@@ -1,15 +1,19 @@
 {
-  "name": "@workspace/agents-core",
+  "name": "@workspace/agents",
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "LangGraph agent runtime: the graph, state, model, and tool registry.",
+  "description": "Named agents built on the runtime. One agent per module.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
     },
     "./package.json": "./package.json"
   },
@@ -26,9 +30,8 @@
   },
   "dependencies": {
     "@langchain/core": "^1.2.3",
-    "@langchain/langgraph": "^1.4.8",
-    "@langchain/openai": "^1.5.5",
-    "zod": "^4.4.3"
+    "@workspace/agent-tools": "workspace:*",
+    "@workspace/agents-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20",
