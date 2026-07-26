@@ -1,48 +1,40 @@
 {
-  "name": "@repo/agents-core",
-  "version": "1.0.0",
-  "description": "Core logic and utilities for agent-based modules.",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "name": "@workspace/agents-core",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "LangGraph agent runtime: state, tools, and the compiled graph.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
-  "extends": "@repo/typescript-config/base.json",
   "scripts": {
-    "build": "tsc -b",
-    "clean": "rimraf dist",
-    "lint": "eslint src --ext .ts,.tsx",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit --pretty"
-  },
-  "keywords": [
-    "agents",
-    "core",
-    "typescript"
-  ],
-  "author": "",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/your-org/your-repo.git",
-    "directory": "packages/agents-core"
-  },
-  "devDependencies": {
-    "eslint": "@workspace/eslint-config",
-    "rimraf": "@workspace/rimraf",
-    "typescript": "@workspace/typescript-config",
-    "vitest": "@workspace/vitest"
+    "build": "tsc --build",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "dev": "tsc --build --watch",
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@langchain/core": "^1.2.3",
-    "@langchain/langgraph": "^1.4.8"
+    "@langchain/langgraph": "^1.4.8",
+    "@langchain/openai": "^1.5.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9",
+    "typescript": "^5"
   }
 }
