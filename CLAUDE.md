@@ -29,12 +29,15 @@ There is **no test setup** in this repo — no test runner, no `test` task in `t
 
 ## Layout
 
-| Path                         | Package name                   | Role                                                    |
-| ---------------------------- | ------------------------------ | ------------------------------------------------------- |
-| `apps/dashboard`             | `web`                          | The only app. Next.js 16 App Router, React 19.2.        |
-| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`. |
-| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.      |
-| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.       |
+| Path                         | Package name                   | Role                                                     |
+| ---------------------------- | ------------------------------ | -------------------------------------------------------- |
+| `apps/dashboard`             | `web`                          | The only app. Next.js 16 App Router, React 19.2.         |
+| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module. |
+| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.            |
+| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.   |
+| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.  |
+| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.       |
+| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.        |
 
 **Naming mismatch to watch:** the directory is `apps/dashboard` but `package.json` still declares `"name": "web"`. Turbo filters, `pnpm --filter`, and dependency references all key off `web`. Git also still tracks the old `apps/web` path.
 
@@ -45,6 +48,21 @@ There is **no test setup** in this repo — no test runner, no `test` task in `t
 - Import as `@workspace/ui/components/button`, `@workspace/ui/lib/utils` — one file per subpath, no barrel index.
 - Adding a component means adding a file under `packages/ui/src/components/`; no export list to update.
 - The app's `tsconfig.json` also path-maps `@workspace/ui/*` → `../../packages/ui/src/*` so the editor resolves it without a build.
+
+**The agent stack is three layers, and the direction of the arrows is the point.** Unlike `@workspace/ui`, these are consumed as built output (`dist/`), so Turbo's `build.dependsOn: ["^build"]` orders them ahead of anything importing them — and `typecheck.dependsOn` is `["^build"]` for the same reason, since a consumer typechecks against its dependencies' emitted `.d.ts`.
+
+```
+@workspace/agents        prompt + tool set per named agent
+        ↓
+@workspace/agents-core   graph, state, model factory, tool registry
+@workspace/agent-tools   the tool catalog (does NOT depend on the runtime)
+```
+
+- **`agents-core` ships no tools and no agents.** It is the runtime only, and `createAgent({ tools })` defaults to none. Keeping concrete tools out of it means a project can take the runtime and supply its own.
+- **`agent-tools` does not depend on `agents-core`.** Tools are plain LangChain tools (`StructuredToolInterface`), so they work with any caller. `AgentTool` in the runtime is a type alias for that same interface — the two line up structurally, not by dependency.
+- **Both new packages use wildcard subpath exports** (`./*` → `./dist/*.js`). Adding `src/weather.ts` makes `@workspace/agent-tools/weather` importable with no config change — same spirit as the UI package's one-file-per-subpath rule, no barrel to update.
+- **Agents are exported as `createX()` factories, never as instances.** Building one constructs a model, which reads `OPENAI_API_KEY` and throws without it; a module-level instance would move that failure to import time and break any consumer that merely imports the module.
+- **Prefer per-tool imports over `allTools`.** A model picks worse as the tool list grows, so give an agent the tools its job needs.
 
 **Tailwind v4, single stylesheet, owned by the UI package.** There is no `tailwind.config.*` anywhere — v4 configures itself from CSS. The one source of truth is `packages/ui/src/styles/globals.css`; the app imports it as `@workspace/ui/globals.css` in `app/layout.tsx`. The app's `postcss.config.mjs` is a one-line re-export of the UI package's. Theme tokens, base colors, and animations belong in that stylesheet, not in the app.
 
@@ -61,6 +79,8 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 ## Conventions
 
 **Prettier owns formatting** (`.prettierrc`): no semicolons, double quotes, 2-space tabs, 80-column width, ES5 trailing commas, LF. `prettier-plugin-tailwindcss` sorts classes and is pointed at `packages/ui/src/styles/globals.css` via `tailwindStylesheet`; it also sorts inside `cn()` and `cva()` calls. Match this style when editing — some checked-in files predate it and are not formatted.
+
+**`.npmrc` pins `symlink=true`, and that line is load-bearing.** pnpm can be configured globally with `symlink=false` (this machine is), which downloads packages into `node_modules/.pnpm` but creates no `node_modules` links — so every `workspace:*` dependency becomes unresolvable by both Node and `tsc`, and `pnpm install` still exits 0. The repo-level setting overrides that. If a workspace import suddenly reports `Cannot find module '@workspace/…'`, check this before anything else. It is deliberately the only line in the file: the linker mode itself is left to whatever the machine prefers.
 
 **ESLint never fails.** `eslint-plugin-only-warn` is in the base config, so every rule downgrades to a warning and `pnpm lint` exits 0 regardless. Read the warnings; do not treat a clean exit code as a clean lint.
 

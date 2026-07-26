@@ -11,7 +11,7 @@ import type { ChatOpenAI } from "@langchain/openai"
 
 import { createModel } from "./model.js"
 import { AgentState } from "./state.js"
-import { createToolRegistry, defaultTools, type AgentTool } from "./tools.js"
+import { createToolRegistry, type AgentTool } from "./tools.js"
 
 export const DEFAULT_SYSTEM_PROMPT = [
   "You are a helpful assistant with access to tools.",
@@ -28,7 +28,10 @@ export const DEFAULT_MAX_LLM_CALLS = 10
 export interface CreateAgentOptions {
   /** Defaults to {@link createModel}(). */
   model?: ChatOpenAI
-  /** Defaults to {@link defaultTools}. */
+  /**
+   * Defaults to none — this package ships no tools. Take them from
+   * `@workspace/agent-tools`, or pass your own.
+   */
   tools?: AgentTool[]
   systemPrompt?: string
   /** Pass a checkpointer (e.g. `new MemorySaver()`) to persist threads. */
@@ -66,15 +69,15 @@ function errorToolMessage(toolCall: ToolCall, content: string): ToolMessage {
  *               ↓
  *              END
  *
- * The model node calls Claude; the router sends it to the tool node whenever
- * the reply carries tool calls, and the tool node loops back. When the model
- * call budget is exhausted the run is diverted to `halt`, which answers every
- * outstanding tool call with an error so the transcript stays well-formed —
- * an unanswered `tool_use` block would be rejected on the next turn.
+ * The model node calls the chat model; the router sends it to the tool node
+ * whenever the reply carries tool calls, and the tool node loops back. When the
+ * model call budget is exhausted the run is diverted to `halt`, which answers
+ * every outstanding tool call with an error so the transcript stays
+ * well-formed — an unanswered tool call would be rejected on the next turn.
  */
 export function createAgent(options: CreateAgentOptions = {}) {
   const model = options.model ?? createModel()
-  const registry = createToolRegistry(options.tools ?? defaultTools)
+  const registry = createToolRegistry(options.tools ?? [])
   const systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT
   const maxLlmCalls = options.maxLlmCalls ?? DEFAULT_MAX_LLM_CALLS
   const modelWithTools = model.bindTools(registry.tools)

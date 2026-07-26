@@ -8,18 +8,35 @@ START → model ⇄ tools
          END
 ```
 
-`model` calls Claude. The router sends it to `tools` whenever the reply carries
-tool calls, and `tools` loops back. If the model-call budget runs out first, the
-run is diverted to a `halt` node that answers every outstanding tool call with an
-error — an unanswered `tool_use` block would be rejected on the next turn.
+`model` calls the chat model. The router sends it to `tools` whenever the reply
+carries tool calls, and `tools` loops back. If the model-call budget runs out
+first, the run is diverted to a `halt` node that answers every outstanding tool
+call with an error — an unanswered tool call would be rejected on the next turn.
+
+## Where this sits
+
+This package is the runtime only. It ships **no tools and no agents**: the
+shared tool catalog lives in `@workspace/agent-tools`, and named agents in
+`@workspace/agents`.
+
+```
+@workspace/agents        prompt + tool set per named agent
+        ↓
+@workspace/agents-core   this package — graph, state, model, tool registry
+@workspace/agent-tools   the tool catalog (independent of this package)
+```
+
+Take this package directly when a project brings its own prompt and tools; take
+`@workspace/agents` when it wants one off the shelf.
 
 ## Usage
 
 ```ts
 import { HumanMessage } from "@langchain/core/messages"
+import { getCurrentTime } from "@workspace/agent-tools/time"
 import { createAgent } from "@workspace/agents-core"
 
-const agent = createAgent()
+const agent = createAgent({ tools: [getCurrentTime] })
 
 const result = await agent.invoke({
   messages: [new HumanMessage("What time is it in Sydney?")],
@@ -31,14 +48,19 @@ console.log(result.messages.at(-1)?.text)
 Requires `OPENAI_API_KEY` in the environment (or pass `apiKey` to
 `createModel()` and hand the model to `createAgent({ model })`).
 
-### Adding tools
+`tools` defaults to none — omit it and you get a plain chat model with no tool
+calling, which is occasionally what you want and otherwise a bug.
 
-Tools are plain LangChain tools. Pass your own set to replace the defaults:
+### Tools
+
+Tools are plain LangChain tools (`StructuredToolInterface`), so anything built
+with `tool()` works. Mix the catalog with your own:
 
 ```ts
 import { tool } from "@langchain/core/tools"
 import * as z from "zod"
-import { createAgent, defaultTools } from "@workspace/agents-core"
+import { getCurrentTime } from "@workspace/agent-tools/time"
+import { createAgent } from "@workspace/agents-core"
 
 const searchMessages = tool(async ({ query }) => "...", {
   name: "search_messages",
@@ -47,13 +69,13 @@ const searchMessages = tool(async ({ query }) => "...", {
   schema: z.object({ query: z.string().describe("What to search for.") }),
 })
 
-const agent = createAgent({ tools: [...defaultTools, searchMessages] })
+const agent = createAgent({ tools: [getCurrentTime, searchMessages] })
 ```
 
-Write tool descriptions for the model, not for a human, and say _when_ to call
-the tool rather than only what it does — that measurably raises the should-call
-rate. Names must be unique; `createToolRegistry` throws on duplicates rather
-than letting one tool silently shadow another.
+A tool worth sharing belongs in `@workspace/agent-tools`; keep one here only
+while it is specific to a single caller. Names must be unique —
+`createToolRegistry` throws on duplicates rather than letting one tool silently
+shadow another.
 
 ### Persisting conversations
 

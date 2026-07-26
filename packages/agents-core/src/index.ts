@@ -16,8 +16,6 @@ export {
 
 export {
   createToolRegistry,
-  defaultTools,
-  getCurrentTime,
   type AgentTool,
   type ToolRegistry,
 } from "./tools.js"
