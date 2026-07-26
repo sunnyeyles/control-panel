@@ -1,19 +1,32 @@
-import { Button } from "@workspace/ui/components/button"
+import { AppSidebar } from "@/components/app-sidebar"
+import { SiteHeader } from "@/components/site-header"
+import { AgentChat } from "@workspace/ui/components/agent-chat"
+import { SidebarInset, SidebarProvider } from "@workspace/ui/components/sidebar"
 
 export default function Page() {
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
-      </div>
-    </div>
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": "calc(var(--spacing) * 72)",
+          "--header-height": "calc(var(--spacing) * 12)",
+        } as React.CSSProperties
+      }
+    >
+      <AppSidebar />
+      <SidebarInset className="h-svh overflow-hidden">
+        <SiteHeader />
+        <main className="flex min-h-0 flex-1 flex-col">
+          <AgentChat
+            emptyStateTitle="Control Panel Assistant"
+            emptyStateDescription="Ask anything — I can use tools to find out"
+            suggestions={[
+              "What time is it right now?",
+              "What can you help me with?",
+            ]}
+          />
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }
