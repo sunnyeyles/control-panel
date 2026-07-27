@@ -2,7 +2,7 @@
 title: "Get Azure subscription and local tooling access in place"
 type: task
 status: open
-assignee:
+assignee: claude-bg-abaac7b3
 blocked-by: []
 ---
 
