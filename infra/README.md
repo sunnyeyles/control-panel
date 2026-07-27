@@ -1,3 +1,7 @@
+# THIS IS LEGACY! WE ARE GOING TO MIGRATE TO AWS!
+
+# WE WILL MIGRATE TO AWS LAMBDA FUNCTIONS WITH S3 BUCKET TO STORE .MD FILES
+
 # Azure foundation
 
 Bicep behind `azd`, for the scheduled `@workspace/briefing-worker` service.
