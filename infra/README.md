@@ -26,6 +26,58 @@ True       node    22         2027-04-30
 False      node    20         2026-04-30
 ```
 
+## Topology
+
+```mermaid
+flowchart TB
+  gha["GitHub Actions<br>OIDC — no stored secret"]
+  dev["You, once, by hand<br>az keyvault secret set"]
+  openai["OpenAI API<br>the only real cost centre"]
+
+  subgraph sub["Azure subscription"]
+    budget["Cost Management budget<br>USD 5/mo — alerts, never stops spend"]
+
+    subgraph rg["Resource group — rg-briefing"]
+      plan["App Service Plan — plan<br>FC1 Flex Consumption"]
+      func["Function App — func-worker<br>Node 22 — timer 09:00 UTC daily"]
+      mi(["System-assigned<br>managed identity"])
+      kv["Key Vault — kv<br>RBAC model — openai-api-key"]
+      st["Storage — st<br>shared keys disabled"]
+      appi["Application Insights — appi<br>local auth disabled"]
+      law["Log Analytics — log<br>30-day retention"]
+      vnet["VNet + private endpoint<br>vnetEnabled = false"]
+    end
+  end
+
+  gha ==>|azd provision, azd deploy worker| func
+  dev ==>|the one manual step| kv
+  plan --- func
+  func --- mi
+  func ==>|HTTPS| openai
+
+  mi -->|Key Vault Secrets User<br>resolves OPENAI_API_KEY| kv
+  mi -->|Blob Data Owner + Queue Data Contributor<br>deployment package, timer checkpoint| st
+  mi -->|Monitoring Metrics Publisher<br>proof-run traces| appi
+
+  appi --> law
+  budget -.->|watches, subscription-wide| rg
+
+  classDef off stroke-dasharray:4 4,opacity:0.5
+  class vnet off
+```
+
+Every arrow inside the resource group leaves from the managed identity, and
+that is the whole security story: storage has `allowSharedKeyAccess: false`,
+App Insights has `disableLocalAuth: true`, and the vault is RBAC-only. There is
+no connection string or account key anywhere in the template, in azd's
+environment files, or in the pipeline. The one secret that does exist — the
+OpenAI key — is written by hand and read through a `@Microsoft.KeyVault`
+reference the app resolves with that same identity.
+
+The budget is drawn against the subscription rather than the resource group on
+purpose: it catches a portal experiment or a mistyped `az` command that lands
+outside this deployment.
+
 ## Naming
 
 The starter's own scheme is kept rather than a hand-invented one: CAF
