@@ -21,7 +21,7 @@ pnpm format      # prettier --write per workspace (writes, does not check)
 Scope to one workspace with a Turborepo filter — **use the package name, not the directory name**:
 
 ```bash
-pnpm turbo dev --filter=web            # apps/dashboard
+pnpm turbo dev --filter=@workspace/dashboard   # apps/dashboard
 pnpm turbo typecheck --filter=@workspace/ui
 ```
 
@@ -31,15 +31,13 @@ There is **no test setup** in this repo — no test runner, no `test` task in `t
 
 | Path                         | Package name                   | Role                                                     |
 | ---------------------------- | ------------------------------ | -------------------------------------------------------- |
-| `apps/dashboard`             | `web`                          | The only app. Next.js 16 App Router, React 19.2.         |
+| `apps/dashboard`             | `@workspace/dashboard`         | The only app. Next.js 16 App Router, React 19.2.         |
 | `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module. |
 | `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.            |
 | `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.   |
 | `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.  |
 | `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.       |
 | `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.        |
-
-**Naming mismatch to watch:** the directory is `apps/dashboard` but `package.json` still declares `"name": "web"`. Turbo filters, `pnpm --filter`, and dependency references all key off `web`. Git also still tracks the old `apps/web` path.
 
 ## Architecture
 
