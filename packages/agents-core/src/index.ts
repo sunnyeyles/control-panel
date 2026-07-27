@@ -3,8 +3,11 @@ export {
   DEFAULT_MAX_LLM_CALLS,
   DEFAULT_SYSTEM_PROMPT,
   type Agent,
+  type ChatModelLike,
   type CreateAgentOptions,
 } from "./agent.js"
+
+export { getOpenAIApiKey } from "./env.js"
 
 export { createModel, DEFAULT_MODEL, type ModelOptions } from "./model.js"
 

@@ -99,7 +99,19 @@ restart.
 
 ### Streaming
 
-The compiled graph is a normal LangGraph runnable:
+The compiled graph is a normal LangGraph runnable. To feed an AI SDK UI via
+`@ai-sdk/langchain`'s `toUIMessageStream`, stream with exactly this pair of
+modes — it detects a LangGraph stream by the `[mode, payload]` tuples an
+array of modes produces, then reads `"messages"` events for tokens and
+`"values"` for final state (this is what `apps/dashboard`'s chat route does):
+
+```ts
+const stream = await agent.stream(input, {
+  streamMode: ["values", "messages"],
+})
+```
+
+For plain terminal logging, any single mode works:
 
 ```ts
 for await (const chunk of await agent.stream(input, {
@@ -119,8 +131,9 @@ Uses OpenAI via `@langchain/openai`, defaulting to `gpt-5.5` (see
 - **`maxTokens` is left unset.** On reasoning-capable models the output cap also
   covers reasoning tokens, so a tight cap truncates the answer.
 
-Swapping providers means changing `src/model.ts` and the `model?:` type in
-`src/agent.ts` — nothing in the graph, state, or tools is provider-specific.
+Swapping providers means passing any model that satisfies `ChatModelLike` to
+`createAgent({ model })` — `src/model.ts` is the only OpenAI-specific file;
+nothing in the graph, state, or tools is provider-specific.
 
 ## Build
 

@@ -1,5 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai"
 
+import { getOpenAIApiKey } from "./env.js"
+
 /** Default chat model. Override per-call via {@link ModelOptions.model}. */
 export const DEFAULT_MODEL = "gpt-5.5"
 
@@ -26,13 +28,7 @@ export interface ModelOptions {
  * non-default value. Pass it through `overrides` only on a model that takes it.
  */
 export function createModel(options: ModelOptions = {}): ChatOpenAI {
-  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY
-
-  if (!apiKey) {
-    throw new Error(
-      "OPENAI_API_KEY is not set. Export it, or pass `apiKey` to createModel()."
-    )
-  }
+  const apiKey = options.apiKey ?? getOpenAIApiKey()
 
   return new ChatOpenAI({
     model: options.model ?? DEFAULT_MODEL,

@@ -1,4 +1,8 @@
-import { AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages"
+import {
+  AIMessage,
+  SystemMessage,
+  type BaseMessage,
+} from "@langchain/core/messages"
 import type { ToolCall } from "@langchain/core/messages/tool"
 import {
   END,
@@ -7,11 +11,13 @@ import {
   type ConditionalEdgeRouter,
   type GraphNode,
 } from "@langchain/langgraph"
-import type { ChatOpenAI } from "@langchain/openai"
-
 import { createModel } from "./model.js"
 import { AgentState } from "./state.js"
-import { createToolRegistry, type AgentTool } from "./tools.js"
+import {
+  createToolRegistry,
+  errorToolMessage,
+  type AgentTool,
+} from "./tools.js"
 
 export const DEFAULT_SYSTEM_PROMPT = [
   "You are a helpful assistant with access to tools.",
@@ -25,9 +31,21 @@ export const DEFAULT_SYSTEM_PROMPT = [
  */
 export const DEFAULT_MAX_LLM_CALLS = 10
 
+/**
+ * The minimal chat-model surface the graph needs: bind tools, then invoke.
+ * Structural on purpose — any tool-capable LangChain chat model (ChatOpenAI,
+ * ChatAnthropic, ...) satisfies it, and so does a hand-rolled fake, which is
+ * what makes the agent loop testable without a provider key.
+ */
+export interface ChatModelLike {
+  bindTools(tools: AgentTool[]): {
+    invoke(messages: BaseMessage[]): Promise<AIMessage>
+  }
+}
+
 export interface CreateAgentOptions {
-  /** Defaults to {@link createModel}(). */
-  model?: ChatOpenAI
+  /** Any tool-capable chat model. Defaults to {@link createModel}(). */
+  model?: ChatModelLike
   /**
    * Defaults to none — this package ships no tools. Take them from
    * `@workspace/agent-tools`, or pass your own.
@@ -41,25 +59,6 @@ export interface CreateAgentOptions {
     ? C
     : never
   maxLlmCalls?: number
-}
-
-function toToolMessage(result: unknown, toolCall: ToolCall): ToolMessage {
-  if (ToolMessage.isInstance(result)) return result
-
-  return new ToolMessage({
-    tool_call_id: toolCall.id ?? "",
-    name: toolCall.name,
-    content: typeof result === "string" ? result : JSON.stringify(result),
-  })
-}
-
-function errorToolMessage(toolCall: ToolCall, content: string): ToolMessage {
-  return new ToolMessage({
-    tool_call_id: toolCall.id ?? "",
-    name: toolCall.name,
-    content,
-    status: "error",
-  })
 }
 
 /**
@@ -97,37 +96,13 @@ export function createAgent(options: CreateAgentOptions = {}) {
     return last.tool_calls ?? []
   }
 
-  const callTools: GraphNode<typeof AgentState> = async (state) => {
+  const callTools: GraphNode<typeof AgentState> = async (state) => ({
     // Claude emits parallel tool calls; run them concurrently and return every
     // result in one update so each tool_use gets its matching tool_result.
-    const messages = await Promise.all(
-      pendingToolCalls(state).map(async (toolCall) => {
-        const selected = registry.byName[toolCall.name]
-
-        if (!selected) {
-          return errorToolMessage(
-            toolCall,
-            `Unknown tool "${toolCall.name}". Available tools: ${Object.keys(
-              registry.byName
-            ).join(", ")}.`
-          )
-        }
-
-        try {
-          return toToolMessage(await selected.invoke(toolCall), toolCall)
-        } catch (error) {
-          return errorToolMessage(
-            toolCall,
-            `Tool "${toolCall.name}" failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          )
-        }
-      })
-    )
-
-    return { messages }
-  }
+    messages: await Promise.all(
+      pendingToolCalls(state).map((toolCall) => registry.dispatch(toolCall))
+    ),
+  })
 
   const halt: GraphNode<typeof AgentState> = (state) => ({
     messages: pendingToolCalls(state).map((toolCall) =>

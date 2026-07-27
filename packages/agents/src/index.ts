@@ -3,3 +3,5 @@ export {
   createAssistant,
   type CreateAssistantOptions,
 } from "./assistant.js"
+
+export type { Agent } from "@workspace/agents-core"
