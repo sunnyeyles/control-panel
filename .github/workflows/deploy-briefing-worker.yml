@@ -1,0 +1,82 @@
+name: Deploy briefing-worker
+
+# One workflow, not two: infra and worker code go up together with azd up
+# semantics. Splitting them would mean keeping two files in sync by hand for
+# one small service.
+on:
+  push:
+    branches: [main]
+    # Path-scoped rather than relying on `turbo --filter` to no-op: a
+    # dashboard-only or UI-only push does not start this workflow at all, which
+    # is both stronger and cheaper than starting it and doing nothing.
+    paths:
+      - "apps/briefing-worker/**"
+      - "packages/agents-core/**"
+      - "packages/agents/**"
+      - "packages/agent-tools/**"
+      - "infra/**"
+      - "azure.yaml"
+  # Deliberately unfiltered — a manual run should always run. This is the way
+  # to pick up the one-time Key Vault secret without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  # Mints the GitHub OIDC token azd exchanges for an Azure one. No
+  # service-principal secret is stored anywhere in this repo.
+  id-token: write
+  contents: read
+
+# A queued run deploys the same environment as the one in flight, so let the
+# newer commit win rather than racing.
+concurrency:
+  group: deploy-briefing-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      BUDGET_ALERT_EMAIL: ${{ vars.BUDGET_ALERT_EMAIL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches engines.node in the worker and the Flex Consumption runtime.
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Explicit rather than left to azd's own restore: build.dependsOn
+      # ["^build"] is what compiles agents-core and agent-tools ahead of the
+      # worker, and a failure here is attributable to the build rather than to
+      # a deployment step.
+      - name: Build worker
+        run: pnpm turbo build --filter=@workspace/briefing-worker
+
+      - name: Install azd
+        uses: Azure/setup-azd@v2
+
+      - name: Log in to Azure (OIDC federated credentials)
+        run: >-
+          azd auth login
+          --client-id "$AZURE_CLIENT_ID"
+          --tenant-id "$AZURE_TENANT_ID"
+          --federated-credential-provider github
+
+      # Idempotent: a no-op when the Bicep has not changed.
+      - name: Provision infrastructure
+        run: azd provision --no-prompt
+
+      - name: Deploy worker
+        run: azd deploy worker --no-prompt
