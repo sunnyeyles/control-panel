@@ -22,6 +22,7 @@ var queueRoleDefinitionId = '974c5e8b-45b9-4653-ba55-5f855dd0fb88' // Storage Qu
 var tableRoleDefinitionId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3' // Storage Table Data Contributor role
 var monitoringRoleDefinitionId = '3913510d-42f4-4e42-8a64-420c390055eb' // Monitoring Metrics Publisher role ID
 var keyVaultSecretsUserRoleDefinitionId = '4633458b-17de-408a-b874-0445c86b69e6' // Key Vault Secrets User role ID
+var keyVaultSecretsOfficerRoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7' // Key Vault Secrets Officer role ID
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2022-09-01' existing = {
   name: storageAccountName
@@ -135,5 +136,29 @@ resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleDefinitionId)
     principalId: managedIdentityPrincipalId
     principalType: 'ServicePrincipal'
+  }
+}
+
+// Role assignment for Key Vault (secret write) - human deployer only.
+//
+// Without this, the one documented manual step — `az keyvault secret set` —
+// fails with a 403 on a freshly provisioned environment. Key Vault here uses
+// the RBAC model, and subscription Owner does NOT carry data-plane access to
+// secret values; that is a separate role, by design. Nothing in the template
+// granted it, so the deployment produced a vault its own deployer could not
+// write to.
+//
+// Gated on the deployer being a User, which is the whole point. In CI the
+// deployer is the pipeline's service principal, and granting *it* the ability
+// to read or write secrets would undo the reason the key is set by hand: the
+// pipeline must never be able to reach the value. Locally the deployer is a
+// person, and that person is the one who has the key.
+resource keyVaultOfficerRoleAssignment_User 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (userIdentityPrincipalType == 'User' && !empty(userIdentityPrincipalId)) {
+  name: guid(keyVault.id, userIdentityPrincipalId, keyVaultSecretsOfficerRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsOfficerRoleDefinitionId)
+    principalId: userIdentityPrincipalId
+    principalType: userIdentityPrincipalType
   }
 }

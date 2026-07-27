@@ -1,311 +1,175 @@
-# Next steps — from a reviewed template to a verified daily run
+# Next steps — from a deployed worker to a verified daily run
 
-Everything in `infra/` and `apps/briefing-worker/` is authored, compiles, and
-has been proven locally. **No Azure resource exists yet.** This file is the
-ordered path from here to issue 04 closed, and says at each step why the step
+The foundation is live. This file is what remains, in order, and why each step
 is shaped the way it is.
 
-Read `infra/README.md` for the topology and `apps/briefing-worker/README.md`
-for the load-bearing build details. This file is the sequence; those are the
-reference.
+`infra/README.md` holds the topology and the operational gotchas;
+`apps/briefing-worker/README.md` holds the build details. This file is the
+sequence.
 
 ## Where we are
 
-|                 |                                                         |
-| --------------- | ------------------------------------------------------- |
-| Branch          | `briefing-azure-foundation`, 6 commits, not merged      |
-| Issues done     | 01, 02, 03, 05                                          |
-| Issue open      | 04 — needs live Azure and a real 09:00 UTC slot         |
-| azd environment | `briefing` — all four variables set                     |
-| Azure resources | none                                                    |
-| Proven locally  | build, cold boot under `func`, success run, failure run |
+|             |                                                            |
+| ----------- | ---------------------------------------------------------- |
+| Branch      | `main`, pushed                                             |
+| Issues done | 01, 02, 03, **05 verified end to end in CI**               |
+| Issue open  | 04 — one box left, and it needs a real 09:00 UTC slot      |
+| Azure       | provisioned, worker deployed, `scheduledRun` registered    |
+| Pipeline    | green: preflight → build → OIDC login → provision → deploy |
+| Blocked on  | the OpenAI key                                             |
+
+Already done and not repeated below: merge and push, provision (via CI), deploy,
+`azd env refresh`, the federated-credential fix, and granting the deployer
+Key Vault Secrets Officer by hand.
 
 ---
 
-## Step 1 — Merge the branch to `main`
+## Step 1 — Rotate the OpenAI key
+
+The key was pasted into a chat transcript and into shell history in plaintext.
+Revoke it at platform.openai.com, issue a new one, then:
 
 ```bash
-git add next-steps.md infra/README.md
-git commit -m "Adds the topology diagram and the deployment runbook"
-git checkout main
-git merge briefing-azure-foundation
-git push
+az keyvault secret set --vault-name kv-5ngerafeorjcg --name openai-api-key --value "$(pbpaste)"
 ```
 
-**Why first.** The deploy workflow triggers on `push` to `main` with path
-filters. While the work sits on a side branch, CI is inert — you could
-provision and deploy by hand all day and never learn whether the pipeline
-works. Merging is what makes the rest of this file testable.
+**Why `"$(pbpaste)"`.** A literal `--value sk-...` is recorded in
+`~/.zsh_history` and printed in scrollback, and scrollback is what gets pasted
+elsewhere. Reading from the clipboard keeps the value off both. Clear the old
+one out of history too — search for `sk-proj-`.
 
-**Do step 8 before you push.** The push starts the workflow, and the workflow
-needs repository variables that only `azd pipeline config` creates. It does not
-need any Azure resource to exist, so it can be done now — and doing it now is
-strictly better than doing it later, because a run started without those
-variables used to hang rather than fail. A preflight check and
-`timeout-minutes: 20` now bound that, but the run is still wasted.
-
-`azd pipeline config` shells out to the GitHub CLI, so `gh auth login` has to
-have happened first — it has not on this machine.
-
-**What a push with the variables missing looks like now.** The first step fails
-in seconds with the list of missing names and what to run. That is the intended
-behaviour, not a problem to debug.
+**Why this is first.** Every other step below is worthless while a live key is
+loose, and this is the only step with a clock on it.
 
 ---
 
-## Step 2 — Provision the infrastructure
+## Step 2 — Restart the app, then confirm the reference resolves
 
 ```bash
-azd provision
+az functionapp restart -g rg-briefing -n func-worker-5ngerafeorjcg
+
+# wait ~30s — want the single word "Resolved"
+az rest --method get --uri "https://management.azure.com/subscriptions/49798f7a-1699-4f48-9133-a4139b6fb828/resourceGroups/rg-briefing/providers/Microsoft.Web/sites/func-worker-5ngerafeorjcg/config/configreferences/appsettings?api-version=2022-03-01" \
+  --query "value[?name=='OPENAI_API_KEY'].properties.status" -o tsv
 ```
 
-**Why this is the first irreversible step.** Everything before it was text.
-This creates eight billable resources under subscription
-`49798f7a-…`. Expect five to ten minutes.
+**Why a restart is needed at all.** App Service resolves
+`@Microsoft.KeyVault(...)` references when the app starts and caches the result.
+This app started before the secret existed, so the setting is pinned at
+`SecretNotFound` regardless of what the vault holds now. Setting the secret does
+not clear it; restarting does.
 
-**What it creates.** A resource group `rg-briefing`, a Flex Consumption plan,
-the function app with a system-assigned identity, a storage account, Key Vault,
-Application Insights, Log Analytics, and a subscription-scoped budget. See the
-topology diagram in `infra/README.md`.
-
-**Why it is idempotent.** `azd provision` is a Bicep deployment, so re-running
-it with unchanged templates is a no-op. You can safely run it again after a
-partial failure rather than tearing down.
-
-**Verify:**
-
-```bash
-az resource list --resource-group rg-briefing --output table
-azd env get-values | grep -E 'KEY_VAULT|FUNCTION'
-```
-
-You want `AZURE_KEY_VAULT_NAME` and `AZURE_FUNCTION_NAME` populated — the rest
-of this file uses them.
-
-**If it fails on the budget.** Some Free Trial offers reject
-`Microsoft.Consumption/budgets`. The escape hatch is deliberate:
-
-```bash
-azd env set BUDGET_ALERT_EMAIL ""
-azd provision
-```
-
-The `if (!empty(budgetAlertEmail))` guard at `infra/main.bicep:272` skips the
-resource. Re-set the email after converting to pay-as-you-go — that is exactly
-when the guardrail starts earning its keep, because the trial's spending limit
-is the only hard ceiling you have and it disappears on conversion.
-
-**If the app reports it cannot reach storage.** Role assignments are eventually
-consistent, and RBAC necessarily runs _after_ the function app because a
-system-assigned identity has no principal ID until its host resource exists.
-Wait a minute and re-check before debugging anything.
+**Why this reads like a permissions bug and isn't.** `SecretNotFound` is the
+same symptom you would get from a missing role assignment, which sends you
+looking in the wrong place. The identity already holds Key Vault Secrets User —
+confirmed against the live vault. Check the cache before checking RBAC.
 
 ---
 
-## Step 3 — Put the OpenAI key in Key Vault
+## Step 3 — Force a run
 
 ```bash
-az keyvault secret set \
-  --vault-name "$(azd env get-value AZURE_KEY_VAULT_NAME)" \
-  --name openai-api-key \
-  --value '<the key>'
+KEY=$(az functionapp keys list -g rg-briefing -n func-worker-5ngerafeorjcg --query masterKey -o tsv)
+curl -X POST "https://func-worker-5ngerafeorjcg.azurewebsites.net/admin/functions/scheduledRun" \
+  -H "x-functions-key: $KEY" -H "Content-Type: application/json" -d '{"input":""}'
 ```
 
-**Why by hand, and only ever by hand.** This is the one value in the system
-that must not exist in git, in azd's environment files, or in a pipeline. Bicep
-provisions the vault empty and grants the app's identity **Key Vault Secrets
-User**; the value arrives through this command and lives in exactly one place.
-Any design where the pipeline knows the key would put it in a log the first
-time something went wrong.
+**Why not wait for the timer.** The next slot could be most of a day away.
+Finding out then that something is misconfigured costs a day per iteration.
 
-**Why you do not set `OPENAI_API_KEY` on the function app.**
-`infra/main.bicep:147` already sets it to a
-`@Microsoft.KeyVault(SecretUri=…)` reference. Setting it by hand would replace
-that reference with a literal and defeat the whole arrangement. The URI carries
-no version, so rotating the secret later needs no redeploy — just re-run this
-command.
-
-**Why before the deploy.** Deploy first and the app starts with an app setting
-it cannot resolve, which surfaces as a confusing runtime failure rather than an
-obvious missing-secret one.
-
-**Verify** the reference resolves — this is the real check, not that the secret
-exists:
-
-```bash
-az functionapp config appsettings list \
-  --name "$(azd env get-value AZURE_FUNCTION_NAME)" \
-  --resource-group rg-briefing \
-  --query "[?name=='OPENAI_API_KEY']" --output table
-```
-
-The portal shows a green tick against a Key Vault reference that resolved and a
-red cross against one that did not. A red cross here almost always means RBAC
-has not propagated yet, or the secret name does not match `openai-api-key`.
+**Why it doesn't close issue 04.** The ticket asks for a _scheduled_ run. This
+proves the code, the secret and the network; it does not prove the timer fires.
 
 ---
 
-## Step 4 — Deploy the worker
+## Step 4 — Read the proof line
 
-```bash
-pnpm turbo build --filter=@workspace/briefing-worker
-azd deploy worker
-```
-
-**Why the explicit build.** `azure.yaml` has a `prepackage` hook that runs it
-anyway, but running it yourself means a compile error is attributable to the
-build rather than surfacing inside a deployment step.
-
-**What actually ships.** The contents of `dist/` — one bundled `index.js`,
-`host.json`, and a generated minimal `package.json` — and nothing else. In
-particular never `node_modules`, whose pnpm symlinks do not survive
-run-from-package mounting. That is why the worker is bundled by esbuild at all.
-
-**Verify:**
-
-```bash
-az functionapp function list \
-  --name "$(azd env get-value AZURE_FUNCTION_NAME)" \
-  --resource-group rg-briefing --output table
-```
-
-`scheduledRun` should be listed. If the list is empty the bundle did not
-register — the Functions v4 model finds the registering module through `main`
-in the deployed `package.json`, so that is where to look.
-
----
-
-## Step 5 — Force a run rather than waiting for 09:00 UTC
-
-```bash
-FUNC=$(azd env get-value AZURE_FUNCTION_NAME)
-KEY=$(az functionapp keys list --name "$FUNC" --resource-group rg-briefing \
-  --query masterKey --output tsv)
-
-curl -X POST "https://$FUNC.azurewebsites.net/admin/functions/scheduledRun" \
-  -H "x-functions-key: $KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"input":""}'
-```
-
-**Why not just wait.** The next scheduled slot could be twenty-three hours
-away. Finding out then that the secret reference is misconfigured wastes a day
-per iteration. This is the same admin endpoint used locally, with a master key
-because the deployed host is authenticated.
-
-**Why this does not close issue 04.** The ticket asks for a _scheduled_ run,
-not a triggered one — a manual trigger proves the code and the secret work, but
-not that the timer fires. Both are needed; this one is just available now.
-
----
-
-## Step 6 — Confirm the run the way the ticket defines success
-
-In Application Insights → Logs:
+Application Insights → Logs, on `appi-5ngerafeorjcg`:
 
 ```kusto
 traces
-| where timestamp > ago(24h)
+| where timestamp > ago(1h)
 | where message has "proof-run"
 | project timestamp, message
 ```
 
-**Why a log query and not an exit code.** The failure this service is most
-likely to suffer is _not running at all_ — a broken schedule, a stopped app, a
-deploy that unregistered the function. An exit code cannot report its own
-absence. One row per expected slot is the only check that catches silence,
-which is why ticket 03 made this query the definition of success rather than a
-nice-to-have.
+**What good looks like:** `"outcome":"success"` with `"llmCalls":2`. Two calls
+is the signal that matters — it means model → tool → model, rather than the
+model answering from memory without touching the tool.
 
-**Why sampling is off in `host.json`.** The starter enables it. At one row per
-day, a sampled-out line would read as "the run never started" — the exact false
-signal this check exists to catch.
+**Why a log query rather than an exit code.** The likeliest failure of a daily
+job is not running at all, and nothing can report its own absence. One row per
+expected slot is the only check that catches silence.
 
-**Measuring cold start (issue 04's third box).** The proof-run line carries its
-own `durationMs`, which times `runScheduledTask` only. Compare it against the
-invocation's total duration in the Functions run history: the gap is host
-startup plus module load. Flex Consumption allows 30 s for app init, and the
-design keeps well clear of it deliberately — agents are exported as `createX()`
-factories, so no model is constructed at import time. If that gap ever
-approaches the limit, something has moved work into module scope.
+**Cold start, issue 04's third box.** The proof line's own `durationMs` times
+`runScheduledTask` alone. Compare it with the invocation's total duration in the
+run history: the gap is host startup plus module load. Record the figure. The
+design keeps this small deliberately — agents are exported as `createX()`
+factories, so no model is constructed at import time. A gap that grows means
+work has crept into module scope.
 
 ---
 
-## Step 7 — Prove the failure contract survives deployment
-
-Temporarily break the secret reference, force a run, then restore it:
+## Step 5 — Prove the failure contract survives deployment
 
 ```bash
-az keyvault secret set --vault-name "$(azd env get-value AZURE_KEY_VAULT_NAME)" \
-  --name openai-api-key --value 'sk-deliberately-invalid'
-# force a run as in step 5, then:
-az keyvault secret set --vault-name "$(azd env get-value AZURE_KEY_VAULT_NAME)" \
-  --name openai-api-key --value '<the real key>'
+az keyvault secret set --vault-name kv-5ngerafeorjcg --name openai-api-key --value 'sk-deliberately-invalid'
+az functionapp restart -g rg-briefing -n func-worker-5ngerafeorjcg
+# force a run as in step 3, confirm a Failed invocation and one "outcome":"failure" line, then restore:
+az keyvault secret set --vault-name kv-5ngerafeorjcg --name openai-api-key --value "$(pbpaste)"
+az functionapp restart -g rg-briefing -n func-worker-5ngerafeorjcg
 ```
 
-**Why bother.** A monitoring story that only ever sees success is untested.
-This confirms the run appears as a **Failed** invocation and emits one
-`"outcome":"failure"` line — the same contract proven locally, but across the
-deployment boundary. Without it you would not know whether a real failure would
-be visible or silent.
+**Why bother.** A monitoring story that has only ever seen success is untested.
+This confirms a real failure is visible rather than silent, across the
+deployment boundary — the same contract already proven locally.
 
-**Why an invalid value rather than deleting the secret.** Deleting it puts the
-app setting into an unresolved state that persists until the app restarts,
-which is a slower and messier thing to undo.
+**Why an invalid value rather than deleting the secret.** Deleting leaves the
+reference unresolved in a state that outlives the change; an invalid value fails
+where you want it to, in the agent call.
 
 ---
 
-## Step 8 — Wire up CI
+## Step 6 — Reconcile the hand-made role assignment
+
+`rbac.bicep` now grants the deployer **Key Vault Secrets Officer**, gated on the
+deployer being a `User` so the CI service principal never gains secret access.
+But the equivalent assignment already exists on the vault, created by hand with
+a random name.
+
+**This will break the next provision if left alone.** Azure rejects a second
+assignment for the same principal, role and scope with `RoleAssignmentExists`,
+and Bicep names its assignments deterministically via `guid()` — a different
+name from the hand-made one. So:
 
 ```bash
-azd pipeline config --auth-type federated
-gh variable set BUDGET_ALERT_EMAIL --body sunnyeyles@gmail.com
-gh variable list
+az role assignment delete \
+  --assignee 9f36716f-906f-42fe-8de9-4aaa0efabedf \
+  --role "Key Vault Secrets Officer" \
+  --scope "/subscriptions/49798f7a-1699-4f48-9133-a4139b6fb828/resourceGroups/rg-briefing/providers/Microsoft.KeyVault/vaults/kv-5ngerafeorjcg"
+
+azd provision   # recreates it, this time owned by the template
 ```
 
-**Why federated rather than a client secret.** OIDC means GitHub mints a
-short-lived token per run and no long-lived credential is stored in the repo.
-There is no secret to rotate and none to leak.
-
-**The check that matters.** The workflow reads all six values as `vars.*`. If
-`azd pipeline config` creates them as _secrets_ instead, the job runs with
-empty strings and fails at login with an unhelpful message. `gh variable list`
-should show `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
-`AZURE_ENV_NAME`, `AZURE_LOCATION`, `BUDGET_ALERT_EMAIL`. If they landed as
-secrets, change the references in the workflow to match.
-
-**Why `AZURE_PRINCIPAL_TYPE` is not in that list.** The workflow hardcodes it
-to `ServicePrincipal`, because in CI the deployer is the pipeline's principal,
-not you, and Azure rejects a role assignment whose `principalType` contradicts
-the principal. Locally it defaults to `User`. This is the one value that must
-differ between the two contexts.
-
-Then test the pipeline without a code change:
-
-```bash
-gh workflow run deploy-briefing-worker.yml
-```
-
-**Why `workflow_dispatch` is unfiltered.** The push trigger is path-scoped, so
-a dashboard-only commit does not start the workflow at all. But a manual run
-should always run — that is what makes this test possible without an empty
-commit.
+**Why after the key steps, not before.** Deleting the assignment removes your own
+write access to the vault until the provision restores it. Do it once the secret
+is settled.
 
 ---
 
-## Step 9 — Close issue 04
+## Step 7 — Close issue 04
 
-Wait for one real 09:00 UTC slot, then re-run the query from step 6. The ticket
-closes when all four boxes hold:
+Wait for one real 09:00 UTC slot — **7:00 pm your time**, since `australiaeast`
+is UTC+10 and NCRONTAB has no local time. Then re-run the query from step 4.
 
-- [ ] `azd deploy` succeeds from a clean checkout — steps 2–4
+- [x] `azd deploy` succeeds from a clean checkout — the CI run proved it, and a
+      runner _is_ a clean checkout, so it also proved the `packageManager` fix,
+      the esbuild bundle and the `dist/` deploy root
 - [ ] A **scheduled** invocation returns a success row — this step
-- [ ] Cold-start app init stays inside 30 s, observed figure recorded — step 6
-- [ ] A deliberately failed run appears as a Failed invocation — step 7
+- [ ] Cold-start figure observed and recorded — step 4
+- [ ] A deliberately failed run appears as Failed — step 5
 
-Only the second requires the wait. Everything else is already demonstrable
-after step 7, so record those results as you go rather than re-deriving them
-tomorrow.
+Only the second needs the wait. Record the others as you go.
 
 ---
 
@@ -313,20 +177,22 @@ tomorrow.
 
 **The seam is `runScheduledTask.ts`.** Replacing the proof task with the real
 briefing means changing the body of that one function. The schedule, the
-Functions binding, the run-report shape, and every piece of infrastructure
-above stay exactly as they are — that split is the whole point of the two-module
-design.
+Functions binding, the run-report shape and every resource stay as they are.
+That split is the point of the two-module design.
 
-**There is still no test framework.** That was deliberate and in scope for the
-handoff spec, but the moment `runScheduledTask` does something with real
-branching, the absence starts to cost. Choosing and wiring a runner is the
-natural next piece of work.
+**There is still no test framework.** Deliberate, and in scope for the handoff
+spec — but the moment `runScheduledTask` grows real branching, the absence
+starts to cost. Choosing and wiring a runner is the natural next piece of work.
 
-**Turning it all off** costs one command:
+**A deprecation warning worth clearing eventually.** `actions/checkout@v4`,
+`actions/setup-node@v4` and `pnpm/action-setup@v4` target Node 20 and are being
+forced onto Node 24. Nothing is broken; bumping to v5 clears it.
+
+**Turning it all off:**
 
 ```bash
 azd down --purge
 ```
 
-`--purge` matters — without it the Key Vault stays in soft-deleted limbo for
-seven days and blocks a re-provision that wants the same name.
+`--purge` matters — without it the Key Vault sits soft-deleted for seven days
+and blocks a re-provision that wants the same name.
