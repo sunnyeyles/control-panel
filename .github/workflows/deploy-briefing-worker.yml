@@ -35,6 +35,10 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # A provision plus a deploy of one small service is a few minutes. The
+    # default is six hours, which is a long time to spend discovering that a
+    # step is waiting for input that will never arrive.
+    timeout-minutes: 20
     env:
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -48,6 +52,38 @@ jobs:
       AZURE_PRINCIPAL_TYPE: ServicePrincipal
 
     steps:
+      # Runs before anything else because it needs nothing else, and because
+      # the failure it catches is otherwise silent or slow:
+      #
+      #   - An empty --client-id makes `azd auth login` fall back to
+      #     interactive browser login, which hangs a headless runner instead
+      #     of failing.
+      #   - An empty BUDGET_ALERT_EMAIL passes through main.parameters.json as
+      #     an empty string, which skips the budget entirely. A cost guardrail
+      #     that silently switches itself off is the exact failure ticket 10
+      #     exists to prevent, so CI refuses to deploy without it. Genuinely
+      #     wanting no budget means deleting it from this list — an explicit
+      #     edit rather than a forgotten variable.
+      #
+      # `vars.X` is an empty string whether the variable is unset or set to
+      # empty, so these cases are indistinguishable here and both fail.
+      - name: Check required repository variables
+        run: |
+          missing=()
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
+                      AZURE_ENV_NAME AZURE_LOCATION BUDGET_ALERT_EMAIL; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing repository variables: ${missing[*]}"
+            echo "Run 'azd pipeline config --auth-type federated' to create the"
+            echo "federated credential and set the AZURE_* values, then add"
+            echo "BUDGET_ALERT_EMAIL. Confirm with 'gh variable list' that they"
+            echo "landed as variables — this workflow reads vars.*, so values"
+            echo "created as secrets read back empty and stall here."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -71,12 +107,16 @@ jobs:
       - name: Install azd
         uses: Azure/setup-azd@v2
 
+      # --no-prompt is the belt to the preflight check's braces: it turns any
+      # remaining fallback to an interactive flow into an immediate failure
+      # rather than a runner that sits waiting on a browser redirect.
       - name: Log in to Azure (OIDC federated credentials)
         run: >-
           azd auth login
           --client-id "$AZURE_CLIENT_ID"
           --tenant-id "$AZURE_TENANT_ID"
           --federated-credential-provider github
+          --no-prompt
 
       # Idempotent: a no-op when the Bicep has not changed.
       - name: Provision infrastructure

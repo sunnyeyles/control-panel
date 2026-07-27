@@ -37,11 +37,19 @@ filters. While the work sits on a side branch, CI is inert — you could
 provision and deploy by hand all day and never learn whether the pipeline
 works. Merging is what makes the rest of this file testable.
 
-**Why it is safe to merge before provisioning.** The push will start the
-workflow, and it will fail at the Azure login step because the federated
-credential does not exist yet (step 6). That failure is expected and costs
-nothing. If you would rather not see a red run, do step 6 before pushing —
-`azd pipeline config` works against a repo whose infra has never been applied.
+**Do step 8 before you push.** The push starts the workflow, and the workflow
+needs repository variables that only `azd pipeline config` creates. It does not
+need any Azure resource to exist, so it can be done now — and doing it now is
+strictly better than doing it later, because a run started without those
+variables used to hang rather than fail. A preflight check and
+`timeout-minutes: 20` now bound that, but the run is still wasted.
+
+`azd pipeline config` shells out to the GitHub CLI, so `gh auth login` has to
+have happened first — it has not on this machine.
+
+**What a push with the variables missing looks like now.** The first step fails
+in seconds with the list of missing names and what to run. That is the intended
+behaviour, not a problem to debug.
 
 ---
 
