@@ -16,7 +16,7 @@
     "format": "prettier --write \"**/*.ts\"",
     "start": "func start",
     "typecheck": "tsc --noEmit",
-    "zip": "cd dist && zip -qr ../functionapp.zip ."
+    "zip": "rm -f functionapp.zip && cd dist && zip -qr ../functionapp.zip ."
   },
   "dependencies": {
     "@azure/functions": "^4.8.0",
