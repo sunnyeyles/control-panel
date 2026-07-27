@@ -32,6 +32,7 @@ This directory is the tracker. Each ticket is a file under `.wayfinder/tickets/`
 
 - [Research: Azure options for scheduled Node.js jobs](tickets/01-research-scheduled-compute-options.md) — shortlist of two, both effectively $0 at 1 run/day: Container Apps Jobs (container packaging, native cron, Key Vault refs, retries) and Functions timer on Flex Consumption (zip deploy, best monitoring, but UTC-only, no retry, 30s init limit). ACI, AKS CronJob, and Logic Apps ruled out. Decision deferred to its ticket.
 - [Research: deploying one app from a pnpm + Turborepo workspace to Azure](tickets/02-research-pnpm-monorepo-deploy.md) — fact base in hand: `turbo prune --docker` + multi-stage Dockerfile for container targets; esbuild/tsup single-file bundle for zip-deploy (pnpm symlinks don't survive Azure run-from-package); `pnpm deploy --prod` only for folders consumed in place. Packaging decision itself deferred to its ticket.
+- [Task: Azure subscription and tooling access](tickets/04-azure-subscription-and-tooling-access.md) — `az` 2.88.0 installed and logged in; Free Trial subscription (spending limit ON, free-tier promo to 2027-08-27), tenant and subscription IDs recorded on the ticket; default region `australiaeast` (inferred from machine timezone, overridable).
 
 ## Not yet specified
 
