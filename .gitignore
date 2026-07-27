@@ -40,6 +40,15 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# azure functions local host settings (holds a local OPENAI_API_KEY)
+local.settings.json
+
+# azure functions deploy artifact (built from dist/ on demand)
+functionapp.zip
+
+# azure developer cli (per-machine environment state, incl. resolved secrets)
+.azure/
+
 # vercel
 .vercel
 
