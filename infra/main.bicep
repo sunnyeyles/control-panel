@@ -51,8 +51,8 @@ param location string
 @description('Provision a VNet and a private endpoint to storage. Off by default: a private endpoint alone costs more per month than this deployment\'s entire budget, and one daily timer needs no network isolation.')
 param vnetEnabled bool = false
 
-@description('Email address for budget alerts. Supplied per-environment via `azd env set BUDGET_ALERT_EMAIL ...`, so no personal address is committed. Leave empty to skip the budget entirely — which is also the escape hatch if the subscription offer does not support Cost Management budgets.')
-param budgetAlertEmail string = ''
+@description('Email address for budget alerts. Deliberately has no default, so azd asks for it on first provision and the cost guardrail cannot be missed by forgetting a step. Set it explicitly to an empty string to skip the budget — the documented escape hatch if the subscription offer does not support Cost Management budgets.')
+param budgetAlertEmail string
 
 @description('Monthly spend ceiling for alerting, in USD. Notifies only; it never stops spend.')
 param budgetAmount int = 5
@@ -70,6 +70,13 @@ param storageAccountName string = ''
 param vNetName string = ''
 @description('Id of the user identity to be used for testing and debugging. This is not required in production. Leave empty if not needed.')
 param principalId string = deployer().objectId
+
+@description('What kind of principal principalId is. Locally the deployer is a signed-in user; in CI it is the pipeline\'s service principal, and a role assignment that mislabels it can be rejected.')
+@allowed([
+  'User'
+  'ServicePrincipal'
+])
+param principalType string = 'User'
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
@@ -197,6 +204,7 @@ module rbac 'app/rbac.bicep' = {
     keyVaultName: keyVault.outputs.name
     managedIdentityPrincipalId: worker.outputs.SERVICE_WORKER_IDENTITY_PRINCIPAL_ID
     userIdentityPrincipalId: principalId
+    userIdentityPrincipalType: principalType
     enableBlob: storageEndpointConfig.enableBlob
     enableQueue: storageEndpointConfig.enableQueue
     enableTable: storageEndpointConfig.enableTable
@@ -303,8 +311,14 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = if (!empty(budgetAl
   }
 }
 
-// App outputs
-output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.name
+// App outputs.
+//
+// The component's *name*, not its connection string — the starter labelled this
+// output CONNECTION_STRING while assigning the name. The app never needs the
+// output anyway: worker.bicep reads the real connection string directly and
+// sets it as an app setting, and keeping it out of here also keeps the
+// instrumentation key out of azd's environment files.
+output APPLICATIONINSIGHTS_NAME string = monitoring.outputs.name
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_KEY_VAULT_NAME string = keyVault.outputs.name

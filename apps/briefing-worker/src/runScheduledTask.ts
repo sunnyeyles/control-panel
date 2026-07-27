@@ -7,8 +7,11 @@ import {
 import { getCurrentTime } from "@workspace/agent-tools/time"
 import { createAgent } from "@workspace/agents-core"
 
-/** The one tool the proof task gets. Named per the tool's own `name` field. */
-const TIME_TOOL_NAME = "get_current_time"
+/**
+ * Taken from the tool rather than written out, so renaming the tool cannot
+ * leave this looking for a name nothing emits.
+ */
+const TIME_TOOL_NAME = getCurrentTime.name
 
 /**
  * Fixed, and UTC on purpose: it keeps the expected answer stable against DST,
@@ -66,6 +69,16 @@ export async function runScheduledTask(): Promise<SuccessReport> {
   let llmCalls = 0
   let toolRoundTrips = 0
 
+  // The fields both outcomes share, measured at the moment of the call so each
+  // report gets its own duration. Built once so the two paths cannot drift.
+  const common = (): RunReportFields => ({
+    event: "proof-run",
+    startedAt,
+    durationMs: Date.now() - startedAtMs,
+    llmCalls,
+    toolRoundTrips,
+  })
+
   try {
     // Exactly one tool, imported per-module rather than via `allTools`: a model
     // picks worse as the list grows, and this task needs one thing.
@@ -77,24 +90,13 @@ export async function runScheduledTask(): Promise<SuccessReport> {
 
     llmCalls = result.llmCalls
     toolRoundTrips = countTimeToolResults(result.messages)
+    const answer = assertSucceeded(result.messages, toolRoundTrips)
 
-    return emit({
-      event: "proof-run",
-      outcome: "success",
-      startedAt,
-      durationMs: Date.now() - startedAtMs,
-      llmCalls,
-      toolRoundTrips,
-      answer: assertSucceeded(result.messages, toolRoundTrips),
-    })
+    return emit({ ...common(), outcome: "success", answer })
   } catch (error) {
     emit({
-      event: "proof-run",
+      ...common(),
       outcome: "failure",
-      startedAt,
-      durationMs: Date.now() - startedAtMs,
-      llmCalls,
-      toolRoundTrips,
       error: error instanceof Error ? error.message : String(error),
     })
 
@@ -131,17 +133,22 @@ function assertSucceeded(
 ): string {
   const final = messages.at(-1)
 
+  // This is also how a budget halt surfaces. The `halt` node answers every
+  // outstanding tool call with an error ToolMessage before going to END, so a
+  // run that gave up ends on a ToolMessage rather than an AI message.
   if (!final || !AIMessage.isInstance(final)) {
     throw new Error(
-      `Run did not end on an AI message (last message was ${final?.getType() ?? "none"}).`
+      `Run did not end on an AI message (last message was ${final?.getType() ?? "none"}), so it gave up rather than finishing.`
     )
   }
 
-  // Outstanding tool calls mean the graph left via the budget `halt` node
-  // rather than `END` — a run that gave up, not a run that finished.
+  // Unreachable against today's graph — the router only leaves for END once no
+  // tool calls are pending. Kept because the ticket names it as a distinct
+  // success condition, and it is what would catch a future graph that routed
+  // to END with work outstanding.
   if ((final.tool_calls ?? []).length > 0) {
     throw new Error(
-      "Run ended with unanswered tool calls, so it halted on its model-call budget instead of reaching END."
+      "Run ended on an AI message with unanswered tool calls, so it did not reach END cleanly."
     )
   }
 

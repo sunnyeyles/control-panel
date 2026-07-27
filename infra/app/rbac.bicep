@@ -3,6 +3,14 @@ param appInsightsName string
 param keyVaultName string
 param managedIdentityPrincipalId string // Principal ID for the Managed Identity
 param userIdentityPrincipalId string = '' // Principal ID for the User Identity
+// Locally this is a signed-in user; in CI it is the pipeline's service
+// principal. Azure rejects a role assignment whose principalType contradicts
+// the principal, so it cannot be hardcoded.
+@allowed([
+  'User'
+  'ServicePrincipal'
+])
+param userIdentityPrincipalType string = 'User'
 param allowUserIdentityPrincipal bool = false // Flag to enable user identity role assignments
 param enableBlob bool = true
 param enableQueue bool = false
@@ -45,7 +53,7 @@ resource storageRoleAssignment_User 'Microsoft.Authorization/roleAssignments@202
   properties: {
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', storageRoleDefinitionId)
     principalId: userIdentityPrincipalId // Use user identity ID
-    principalType: 'User' // User Identity is a User Principal
+    principalType: userIdentityPrincipalType
   }
 }
 
@@ -67,7 +75,7 @@ resource queueRoleAssignment_User 'Microsoft.Authorization/roleAssignments@2022-
   properties: {
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', queueRoleDefinitionId)
     principalId: userIdentityPrincipalId // Use user identity ID
-    principalType: 'User' // User Identity is a User Principal
+    principalType: userIdentityPrincipalType
   }
 }
 
@@ -89,7 +97,7 @@ resource tableRoleAssignment_User 'Microsoft.Authorization/roleAssignments@2022-
   properties: {
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', tableRoleDefinitionId)
     principalId: userIdentityPrincipalId // Use user identity ID
-    principalType: 'User' // User Identity is a User Principal
+    principalType: userIdentityPrincipalType
   }
 }
 
@@ -111,7 +119,7 @@ resource appInsightsRoleAssignment_User 'Microsoft.Authorization/roleAssignments
   properties: {
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', monitoringRoleDefinitionId)
     principalId: userIdentityPrincipalId // Use user identity ID
-    principalType: 'User' // User Identity is a User Principal
+    principalType: userIdentityPrincipalType
   }
 }
 

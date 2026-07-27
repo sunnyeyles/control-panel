@@ -14,6 +14,18 @@ provisions.
 
 Adapted from `Azure-Samples/functions-quickstart-typescript-azd-timer`.
 
+Node 22 on Flex Consumption in `australiaeast` was confirmed before pinning it,
+and is the platform default there:
+
+```
+$ az functionapp list-flexconsumption-runtimes --location australiaeast --runtime node
+Default    Name    Version    EndOfLifeDate
+---------  ------  ---------  ------------
+False      node    24         2029-04-30
+True       node    22         2027-04-30
+False      node    20         2026-04-30
+```
+
 ## Naming
 
 The starter's own scheme is kept rather than a hand-invented one: CAF
@@ -45,10 +57,14 @@ azd env set BUDGET_ALERT_EMAIL you@example.com
 azd provision
 ```
 
-Leaving `BUDGET_ALERT_EMAIL` unset skips the budget entirely. That is also the
-escape hatch if the Free Trial offer rejects Cost Management budgets: the
-deployment fails fast on the budget resource, and unsetting the value lets the
-rest through. Re-set it after converting to pay-as-you-go.
+`budgetAlertEmail` has no default, so azd prompts for it on a first provision
+and the cost guardrail cannot go missing because a step was forgotten.
+
+Setting it to an empty string explicitly is the escape hatch if the Free Trial
+offer rejects Cost Management budgets — the deployment fails fast on the budget
+resource, and an empty value skips it. Re-set it after converting to
+pay-as-you-go, which is exactly when the guardrail starts to matter: the trial's
+spending limit is the only hard ceiling, and it disappears on conversion.
 
 ## The one manual step
 

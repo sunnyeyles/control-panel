@@ -25,19 +25,25 @@ pnpm turbo dev --filter=@workspace/dashboard   # apps/dashboard
 pnpm turbo typecheck --filter=@workspace/ui
 ```
 
+The scheduled worker has its own build and run story — an esbuild bundle, a
+local Azure Functions host, and azd for deployment. See
+`apps/briefing-worker/README.md` and `infra/README.md`; neither the Next.js
+commands above nor `pnpm dev` cover it.
+
 There is **no test setup** in this repo — no test runner, no `test` task in `turbo.json`, no test script in any package. Do not invent test commands; if tests are needed, the framework has to be chosen and wired up first.
 
 ## Layout
 
-| Path                         | Package name                   | Role                                                     |
-| ---------------------------- | ------------------------------ | -------------------------------------------------------- |
-| `apps/dashboard`             | `@workspace/dashboard`         | The only app. Next.js 16 App Router, React 19.2.         |
-| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module. |
-| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.            |
-| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.   |
-| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.  |
-| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.       |
-| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.        |
+| Path                         | Package name                   | Role                                                        |
+| ---------------------------- | ------------------------------ | ----------------------------------------------------------- |
+| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                          |
+| `apps/briefing-worker`       | `@workspace/briefing-worker`   | Azure Functions timer. Bundled by esbuild, deployed by azd. |
+| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.    |
+| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.               |
+| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.      |
+| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.     |
+| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.          |
+| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.           |
 
 ## Architecture
 

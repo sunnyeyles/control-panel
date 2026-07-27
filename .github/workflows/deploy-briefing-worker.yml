@@ -42,6 +42,10 @@ jobs:
       AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
       AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
       BUDGET_ALERT_EMAIL: ${{ vars.BUDGET_ALERT_EMAIL }}
+      # Here the deployer is the pipeline's service principal, not a signed-in
+      # user. Azure rejects role assignments that mislabel the principal, so
+      # this must differ from the local default.
+      AZURE_PRINCIPAL_TYPE: ServicePrincipal
 
     steps:
       - uses: actions/checkout@v4
