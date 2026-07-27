@@ -42,7 +42,7 @@ This directory is the tracker. Each ticket is a file under `.wayfinder/tickets/`
 
 ## Out of scope
 
-- The real briefing agent — data sources (Gmail etc.), prompts, tool wiring, briefing content. This map's agent task is deliberately trivial.
+- The real briefing agent — building the search-agent fan-out (Tavily), the orchestrator's synthesis prompt, and the Azure Blob upload. Shape decided in `CONTEXT.md` (Briefing, Search Agent, Orchestrator); this map's agent task is deliberately trivial and doesn't build any of it.
 - Surfacing briefings in the dashboard, and hosting the Next.js dashboard itself on Azure.
 - Choosing or wiring up a test framework (the repo has none; that's its own effort).
 - Multi-user or auth concerns — the platform is single-user today.
