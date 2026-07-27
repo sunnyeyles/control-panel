@@ -34,12 +34,11 @@ This directory is the tracker. Each ticket is a file under `.wayfinder/tickets/`
 - [Research: deploying one app from a pnpm + Turborepo workspace to Azure](tickets/02-research-pnpm-monorepo-deploy.md) — fact base in hand: `turbo prune --docker` + multi-stage Dockerfile for container targets; esbuild/tsup single-file bundle for zip-deploy (pnpm symlinks don't survive Azure run-from-package); `pnpm deploy --prod` only for folders consumed in place. Packaging decision itself deferred to its ticket.
 - [Proof task and observable success](tickets/03-define-proof-task-and-success.md) — one `createAgent` invocation with only `getCurrentTime`, fixed UTC prompt forcing a tool round-trip; success defined structurally (no throw, clean END, ≥1 non-error tool result), signalled by exit code (authoritative) plus one JSON "run report" log line queried in Log Analytics/App Insights. **No persistence primitive in the foundation.** Pins for the compute choice: <60 s runtime, egress to `api.openai.com` only, single secret `OPENAI_API_KEY`, logs-to-workspace required.
 - [Task: Azure subscription and tooling access](tickets/04-azure-subscription-and-tooling-access.md) — `az` 2.88.0 installed and logged in; Free Trial subscription (spending limit ON, free-tier promo to 2027-08-27), tenant and subscription IDs recorded on the ticket; default region `australiaeast` (inferred from machine timezone, overridable).
+- [Choose the compute service for the scheduled job](tickets/05-choose-compute-service.md) — **Azure Functions timer trigger on Flex Consumption**, chosen over Container Apps Jobs: esbuild/tsup zip-deploy bundle (no native deps, no Dockerfile/registry) over container packaging, and no automatic retry needed for a daily proof run. NCRONTAB/UTC schedule, `OPENAI_API_KEY` via Key Vault reference + managed identity, App Insights for the run-report log line and failure status, effectively $0 at this cadence.
 
 ## Not yet specified
 
 - The multi-environment story (dev vs prod, or single environment) — hangs on the IaC and resource-structure decision.
-- Cost guardrails on the personal subscription (budgets, alerts, spend ceiling for the scheduled runs) — hangs on subscription setup and compute choice.
-- How the cadence is configured and changed after deploy (in code, in IaC, in the portal) — hangs on the compute-service choice.
 
 ## Out of scope
 
