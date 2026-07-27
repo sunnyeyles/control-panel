@@ -7,18 +7,22 @@ using a single tool, and its only purpose is to prove the deployment foundation
 works end to end — secret delivery, outbound HTTPS, the built `dist/` of the
 agent packages resolving at runtime, and a full model → tools → model cycle
 through the LangGraph graph. The real briefing replaces the body of
-`runScheduledTask.ts` later; nothing else has to move.
+`run-scheduled-task.ts` later; nothing else has to move.
 
 ## Layout
 
 ```
-src/functions/scheduledRun.ts   shallow — binds a schedule to the task
-src/runScheduledTask.ts         deep — owns the task and its success contract
-src/index.ts                    entry point; importing a trigger registers it
-host.json                       Functions host config (source of truth)
-build.mjs                       esbuild bundle + deploy-root assembly
-local.settings.json             gitignored; local `func start` settings
+src/functions/scheduled-run.ts   shallow — binds a schedule to the task
+src/run-scheduled-task.ts        deep — owns the task and its success contract
+src/index.ts                     entry point; importing a trigger registers it
+host.json                        Functions host config (source of truth)
+build.mjs                        esbuild bundle + deploy-root assembly
+local.settings.json              gitignored; local `func start` settings
 ```
+
+File names are kebab-case to match the rest of the repo. The registered
+function name is the string in `app.timer()`, not the file name, so it stays
+`scheduledRun` — that is what the admin endpoint below addresses.
 
 The split between the two `src` modules is the point of the design: the
 schedule and the Functions binding never change when the task changes.
@@ -28,7 +32,7 @@ schedule and the Functions binding never change when the task changes.
 ```bash
 pnpm turbo build --filter=@workspace/briefing-worker      # bundle to dist/
 pnpm turbo typecheck --filter=@workspace/briefing-worker
-pnpm --filter=@workspace/briefing-worker zip              # dist/ -> functionapp.zip
+pnpm turbo zip --filter=@workspace/briefing-worker        # dist/ -> functionapp.zip
 pnpm --filter=@workspace/briefing-worker start            # func start, local host
 ```
 

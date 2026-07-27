@@ -175,7 +175,7 @@ Only the second needs the wait. Record the others as you go.
 
 ## After that
 
-**The seam is `runScheduledTask.ts`.** Replacing the proof task with the real
+**The seam is `run-scheduled-task.ts`.** Replacing the proof task with the real
 briefing means changing the body of that one function. The schedule, the
 Functions binding, the run-report shape and every resource stay as they are.
 That split is the point of the two-module design.

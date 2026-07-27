@@ -1,6 +1,6 @@
 import { app, type InvocationContext, type Timer } from "@azure/functions"
 
-import { runScheduledTask } from "../runScheduledTask.js"
+import { runScheduledTask } from "../run-scheduled-task.js"
 
 /**
  * 09:00 UTC, daily. NCRONTAB is `{sec} {min} {hour} {day} {month} {day-of-week}`,
