@@ -30,7 +30,28 @@ local Azure Functions host, and azd for deployment. See
 `apps/briefing-worker/README.md` and `infra/README.md`; neither the Next.js
 commands above nor `pnpm dev` cover it.
 
-There is **no test setup** in this repo — no test runner, no `test` task in `turbo.json`, no test script in any package. Do not invent test commands; if tests are needed, the framework has to be chosen and wired up first.
+Infrastructure is **two stacks mid-migration**, and Turborepo covers neither.
+`infra/` is Bicep behind `azd` for the live Azure deployment (`infra/README.md`);
+`infra/aws/` is Terraform for AWS (`infra/aws/README.md`). Terraform commands
+run directly:
+
+```bash
+terraform -chdir=infra/aws fmt -recursive -check
+terraform -chdir=infra/aws init -backend=false && terraform -chdir=infra/aws validate
+```
+
+`validate` is the ceiling without AWS credentials — `plan` calls STS while
+configuring the provider and fails before reaching a resource.
+
+```bash
+pnpm test        # turbo test
+```
+
+**Only `@workspace/user-storage` has tests.** Vitest is the runner, and it is a
+devDependency of that package alone; `turbo test` is a no-op everywhere else. Do
+not assume a package is covered because the command exits 0. Adding tests to
+another workspace means adding `vitest` to it and a `test` script — the `test`
+task in `turbo.json` is already there.
 
 ## Layout
 
@@ -41,6 +62,7 @@ There is **no test setup** in this repo — no test runner, no `test` task in `t
 | `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.    |
 | `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.               |
 | `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.      |
+| `packages/user-storage`      | `@workspace/user-storage`      | S3 storage for per-user data, behind an interface.          |
 | `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.     |
 | `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.          |
 | `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.           |
@@ -67,6 +89,14 @@ There is **no test setup** in this repo — no test runner, no `test` task in `t
 - **Both new packages use wildcard subpath exports** (`./*` → `./dist/*.js`). Adding `src/weather.ts` makes `@workspace/agent-tools/weather` importable with no config change — same spirit as the UI package's one-file-per-subpath rule, no barrel to update.
 - **Agents are exported as `createX()` factories, never as instances.** Building one constructs a model, which reads `OPENAI_API_KEY` and throws without it; a module-level instance would move that failure to import time and break any consumer that merely imports the module.
 - **Prefer per-tool imports over `allTools`.** A model picks worse as the tool list grows, so give an agent the tools its job needs.
+
+**`@workspace/user-storage` hides the AWS SDK behind one module.** `s3-user-object-store.ts` is the only file in the repo that imports `@aws-sdk/client-s3`. Everything else depends on the `UserObjectStore` interface — or, better, on the narrow `BriefStore` / `ResumeStore` facades over it, which know their kind's key shape and file types so a call site cannot get them wrong. Call `createS3UserObjectStore()` only at a composition root: same `createX()` factory rule as the agents, and for the same reason — constructing one reads configuration, so a module-level instance would move that failure to import time.
+
+Three things about that package are load-bearing and easy to undo by accident:
+
+- **Object keys are `{environment}/{userId}/{kind}/…tail.{ext}`, and `userId` sits above `kind` deliberately** — erasing a user is then one prefix, not one per kind. The segment validation in `keys.ts` is the ownership boundary, not a tidiness rule: an unvalidated `userId` of `../someone-else` addresses another user's prefix.
+- **Retention is driven by an object _tag_, not a key prefix.** S3 lifecycle filters take no wildcards, so with `userId` in the middle there is no prefix meaning "every user's briefs". Every object is tagged `kind=<kind>` at write time and the Terraform lifecycle rules filter on that — which is why the IAM policies must grant `s3:PutObjectTagging`, and why a kind added to `kinds.ts` without a matching `object_kinds` entry in Terraform silently gets no retention at all.
+- **Content types are derived from the extension, never accepted from the caller,** against a per-kind allowlist in `kinds.ts`. A caller-supplied media type would let a `.pdf` be stored as `text/html`. Uploaded kinds are also stored `Content-Disposition: attachment`.
 
 **Tailwind v4, single stylesheet, owned by the UI package.** There is no `tailwind.config.*` anywhere — v4 configures itself from CSS. The one source of truth is `packages/ui/src/styles/globals.css`; the app imports it as `@workspace/ui/globals.css` in `app/layout.tsx`. The app's `postcss.config.mjs` is a one-line re-export of the UI package's. Theme tokens, base colors, and animations belong in that stylesheet, not in the app.
 

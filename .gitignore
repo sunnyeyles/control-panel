@@ -49,6 +49,23 @@ functionapp.zip
 # azure developer cli (per-machine environment state, incl. resolved secrets)
 .azure/
 
+# terraform — provider binaries, state, and anything holding resolved values.
+# `.terraform.lock.hcl` is deliberately NOT ignored: it pins provider versions
+# and belongs in the repo.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
 # vercel
 .vercel
 
