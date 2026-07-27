@@ -41,6 +41,7 @@ yarn-error.log*
 .env*
 
 # azure functions local host settings (holds a local OPENAI_API_KEY)
+# kept until the azure stack is decommissioned; see infra/README.md
 local.settings.json
 
 # azure functions deploy artifact (built from dist/ on demand)
@@ -49,16 +50,26 @@ functionapp.zip
 # azure developer cli (per-machine environment state, incl. resolved secrets)
 .azure/
 
-# terraform — provider binaries, state, and anything holding resolved values.
-# `.terraform.lock.hcl` is deliberately NOT ignored: it pins provider versions
-# and belongs in the repo.
-**/.terraform/*
+# lambda deploy artifact (built from dist/ on demand)
+lambda.zip
+
+# terraform: provider binaries and modules, per-machine
+.terraform/
+# state and plans. state holds every attribute terraform has read, plans hold
+# resolved variable values — neither belongs in a diff. `.terraform.lock.hcl`
+# is deliberately NOT ignored: pinning provider hashes is the point of it.
 *.tfstate
 *.tfstate.*
+*.tfplan
+tfplan
 crash.log
 crash.*.log
+# variable files: the same resolved-values argument as plans
 *.tfvars
 *.tfvars.json
+# per-machine backend bucket, see infra/aws/bootstrap/README.md
+backend.hcl
+# per-machine cli config and local overrides
 override.tf
 override.tf.json
 *_override.tf

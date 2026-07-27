@@ -1,7 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
-  "globalEnv": ["OPENAI_API_KEY"],
+  "globalEnv": ["OPENAI_API_KEY", "OPENAI_SECRET_ID"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -19,6 +19,10 @@
     },
     "test": {
       "dependsOn": ["^build"]
+    },
+    "zip": {
+      "dependsOn": ["build"],
+      "outputs": ["lambda.zip"]
     },
     "dev": {
       "dependsOn": ["^build"],

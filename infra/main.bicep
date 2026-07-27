@@ -223,7 +223,7 @@ module serviceVirtualNetwork 'app/vnet.bicep' =  if (vnetEnabled) {
   }
 }
 
-module storagePrivateEndpoint 'app/storage-PrivateEndpoint.bicep' = if (vnetEnabled) {
+module storagePrivateEndpoint 'app/storage-private-endpoint.bicep' = if (vnetEnabled) {
   name: 'servicePrivateEndpoint'
   scope: rg
   params: {

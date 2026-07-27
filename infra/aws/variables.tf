@@ -1,5 +1,5 @@
 variable "region" {
-  description = "AWS region for the user-storage bucket."
+  description = "AWS region for this root — the user-storage bucket and the briefing worker alike."
   type        = string
   default     = "ap-southeast-2"
 }
@@ -47,7 +47,16 @@ variable "kms_key_arn" {
 }
 
 variable "attach_to_role_names" {
-  description = "IAM role names to attach each environment's access policy to, keyed by environment. Left empty until the Lambda stack exists; see README.md."
+  description = <<-EOT
+    IAM role names to attach each environment's *broad* per-environment access
+    policy to, keyed by environment.
+
+    Empty, and expected to stay that way. The briefing worker — the one consumer
+    so far — is joined the other way round, in `briefing-worker.tf`, which
+    attaches the narrow per-kind grant to its own execution role. That keeps the
+    dependency one-way: the worker knows about storage, storage knows about
+    nothing. Reach for this only for a role this root does not create.
+  EOT
   type        = map(list(string))
   default     = {}
 }
