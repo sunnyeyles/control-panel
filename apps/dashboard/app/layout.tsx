@@ -1,14 +1,18 @@
-import { Geist, Geist_Mono } from "next/font/google"
+import { Hanken_Grotesk, IBM_Plex_Mono } from "next/font/google"
 
 import "@workspace/ui/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@workspace/ui/lib/utils"
 
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
-
-const fontMono = Geist_Mono({
+const fontSans = Hanken_Grotesk({
   subsets: ["latin"],
-  variable: "--font-mono",
+  variable: "--font-hanken",
+})
+
+const fontMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-plex-mono",
 })
 
 export default function RootLayout({
@@ -21,10 +25,9 @@ export default function RootLayout({
       lang="en"
       suppressHydrationWarning
       className={cn(
-        "antialiased",
-        fontMono.variable,
-        "font-sans",
-        geist.variable
+        "font-sans antialiased",
+        fontSans.variable,
+        fontMono.variable
       )}
     >
       <body>
