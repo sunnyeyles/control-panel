@@ -25,25 +25,39 @@ pnpm turbo dev --filter=@workspace/dashboard   # apps/dashboard
 pnpm turbo typecheck --filter=@workspace/ui
 ```
 
-The scheduled worker has its own build and run story — an esbuild bundle, a
-local Azure Functions host, and azd for deployment. See
-`apps/briefing-worker/README.md` and `infra/README.md`; neither the Next.js
-commands above nor `pnpm dev` cover it.
+The scheduled worker has its own build and run story — an esbuild bundle and
+Terraform for deployment. See `apps/briefing-worker/README.md` and
+`infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
+cover it.
+
+Infrastructure is **two stacks mid-migration**, and Turborepo covers neither.
+`infra/aws/` is Terraform for AWS and is where the worker deploys from;
+`infra/` is the Bicep-and-`azd` Azure deployment it replaces, kept until cutover
+so rollback stays a revert. Terraform runs directly:
+
+```bash
+terraform -chdir=infra/aws fmt -recursive -check
+terraform -chdir=infra/aws init -backend=false && terraform -chdir=infra/aws validate
+```
+
+`validate` is the ceiling without AWS credentials — `plan` calls STS while
+configuring the provider and fails before reaching a resource. `plan` also reads
+`lambda.zip` at plan time, so build before planning.
 
 There is **no test setup** in this repo — no test runner, no `test` task in `turbo.json`, no test script in any package. Do not invent test commands; if tests are needed, the framework has to be chosen and wired up first.
 
 ## Layout
 
-| Path                         | Package name                   | Role                                                        |
-| ---------------------------- | ------------------------------ | ----------------------------------------------------------- |
-| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                          |
-| `apps/briefing-worker`       | `@workspace/briefing-worker`   | Azure Functions timer. Bundled by esbuild, deployed by azd. |
-| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.    |
-| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.               |
-| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.      |
-| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.     |
-| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.          |
-| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.           |
+| Path                         | Package name                   | Role                                                          |
+| ---------------------------- | ------------------------------ | ------------------------------------------------------------- |
+| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                            |
+| `apps/briefing-worker`       | `@workspace/briefing-worker`   | AWS Lambda, daily. Bundled by esbuild, deployed by Terraform. |
+| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.      |
+| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.                 |
+| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.        |
+| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.       |
+| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.            |
+| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.             |
 
 ## Architecture
 

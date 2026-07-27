@@ -1,10 +1,7 @@
-# THIS IS LEGACY! WE ARE GOING TO MIGRATE TO AWS!
-
-# WE WILL MIGRATE TO AWS LAMBDA FUNCTIONS WITH S3 BUCKET TO STORE .MD FILES
-
 # @workspace/briefing-worker
 
-A scheduled Azure Functions timer that runs one agent task per day at 09:00 UTC.
+A scheduled AWS Lambda that runs one agent task per day at 09:00 UTC, invoked by
+EventBridge Scheduler.
 
 Today that task is a **proof task**: it asks an agent for the current UTC time
 using a single tool, and its only purpose is to prove the deployment foundation
@@ -16,72 +13,89 @@ through the LangGraph graph. The real briefing replaces the body of
 ## Layout
 
 ```
-src/functions/scheduled-run.ts   shallow — binds a schedule to the task
-src/run-scheduled-task.ts        deep — owns the task and its success contract
-src/index.ts                     entry point; importing a trigger registers it
-host.json                        Functions host config (source of truth)
-build.mjs                        esbuild bundle + deploy-root assembly
-local.settings.json              gitignored; local `func start` settings
+src/index.ts               shallow — the Lambda handler, and the only AWS-aware file
+src/run-scheduled-task.ts  deep — owns the task and its success contract
+build.mjs                  esbuild bundle + deploy-root assembly
 ```
 
-File names are kebab-case to match the rest of the repo. The registered
-function name is the string in `app.timer()`, not the file name, so it stays
-`scheduledRun` — that is what the admin endpoint below addresses.
+The split between the two `src` modules is the point of the design, and the
+migration off Azure is what proved it: `run-scheduled-task.ts` moved between
+cloud providers without a single line changing. Everything platform-shaped —
+the handler signature and fetching the API key — lives in `index.ts`.
 
-The split between the two `src` modules is the point of the design: the
-schedule and the Functions binding never change when the task changes.
+The schedule is **not** in this package. It lives in
+`infra/aws/modules/briefing-worker/schedule.tf`, which keeps it reviewable in a
+diff rather than drifting invisibly in console configuration — the same property
+the Azure NCRONTAB constant had, moved rather than lost.
 
 ## Commands
 
 ```bash
 pnpm turbo build --filter=@workspace/briefing-worker      # bundle to dist/
 pnpm turbo typecheck --filter=@workspace/briefing-worker
-pnpm turbo zip --filter=@workspace/briefing-worker        # dist/ -> functionapp.zip
-pnpm --filter=@workspace/briefing-worker start            # func start, local host
+pnpm turbo zip --filter=@workspace/briefing-worker        # dist/ -> lambda.zip
+pnpm --filter=@workspace/briefing-worker invoke           # run the handler locally
 ```
 
-Running locally needs `OPENAI_API_KEY` in the environment and an Azure Storage
-emulator for the timer's checkpointing:
+Running locally needs `OPENAI_API_KEY` in the environment and **nothing else** —
+no emulator, no AWS credentials, no local host:
 
 ```bash
-pnpm dlx azurite --silent --location /tmp/azurite &
 export OPENAI_API_KEY=...
-pnpm --filter=@workspace/briefing-worker build
-pnpm --filter=@workspace/briefing-worker start
+pnpm turbo build --filter=@workspace/briefing-worker
+pnpm --filter=@workspace/briefing-worker invoke
 ```
 
-A timer will not fire on demand, so trigger a run through the admin endpoint:
+That works because `loadSecret()` short-circuits when `OPENAI_API_KEY` is
+already set, so the Secrets Manager call never happens. It is also the escape
+hatch if Secrets Manager is unreachable but the value is known.
+
+Success prints one JSON `proof-run` line and exits 0; failure prints one with
+`"outcome":"failure"` and exits non-zero.
+
+## Forcing a run in AWS
 
 ```bash
-curl -X POST http://localhost:7071/admin/functions/scheduledRun \
-  -H 'Content-Type: application/json' -d '{"input":""}'
+aws lambda invoke --function-name briefing-worker \
+  --cli-binary-format raw-in-base64-out --payload '{}' /dev/stdout
 ```
 
-Success prints one JSON `proof-run` line and the host logs `Succeeded`; failure
-prints one with `"outcome":"failure"` and the host logs `Failed`.
+Read the result in CloudWatch Logs Insights:
+
+```
+fields @timestamp, @message
+| filter @message like /"event":"proof-run"/
+| sort @timestamp desc
+| limit 20
+```
+
+Good looks like `"outcome":"success"` with `"llmCalls":2`. Two calls is the
+number that matters: it means model → tool → model, rather than the model
+answering from memory without touching the tool.
 
 ## Things that are load-bearing and look like they are not
 
-**`packageManager` in `package.json`.** azd detects the package manager from
-this field. Without it azd restores the service with `npm install`, which fails
-outright on this repo's `workspace:*` dependencies
-(`npm error EUNSUPPORTEDPROTOCOL`). It is a deployment dependency, not a note
-about local tooling.
+**The `createRequire` banner in `build.mjs`.** Some transitive CommonJS in the
+LangChain stack calls `require` at load time, which an ESM bundle has no binding
+for. It sits next to what used to be the Azure external and looks like part of
+it; it is not. Removing it breaks the bundle at import with an opaque
+`require is not defined`.
 
-**`dist/` is a deploy root, not compiler output.** `build.mjs` copies
-`host.json` in and generates a second, minimal `package.json` there, because
-the Functions v4 programming model locates the module that registers functions
-through `main`. `azure.yaml` points azd's `dist` at this folder, so the uploaded
-zip is exactly these files — and in particular never `node_modules`, whose pnpm
-symlinks do not survive run-from-package mounting.
+**`"type": "module"` in the generated `dist/package.json`.** It is what makes
+Lambda load `index.js` as ESM and find the named `handler` export. Without it
+the runtime treats the bundle as CommonJS and fails at import. There is
+deliberately no `main` — Lambda locates the entry from its own
+`handler = "index.handler"` setting.
 
-**`local.settings.json` is deliberately not copied into `dist/`.** Keeping it
-out is what stops local settings from reaching a deploy artifact.
+**`dist/` is a deploy root, not compiler output.** The zip is exactly its
+contents — in particular never `node_modules`, whose pnpm symlinks do not
+survive being zipped. That is why the bundle has no externals at all.
 
-**`@azure/functions-core` is the one esbuild external.** It is not an npm
-package; the Functions host injects it at runtime, so it cannot be bundled.
+**Nothing catches the throw.** `runScheduledTask()` emits its one-line report
+and rethrows; the handler lets it through. That throw is what marks the
+invocation failed, which is what produces the `Errors` datapoint the alarm
+watches. Catching it would turn a broken run into a silent one.
 
-**App Insights sampling is off in `host.json`.** The starter enables it. The
-verification for this service is a single trace line per run, and a sampled-out
-line reads as "the run never started" — the exact false signal that check
-exists to catch. At one run per day there is nothing to sample anyway.
+**Build before `terraform plan`.** Terraform reads `lambda.zip` with
+`filebase64sha256` at plan time, so a plan on a tree that has not been built
+fails with a file-not-found that reads like a Terraform bug.

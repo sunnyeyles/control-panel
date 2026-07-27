@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Scheduled Azure Functions timer that runs the daily briefing task.",
+  "description": "Scheduled AWS Lambda that runs the daily briefing task.",
   "main": "dist/index.js",
   "engines": {
     "node": ">=22"
@@ -11,15 +11,15 @@
   "packageManager": "pnpm@10.33.4",
   "scripts": {
     "build": "node build.mjs",
-    "clean": "rm -rf dist .turbo functionapp.zip",
+    "clean": "rm -rf dist .turbo lambda.zip",
     "lint": "eslint",
     "format": "prettier --write \"**/*.ts\"",
-    "start": "func start",
+    "invoke": "node -e 'import(\"./dist/index.js\").then((m) => m.handler())'",
     "typecheck": "tsc --noEmit",
-    "zip": "rm -f functionapp.zip && cd dist && zip -qr ../functionapp.zip ."
+    "zip": "rm -f lambda.zip && cd dist && zip -qr ../lambda.zip ."
   },
   "dependencies": {
-    "@azure/functions": "^4.8.0",
+    "@aws-sdk/client-secrets-manager": "^3.1096.0",
     "@langchain/core": "^1.2.3",
     "@workspace/agent-tools": "workspace:*",
     "@workspace/agents-core": "workspace:*"

@@ -1,6 +1,13 @@
-# THIS IS LEGACY! WE ARE GOING TO MIGRATE TO AWS!
-
-# WE WILL MIGRATE TO AWS LAMBDA FUNCTIONS WITH S3 BUCKET TO STORE .MD FILES
+> **Superseded, and kept on purpose.** The worker now deploys to AWS Lambda from
+> `infra/aws/` (Terraform). Everything below describes the Azure deployment it
+> replaces, which stays in the tree until cutover so that rollback is
+> `az functionapp start` plus a revert rather than a rebuild.
+>
+> Nothing in CI touches this any more — `.github/workflows/deploy-briefing-worker.yml`
+> is scoped to `infra/aws/**`, so editing these files deploys nothing. Deploying
+> Azure again means running `azd provision && azd deploy worker` by hand.
+>
+> The runbook, including the decommission steps, is `infra/aws/DEPLOYING.md`.
 
 # Azure foundation
 

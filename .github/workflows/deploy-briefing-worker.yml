@@ -1,86 +1,140 @@
 name: Deploy briefing-worker
 
-# One workflow, not two: infra and worker code go up together with azd up
-# semantics. Splitting them would mean keeping two files in sync by hand for
-# one small service.
+# One workflow, not two: infra and worker code go up together. The zip reaches
+# Lambda through Terraform's `filename` + `source_code_hash` rather than a
+# separate `aws lambda update-function-code`, so one apply deploys both and
+# there is no window where the function and its schedule disagree.
 on:
   push:
     branches: [main]
     # Path-scoped rather than relying on `turbo --filter` to no-op: a
     # dashboard-only or UI-only push does not start this workflow at all, which
     # is both stronger and cheaper than starting it and doing nothing.
+    #
+    # `infra/aws/**`, not `infra/**` — the Bicep beside it belongs to the Azure
+    # deployment this replaces, which is kept until cutover so rollback stays a
+    # revert. Editing it must not trigger an AWS deploy.
     paths:
       - "apps/briefing-worker/**"
       - "packages/agents-core/**"
       - "packages/agents/**"
       - "packages/agent-tools/**"
-      - "infra/**"
-      - "azure.yaml"
-  # Deliberately unfiltered — a manual run should always run. This is the way
-  # to pick up the one-time Key Vault secret without an empty commit.
+      - "infra/aws/**"
+      - ".github/workflows/deploy-briefing-worker.yml"
+  pull_request:
+    paths:
+      - "apps/briefing-worker/**"
+      - "packages/agents-core/**"
+      - "packages/agents/**"
+      - "packages/agent-tools/**"
+      - "infra/aws/**"
+      - ".github/workflows/deploy-briefing-worker.yml"
+  # Deliberately unfiltered — a manual run should always run.
   workflow_dispatch:
 
 permissions:
-  # Mints the GitHub OIDC token azd exchanges for an Azure one. No
-  # service-principal secret is stored anywhere in this repo.
-  id-token: write
   contents: read
 
 # A queued run deploys the same environment as the one in flight, so let the
 # newer commit win rather than racing.
 concurrency:
-  group: deploy-briefing-worker
+  group: deploy-briefing-worker-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Everything that can be checked without touching AWS. This is the whole of
+  # what a pull request runs: the deploy role trusts `ref:refs/heads/main` only,
+  # so a PR cannot assume it — which is the point, not a limitation to work
+  # around. Granting pull_request subjects the ability to assume a role that can
+  # apply infrastructure would hand it to anyone who can open a PR.
+  check:
     runs-on: ubuntu-latest
-    # A provision plus a deploy of one small service is a few minutes. The
-    # default is six hours, which is a long time to spend discovering that a
-    # step is waiting for input that will never arrive.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches engines.node in the worker and the nodejs22.x runtime.
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Explicit rather than implied: build.dependsOn ["^build"] is what
+      # compiles agents-core and agent-tools ahead of the worker, and a failure
+      # here is attributable to the build rather than to a deployment step.
+      - name: Build worker
+        run: pnpm turbo build typecheck lint --filter=@workspace/briefing-worker
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        run: terraform -chdir=infra/aws fmt -recursive -check -diff
+
+      # -backend=false is what makes this runnable with no credentials and no
+      # state bucket. It is the ceiling without AWS access: `plan` calls STS
+      # while configuring the provider and fails before reaching a resource.
+      - name: Terraform validate
+        run: |
+          terraform -chdir=infra/aws init -backend=false -input=false
+          terraform -chdir=infra/aws validate
+          terraform -chdir=infra/aws/bootstrap init -backend=false -input=false
+          terraform -chdir=infra/aws/bootstrap validate
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    permissions:
+      # Mints the GitHub OIDC token AWS exchanges for temporary credentials. No
+      # access key is stored anywhere in this repo.
+      id-token: write
+      contents: read
+
     env:
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
-      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
-      BUDGET_ALERT_EMAIL: ${{ vars.BUDGET_ALERT_EMAIL }}
-      # Here the deployer is the pipeline's service principal, not a signed-in
-      # user. Azure rejects role assignments that mislabel the principal, so
-      # this must differ from the local default.
-      AZURE_PRINCIPAL_TYPE: ServicePrincipal
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      # Consumed by `variable "alert_email"`, which has no default on purpose:
+      # an unset value must break the apply rather than quietly produce a
+      # worker nobody is watching.
+      TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
 
     steps:
       # Runs before anything else because it needs nothing else, and because
-      # the failure it catches is otherwise silent or slow:
+      # the failures it catches are otherwise slow or silent:
       #
-      #   - An empty --client-id makes `azd auth login` fall back to
-      #     interactive browser login, which hangs a headless runner instead
-      #     of failing.
-      #   - An empty BUDGET_ALERT_EMAIL passes through main.parameters.json as
-      #     an empty string, which skips the budget entirely. A cost guardrail
-      #     that silently switches itself off is the exact failure ticket 10
-      #     exists to prevent, so CI refuses to deploy without it. Genuinely
-      #     wanting no budget means deleting it from this list — an explicit
-      #     edit rather than a forgotten variable.
+      #   - An empty role ARN makes configure-aws-credentials fail deep into
+      #     the run with an error about the assume-role call rather than about
+      #     the missing input.
+      #   - An empty TF_STATE_BUCKET makes `init` fall back to prompting, which
+      #     with -input=false is a failure two steps later.
+      #   - An empty ALERT_EMAIL would have been a worker with no alarms, which
+      #     is the exact failure the alarms exist to catch.
       #
       # `vars.X` is an empty string whether the variable is unset or set to
       # empty, so these cases are indistinguishable here and both fail.
       - name: Check required repository variables
         run: |
           missing=()
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
-                      AZURE_ENV_NAME AZURE_LOCATION BUDGET_ALERT_EMAIL; do
+          for name in AWS_REGION AWS_DEPLOY_ROLE_ARN TF_STATE_BUCKET TF_VAR_alert_email; do
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ ${#missing[@]} -ne 0 ]; then
             echo "::error::Missing repository variables: ${missing[*]}"
-            echo "Run 'azd pipeline config --auth-type federated' to create the"
-            echo "federated credential and set the AZURE_* values, then add"
-            echo "BUDGET_ALERT_EMAIL. Confirm with 'gh variable list' that they"
-            echo "landed as variables — this workflow reads vars.*, so values"
-            echo "created as secrets read back empty and stall here."
+            echo "TF_VAR_alert_email comes from the ALERT_EMAIL variable."
+            echo "Apply infra/aws/bootstrap once, then set these from its"
+            echo "outputs — see infra/aws/bootstrap/README.md. Confirm with"
+            echo "'gh variable list' that they landed as variables: this"
+            echo "workflow reads vars.*, so values created as secrets read"
+            echo "back empty and stall here."
             exit 1
           fi
 
@@ -90,37 +144,37 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Matches engines.node in the worker and the Flex Consumption runtime.
           node-version: 22
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Explicit rather than left to azd's own restore: build.dependsOn
-      # ["^build"] is what compiles agents-core and agent-tools ahead of the
-      # worker, and a failure here is attributable to the build rather than to
-      # a deployment step.
-      - name: Build worker
-        run: pnpm turbo build --filter=@workspace/briefing-worker
+      # Before Terraform, and not merely for speed. `filebase64sha256` reads the
+      # zip at *plan* time, so a plan on a tree without one fails with a
+      # file-not-found that reads like a Terraform bug.
+      - name: Build and package worker
+        run: pnpm turbo zip --filter=@workspace/briefing-worker
 
-      - name: Install azd
-        uses: Azure/setup-azd@v2
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # --no-prompt is the belt to the preflight check's braces: it turns any
-      # remaining fallback to an interactive flow into an immediate failure
-      # rather than a runner that sits waiting on a browser redirect.
-      - name: Log in to Azure (OIDC federated credentials)
+      - uses: hashicorp/setup-terraform@v3
+
+      # Partial backend config: the bucket is supplied here rather than written
+      # into backend.tf, so nothing in the repository names a bucket that might
+      # not exist yet.
+      - name: Terraform init
         run: >-
-          azd auth login
-          --client-id "$AZURE_CLIENT_ID"
-          --tenant-id "$AZURE_TENANT_ID"
-          --federated-credential-provider github
-          --no-prompt
+          terraform -chdir=infra/aws init -input=false
+          -backend-config="bucket=$TF_STATE_BUCKET"
+          -backend-config="region=$AWS_REGION"
 
-      # Idempotent: a no-op when the Bicep has not changed.
-      - name: Provision infrastructure
-        run: azd provision --no-prompt
+      - name: Terraform plan
+        run: terraform -chdir=infra/aws plan -input=false -out=tfplan
 
-      - name: Deploy worker
-        run: azd deploy worker --no-prompt
+      - name: Terraform apply
+        run: terraform -chdir=infra/aws apply -input=false -auto-approve tfplan
