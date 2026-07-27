@@ -8,6 +8,7 @@
   "engines": {
     "node": "22.x"
   },
+  "packageManager": "pnpm@10.33.4",
   "scripts": {
     "build": "node build.mjs",
     "clean": "rm -rf dist .turbo functionapp.zip",

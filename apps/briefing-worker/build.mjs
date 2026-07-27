@@ -28,7 +28,12 @@ await esbuild.build({
   format: "esm",
   platform: "node",
   target: "node22",
-  sourcemap: true,
+  // Off deliberately. Node ignores source maps unless started with
+  // --enable-source-maps, which this app does not set, so shipping one would
+  // add ~8 MB to a package that Flex Consumption mounts on every cold start
+  // for no runtime benefit. Diagnostics come from the run report's `error`
+  // field instead. Flip to `true` locally when a stack trace is worth it.
+  sourcemap: false,
   // Not an npm package: the Functions host injects `@azure/functions-core`
   // into the worker at runtime. Bundling it is impossible — it must resolve
   // from the host, so it stays external even though nothing else does.

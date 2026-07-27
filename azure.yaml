@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+# azd's manifest lives at the repo root, not under the app: that is azd's own
+# convention, and this repo may host a second deployable service later.
+name: control-panel
+metadata:
+  template: functions-quickstart-typescript-azd-timer@1.0.0
+
+services:
+  worker:
+    project: ./apps/briefing-worker
+    language: ts
+    host: function
+    # `dist/` is a complete deploy root — bundle, host.json and a generated
+    # package.json — so azd uploads exactly what build.mjs produced and nothing
+    # else. In particular it never sees node_modules, whose pnpm symlinks do
+    # not survive run-from-package mounting.
+    dist: dist
+    hooks:
+      # Build through Turborepo rather than letting azd run `npm run build` in
+      # the app directory: `build.dependsOn: ["^build"]` is what compiles
+      # agents-core and agent-tools first, and npm cannot resolve this repo's
+      # `workspace:*` dependencies at all.
+      prepackage:
+        shell: sh
+        run: pnpm turbo build --filter=@workspace/briefing-worker
