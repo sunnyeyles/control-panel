@@ -1,3 +1,7 @@
+# THIS IS LEGACY! WE ARE GOING TO MIGRATE TO AWS!
+
+# WE WILL MIGRATE TO AWS LAMBDA FUNCTIONS WITH S3 BUCKET TO STORE .MD FILES
+
 # @workspace/briefing-worker
 
 A scheduled Azure Functions timer that runs one agent task per day at 09:00 UTC.
