@@ -2,7 +2,7 @@
 title: "Choose the compute service for the scheduled job"
 type: grilling
 status: open
-assignee:
+assignee: claude-fg-38d95118
 blocked-by:
   - 01-research-scheduled-compute-options.md
   - 02-research-pnpm-monorepo-deploy.md
