@@ -95,18 +95,22 @@ In CloudWatch Logs Insights:
 
 ```
 fields @timestamp, @message
-| filter @message like /"event":"proof-run"/
+| filter @message like /"event":"tick"/ or @message like /"event":"proof-run"/
 | sort @timestamp desc
-| limit 20
+| limit 40
 ```
 
-and for the daily health check:
+and for the daily health check — count ticks, not runs, since most hours have
+nothing due and a run report is only emitted when a job is actually claimed:
 
 ```
-filter @message like /"event":"proof-run"/
-| parse @message '"outcome":"*"' as outcome
-| stats count() by outcome, bin(1d)
+filter @message like /"event":"tick"/
+| parse @message '"failed":*,' as failed
+| stats count() as ticks, sum(failed) as failed_runs by bin(1d)
 ```
+
+Twenty-four ticks a day is healthy. Fewer means the schedule is not firing,
+which is the missed-run alarm's job to notice — but this is how to see it.
 
 Done means all of:
 
@@ -114,29 +118,48 @@ Done means all of:
 - [ ] `terraform apply` clean, and a following `plan` reports no changes
 - [ ] both roles carry the boundary:
       `aws iam get-role --role-name briefing-worker-execution --query Role.PermissionsBoundary`
-- [ ] `aws secretsmanager describe-secret` shows a recent `LastChangedDate`
-      (never print the value)
-- [ ] a manual invoke produces one `proof-run` line with `"outcome":"success"`
-      and `"llmCalls":2` — two calls is what proves model → tool → model rather
-      than the model answering from memory
-- [ ] `Init Duration` noted from the `REPORT` line, as the cold-start baseline
-- [ ] the failure contract: set the secret to an invalid value, invoke, and
-      confirm exactly one `"outcome":"failure"` line, one `Errors` datapoint and
-      an alarm mail — then restore with
+- [ ] `aws secretsmanager describe-secret` shows a recent `LastChangedDate` for
+      **both** `briefing-worker/openai-api-key` and `briefing-worker/database-url`
+      (never print either value)
+- [ ] migrations applied: `DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate`
+      reports nothing to do on a second run
+- [ ] a manual invoke produces one `tick` line; with nothing due that is
+      `"due":0` and is a success
+- [ ] with a job seeded due, a manual invoke produces one `proof-run` line with
+      `"outcome":"success"` and `"llmCalls":2` — two calls is what proves
+      model → tool → model rather than the model answering from memory
+- [ ] `Init Duration` noted from the `REPORT` line, as the cold-start baseline.
+      Expect it to have grown: the bundle now carries `pg`, and a tick pays a
+      Neon wake on top
+- [ ] `Init Duration` and total duration on an idle tick are both acceptable —
+      an hourly tick wakes Neon 24× a day where a daily one woke it once, which
+      is a compute-hours line to watch rather than a caching strategy to build
+- [ ] the failure contract: set the OpenAI secret to an invalid value, invoke
+      with a job due, and confirm exactly one `"outcome":"failure"` line, a
+      `tick` line with `"failed":1`, one `Errors` datapoint and an alarm mail —
+      then restore with
       `aws secretsmanager get-secret-value --version-stage AWSPREVIOUS`, not from
       the clipboard
-- [ ] one scheduled run lands at 09:00 UTC unprompted
+- [ ] ticks land on the hour unprompted
 
 ## Taking the worker off duty
 
-Verifying a change without letting it write a brief a day:
+Verifying a change without letting it run whatever is due:
 
 ```bash
 terraform -chdir=infra/aws apply -var="schedule_enabled=false"
 ```
 
-The function stays deployed and manually invocable; only the schedule is
-disabled. Re-apply without the flag to put it back on duty.
+The function stays deployed and manually invocable; only the tick is disabled.
+Re-apply without the flag to put it back on duty.
+
+**This is the safe half of the tick cutover.** The worker and its schedule
+changed meaning at the same moment — the function became "run what is due" and
+the schedule became hourly — and deploying either alone leaves the system
+incoherent: an hourly schedule against a worker that ignores the database runs
+the proof task 24 times a day, and a daily schedule against the tick caps every
+job at one run a day. Deploy both with `schedule_enabled=false`, apply
+migrations, verify by manual invoke, then enable.
 
 `schedule_enabled` is the one stack input kept as a flat top-level variable
 rather than a field of the `briefing_worker` object, precisely so it can be set

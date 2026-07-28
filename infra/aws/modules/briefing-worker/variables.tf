@@ -25,24 +25,43 @@ variable "lambda_zip_path" {
 
 variable "schedule_expression" {
   description = <<-EOT
-    When the worker runs, as an EventBridge Scheduler expression.
+    How often the worker **ticks**, as an EventBridge Scheduler expression.
+
+    This is not when any briefing runs. A job's own cadence lives in Postgres,
+    as `jobs.schedule_cron` and `jobs.schedule_timezone`, and the worker asks
+    what is due on every tick — so adding a second job with a different cadence
+    costs an INSERT rather than an apply. What is left here is the tick, which
+    is the same for every job and therefore has nothing to drift.
+
+    Hourly is the resolution of the whole system: a job's schedule can name any
+    hour in any timezone, but nothing finer than this is observable. Making it
+    finer multiplies cold starts and Neon wakes for cadences nobody has asked
+    for; making it coarser silently rounds every job's schedule.
 
     Note the dialect: EventBridge has no seconds field and requires `?` in
-    exactly one of day-of-month or day-of-week, so daily at 09:00 is
-    `cron(0 9 * * ? *)` rather than the five-field crontab it resembles.
+    exactly one of day-of-month or day-of-week, so hourly on the hour is
+    `cron(0 * * * ? *)` rather than the five-field crontab it resembles.
   EOT
   type        = string
-  default     = "cron(0 9 * * ? *)"
+  default     = "cron(0 * * * ? *)"
 }
 
 variable "schedule_timezone" {
-  description = "Timezone the schedule is evaluated in. UTC by default, so the daily slot does not move under daylight saving and the schedule agrees with the UTC timestamps in the run reports."
+  description = <<-EOT
+    Timezone the **tick** is evaluated in, not the timezone any briefing runs
+    in — that is `jobs.schedule_timezone`, per job, and an IANA name.
+
+    UTC by default. On an hourly tick this barely matters, since every zone's
+    hour boundary is this one's; it stays UTC so the tick agrees with the UTC
+    timestamps in the run reports, and so a zone that observes a sub-hour offset
+    cannot shift the tick off the hour.
+  EOT
   type        = string
   default     = "UTC"
 }
 
 variable "schedule_enabled" {
-  description = "Whether the daily schedule fires. Set false to keep the function deployable and manually invocable while it is not on duty — the safe half of a cutover."
+  description = "Whether the hourly tick fires. Set false to keep the function deployable and manually invocable while it is not on duty — the safe half of a cutover, and the half to deploy first when the worker and its schedule change meaning together."
   type        = bool
   default     = true
 }

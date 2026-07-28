@@ -10,11 +10,12 @@
 # This module states which alarms exist; where they are delivered is not its
 # business.
 
-# A run that ran and threw. `runScheduledTask` rethrows after emitting its
-# failure report, and the handler catches nothing, so any bad run lands here.
+# A tick that ran and threw. `runTick` rethrows after emitting its tick report
+# — and each failing job has already emitted its own run report — while the
+# handler catches nothing, so any bad tick lands here.
 resource "aws_cloudwatch_metric_alarm" "errors" {
   alarm_name        = "${var.function_name}-errors"
-  alarm_description = "The briefing worker failed. Check the proof-run line with outcome=failure for the reason."
+  alarm_description = "The briefing worker failed. Check the tick line for counts, then the proof-run line with outcome=failure for the reason."
 
   namespace   = "AWS/Lambda"
   metric_name = "Errors"
@@ -36,14 +37,17 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
   tags = var.tags
 }
 
-# The failure mode an error alarm cannot see: the run never started. A deleted
+# The failure mode an error alarm cannot see: the tick never started. A deleted
 # schedule, a broken scheduler role or a disabled rule all look like silence,
 # and silence is indistinguishable from success unless something asserts that
 # an invocation should have happened.
 #
-# The assertion is "one invocation per slot, and a missing one means it never
-# started" — the check a human would otherwise have to remember to run against
-# the logs, moved into an alarm.
+# The assertion is "at least one invocation a day, and none at all means the
+# schedule is broken". Deliberately unchanged when the cadence became hourly:
+# tightening the period to match would catch a dead scheduler roughly a day
+# sooner and would also fire on any single Neon wake that outlasts one hour, and
+# an alarm that cries wolf is worse than one that is slow. Twenty-four missed
+# ticks in a row is not a subtle condition.
 #
 # Gated on the schedule, because `treat_missing_data = "breaching"` means a
 # disabled schedule puts this alarm permanently in ALARM. An alarm that is

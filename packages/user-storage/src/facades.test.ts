@@ -86,7 +86,8 @@ beforeEach(() => {
 })
 
 describe("BriefStore", () => {
-  const GENERATED_AT = new Date("2026-07-28T09:00:00.000Z")
+  const OCCURRENCE = new Date("2026-07-28T09:00:00.000Z")
+  const GENERATED_AT = new Date("2026-07-28T09:00:41.000Z")
 
   it("date-partitions the key and fixes the extension", async () => {
     const briefs = createBriefStore(objects)
@@ -94,6 +95,7 @@ describe("BriefStore", () => {
     await briefs.put({
       userId: "alice",
       briefId: "morning",
+      occurrence: OCCURRENCE,
       generatedAt: GENERATED_AT,
       markdown: "# Hello",
     })
@@ -112,11 +114,58 @@ describe("BriefStore", () => {
     await briefs.put({
       userId: "alice",
       briefId: "evening",
+      occurrence: new Date("2026-07-28T22:30:00.000Z"),
       generatedAt: new Date("2026-07-28T22:30:00.000Z"),
       markdown: "# Hello",
     })
 
     expect(objects.puts[0]?.segments).toEqual(["2026", "07", "28", "evening"])
+  })
+
+  it("partitions on the occurrence, not on when the run finished", async () => {
+    const briefs = createBriefStore(objects)
+
+    // The failure this separation exists to prevent: a 23:30 slot that takes
+    // forty minutes finishes on the 29th. Partitioning on the finish time would
+    // file it under a day the run row disagrees with, so "which day is this
+    // brief for" would have two answers.
+    const stored = await briefs.put({
+      userId: "alice",
+      briefId: "late",
+      occurrence: new Date("2026-07-28T23:30:00.000Z"),
+      generatedAt: new Date("2026-07-29T00:10:00.000Z"),
+      markdown: "# Hello",
+    })
+
+    expect(objects.puts[0]?.segments).toEqual(["2026", "07", "28", "late"])
+    expect(stored.partitionOn).toBe("2026-07-28")
+    // The true instant is not lost; it just lives in metadata now.
+    expect(objects.puts[0]?.metadata?.["generated-at"]).toBe(
+      "2026-07-29T00:10:00.000Z"
+    )
+  })
+
+  it("files a 09:00 Sydney occurrence under the previous UTC day", async () => {
+    const briefs = createBriefStore(objects)
+
+    // Pinned because it looks like a bug and is the specified behaviour. 09:00
+    // in Sydney is 23:00 UTC the day before, and the key is a storage
+    // partition rather than a date display — a key stays interpretable without
+    // its job row, and the dashboard renders dates from `runs.scheduled_for`.
+    await briefs.put({
+      userId: "alice",
+      briefId: "sydney-morning",
+      occurrence: new Date("2026-07-28T23:00:00.000Z"),
+      generatedAt: new Date("2026-07-28T23:00:12.000Z"),
+      markdown: "# Hello",
+    })
+
+    expect(objects.puts[0]?.segments).toEqual([
+      "2026",
+      "07",
+      "28",
+      "sydney-morning",
+    ])
   })
 
   it("keeps the full instant in metadata though the key holds only the day", async () => {
@@ -126,6 +175,7 @@ describe("BriefStore", () => {
     await briefs.put({
       userId: "alice",
       briefId: "morning",
+      occurrence: OCCURRENCE,
       generatedAt: precise,
       markdown: "# Hello",
     })
@@ -142,13 +192,14 @@ describe("BriefStore", () => {
     await briefs.put({
       userId: "alice",
       briefId: "morning",
+      occurrence: OCCURRENCE,
       generatedAt: GENERATED_AT,
       markdown,
     })
 
     const read = await briefs.get({
       userId: "alice",
-      generatedOn: "2026-07-28",
+      partitionOn: "2026-07-28",
       briefId: "morning",
     })
 
@@ -159,7 +210,7 @@ describe("BriefStore", () => {
   it("lists a user's briefs chronologically, because the key sorts", async () => {
     const briefs = createBriefStore(objects)
 
-    for (const [generatedAt, briefId] of [
+    for (const [occurrence, briefId] of [
       ["2026-07-28T09:00:00.000Z", "c"],
       ["2026-01-02T09:00:00.000Z", "a"],
       ["2026-03-15T09:00:00.000Z", "b"],
@@ -167,14 +218,15 @@ describe("BriefStore", () => {
       await briefs.put({
         userId: "alice",
         briefId,
-        generatedAt: new Date(generatedAt),
+        occurrence: new Date(occurrence),
+        generatedAt: new Date(occurrence),
         markdown: "x",
       })
     }
 
     const listed = await briefs.list("alice")
     expect(listed.map((b) => b.briefId)).toEqual(["a", "b", "c"])
-    expect(listed.map((b) => b.generatedOn)).toEqual([
+    expect(listed.map((b) => b.partitionOn)).toEqual([
       "2026-01-02",
       "2026-03-15",
       "2026-07-28",
@@ -187,7 +239,7 @@ describe("BriefStore", () => {
     await expect(
       briefs.get({
         userId: "alice",
-        generatedOn: "2026-02-31",
+        partitionOn: "2026-02-31",
         briefId: "morning",
       })
     ).rejects.toThrow(InvalidObjectKeyError)
@@ -329,6 +381,7 @@ describe("the two facades share one store", () => {
     await briefs.put({
       userId: "alice",
       briefId: "morning",
+      occurrence: new Date("2026-07-28T09:00:00.000Z"),
       generatedAt: new Date("2026-07-28T09:00:00.000Z"),
       markdown: "x",
     })
@@ -352,6 +405,7 @@ describe("the two facades share one store", () => {
     await briefs.put({
       userId: "alice",
       briefId: "morning",
+      occurrence: new Date("2026-07-28T09:00:00.000Z"),
       generatedAt: new Date("2026-07-28T09:00:00.000Z"),
       markdown: "x",
     })

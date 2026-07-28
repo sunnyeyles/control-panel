@@ -34,3 +34,14 @@ output "openai_secret_arn" {
   description = "ARN of the (empty) OpenAI key secret. Set its value out-of-band; Terraform never writes it."
   value       = aws_secretsmanager_secret.openai.arn
 }
+
+output "database_secret_arn" {
+  description = <<-EOT
+    ARN of the (empty) Postgres connection-string secret. Set its value
+    out-of-band; Terraform never writes it.
+
+    The **pooled** endpoint — `DATABASE_URL`. Migrations take the direct one and
+    are not run by this function.
+  EOT
+  value       = aws_secretsmanager_secret.database.arn
+}

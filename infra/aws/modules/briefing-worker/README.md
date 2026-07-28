@@ -77,7 +77,20 @@ file-not-found that looks like a Terraform problem and is not:
 pnpm turbo zip --filter=@workspace/briefing-worker   # then plan
 ```
 
-## One run per slot
+## The schedule is a tick, not a briefing time
+
+`schedule_expression` is `cron(0 * * * ? *)` — hourly — and it says when the
+worker _asks what is due_, not when any briefing runs. A job's own cadence lives
+in Postgres as `jobs.schedule_cron` and `jobs.schedule_timezone`, so adding a
+job with a new cadence costs an INSERT rather than an apply.
+
+That makes hourly the resolution of the whole system: a job may name any hour in
+any IANA timezone, and nothing finer than an hour is observable. Setting this
+back to a daily expression would not "run the briefing daily" — it would
+silently round every job's schedule to whichever hour it named, with no job row
+disagreeing.
+
+## One invocation per tick
 
 Retries are off in two places, because there are two retry layers and the
 obvious one only covers half the problem:
@@ -88,16 +101,38 @@ obvious one only covers half the problem:
   Scheduler invokes asynchronously, which brings Lambda's own 2 retries into
   play from a layer the schedule's policy does not reach.
 
-Together they preserve the contract the daily check depends on: exactly one
-`proof-run` line per slot, and a failed run waits for tomorrow.
+Both are load-bearing for at-most-once claiming. A retried tick would find the
+slot already taken and skip it, so every retry is a wasted invocation — and one
+that landed in a _new_ hour would run the next slot early. A failed tick waits
+for the next hour.
+
+## Secrets
+
+Two, both provisioned as empty shells and never written by Terraform:
+
+| Secret                      | Environment variable | Holds                            |
+| --------------------------- | -------------------- | -------------------------------- |
+| `<function>/openai-api-key` | `OPENAI_SECRET_ID`   | the OpenAI API key               |
+| `<function>/database-url`   | `DATABASE_SECRET_ID` | the **pooled** connection string |
+
+The function gets each secret's **ARN**, never its value. A value passed through
+Terraform appears in plan output, in state, and in the log of whatever ran the
+apply — and a connection string carries a password. Set both by hand:
+
+```bash
+aws secretsmanager put-secret-value --secret-id briefing-worker/database-url \
+  --secret-string "postgresql://…-pooler.…neon.tech/neondb?sslmode=require"
+```
+
+Migrations need the **direct** endpoint and are not run by this function.
 
 ## If a second scheduled worker appears
 
 This module is not yet a reusable `scheduled-lambda-job`, and deliberately so.
-It hardcodes one secret and one environment variable name, so a second worker
-cannot use it as-is — but there is one caller today, and generalising now would
-mean designing an interface against an imagined second consumer rather than a
-real one.
+It hardcodes two secrets and their environment variable names, so a second
+worker cannot use it as-is — but there is one caller today, and generalising now
+would mean designing an interface against an imagined second consumer rather
+than a real one.
 
 The change is mechanical when the trigger arrives: lift `secrets` to a map input
 and the rest of the module already generalises. Do it then, against the two

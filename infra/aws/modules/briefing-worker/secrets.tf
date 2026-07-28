@@ -32,3 +32,36 @@ resource "aws_secretsmanager_secret" "openai" {
     prevent_destroy = true
   }
 }
+
+# The Postgres connection string, on the same terms and for the same reason.
+#
+# A connection string carries a password, so it is exactly the kind of value the
+# arrangement above exists to keep out of plan output, out of state, and out of
+# the apply log. There is no aws_secretsmanager_secret_version here either.
+#
+# The **pooled** endpoint — `DATABASE_URL`, the PgBouncer one — because that is
+# what a runtime consumer wants. Migrations need the direct endpoint and are not
+# run by this function: every cold start would race every other one for a schema
+# it does not need.
+#
+#   aws secretsmanager put-secret-value \
+#     --secret-id briefing-worker/database-url \
+#     --secret-string "postgresql://…-pooler.…neon.tech/neondb?sslmode=require"
+#
+# Rotation is Neon's to do and ours to mirror: rotating there means putting the
+# new string here, and nothing in Terraform notices either way.
+resource "aws_secretsmanager_secret" "database" {
+  name        = "${var.function_name}/database-url"
+  description = "Pooled Postgres connection string for the briefing worker. Set out-of-band; never written by Terraform."
+
+  recovery_window_in_days = 7
+
+  tags = var.tags
+
+  # Unlike the OpenAI key, this value is recoverable from the Neon console — but
+  # destroying it still takes the worker off the database with no warning, and
+  # the name is not reusable until the recovery window elapses.
+  lifecycle {
+    prevent_destroy = true
+  }
+}

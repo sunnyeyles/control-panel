@@ -1,7 +1,13 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
-  "globalEnv": ["OPENAI_API_KEY", "OPENAI_SECRET_ID"],
+  "globalEnv": [
+    "OPENAI_API_KEY",
+    "OPENAI_SECRET_ID",
+    "DATABASE_URL",
+    "DATABASE_URL_UNPOOLED",
+    "DATABASE_SECRET_ID"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

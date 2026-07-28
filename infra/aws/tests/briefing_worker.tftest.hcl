@@ -23,17 +23,25 @@ run "on_duty" {
     source = "./modules/briefing-worker"
   }
 
-  # The contract the daily check depends on: exactly one `proof-run` line per
-  # slot. There are two independent retry layers and turning off the obvious one
-  # only covers half the problem — Scheduler invokes asynchronously, which
-  # brings Lambda's own two retries in from a layer retry_policy cannot reach.
-  # Either one left at its default re-bills a failing LLM run all day.
+  # The schedule is a *tick*, not a briefing time. A job's own cadence lives in
+  # `jobs.schedule_cron` in Postgres, and the worker asks what is due — so this
+  # firing daily again would silently round every job's schedule to whatever
+  # hour this names, and no job row would disagree with it.
+  assert {
+    condition     = aws_scheduler_schedule.daily.schedule_expression == "cron(0 * * * ? *)"
+    error_message = "The schedule must be an hourly tick; a daily one silently caps every job's cadence at once a day."
+  }
+
+  # The contract the claim depends on: at most one invocation per tick. There
+  # are two independent retry layers and turning off the obvious one only covers
+  # half the problem — Scheduler invokes asynchronously, which brings Lambda's
+  # own two retries in from a layer retry_policy cannot reach.
   assert {
     condition = alltrue([
       for target in aws_scheduler_schedule.daily.target :
       alltrue([for policy in target.retry_policy : policy.maximum_retry_attempts == 0])
     ])
-    error_message = "Scheduler retries must be 0, or a failed run is retried 185 times over 24 hours."
+    error_message = "Scheduler retries must be 0, or a failed tick is retried 185 times over 24 hours."
   }
 
   assert {
@@ -80,6 +88,35 @@ run "on_duty" {
   assert {
     condition     = length(data.aws_iam_policy_document.logs.statement[0].resources) == 1
     error_message = "Log write access must be scoped to the worker's own group, not granted account-wide."
+  }
+
+  # Both secrets are shells and stay shells. A version resource here would put
+  # the value in plan output, in state, and in the apply log — which is the one
+  # property this whole arrangement exists for, and a connection string carries
+  # a password.
+  assert {
+    condition = alltrue([
+      for secret in [aws_secretsmanager_secret.openai, aws_secretsmanager_secret.database] :
+      secret.recovery_window_in_days == 7
+    ])
+    error_message = "Both secrets must keep a recovery window; a mistaken destroy is otherwise unrecoverable."
+  }
+
+  # The worker cannot find out what is due without this. Asserted on the key
+  # rather than on the ARN it holds, because a mocked provider does not know an
+  # ARN until apply — and the failure worth catching here is the variable going
+  # missing, not it carrying the wrong string.
+  assert {
+    condition     = contains(keys(local.environment), "DATABASE_SECRET_ID")
+    error_message = "DATABASE_SECRET_ID must be set on the function, mirroring OPENAI_SECRET_ID."
+  }
+
+  # The secret's ARN, never its value. A connection string carries a password,
+  # and an environment variable would put it in plan output, in state, and on
+  # the console's function configuration page.
+  assert {
+    condition     = !contains(keys(local.environment), "DATABASE_URL")
+    error_message = "The connection string must never be a Lambda environment variable — it would land in plan output and in state."
   }
 }
 

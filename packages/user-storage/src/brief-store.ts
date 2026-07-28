@@ -11,8 +11,15 @@ const GENERATED_AT = "generated-at"
 /** Addresses one brief. */
 export interface BriefRef {
   userId: string
-  /** UTC calendar date the brief was generated for, `YYYY-MM-DD`. */
-  generatedOn: string
+  /**
+   * The UTC calendar date the key partitions on, `YYYY-MM-DD`.
+   *
+   * Derived from the brief's **occurrence** — the slot it was written for — and
+   * not from when it was generated. Those are not always the same day: a 23:30
+   * slot that takes forty minutes finishes after midnight, and partitioning on
+   * the finish time would file it under a day its run row disagrees with.
+   */
+  partitionOn: string
   briefId: string
 }
 
@@ -21,9 +28,31 @@ export interface NewBrief {
   userId: string
   briefId: string
   /**
-   * The instant the brief was generated. The store derives the key's UTC date
-   * from this and keeps the full value on the object's metadata, so nothing is
-   * lost to the day-level granularity of the key.
+   * The slot this brief is for — `runs.scheduled_for` — which decides the key's
+   * partition day.
+   *
+   * Separate from {@link NewBrief.generatedAt} on purpose, and the whole reason
+   * this interface carries two Dates. It makes the object key derivable from
+   * the run row alone, without knowing when the run happened to finish, so
+   * "which day is this brief for" has exactly one answer in both places.
+   *
+   * An ad-hoc run has no scheduled occurrence; pass the instant it was
+   * triggered.
+   *
+   * Note the consequence of the day being computed in UTC: a 09:00
+   * `Australia/Sydney` briefing fires at 23:00 UTC the previous day and lands
+   * in the previous UTC day's folder. That is intended — the key is a storage
+   * partition, not a date display, and keeping it UTC means a key stays
+   * interpretable without its job row. Dates shown to a person come from
+   * `runs.scheduled_for`.
+   */
+  occurrence: Date
+  /**
+   * The instant the brief was actually generated.
+   *
+   * Carried into the object's metadata and nowhere else — it no longer decides
+   * the key. Keeping it means nothing is lost to the day-level granularity of
+   * the partition.
    */
   generatedAt: Date
   /** The brief itself. Stored as UTF-8 `text/markdown`. */
@@ -60,16 +89,19 @@ export function createBriefStore(objects: UserObjectStore): BriefStore {
   const refFor = (ref: BriefRef) => ({
     userId: ref.userId,
     kind: KIND,
-    segments: [...dateSegments(ref.generatedOn), ref.briefId],
+    segments: [...dateSegments(ref.partitionOn), ref.briefId],
     extension: EXTENSION,
   })
 
   return {
     async put(brief: NewBrief): Promise<StoredBrief> {
-      const generatedOn = toGeneratedOn(brief.generatedAt)
+      // `toGeneratedOn` is "the UTC calendar day of an instant" and is
+      // unchanged. What changed is which instant it is handed: the occurrence,
+      // not the generation time.
+      const partitionOn = toGeneratedOn(brief.occurrence)
 
       const stored = await objects.put({
-        ...refFor({ ...brief, generatedOn }),
+        ...refFor({ ...brief, partitionOn }),
         body: brief.markdown,
         metadata: { [GENERATED_AT]: brief.generatedAt.toISOString() },
       })
@@ -77,7 +109,7 @@ export function createBriefStore(objects: UserObjectStore): BriefStore {
       return {
         key: stored.key,
         userId: brief.userId,
-        generatedOn,
+        partitionOn,
         briefId: brief.briefId,
         size: stored.size,
         generatedAt: brief.generatedAt,
@@ -90,10 +122,10 @@ export function createBriefStore(objects: UserObjectStore): BriefStore {
       return {
         key: fetched.key,
         userId: ref.userId,
-        generatedOn: ref.generatedOn,
+        partitionOn: ref.partitionOn,
         briefId: ref.briefId,
         size: fetched.size,
-        generatedAt: instantFrom(fetched.metadata, ref.generatedOn),
+        generatedAt: instantFrom(fetched.metadata, ref.partitionOn),
         markdown: fetched.text(),
       }
     },
@@ -113,31 +145,31 @@ function toStoredBrief(userId: string, object: StoredObject): StoredBrief {
   // segments are [YYYY, MM, DD, briefId] by construction, and parseObjectKey
   // has already validated each one.
   const [year, month, day, briefId] = object.segments
-  const generatedOn = `${year}-${month}-${day}`
+  const partitionOn = `${year}-${month}-${day}`
 
   return {
     key: object.key,
     userId,
-    generatedOn,
+    partitionOn,
     briefId: briefId ?? "",
     size: object.size,
-    generatedAt: instantFrom(object.metadata, generatedOn),
+    generatedAt: instantFrom(object.metadata, partitionOn),
   }
 }
 
 /**
  * Metadata holds the exact instant; the key only holds the day. Fall back to
- * UTC midnight on that day if an object predates the metadata — wrong by up to
- * a day, but never silently absent.
+ * UTC midnight on the partition day if an object predates the metadata — wrong
+ * by up to a day, but never silently absent.
  */
 function instantFrom(
   metadata: Record<string, string>,
-  generatedOn: string
+  partitionOn: string
 ): Date {
   const raw = metadata[GENERATED_AT]
   const parsed = raw ? new Date(raw) : undefined
 
   return parsed && !Number.isNaN(parsed.getTime())
     ? parsed
-    : new Date(`${generatedOn}T00:00:00.000Z`)
+    : new Date(`${partitionOn}T00:00:00.000Z`)
 }

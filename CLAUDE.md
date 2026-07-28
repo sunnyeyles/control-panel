@@ -30,6 +30,18 @@ Terraform for deployment. See `apps/briefing-worker/README.md` and
 `infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
 cover it.
 
+Database migrations are also outside Turborepo, and are run by hand:
+
+```bash
+DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
+```
+
+**`DATABASE_URL_UNPOOLED`, not `DATABASE_URL`** — the runner takes a
+session-level advisory lock, and the pooled endpoint runs PgBouncer in
+transaction mode, which does not carry one across statements. Through the
+pooler the lock appears to be taken while holding nothing. Migrations are
+forward-only; there are no down migrations. See `packages/db/README.md`.
+
 Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
 it**. One root holds two stacks — the worker and user storage — sharing a single
 state file, plus `bootstrap/` for the state bucket and the CI deploy role.
@@ -60,25 +72,32 @@ Tests are their own task, and a thin one:
 pnpm test        # turbo test
 ```
 
-**Only `@workspace/user-storage` has tests.** Vitest is the runner, and it is a
-devDependency of that package alone; `turbo test` is a no-op everywhere else. Do
-not assume a package is covered because the command exits 0. Adding tests to
-another workspace means adding `vitest` to it and a `test` script — the `test`
-task in `turbo.json` is already there.
+**Only `@workspace/user-storage` and `@workspace/db` have tests.** Vitest is the
+runner and is a devDependency of those two alone; `turbo test` is a no-op in the
+other six workspaces. Do not assume a package is covered because the command
+exits 0. Adding tests to another workspace means adding `vitest` to it and a
+`test` script — the `test` task in `turbo.json` is already there.
+
+`@workspace/db` splits its suite by whether the thing under test needs Postgres
+to _be_ Postgres. `schedule.test.ts` needs nothing. `stores.test.ts` needs a real
+database and **skips itself when `DATABASE_URL_UNPOOLED` is unset**, so a clean
+`pnpm test` locally does not mean the claim race, the CHECK constraints, or the
+partial unique index were exercised — only CI, with a database, exercises those.
 
 ## Layout
 
-| Path                         | Package name                   | Role                                                          |
-| ---------------------------- | ------------------------------ | ------------------------------------------------------------- |
-| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                            |
-| `apps/briefing-worker`       | `@workspace/briefing-worker`   | AWS Lambda, daily. Bundled by esbuild, deployed by Terraform. |
-| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.      |
-| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.                 |
-| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.        |
-| `packages/user-storage`      | `@workspace/user-storage`      | S3 storage for per-user data, behind an interface.            |
-| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.       |
-| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.            |
-| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.             |
+| Path                         | Package name                   | Role                                                                |
+| ---------------------------- | ------------------------------ | ------------------------------------------------------------------- |
+| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                                  |
+| `apps/briefing-worker`       | `@workspace/briefing-worker`   | AWS Lambda, hourly tick. Bundled by esbuild, deployed by Terraform. |
+| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.            |
+| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.                       |
+| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.              |
+| `packages/db`                | `@workspace/db`                | Postgres: jobs, runs, artifacts. The only place SQL lives.          |
+| `packages/user-storage`      | `@workspace/user-storage`      | S3 storage for per-user data, behind an interface.                  |
+| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.             |
+| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.                  |
+| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.                   |
 
 ## Architecture
 

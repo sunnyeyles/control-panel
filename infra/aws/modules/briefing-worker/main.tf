@@ -5,11 +5,13 @@ locals {
   # line here rather than an edit inside the resource block, which keeps the
   # diff of "the worker learned about a new thing" small and obvious.
   #
-  # OPENAI_API_KEY is deliberately absent: the value is fetched from Secrets
-  # Manager at cold start. Putting it here would place the key in plan output,
-  # in state, and in the console's function configuration page.
+  # OPENAI_API_KEY and DATABASE_URL are deliberately absent: both values are
+  # fetched from Secrets Manager at cold start. Putting either here would place
+  # a secret in plan output, in state, and in the console's function
+  # configuration page.
   environment = {
-    OPENAI_SECRET_ID = aws_secretsmanager_secret.openai.arn
+    OPENAI_SECRET_ID   = aws_secretsmanager_secret.openai.arn
+    DATABASE_SECRET_ID = aws_secretsmanager_secret.database.arn
   }
 }
 

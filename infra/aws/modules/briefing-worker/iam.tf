@@ -43,19 +43,24 @@ resource "aws_iam_role_policy" "logs" {
   policy = data.aws_iam_policy_document.logs.json
 }
 
-# One secret, by ARN. The worker reads the OpenAI key and nothing else.
-data "aws_iam_policy_document" "read_openai_secret" {
+# Two secrets, both by ARN. The worker reads the OpenAI key and the connection
+# string, and nothing else — listing them explicitly rather than granting a
+# prefix keeps "what may this function read" answerable from this block alone.
+data "aws_iam_policy_document" "read_secrets" {
   statement {
-    sid       = "ReadOpenAIKey"
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.openai.arn]
+    sid     = "ReadWorkerSecrets"
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      aws_secretsmanager_secret.openai.arn,
+      aws_secretsmanager_secret.database.arn,
+    ]
   }
 }
 
-resource "aws_iam_role_policy" "read_openai_secret" {
-  name   = "read-openai-secret"
+resource "aws_iam_role_policy" "read_secrets" {
+  name   = "read-secrets"
   role   = aws_iam_role.execution.id
-  policy = data.aws_iam_policy_document.read_openai_secret.json
+  policy = data.aws_iam_policy_document.read_secrets.json
 }
 
 # The scheduler's own role. EventBridge Scheduler assumes a role to call its

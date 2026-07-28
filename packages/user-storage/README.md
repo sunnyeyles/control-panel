@@ -40,10 +40,19 @@ Everything downstream takes the narrow type:
 ```ts
 import type { BriefStore } from "@workspace/user-storage"
 
-async function persist(briefs: BriefStore, markdown: string) {
+async function persist(
+  briefs: BriefStore,
+  scheduledFor: Date,
+  markdown: string
+) {
   return briefs.put({
     userId: "alice",
     briefId: "morning",
+    // The slot this brief is for, which decides the key's UTC partition day.
+    occurrence: scheduledFor,
+    // When it was actually produced. Metadata only — it no longer decides the
+    // key, so a 23:30 slot finishing after midnight still files under its own
+    // day rather than the next one.
     generatedAt: new Date(),
     markdown,
   })
