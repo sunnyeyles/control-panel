@@ -167,6 +167,25 @@ data "aws_iam_policy_document" "deploy_iam" {
     resources = local.managed_policy_arn_patterns
   }
 
+  # Finding the boundary policy by name, which is how `infra/aws/boundary.tf`
+  # resolves it — it cannot read this root's state, because that state is a local
+  # file on one laptop.
+  #
+  # The provider implements a name lookup as "enumerate the account's policies
+  # and match", so the call is `iam:ListPolicies`, and AWS offers no
+  # resource-level scoping for it: the request is authorized against the policy
+  # *path*, not against any one policy, which is why the error names
+  # `resource: policy path /`. `*` is the only value this can take.
+  #
+  # Read-only, and it widens nothing that matters: it returns policy metadata and
+  # confers no ability to attach, edit or pass anything. Every statement above
+  # that *changes* a policy is still scoped to `control-panel-*`.
+  statement {
+    sid       = "ListPoliciesToResolveTheBoundaryByName"
+    actions   = ["iam:ListPolicies"]
+    resources = ["*"]
+  }
+
   # Handing a role to a service. Previously `*`, which meant the pipeline could
   # give any role in the account to a Lambda it created.
   statement {
