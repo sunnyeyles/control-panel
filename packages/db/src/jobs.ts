@@ -176,11 +176,31 @@ export function createJobStore(connection: Connection): JobStore {
       // Computed from `now`, not from the slot being claimed, and that is what
       // makes a missed schedule run once and jump forward rather than owe a
       // backfill. A job that was down for a week is due once.
-      const nextRunAt = computeNextRunAt(
+      const fromNow = computeNextRunAt(
         job.scheduleCron,
         job.scheduleTimezone,
         now
       )
+
+      // ...but a claim must always move the slot forward, and computing from
+      // `now` only guarantees that while `now >= job.nextRunAt`. Claim a job
+      // whose slot has not arrived yet and the next occurrence after `now` is
+      // that same slot, so the guarded UPDATE below would write the value it
+      // matched on: the row is claimed, the slot never advances, and every
+      // later tick is turned away by the unique index instead. The job would
+      // sit there looking due and never run again.
+      //
+      // `dueJobs()` never returns such a job, so the tick cannot reach this —
+      // which is exactly why it is worth making structural rather than relying
+      // on every caller to check first.
+      const nextRunAt =
+        fromNow > job.nextRunAt
+          ? fromNow
+          : computeNextRunAt(
+              job.scheduleCron,
+              job.scheduleTimezone,
+              job.nextRunAt
+            )
 
       return connection.transaction(async (tx) => {
         // Guarded on the observed value. Two ticks reading the same due row
@@ -234,7 +254,16 @@ export function createJobStore(connection: Connection): JobStore {
              -- A paused job stays paused. NULL means "not scheduled", so
              -- writing the new occurrence unconditionally would put a retired
              -- job back on duty as a side effect of tidying up its cron.
-             next_run_at       = case when next_run_at is null then null else $4 end,
+             --
+             -- The cast is required, not decoration. Everywhere else a
+             -- parameter is assigned straight to a column and Postgres infers
+             -- its type from that column, but inside a CASE the other branch is
+             -- an untyped NULL, so there is nothing to infer from and the
+             -- parameter defaults to text — which fails with "column
+             -- next_run_at is of type timestamp with time zone but expression
+             -- is of type text". This statement is unreachable from the tick,
+             -- so only an integration test catches it.
+             next_run_at       = case when next_run_at is null then null else $4::timestamptz end,
              updated_at        = now()
          where id = $1
          returning ${COLUMNS}`,

@@ -88,7 +88,18 @@ describeWithDatabase("against a real database", () => {
     await admin?.close()
   })
 
-  /** A job due right now, which is the only state `claim()` accepts. */
+  /**
+   * The slot every fixture job is overdue for.
+   *
+   * Relative to the wall clock rather than a literal date, and that matters: a
+   * hard-coded instant is only in the past until the suite is run on a day that
+   * has caught up with it, and a slot that is not actually overdue makes the
+   * claim's advance a silent no-op — which is a test that passes for the wrong
+   * reason on one day and fails confusingly on another.
+   */
+  const OVERDUE_BY_DAYS = 7
+
+  /** A job that is genuinely overdue, which is the state `claim()` expects. */
   async function dueJob(name: string): Promise<DueJob> {
     const job = await db.jobs.create({
       userId,
@@ -98,17 +109,29 @@ describeWithDatabase("against a real database", () => {
       config: { topic: "example" },
     })
 
+    const overdue = new Date(Date.now() - OVERDUE_BY_DAYS * 86_400_000)
+
     // Reach past the store on purpose: nothing in the public surface can put a
     // job's slot in the past, because nothing legitimately should.
     await admin.query(
       `update "${SCHEMA}".jobs set next_run_at = $2 where id = $1`,
-      [job.id, new Date("2026-07-28T09:00:00.000Z")]
+      [job.id, overdue]
     )
 
     const due = await db.jobs.get(job.id)
     if (!due?.nextRunAt) throw new Error("fixture job is not due")
+    if (due.nextRunAt.getTime() >= Date.now()) {
+      throw new Error("fixture job's slot is not in the past")
+    }
 
     return { ...due, nextRunAt: due.nextRunAt }
+  }
+
+  /** Claim, and fail the test rather than the next statement if it did not. */
+  async function claimOrFail(job: DueJob) {
+    const slot = await db.jobs.claim(job)
+    if (!slot) throw new Error(`claim of ${job.name} returned no slot`)
+    return slot
   }
 
   describe("the claim", () => {
@@ -153,6 +176,32 @@ describeWithDatabase("against a real database", () => {
       )
     })
 
+    it("advances the slot even when claimed before it is due", async () => {
+      // `create()` sets `next_run_at` to the next *future* occurrence, so this
+      // job is deliberately not due. `dueJobs()` would never return it, but a
+      // caller can still hand it to `claim()` — and if the advance were
+      // computed only from `now`, the next occurrence after `now` would be this
+      // very slot. The guarded UPDATE would then write the value it matched on,
+      // leaving the job claimed, its slot unmoved, and every later tick turned
+      // away by the unique index. Wedged, and looking due the whole time.
+      const job = await db.jobs.create({
+        userId,
+        name: "not-yet-due",
+        scheduleCron: "0 9 * * *",
+        scheduleTimezone: "UTC",
+      })
+
+      if (!job.nextRunAt) throw new Error("a new job must have a slot")
+      expect(job.nextRunAt.getTime()).toBeGreaterThan(Date.now())
+
+      const slot = await claimOrFail({ ...job, nextRunAt: job.nextRunAt })
+
+      expect(slot.nextRunAt.getTime()).toBeGreaterThan(job.nextRunAt.getTime())
+
+      const after = await db.jobs.get(job.id)
+      expect(after?.nextRunAt?.getTime()).toBe(slot.nextRunAt.getTime())
+    })
+
     it("refuses a second claim of the same observed slot", async () => {
       const job = await dueJob("second-claim")
 
@@ -194,8 +243,7 @@ describeWithDatabase("against a real database", () => {
   describe("status transitions", () => {
     it("cannot walk a terminal run back to running", async () => {
       const job = await dueJob("terminal-run")
-      const slot = await db.jobs.claim(job)
-      const runId = slot?.runId as string
+      const { runId } = await claimOrFail(job)
 
       expect(await db.runs.finish(runId)).toBe(true)
 
@@ -212,8 +260,7 @@ describeWithDatabase("against a real database", () => {
 
     it("records partial success as succeeded with a failure payload", async () => {
       const job = await dueJob("partial-success")
-      const slot = await db.jobs.claim(job)
-      const runId = slot?.runId as string
+      const { runId } = await claimOrFail(job)
 
       await db.runs.finish(runId, { sources: { example: "timed out" } })
 
@@ -226,8 +273,7 @@ describeWithDatabase("against a real database", () => {
   describe("artifacts", () => {
     it("accepts an object key in the shape user-storage builds", async () => {
       const job = await dueJob("artifact-key")
-      const slot = await db.jobs.claim(job)
-      const runId = slot?.runId as string
+      const { runId } = await claimOrFail(job)
 
       const key = `prod/${userId}/briefs/2026/07/28/morning.md`
       const artifact = await db.artifacts.record(runId, key)
@@ -238,8 +284,7 @@ describeWithDatabase("against a real database", () => {
 
     it("rejects a URL", async () => {
       const job = await dueJob("artifact-url")
-      const slot = await db.jobs.claim(job)
-      const runId = slot?.runId as string
+      const { runId } = await claimOrFail(job)
 
       await expect(
         db.artifacts.record(
@@ -251,8 +296,7 @@ describeWithDatabase("against a real database", () => {
 
     it("rejects a leading slash", async () => {
       const job = await dueJob("artifact-slash")
-      const slot = await db.jobs.claim(job)
-      const runId = slot?.runId as string
+      const { runId } = await claimOrFail(job)
 
       await expect(
         db.artifacts.record(runId, `/prod/${userId}/briefs/2026/07/28/x.md`)
@@ -261,8 +305,7 @@ describeWithDatabase("against a real database", () => {
 
     it("refuses to record the same object twice", async () => {
       const job = await dueJob("artifact-duplicate")
-      const slot = await db.jobs.claim(job)
-      const runId = slot?.runId as string
+      const { runId } = await claimOrFail(job)
 
       const key = `prod/${userId}/briefs/2026/07/29/morning.md`
       await db.artifacts.record(runId, key)
@@ -273,21 +316,27 @@ describeWithDatabase("against a real database", () => {
     it("finds the latest artifact of a successful run", async () => {
       const job = await dueJob("artifact-latest")
 
-      const older = await db.jobs.claim(job)
+      const older = await claimOrFail(job)
       await db.artifacts.record(
-        older?.runId as string,
+        older.runId,
         `prod/${userId}/briefs/2026/07/30/a.md`
       )
-      await db.runs.finish(older?.runId as string)
+      await db.runs.finish(older.runId)
 
+      // Re-read rather than reusing `job`: the first claim advanced the slot,
+      // so the stale object would be turned away by the guarded UPDATE. That
+      // the re-read job is still claimable is itself the assertion that the
+      // claim moved `next_run_at` forward.
       const refreshed = await db.jobs.get(job.id)
-      const newer = await db.jobs.claim({
-        ...(refreshed as DueJob),
-        nextRunAt: refreshed?.nextRunAt as Date,
+      if (!refreshed?.nextRunAt) throw new Error("job lost its slot")
+
+      const newer = await claimOrFail({
+        ...refreshed,
+        nextRunAt: refreshed.nextRunAt,
       })
       const latestKey = `prod/${userId}/briefs/2026/07/31/b.md`
-      await db.artifacts.record(newer?.runId as string, latestKey)
-      await db.runs.finish(newer?.runId as string)
+      await db.artifacts.record(newer.runId, latestKey)
+      await db.runs.finish(newer.runId)
 
       expect((await db.artifacts.latestForJob(job.id))?.objectKey).toBe(
         latestKey
