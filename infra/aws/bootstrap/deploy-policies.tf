@@ -110,6 +110,18 @@ data "aws_iam_policy_document" "deploy_secrets" {
       "secretsmanager:TagResource",
       "secretsmanager:UntagResource",
       "secretsmanager:ListSecretVersionIds",
+
+      # Read *after* create, not a widening of what CI may read. The provider
+      # refreshes an `aws_secretsmanager_secret` by calling DescribeSecret and
+      # GetResourcePolicy, so without this the secret is created and the apply
+      # then fails reading back the resource it just made — which is how this
+      # was found.
+      #
+      # Note which "policy" this is: the resource policy says *who may reach the
+      # secret*, and is null here because nothing attaches one. It is not the
+      # secret's value. Reading the value is `GetSecretValue`, which the Deny
+      # below still refuses.
+      "secretsmanager:GetResourcePolicy",
     ]
     resources = ["*"]
   }
