@@ -43,6 +43,33 @@ pooler the lock appears to be taken while holding nothing. Migrations are
 forward-only; there are no down migrations. The runner executes TypeScript
 source through `tsx`, so it needs no prior build. See `packages/db/README.md`.
 
+Authentication is Neon Auth (Managed Better Auth), configured from the Neon CLI
+rather than from anything in this repo. The workspace is linked to a project and
+branch via a git-ignored `.neon`; `neon link` and `neon checkout` write it and
+pull that branch's variables into `.env.local`.
+
+```bash
+neon neon-auth status                      # is auth on, and at which base URL
+neon neon-auth config email-password get   # must stay `Enabled: false`
+neon neon-auth oauth-provider list
+neon neon-auth domain list                 # trusted redirect targets
+neon env pull                              # re-pull after switching branch
+```
+
+**`NEON_AUTH_BASE_URL` is per branch.** Every Neon branch gets its own auth
+endpoint, its own users and its own JWKS, so a preview branch is a different
+auth environment — not a different view of the same one. Never hand-write the
+value; re-pull it.
+
+**`NEON_AUTH_COOKIE_SECRET` is ours, not Neon's**, so `env pull` does not
+supply it. Generate with `openssl rand -base64 32`; the SDK requires 32+
+characters.
+
+**Signup is closed, and `AUTH_ALLOWED_EMAILS` is what closes it.** Neon Auth
+creates an account for anyone who completes an OAuth flow; the allowlist check
+in `apps/dashboard/lib/auth/current-user.ts` is the only thing standing between
+that account and the app. An unset list refuses everyone, deliberately.
+
 Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
 it**. One root holds two stacks — the worker and user storage — sharing a single
 state file, plus `bootstrap/` for the state bucket and the CI deploy role.
@@ -130,6 +157,14 @@ Three things about that package are load-bearing and easy to undo by accident:
 - **Object keys are `{environment}/{userId}/{kind}/…tail.{ext}`, and `userId` sits above `kind` deliberately** — erasing a user is then one prefix, not one per kind. The segment validation in `keys.ts` is the ownership boundary, not a tidiness rule: an unvalidated `userId` of `../someone-else` addresses another user's prefix.
 - **Retention is driven by an object _tag_, not a key prefix.** S3 lifecycle filters take no wildcards, so with `userId` in the middle there is no prefix meaning "every user's briefs". Every object is tagged `kind=<kind>` at write time and the Terraform lifecycle rules filter on that — which is why the IAM policies must grant `s3:PutObjectTagging`, and why a kind added to `kinds.ts` without a matching `object_kinds` entry in Terraform silently gets no retention at all.
 - **Content types are derived from the extension, never accepted from the caller,** against a per-kind allowlist in `kinds.ts`. A caller-supplied media type would let a `.pdf` be stored as `text/html`. Uploaded kinds are also stored `Content-Disposition: attachment`.
+
+**The gate is two layers, and neither is sufficient alone.** `apps/dashboard/proxy.ts` — `proxy.ts`, not `middleware.ts`; Next 16 renamed the convention — matches everything except static assets, so a route added later is closed by default. The authoritative check is separate: pages call `getCurrentUser()` themselves, and `lib/chat-handler.ts` returns its own 401 before it parses a body. That duplication is deliberate. The proxy is a routing concern, and the chat route spends the OpenAI budget, so it must not be reachable because a matcher pattern was wrong.
+
+Three things here are easy to undo by accident:
+
+- **The proxy converts its redirect to a 401 under `/api/`.** The SDK only knows how to redirect to a login page, which for an API route means a `fetch` caller receives an HTML page with a success status and cannot tell it was refused. Removing that conversion also stops the chat route's own 401 from ever running, because the request no longer reaches it.
+- **The SDK's skip list is hardcoded** — `/api/auth`, `/auth/callback`, `/auth/sign-in`, `/auth/sign-up` are ungated no matter what `config.matcher` says, and nothing in this repo can extend or override it. It is also why `/auth/sign-up` would be public if anyone built it.
+- **`users.id` is the platform identity; the Neon Auth id is only a mapping.** `lib/auth/current-user.ts` returns the uuid from `users`, never `session.user.id`. That uuid is what `jobs.user_id` references and what becomes the `userId` segment of every S3 key, where `assertSegment()` in `@workspace/user-storage` treats it as the ownership boundary. `UserStore.ensureForAuthUser()` is a single idempotent upsert, so it is safe on every request and self-heals — there is no transaction to coordinate with, because Neon has already created the account by the time our code runs.
 
 **Tailwind v4, single stylesheet, owned by the UI package.** There is no `tailwind.config.*` anywhere — v4 configures itself from CSS. The one source of truth is `packages/ui/src/styles/globals.css`; the app imports it as `@workspace/ui/globals.css` in `app/layout.tsx`. The app's `postcss.config.mjs` is a one-line re-export of the UI package's. Theme tokens, base colors, and animations belong in that stylesheet, not in the app.
 

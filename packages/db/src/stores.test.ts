@@ -384,6 +384,84 @@ describeWithDatabase("against a real database", () => {
     })
   })
 
+  describe("the auth identity link", () => {
+    it("mints one user for an identity it has never seen", async () => {
+      const authUserId = `auth_${randomUUID()}`
+
+      const user = await db.users.ensureForAuthUser(authUserId)
+
+      expect(user.id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+      )
+      // The uuid, not the upstream id, is what becomes an S3 key segment.
+      expect(user.id).not.toBe(authUserId)
+      expect(await db.users.get(user.id)).toBeDefined()
+    })
+
+    it("returns the same user on every later request", async () => {
+      const authUserId = `auth_${randomUUID()}`
+
+      const first = await db.users.ensureForAuthUser(authUserId)
+      const second = await db.users.ensureForAuthUser(authUserId)
+
+      expect(second.id).toBe(first.id)
+      expect(second.createdAt.getTime()).toBe(first.createdAt.getTime())
+    })
+
+    it("mints once for two concurrent first requests", async () => {
+      const authUserId = `auth_${randomUUID()}`
+
+      // Two connections, because two in-flight requests are two connections.
+      // This is the normal case on first sign-in, not an edge one: the browser
+      // fetches the page and its data at the same moment.
+      const rival = createDb(config)
+
+      try {
+        const [mine, theirs] = await Promise.all([
+          db.users.ensureForAuthUser(authUserId),
+          rival.users.ensureForAuthUser(authUserId),
+        ])
+
+        expect(theirs.id).toBe(mine.id)
+
+        const { rows } = await admin.query<{ count: string }>(
+          `select count(*)::text as count from "${SCHEMA}".users where auth_user_id = $1`,
+          [authUserId]
+        )
+        expect(rows[0]?.count).toBe("1")
+      } finally {
+        await rival.close()
+      }
+    })
+
+    it("keeps unlinked users legal, and there can be many", async () => {
+      // `userId` from beforeAll is one already. NULLs are distinct under
+      // UNIQUE, which is what lets the worker keep creating owners that never
+      // sign in.
+      await db.users.create()
+      await db.users.create()
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".users where auth_user_id is null`
+      )
+      expect(Number(rows[0]?.count)).toBeGreaterThanOrEqual(3)
+    })
+
+    it("refuses to point two users at one identity", async () => {
+      const authUserId = `auth_${randomUUID()}`
+      await db.users.ensureForAuthUser(authUserId)
+
+      const other = await db.users.create()
+
+      await expect(
+        admin.query(
+          `update "${SCHEMA}".users set auth_user_id = $1 where id = $2`,
+          [authUserId, other.id]
+        )
+      ).rejects.toThrow()
+    })
+  })
+
   describe("referential integrity", () => {
     it("refuses to delete a user who still owns jobs", async () => {
       const job = await dueJob("restrict-delete")

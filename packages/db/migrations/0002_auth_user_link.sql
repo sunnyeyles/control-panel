@@ -1,0 +1,30 @@
+-- Links a Neon Auth identity to the platform user row.
+--
+-- Neon Auth (Managed Better Auth) keeps its own users, sessions and OAuth
+-- configuration in this same database, under the `neon_auth` schema, and
+-- branches them with it. This column is the one crossing between that schema
+-- and ours.
+--
+-- `users.id` stays canonical and unchanged. It is what `jobs.user_id` points at
+-- and what every S3 object key means, so it must keep being a uuid we generate:
+-- `assertSegment()` in @workspace/user-storage constrains a userId segment to
+-- [A-Za-z0-9._-] starting and ending alphanumeric, and adopting an upstream id
+-- as the key segment would put a third party in charge of that boundary.
+--
+-- Forward-only, like every file here.
+
+-- text, not uuid: Better Auth mints nanoids by default, so the upstream id is
+-- not a uuid and casting it would fail on the first sign-in.
+--
+-- Nullable, because the column is meaningless for rows the worker owns and for
+-- every row that predates authentication. Postgres treats NULLs as distinct
+-- inside UNIQUE, so unlimited unlinked users remain legal while a given auth
+-- identity can map to at most one platform user.
+--
+-- Deliberately NOT a foreign key to `neon_auth`. Two reasons, and either alone
+-- would settle it: the schema is managed by Neon and provisioned per branch, so
+-- ours would depend on the shape of something we do not control; and
+-- `stores.test.ts` migrates into a throwaway `db_test_*` schema via search_path
+-- where `neon_auth` does not exist at all, so the constraint would fail the
+-- suite on a database that is otherwise perfectly valid.
+alter table users add column auth_user_id text unique;

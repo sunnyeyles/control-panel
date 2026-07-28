@@ -1,4 +1,5 @@
 import { toBaseMessages, toUIMessageStream } from "@ai-sdk/langchain"
+import { getCurrentUser, type CurrentUser } from "@/lib/auth/current-user"
 import type { Agent } from "@workspace/agents"
 import { createAssistant } from "@workspace/agents/assistant"
 import {
@@ -25,6 +26,11 @@ const requestBodySchema = z.object({ messages: z.array(z.unknown()) })
 export interface ChatHandlerDeps {
   /** Agent factory — the seam a test fake plugs into. Defaults to createAssistant. */
   createAgent?: () => Agent
+  /**
+   * Who is asking. Same seam idea as `createAgent`, and it exists so this
+   * handler can be exercised in all three states without a live session.
+   */
+  getUser?: () => Promise<CurrentUser>
 }
 
 /**
@@ -52,8 +58,32 @@ export function createChatHandler(
   deps: ChatHandlerDeps = {}
 ): (req: Request) => Promise<Response> {
   const createAgent = deps.createAgent ?? (() => createAssistant())
+  const getUser = deps.getUser ?? getCurrentUser
 
   return async function POST(req: Request): Promise<Response> {
+    // The authoritative gate. `proxy.ts` also turns anonymous requests away,
+    // but this is the check that matters: this route spends the OpenAI budget,
+    // and it must not be reachable because a matcher pattern was wrong.
+    //
+    // Before anything else, including parsing the body — an unauthenticated
+    // caller gets no signal about what a well-formed request looks like.
+    //
+    // "refused" and "anonymous" both answer 401 rather than 403. Distinguishing
+    // them here would tell an unapproved caller that their account exists and
+    // is merely not on the list, which is more than they need to know; the
+    // pages, which have already established who they are, do tell them apart.
+    let user: CurrentUser
+    try {
+      user = await getUser()
+    } catch (error) {
+      console.error("chat: failed to resolve the caller", error)
+      return Response.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    if (user.status !== "ok") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     let body: unknown
     try {
       body = await req.json()

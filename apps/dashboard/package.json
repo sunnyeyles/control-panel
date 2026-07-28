@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "@ai-sdk/langchain": "^3.0.37",
+    "@neondatabase/auth": "0.4.2-beta",
     "@workspace/agents": "workspace:*",
+    "@workspace/db": "workspace:*",
     "@workspace/ui": "workspace:*",
     "ai": "^7.0.37",
     "lucide-react": "^1.26.0",
