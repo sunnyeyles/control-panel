@@ -24,7 +24,7 @@ user_storage = {
   # bucket exists, changing this name means creating a new empty bucket and
   # abandoning the old one's contents — `prevent_destroy` on the bucket will
   # stop the apply rather than let that happen quietly.
-  bucket_name = "control-panel-user-storage-227119264248"
+  bucket_name = "control-panel-user-storage-650694420748"
 }
 
 briefing_worker = {
