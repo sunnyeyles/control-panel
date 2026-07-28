@@ -1,6 +1,6 @@
-import { InvalidObjectKeyError } from "./errors.js"
-import { extensionsFor } from "./kinds.js"
-import type { StoredObject, UserObjectStore } from "./user-object-store.js"
+import { InvalidObjectKeyError } from "./errors.ts"
+import { extensionsFor } from "./kinds.ts"
+import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
 
 const KIND = "resumes" as const
 

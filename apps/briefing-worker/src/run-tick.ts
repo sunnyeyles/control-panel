@@ -1,6 +1,6 @@
 import type { Db } from "@workspace/db"
 
-import { runScheduledTask } from "./run-scheduled-task.js"
+import { runScheduledTask } from "./run-scheduled-task.ts"
 
 /**
  * The worker is no longer "the thing that runs at 09:00". It is "the thing that

@@ -1,5 +1,5 @@
-import { InvalidObjectKeyError } from "./errors.js"
-import { contentTypeFor, isObjectKind, type ObjectKind } from "./kinds.js"
+import { InvalidObjectKeyError } from "./errors.ts"
+import { contentTypeFor, isObjectKind, type ObjectKind } from "./kinds.ts"
 
 /**
  * The parts of a stored object's address, in the order they appear in the key.

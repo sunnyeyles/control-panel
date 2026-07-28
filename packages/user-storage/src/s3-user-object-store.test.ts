@@ -8,15 +8,15 @@ import {
 } from "@aws-sdk/client-s3"
 import { beforeEach, describe, expect, it } from "vitest"
 
-import type { UserStorageConfig } from "./config.js"
+import type { UserStorageConfig } from "./config.ts"
 import {
   InvalidObjectKeyError,
   ObjectNotFoundError,
   ObjectOwnershipError,
   StorageUnavailableError,
-} from "./errors.js"
-import { createS3UserObjectStore } from "./s3-user-object-store.js"
-import type { ObjectRef } from "./user-object-store.js"
+} from "./errors.ts"
+import { createS3UserObjectStore } from "./s3-user-object-store.ts"
+import type { ObjectRef } from "./user-object-store.ts"
 
 const CONFIG: UserStorageConfig = {
   bucketName: "user-storage-test",

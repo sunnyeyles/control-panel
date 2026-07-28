@@ -1,6 +1,6 @@
 import { CronExpressionParser } from "cron-parser"
 
-import { InvalidScheduleError } from "./errors.js"
+import { InvalidScheduleError } from "./errors.ts"
 
 /**
  * When a job should next run, given its cadence and a moment to look forward

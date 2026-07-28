@@ -18,7 +18,7 @@
 export {
   createS3UserObjectStore,
   type CreateS3UserObjectStoreOptions,
-} from "./s3-user-object-store.js"
+} from "./s3-user-object-store.ts"
 
 export type {
   FetchedObject,
@@ -26,7 +26,7 @@ export type {
   ObjectRef,
   StoredObject,
   UserObjectStore,
-} from "./user-object-store.js"
+} from "./user-object-store.ts"
 
 export {
   createBriefStore,
@@ -34,7 +34,7 @@ export {
   type BriefStore,
   type NewBrief,
   type StoredBrief,
-} from "./brief-store.js"
+} from "./brief-store.ts"
 
 export {
   acceptedResumeExtensions,
@@ -43,9 +43,9 @@ export {
   type ResumeRef,
   type ResumeStore,
   type StoredResume,
-} from "./resume-store.js"
+} from "./resume-store.ts"
 
-export { readUserStorageConfig, type UserStorageConfig } from "./config.js"
+export { readUserStorageConfig, type UserStorageConfig } from "./config.ts"
 
 export {
   InvalidObjectKeyError,
@@ -55,7 +55,7 @@ export {
   StorageUnavailableError,
   UserStorageError,
   type UserStorageErrorCode,
-} from "./errors.js"
+} from "./errors.ts"
 
 export {
   buildObjectKey,
@@ -65,7 +65,7 @@ export {
   toGeneratedOn,
   userPrefix,
   type ObjectKeyParts,
-} from "./keys.js"
+} from "./keys.ts"
 
 export {
   contentTypeFor,
@@ -74,4 +74,4 @@ export {
   OBJECT_KIND_NAMES,
   OBJECT_KINDS,
   type ObjectKind,
-} from "./kinds.js"
+} from "./kinds.ts"

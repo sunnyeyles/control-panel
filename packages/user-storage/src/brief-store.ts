@@ -1,5 +1,5 @@
-import { dateSegments, toGeneratedOn } from "./keys.js"
-import type { StoredObject, UserObjectStore } from "./user-object-store.js"
+import { dateSegments, toGeneratedOn } from "./keys.ts"
+import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
 
 /** Briefs are Markdown and nothing else. */
 const EXTENSION = ".md"

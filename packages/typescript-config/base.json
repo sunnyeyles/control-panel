@@ -2,6 +2,16 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "display": "Default",
   "compilerOptions": {
+    // Relative imports are written with the extension of the file that
+    // actually exists — `./schedule.ts`, not `./schedule.js`. This pair is
+    // what makes that work, and neither half stands alone:
+    // `rewriteRelativeImportExtensions` rewrites the specifier to `.js` on the
+    // way out, so `dist/` stays valid Node ESM under NodeNext, and it is also
+    // what lifts `allowImportingTsExtensions`'s usual `noEmit` requirement.
+    // Declaration output keeps the `.ts` specifier; that is correct and not a
+    // bug to fix — `.d.ts` is read only by TypeScript, which resolves it to
+    // the sibling `.d.ts`.
+    "allowImportingTsExtensions": true,
     "declaration": true,
     "declarationMap": true,
     "esModuleInterop": true,
@@ -13,6 +23,8 @@
     "moduleResolution": "NodeNext",
     "noUncheckedIndexedAccess": true,
     "resolveJsonModule": true,
+    // Half of the pair described at the top of this block.
+    "rewriteRelativeImportExtensions": true,
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2022"

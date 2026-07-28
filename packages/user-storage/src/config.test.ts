@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { readUserStorageConfig } from "./config.js"
+import { readUserStorageConfig } from "./config.ts"
 
 const COMPLETE = {
   USER_STORAGE_BUCKET_NAME: "user-storage",

@@ -42,6 +42,9 @@ transaction mode, which does not carry one across statements. Through the
 pooler the lock appears to be taken while holding nothing. Migrations are
 forward-only; there are no down migrations. See `packages/db/README.md`.
 
+The runner executes TypeScript source through `tsx`, so it needs no prior
+build and can never apply a stale `dist/`.
+
 Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
 it**. One root holds two stacks — the worker and user storage — sharing a single
 state file, plus `bootstrap/` for the state bucket and the CI deploy role.
@@ -151,6 +154,13 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 **ESLint never fails.** `eslint-plugin-only-warn` is in the base config, so every rule downgrades to a warning and `pnpm lint` exits 0 regardless. Read the warnings; do not treat a clean exit code as a clean lint.
 
 **TypeScript is strict, including `noUncheckedIndexedAccess`** (`packages/typescript-config/base.json`). Indexed reads are `T | undefined` — narrow them. The base config is `NodeNext`; the Next.js preset overrides to `ESNext`/`Bundler` with `noEmit`.
+
+**Relative imports carry a `.ts` extension, and the compiler rewrites it.** Write `import { computeNextRunAt } from "./schedule.ts"` — the extension of the file that actually exists. `rewriteRelativeImportExtensions` in the base config turns that into `./schedule.js` on emit, so `dist/` stays valid Node ESM under NodeNext; the emitted JS is unchanged from when sources spelled `.js` by hand. It is also what lets `allowImportingTsExtensions` coexist with emit, which normally requires `noEmit`.
+
+Two things here look wrong and are not:
+
+- **Declaration output keeps the `.ts` specifier.** `dist/*.d.ts` reads `from "./keys.ts"`. Only TypeScript reads a `.d.ts`, and it resolves that to the sibling `.d.ts` — downstream packages typecheck against it without needing `allowImportingTsExtensions` themselves. Do not "fix" it.
+- **The extension is `.ts`, not nothing.** Extensionless imports would mean abandoning NodeNext for `Bundler` resolution, which breaks any `dist/` that Node runs directly — the migration CLI, and the worker before esbuild bundles it.
 
 ## Repo context
 

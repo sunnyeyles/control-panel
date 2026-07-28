@@ -6,7 +6,7 @@ import {
   ObjectNotFoundError,
   ObjectOwnershipError,
   StorageUnavailableError,
-} from "./errors.js"
+} from "./errors.ts"
 
 describe("isUserStorageError", () => {
   const errors = [

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import { InvalidScheduleError } from "./errors.js"
-import { computeNextRunAt, isValidSchedule } from "./schedule.js"
+import { InvalidScheduleError } from "./errors.ts"
+import { computeNextRunAt, isValidSchedule } from "./schedule.ts"
 
 /**
  * Nothing here needs a database, and that is the point: this is where the real

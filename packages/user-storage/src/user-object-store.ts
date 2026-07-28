@@ -1,5 +1,5 @@
-import type { ObjectKeyParts } from "./keys.js"
-import type { ObjectKind } from "./kinds.js"
+import type { ObjectKeyParts } from "./keys.ts"
+import type { ObjectKind } from "./kinds.ts"
 
 /**
  * Everything needed to address one stored object.
@@ -85,8 +85,8 @@ export interface UserObjectStore {
   /**
    * Read an object, including its bytes.
    *
-   * @throws {import("./errors.js").ObjectNotFoundError} if nothing is stored there.
-   * @throws {import("./errors.js").ObjectOwnershipError} if it belongs to another user.
+   * @throws {import("./errors.ts").ObjectNotFoundError} if nothing is stored there.
+   * @throws {import("./errors.ts").ObjectOwnershipError} if it belongs to another user.
    */
   get(ref: ObjectRef): Promise<FetchedObject>
 
@@ -105,8 +105,8 @@ export interface UserObjectStore {
    * destroying it; prior versions remain until the lifecycle rule expires
    * them.
    *
-   * @throws {import("./errors.js").ObjectNotFoundError} if nothing is stored there.
-   * @throws {import("./errors.js").ObjectOwnershipError} if it belongs to another user.
+   * @throws {import("./errors.ts").ObjectNotFoundError} if nothing is stored there.
+   * @throws {import("./errors.ts").ObjectOwnershipError} if it belongs to another user.
    */
   delete(ref: ObjectRef): Promise<void>
 

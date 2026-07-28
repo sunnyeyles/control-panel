@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { InvalidObjectKeyError } from "./errors.js"
+import { InvalidObjectKeyError } from "./errors.ts"
 import {
   buildObjectKey,
   dateSegments,
@@ -9,7 +9,7 @@ import {
   toGeneratedOn,
   userPrefix,
   type ObjectKeyParts,
-} from "./keys.js"
+} from "./keys.ts"
 
 const BRIEF: ObjectKeyParts = {
   environment: "prod",

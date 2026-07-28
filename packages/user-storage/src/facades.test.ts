@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
-import { createBriefStore } from "./brief-store.js"
-import { InvalidObjectKeyError } from "./errors.js"
-import { acceptedResumeExtensions, createResumeStore } from "./resume-store.js"
+import { createBriefStore } from "./brief-store.ts"
+import { InvalidObjectKeyError } from "./errors.ts"
+import { acceptedResumeExtensions, createResumeStore } from "./resume-store.ts"
 import type {
   FetchedObject,
   NewObject,
   ObjectRef,
   StoredObject,
   UserObjectStore,
-} from "./user-object-store.js"
+} from "./user-object-store.ts"
 
 /**
  * An in-memory {@link UserObjectStore}.

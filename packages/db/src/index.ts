@@ -27,7 +27,7 @@
  * `@workspace/db/schedule` gets `computeNextRunAt` without pulling in the
  * driver at all.
  */
-export { createDb, type Db } from "./db.js"
+export { createDb, type Db } from "./db.ts"
 
 export {
   readDatabaseConfig,
@@ -35,29 +35,29 @@ export {
   DATABASE_URL,
   DATABASE_URL_UNPOOLED,
   type DatabaseConfig,
-} from "./config.js"
+} from "./config.ts"
 
-export { createUserStore, type UserStore } from "./users.js"
+export { createUserStore, type UserStore } from "./users.ts"
 
 export {
   createJobStore,
   type ClaimedSlot,
   type JobStore,
   type NewJob,
-} from "./jobs.js"
+} from "./jobs.ts"
 
-export { createRunStore, type RunStore } from "./runs.js"
+export { createRunStore, type RunStore } from "./runs.ts"
 
-export { createArtifactStore, type ArtifactStore } from "./artifacts.js"
+export { createArtifactStore, type ArtifactStore } from "./artifacts.ts"
 
-export { computeNextRunAt, isValidSchedule } from "./schedule.js"
+export { computeNextRunAt, isValidSchedule } from "./schedule.ts"
 
 export {
   appliedMigrations,
   runMigrations,
   type MigrationsResult,
   type RunMigrationsOptions,
-} from "./migrate.js"
+} from "./migrate.ts"
 
 export type {
   Artifact,
@@ -68,7 +68,7 @@ export type {
   RunFailure,
   RunStatus,
   User,
-} from "./rows.js"
+} from "./rows.ts"
 
 export {
   DatabaseUnavailableError,
@@ -77,4 +77,4 @@ export {
   isDbError,
   MigrationError,
   type DbErrorCode,
-} from "./errors.js"
+} from "./errors.ts"

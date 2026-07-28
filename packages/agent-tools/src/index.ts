@@ -1,8 +1,8 @@
 import type { StructuredToolInterface } from "@langchain/core/tools"
 
-import { getCurrentTime } from "./time.js"
+import { getCurrentTime } from "./time.ts"
 
-export { getCurrentTime } from "./time.js"
+export { getCurrentTime } from "./time.ts"
 
 /**
  * Every tool in the catalog.

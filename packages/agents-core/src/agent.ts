@@ -11,13 +11,13 @@ import {
   type ConditionalEdgeRouter,
   type GraphNode,
 } from "@langchain/langgraph"
-import { createModel } from "./model.js"
-import { AgentState } from "./state.js"
+import { createModel } from "./model.ts"
+import { AgentState } from "./state.ts"
 import {
   createToolRegistry,
   errorToolMessage,
   type AgentTool,
-} from "./tools.js"
+} from "./tools.ts"
 
 export const DEFAULT_SYSTEM_PROMPT = [
   "You are a helpful assistant with access to tools.",

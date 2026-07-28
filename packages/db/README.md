@@ -100,6 +100,10 @@ Numbered plain `.sql` files applied in filename order, a `schema_migrations`
 ledger, a session advisory lock for the duration, and one transaction per file.
 Idempotent — running it twice does nothing.
 
+The script runs `src/migrate-cli.ts` through `tsx`, not the compiled copy in
+`dist/`. No build step is required first, and there is no way to apply a stale
+one by forgetting it.
+
 **Forward-only. There are no down migrations.** An unwanted change is undone by
 writing the next one. That is the accepted cost of not adopting Atlas, and the
 files stay plain SQL precisely so Atlas remains available later.

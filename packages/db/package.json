@@ -27,7 +27,7 @@
     "dev": "tsc --build --watch",
     "lint": "eslint",
     "format": "prettier --write \"**/*.ts\"",
-    "migrate": "node ./dist/migrate-cli.js",
+    "migrate": "tsx ./src/migrate-cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
@@ -41,6 +41,7 @@
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "eslint": "^9",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

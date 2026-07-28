@@ -1,5 +1,5 @@
-import type { Connection } from "./client.js"
-import type { Run, RunFailure, RunStatus } from "./rows.js"
+import type { Connection } from "./client.ts"
+import type { Run, RunFailure, RunStatus } from "./rows.ts"
 
 /**
  * Runs, and the two statements that end one.

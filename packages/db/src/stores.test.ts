@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto"
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
-import { createConnection, type Connection } from "./client.js"
-import type { DatabaseConfig } from "./config.js"
-import { createDb, type Db } from "./db.js"
-import { runMigrations } from "./migrate.js"
-import type { DueJob } from "./rows.js"
+import { createConnection, type Connection } from "./client.ts"
+import type { DatabaseConfig } from "./config.ts"
+import { createDb, type Db } from "./db.ts"
+import { runMigrations } from "./migrate.ts"
+import type { DueJob } from "./rows.ts"
 
 /**
  * The half of this package that needs Postgres to be Postgres.

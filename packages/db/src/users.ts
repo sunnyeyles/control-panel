@@ -1,5 +1,5 @@
-import type { Connection } from "./client.js"
-import type { User } from "./rows.js"
+import type { Connection } from "./client.ts"
+import type { User } from "./rows.ts"
 
 /**
  * Users, and deliberately almost nothing about them.

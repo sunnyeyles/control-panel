@@ -1,5 +1,5 @@
-import type { Connection } from "./client.js"
-import type { Artifact } from "./rows.js"
+import type { Connection } from "./client.ts"
+import type { Artifact } from "./rows.ts"
 
 /**
  * Pointers to what a run produced.

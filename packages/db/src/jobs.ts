@@ -1,6 +1,6 @@
-import type { Connection } from "./client.js"
-import type { DueJob, Job, JobConfig } from "./rows.js"
-import { computeNextRunAt } from "./schedule.js"
+import type { Connection } from "./client.ts"
+import type { DueJob, Job, JobConfig } from "./rows.ts"
+import { computeNextRunAt } from "./schedule.ts"
 
 /** A job on its way in. */
 export interface NewJob {

@@ -1,9 +1,9 @@
-import { createArtifactStore, type ArtifactStore } from "./artifacts.js"
-import { createConnection } from "./client.js"
-import { readDatabaseConfig, type DatabaseConfig } from "./config.js"
-import { createJobStore, type JobStore } from "./jobs.js"
-import { createRunStore, type RunStore } from "./runs.js"
-import { createUserStore, type UserStore } from "./users.js"
+import { createArtifactStore, type ArtifactStore } from "./artifacts.ts"
+import { createConnection } from "./client.ts"
+import { readDatabaseConfig, type DatabaseConfig } from "./config.ts"
+import { createJobStore, type JobStore } from "./jobs.ts"
+import { createRunStore, type RunStore } from "./runs.ts"
+import { createUserStore, type UserStore } from "./users.ts"
 
 /**
  * One connection's worth of database access, as four narrow facades.

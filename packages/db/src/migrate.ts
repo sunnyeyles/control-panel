@@ -2,9 +2,9 @@ import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { createConnection, type Connection } from "./client.js"
-import { readMigrationConfig, type DatabaseConfig } from "./config.js"
-import { MigrationError } from "./errors.js"
+import { createConnection, type Connection } from "./client.ts"
+import { readMigrationConfig, type DatabaseConfig } from "./config.ts"
+import { MigrationError } from "./errors.ts"
 
 /**
  * Numbered `.sql` files and a small runner. No Atlas, no ORM-attached tool.

@@ -7,27 +7,27 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3"
 
-import { readUserStorageConfig, type UserStorageConfig } from "./config.js"
+import { readUserStorageConfig, type UserStorageConfig } from "./config.ts"
 import {
   InvalidObjectKeyError,
   ObjectNotFoundError,
   ObjectOwnershipError,
   StorageUnavailableError,
-} from "./errors.js"
+} from "./errors.ts"
 import {
   buildObjectKey,
   kindPrefix,
   parseObjectKey,
   type ObjectKeyParts,
-} from "./keys.js"
-import { contentTypeFor, dispositionFor, type ObjectKind } from "./kinds.js"
+} from "./keys.ts"
+import { contentTypeFor, dispositionFor, type ObjectKind } from "./kinds.ts"
 import type {
   FetchedObject,
   NewObject,
   ObjectRef,
   StoredObject,
   UserObjectStore,
-} from "./user-object-store.js"
+} from "./user-object-store.ts"
 
 /**
  * Reserved user-metadata keys. S3 lowercases metadata names in transit, so

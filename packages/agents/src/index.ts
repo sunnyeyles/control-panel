@@ -2,6 +2,6 @@ export {
   ASSISTANT_SYSTEM_PROMPT,
   createAssistant,
   type CreateAssistantOptions,
-} from "./assistant.js"
+} from "./assistant.ts"
 
 export type { Agent } from "@workspace/agents-core"

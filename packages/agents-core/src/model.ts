@@ -1,6 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai"
 
-import { getOpenAIApiKey } from "./env.js"
+import { getOpenAIApiKey } from "./env.ts"
 
 /** Default chat model. Override per-call via {@link ModelOptions.model}. */
 export const DEFAULT_MODEL = "gpt-5.5"

@@ -1,7 +1,7 @@
 import pg from "pg"
 
-import type { DatabaseConfig } from "./config.js"
-import { DatabaseUnavailableError } from "./errors.js"
+import type { DatabaseConfig } from "./config.ts"
+import { DatabaseUnavailableError } from "./errors.ts"
 
 /**
  * The only file in the repository that imports a Postgres driver.

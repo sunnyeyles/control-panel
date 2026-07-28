@@ -4,7 +4,7 @@ import {
 } from "@aws-sdk/client-secrets-manager"
 import { createDb } from "@workspace/db"
 
-import { runTick } from "./run-tick.js"
+import { runTick } from "./run-tick.ts"
 
 /**
  * The one file in the worker that knows it runs on AWS.

@@ -5,20 +5,20 @@ export {
   type Agent,
   type ChatModelLike,
   type CreateAgentOptions,
-} from "./agent.js"
+} from "./agent.ts"
 
-export { getOpenAIApiKey } from "./env.js"
+export { getOpenAIApiKey } from "./env.ts"
 
-export { createModel, DEFAULT_MODEL, type ModelOptions } from "./model.js"
+export { createModel, DEFAULT_MODEL, type ModelOptions } from "./model.ts"
 
 export {
   AgentState,
   type AgentStateUpdate,
   type AgentStateValue,
-} from "./state.js"
+} from "./state.ts"
 
 export {
   createToolRegistry,
   type AgentTool,
   type ToolRegistry,
-} from "./tools.js"
+} from "./tools.ts"

@@ -1,4 +1,4 @@
-import { runMigrations } from "./migrate.js"
+import { runMigrations } from "./migrate.ts"
 
 /**
  * `pnpm --filter @workspace/db migrate`
