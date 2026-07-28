@@ -1,74 +1,121 @@
-## Project overview
+# Job-search briefing pipeline
 
-We are building a scheduled research pipeline that collects information from external websites and generates structured Markdown briefs.
+A scheduled worker turns a candidate's search criteria into a private, per-user
+job-search brief.
 
-The pipeline should run on a cron schedule and contain two stages:
+Each run: read the criteria → search the web for matching postings → validate
+the findings → compose markdown → upload to private S3 → record the object key
+in Neon.
 
-1. **Scraper agents**
+Vocabulary is in `CONTEXT.md`, and it is worth reading first — in particular
+**Job** means "a row in `jobs`, a thing that runs on a cadence" and never an
+employment opportunity, which is a **Posting**.
 
-   - Each scraper agent is responsible for one source or source type.
-   - Agents search or scrape configured websites, extract relevant information, and return structured results.
-   - Scraping should be implemented behind reusable tools or adapters rather than embedded directly into agent prompts.
-   - Use normal HTTP fetching and HTML parsing where possible.
-   - Support a headless browser such as Playwright only for websites that require JavaScript rendering.
-   - Scrapers must handle timeouts, retries, rate limits, duplicate results, and partial failures.
+## Where it lives
 
-2. **Synthesiser agent**
+| Stage                                        | Owner                                                                                                          |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Dashboard, brief viewing                     | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                              |
+| Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                        |
+| One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                     |
+| What `jobs.config` means                     | `apps/briefing-worker/src/job-search-config.ts`                                                                |
+| Scout and brief-writer agents                | `packages/agents/src/` — one `createX()` factory per module                                                    |
+| The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                              |
+| Search and fetch tools                       | `packages/agent-tools/src/` — one tool per module                                                              |
+| Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                    |
+| Jobs, runs, artifacts SQL                    | `packages/db/src/` + `packages/db/migrations/`                                                                 |
+| S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts`, never import the AWS SDK elsewhere |
+| EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`)                                                         |
 
-   - Receives the results from all scraper agents.
-   - Validates, combines, deduplicates, and ranks the collected information.
-   - Generates a final brief in Markdown.
-   - Stores structured metadata and processing status in the database.
-   - Stores the complete `.md` brief in Amazon S3.
-   - Updates the database record with the S3 object key and generation details.
+## Rules
 
-## Current and planned infrastructure
+- **S3 stays private.** Neon stores object keys only — never URLs, never blob
+  content. The `artifacts.object_key` CHECK enforces it.
+- **Runs are idempotent.** `briefId` is the run id and the key partitions on the
+  occurrence, so re-executing a run overwrites one object rather than making a
+  second. Claiming is at-most-once; every duplicate occurrence is a paid run.
+- **The scout returns data, not side effects.** No writes, no uploads, no DB
+  calls inside it. It carries one tool, so this is structural.
+- **URLs are copied, never composed.** Every posting must carry a URL a search
+  actually returned; the findings schema rejects anything that is not a URL.
+- **A run with no successful search fails.** Well-formed findings that never
+  touched the web would produce a confident brief citing postings nobody looked
+  up — worse than no brief.
+- **New `kinds.ts` entries need a matching `object_kinds` entry in Terraform**,
+  or the objects get no retention and writes 403 for want of the per-kind grant.
 
-- The frontend and application are deployed on Vercel.
-- The application database is Neon Postgres.
-- All cloud infrastructure is managed with Terraform in the `infra/` directory.
-- The scheduled worker runs on AWS Lambda.
-- Amazon EventBridge Scheduler triggers the Lambda worker on a cron schedule.
-- Amazon S3 privately stores generated Markdown briefs.
-- Neon Postgres will store users, brief metadata, source records, job state, processing status, and S3 object keys.
-- AWS IAM will provide least-privilege access.
-- Secrets should use AWS Secrets Manager, SSM Parameter Store, or deployment-provided environment variables.
-- CloudWatch should provide logs, metrics, and failure visibility.
-- All AWS infrastructure must be provisioned through Terraform.
+## Flow
 
-## Desired workflow
+```mermaid
+flowchart TD
+    E[EventBridge Scheduler — hourly tick] --> F[AWS Lambda briefing worker]
+    F --> D[(Neon Postgres — jobs, runs)]
+    D -->|due job + criteria| G[Scout agent]
+    G --> T[web_search tool → Tavily]
+    T --> X[External websites]
+    G -->|Findings JSON, validated| L[Brief writer agent]
+    L --> Z[Markdown]
+    Z --> U[Upload to private S3]
+    U --> V[(S3 bucket — markdown briefs)]
+    V --> W[Record object key in artifacts]
+    F --> CW[CloudWatch logs & metrics]
+```
 
-1. EventBridge starts the scheduled job.
-2. The worker creates a job record in Neon.
-3. Scraper agents run against configured sources.
-4. Each scraper returns structured source data and citations.
-5. Failures from one scraper should not necessarily stop the entire job.
-6. The synthesiser processes all successful scraper outputs.
-7. The synthesiser generates the Markdown brief.
-8. The worker uploads the `.md` file to the private S3 bucket.
-9. The worker updates Neon with:
+## Not built yet
 
-   - Job status.
-   - Brief metadata.
-   - Source references.
-   - S3 object key.
-   - Generation timestamp.
-   - Errors or warnings.
+The pipeline above runs end to end. These are the parts of the intended product
+that do not exist, and none of them is implied by the code today:
 
-10. CloudWatch records logs and operational metrics.
+```mermaid
+flowchart TD
+    A[Dashboard] -->|Upload resume| B[Resume in S3]
+    B --> C[Profile extraction]
+    C --> D[(Neon — search criteria)]
+    D -.->|replaces hand-written jobs.config| P[Briefing pipeline above]
+    P --> M[Several scouts, merged and ranked]
+    M --> N[Cover letter agent]
+    P --> Q[Dashboard views a brief]
+```
+
+- **Resume upload and profile extraction.** `resumes` is a live object kind in
+  `@workspace/user-storage` with no runtime consumer: nothing uploads one, and
+  no Postgres row points at one. Search criteria are hand-written into
+  `jobs.config` instead. Extraction would most naturally be a `createX()`
+  factory in `packages/agents/src/` invoked from a route handler under
+  `apps/dashboard/app/api/`.
+- **Fan-out across several scouts, with merge and rank.** One scout runs today.
+  Fanning out replaces what produces `Findings` and leaves everything downstream
+  of it alone.
+- **Cover letters.**
+- **Any dashboard UI for briefs.** `apps/dashboard` has an assistant chat, a
+  settings page and the auth pages, and calls the database only to upsert the
+  signed-in user. `JobStore.listForUser()` and `ArtifactStore.latestForJob()`
+  already exist and have no caller.
+
+## Infrastructure
+
+- Frontend and application on Vercel; database is Neon Postgres.
+- The scheduled worker runs on AWS Lambda, triggered hourly by EventBridge
+  Scheduler. The tick is the same for every job, so a job's own cadence is a row
+  in Postgres rather than anything in Terraform.
+- S3 privately stores generated markdown briefs. IAM is least-privilege and
+  bounded by a permissions boundary; the worker holds the `prod:briefs` grant
+  and nothing wider.
+- Secrets are AWS Secrets Manager shells whose values are set by hand —
+  Terraform provisions containers it can never read.
+- All AWS infrastructure is Terraform under `infra/aws/`, which Turborepo does
+  not cover. CloudWatch provides logs, metrics and failure alarms.
 
 ## Design requirements
 
-- Keep scraping, synthesis, storage, database, and scheduling concerns separated.
-- Define clear typed interfaces between scraper agents and the synthesiser.
-- Make individual scrapers replaceable without changing the rest of the pipeline.
-- Keep AWS-specific code behind infrastructure or storage adapters.
-- Make jobs idempotent so retries do not create duplicate briefs.
-- Preserve source URLs and timestamps for traceability.
-- Do not make the S3 bucket or generated briefs public.
-- Do not store permanent public S3 URLs in the database.
-- Use the S3 object key as the persistent file reference.
-- Design for local development and automated testing.
-- Avoid modifying the Vercel deployment or Neon infrastructure unless integration changes are required.
-
-Use this context when inspecting the repository, proposing architecture, planning work, or implementing the scraper and synthesis pipeline. Clearly distinguish existing functionality from infrastructure that is currently being added.
+- Keep searching, composition, storage, database and scheduling concerns
+  separated, with typed interfaces between them.
+- Make individual scouts replaceable without changing the rest of the pipeline.
+- Keep AWS-specific code behind storage adapters — `s3-user-object-store.ts` is
+  the only file importing the AWS S3 SDK, and `index.ts` the only worker file
+  that knows it runs on Lambda.
+- Preserve source URLs for traceability.
+- Never make the bucket or the briefs public, and never store a public URL as
+  the file reference; the object key is the persistent reference.
+- Design for local development and automated testing: `runBriefing` takes its
+  agents through injectable seams so a run can be exercised without an API key.

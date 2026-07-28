@@ -3,16 +3,20 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager"
 import { createDb } from "@workspace/db"
+import {
+  createBriefStore,
+  createS3UserObjectStore,
+} from "@workspace/user-storage"
 
 import { runTick } from "./run-tick.ts"
 
 /**
  * The one file in the worker that knows it runs on AWS.
  *
- * `run-tick.ts` and `run-scheduled-task.ts` are deliberately
- * platform-independent, so everything platform-shaped — the handler signature,
- * and fetching secrets — is confined here. Moving to another runtime means
- * rewriting this file and nothing else.
+ * `run-tick.ts` and `run-briefing.ts` are deliberately platform-independent, so
+ * everything platform-shaped — the handler signature, fetching secrets, and
+ * reaching S3 — is confined here. Moving to another runtime means rewriting
+ * this file and nothing else.
  */
 
 /**
@@ -75,8 +79,8 @@ async function loadSecret(
 }
 
 /**
- * Both secrets, in parallel — two cold-start round trips that have no reason to
- * be sequential.
+ * Every secret, in parallel — cold-start round trips that have no reason to be
+ * sequential.
  */
 async function loadSecrets(): Promise<void> {
   await Promise.all([
@@ -89,6 +93,11 @@ async function loadSecrets(): Promise<void> {
       "DATABASE_URL",
       "DATABASE_SECRET_ID",
       "Neither DATABASE_URL nor DATABASE_SECRET_ID is set, so there is no way to find out what is due."
+    ),
+    loadSecret(
+      "TAVILY_API_KEY",
+      "TAVILY_SECRET_ID",
+      "Neither TAVILY_API_KEY nor TAVILY_SECRET_ID is set, so there is no way to search the web."
     ),
   ])
 }
@@ -118,8 +127,14 @@ export const handler = async (): Promise<void> => {
   // note above.
   const db = createDb()
 
+  // Built here rather than at module scope for the same reason the agents are
+  // factories: constructing the store reads `USER_STORAGE_BUCKET_NAME` and
+  // `USER_STORAGE_ENVIRONMENT`, and a module-level instance would move that
+  // failure to import time. Region comes from the AWS_REGION the runtime sets.
+  const briefs = createBriefStore(createS3UserObjectStore())
+
   try {
-    await runTick(db)
+    await runTick(db, briefs)
   } finally {
     await db.close()
   }

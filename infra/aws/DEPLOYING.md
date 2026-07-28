@@ -95,7 +95,7 @@ In CloudWatch Logs Insights:
 
 ```
 fields @timestamp, @message
-| filter @message like /"event":"tick"/ or @message like /"event":"proof-run"/
+| filter @message like /"event":"tick"/ or @message like /"event":"briefing-run"/
 | sort @timestamp desc
 | limit 40
 ```
@@ -119,15 +119,22 @@ Done means all of:
 - [ ] both roles carry the boundary:
       `aws iam get-role --role-name briefing-worker-execution --query Role.PermissionsBoundary`
 - [ ] `aws secretsmanager describe-secret` shows a recent `LastChangedDate` for
-      **both** `briefing-worker/openai-api-key` and `briefing-worker/database-url`
-      (never print either value)
+      **all three** of `briefing-worker/openai-api-key`,
+      `briefing-worker/database-url` and `briefing-worker/tavily-api-key`
+      (never print any of the values)
+- [ ] the function carries `USER_STORAGE_BUCKET_NAME` and
+      `USER_STORAGE_ENVIRONMENT`:
+      `aws lambda get-function-configuration --function-name briefing-worker --query Environment.Variables`
 - [ ] migrations applied: `DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate`
       reports nothing to do on a second run
 - [ ] a manual invoke produces one `tick` line; with nothing due that is
       `"due":0` and is a success
-- [ ] with a job seeded due, a manual invoke produces one `proof-run` line with
-      `"outcome":"success"` and `"llmCalls":2` — two calls is what proves
-      model → tool → model rather than the model answering from memory
+- [ ] with a job seeded due, a manual invoke produces one `briefing-run` line
+      with `"outcome":"success"`, `"searches"` above zero, and an `objectKey` —
+      a non-zero search count is what proves the postings were looked up rather
+      than recalled
+- [ ] that `objectKey` exists in the bucket, carries the `kind=briefs` tag, and
+      has a matching row: `select object_key from artifacts order by created_at desc limit 1`
 - [ ] `Init Duration` noted from the `REPORT` line, as the cold-start baseline.
       Expect it to have grown: the bundle now carries `pg`, and a tick pays a
       Neon wake on top

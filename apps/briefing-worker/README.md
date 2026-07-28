@@ -13,28 +13,41 @@ A job's own cadence lives in Postgres, as `jobs.schedule_cron` and
 INSERT rather than a Terraform apply. What stayed in Terraform is the tick,
 which is the same for every job and therefore has nothing left to drift.
 
-Today the work a claimed job performs is still a **proof task**: it asks an
-agent for the current UTC time using a single tool, and its only purpose is to
-prove the deployment foundation works end to end — secret delivery, outbound
-HTTPS, the built `dist/` of the agent packages resolving at runtime, and a full
-model → tools → model cycle through the LangGraph graph. The real briefing
-replaces the body of `run-scheduled-task.ts` later; nothing else has to move.
+The work a claimed job performs is a **briefing run**: a scout agent searches
+the web for job postings matching the criteria in `jobs.config`, a writer agent
+turns those findings into markdown, the worker uploads it to private S3 through
+`@workspace/user-storage`, and records the object key in `artifacts`.
+
+The two agents are joined by plain TypeScript rather than by a LangGraph
+fan-out. Fanning out across several scouts and merging their findings is a later
+change, and it does not disturb this shape — it replaces what produces
+`findings` and leaves everything downstream alone. What matters now is that the
+scout hands over **data**, because data is the thing that can be validated
+between the two halves.
 
 ## Layout
 
 ```
 src/index.ts               shallow — the Lambda handler, and the only AWS-aware file
 src/run-tick.ts            deep — claim, run, record; one invocation's worth of work
-src/run-scheduled-task.ts  deep — owns the task and its success contract
+src/run-briefing.ts        deep — owns one briefing and its success contract
+src/job-search-config.ts   deep — what `jobs.config` means to this worker
 build.mjs                  esbuild bundle + deploy-root assembly
 ```
 
 The split is the point of the design: neither `run-tick.ts` nor
-`run-scheduled-task.ts` knows where it runs, so both are testable and portable.
-Everything platform-shaped — the handler signature and fetching secrets — lives
-in `index.ts`.
+`run-briefing.ts` knows where it runs, so both are testable and portable.
+Everything platform-shaped — the handler signature, fetching secrets, and
+reaching S3 — lives in `index.ts`.
 
-`runTick` takes a `Db` rather than constructing one, for the same reason.
+`runTick` takes a `Db` and a `BriefStore` rather than constructing either, for
+the same reason.
+
+**`jobs.config` is interpreted here, not in `@workspace/db`.** The platform
+stores that column and never reads inside it, so the schema for it lives in
+`job-search-config.ts`. That is what lets a second kind of job arrive later with
+a completely different config and no migration — and it is the seam a resume
+extractor will eventually write to, with nothing downstream of it changing.
 
 **Due jobs are run sequentially in one invocation.** Fanning out would mean a
 second Lambda, a second set of permissions and a second failure mode, bought to
@@ -48,10 +61,16 @@ in a diff rather than drifting invisibly in console configuration.
 
 ## Connections and secrets
 
-Two secrets, both fetched from Secrets Manager at cold start and cached at
-module scope: `OPENAI_SECRET_ID` and `DATABASE_SECRET_ID`. Neither value is a
-Lambda environment variable — that would put it in plan output, in state, and on
-the console's function configuration page.
+Three secrets, all fetched from Secrets Manager at cold start and cached at
+module scope: `OPENAI_SECRET_ID`, `DATABASE_SECRET_ID` and `TAVILY_SECRET_ID`.
+No value is a Lambda environment variable — that would put it in plan output, in
+state, and on the console's function configuration page.
+
+Two things that are **not** secrets are passed directly:
+`USER_STORAGE_BUCKET_NAME` and `USER_STORAGE_ENVIRONMENT`, which is what
+`createS3UserObjectStore()` reads. `AWS_REGION` needs no entry — the Lambda
+runtime sets it, so the region the function runs in and the region it writes to
+cannot become two facts that disagree.
 
 The **connection** is deliberately not cached that way. A secret is a string and
 stays valid; a socket does not. The gap between ticks is an hour and Neon
@@ -67,29 +86,41 @@ schema it does not need; see `packages/db/README.md`.
 ```bash
 pnpm turbo build --filter=@workspace/briefing-worker      # bundle to dist/
 pnpm turbo typecheck --filter=@workspace/briefing-worker
+pnpm --filter=@workspace/briefing-worker test             # run logic, fake agents
 pnpm turbo zip --filter=@workspace/briefing-worker        # dist/ -> lambda.zip
 pnpm --filter=@workspace/briefing-worker invoke           # run the handler locally
 ```
 
-Running locally needs `OPENAI_API_KEY` and `DATABASE_URL` in the environment and
-**nothing else** — no emulator, no AWS credentials, no local host:
+Running locally needs no emulator, no AWS credentials and no local host — only
+the values the function would otherwise fetch, plus the two storage variables:
 
 ```bash
 export OPENAI_API_KEY=...
-export DATABASE_URL=...            # the pooled endpoint
+export DATABASE_URL=...                  # the pooled endpoint
+export TAVILY_API_KEY=...
+export USER_STORAGE_BUCKET_NAME=...
+export USER_STORAGE_ENVIRONMENT=prod
+export AWS_REGION=ap-southeast-2
 pnpm turbo build --filter=@workspace/briefing-worker
 pnpm --filter=@workspace/briefing-worker invoke
 ```
 
-That works because `loadSecret()` short-circuits when the target variable is
-already set, so the Secrets Manager call never happens. It is also the escape
-hatch if Secrets Manager is unreachable but the values are known.
+The secret part works because `loadSecret()` short-circuits when the target
+variable is already set, so the Secrets Manager call never happens. It is also
+the escape hatch if Secrets Manager is unreachable but the values are known.
+Writing to S3 is the one step that does need real credentials, since the upload
+is a real upload.
 
 Every invocation prints one JSON `tick` line — `due`, `claimed`, `skipped`,
-`succeeded`, `failed` — and one `proof-run` line per job that was actually
+`succeeded`, `failed` — and one `briefing-run` line per job that was actually
 claimed. A tick with `"due":0` is a success and exits 0. Any failed job makes
 the process exit non-zero, which is what produces the `Errors` datapoint the
 alarm watches.
+
+The unit tests need none of the above. They drive `runBriefing` with fake agents
+through its `createScout`/`createWriter` seams and assert on the shape of a run —
+did a search succeed, did the hand-off validate, is the key derived from the
+occurrence — never on what a model said.
 
 ## Forcing a run in AWS
 
@@ -102,16 +133,17 @@ Read the result in CloudWatch Logs Insights:
 
 ```
 fields @timestamp, @message
-| filter @message like /"event":"tick"/ or @message like /"event":"proof-run"/
+| filter @message like /"event":"tick"/ or @message like /"event":"briefing-run"/
 | sort @timestamp desc
 | limit 40
 ```
 
 A healthy hour with nothing scheduled is one `tick` line with `"due":0` and no
-`proof-run` line at all — which is why the tick line exists. When a job does
-run, good looks like `"outcome":"success"` with `"llmCalls":2`. Two calls is the
-number that matters: it means model → tool → model, rather than the model
-answering from memory without touching the tool.
+`briefing-run` line at all — which is why the tick line exists. When a job does
+run, good looks like `"outcome":"success"` with `"searches"` above zero and an
+`objectKey`. The search count is the number that matters: a run that reached the
+model but made no successful search would be reporting postings it did not look
+up, so the run fails rather than producing one.
 
 `"skipped"` above zero is not an error. It means another party already held the
 slot — an overlapping tick, or a manual invoke landing mid-tick — and the job
@@ -135,7 +167,17 @@ deliberately no `main` — Lambda locates the entry from its own
 contents — in particular never `node_modules`, whose pnpm symlinks do not
 survive being zipped. That is why the bundle has no externals at all.
 
-**Nothing catches the throw.** `runScheduledTask()` emits its one-line report
+**The brief is written before the row, never after.** The `artifacts` row is the
+claim that a brief exists, so `artifacts.record()` runs only once `briefs.put()`
+has returned a key. The reverse order leaves a row pointing at nothing.
+
+**`briefId` is the run id, and the partition day comes from `scheduledFor`.**
+Two properties fall out of that: re-executing a given run overwrites the same
+object rather than making a second one, and two runs can never collide on
+`artifacts.object_key`, which is UNIQUE. A 23:30 slot that finishes after
+midnight still files under the day its run row names.
+
+**Nothing catches the throw.** `runBriefing()` emits its one-line report
 and rethrows, `runTick()` records the failure and rethrows after attempting
 every other due job, and the handler lets it through. That throw is what marks
 the invocation failed, which is what produces the `Errors` datapoint the alarm

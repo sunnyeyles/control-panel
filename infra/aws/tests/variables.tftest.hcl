@@ -124,10 +124,11 @@ run "rejects_timeout_above_lambda_maximum" {
   }
 
   variables {
-    function_name    = "briefing-worker"
-    lambda_zip_path  = "./tests/fixtures/lambda.zip"
-    alerts_topic_arn = "arn:aws:sns:ap-southeast-2:000000000000:test"
-    timeout          = 901
+    function_name            = "briefing-worker"
+    lambda_zip_path          = "./tests/fixtures/lambda.zip"
+    alerts_topic_arn         = "arn:aws:sns:ap-southeast-2:000000000000:test"
+    user_storage_bucket_name = "control-panel-user-storage-test"
+    timeout                  = 901
   }
 
   expect_failures = [var.timeout]
@@ -143,12 +144,35 @@ run "rejects_non_arn_alerts_topic" {
   }
 
   variables {
-    function_name    = "briefing-worker"
-    lambda_zip_path  = "./tests/fixtures/lambda.zip"
-    alerts_topic_arn = "briefing-worker-alerts"
+    function_name            = "briefing-worker"
+    lambda_zip_path          = "./tests/fixtures/lambda.zip"
+    alerts_topic_arn         = "briefing-worker-alerts"
+    user_storage_bucket_name = "control-panel-user-storage-test"
   }
 
   expect_failures = [var.alerts_topic_arn]
+}
+
+# The environment name is the leading segment of every object key the worker
+# writes, and `assertSegment()` in `packages/user-storage/src/keys.ts` enforces
+# the same rule on the other side. A name with a slash here would have the
+# worker addressing a prefix the IAM grant does not scope to.
+run "rejects_storage_environment_with_slash" {
+  command = plan
+
+  module {
+    source = "./modules/briefing-worker"
+  }
+
+  variables {
+    function_name            = "briefing-worker"
+    lambda_zip_path          = "./tests/fixtures/lambda.zip"
+    alerts_topic_arn         = "arn:aws:sns:ap-southeast-2:000000000000:test"
+    user_storage_bucket_name = "control-panel-user-storage-test"
+    user_storage_environment = "prod/eu"
+  }
+
+  expect_failures = [var.user_storage_environment]
 }
 
 # Alerting that silently switches itself off is the failure the alarms exist to

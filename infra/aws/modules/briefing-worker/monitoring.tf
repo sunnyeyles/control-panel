@@ -15,7 +15,7 @@
 # handler catches nothing, so any bad tick lands here.
 resource "aws_cloudwatch_metric_alarm" "errors" {
   alarm_name        = "${var.function_name}-errors"
-  alarm_description = "The briefing worker failed. Check the tick line for counts, then the proof-run line with outcome=failure for the reason."
+  alarm_description = "The briefing worker failed. Check the tick line for counts, then the briefing-run line with outcome=failure for the reason."
 
   namespace   = "AWS/Lambda"
   metric_name = "Errors"

@@ -11,9 +11,10 @@ mock_provider "aws" {
 }
 
 variables {
-  function_name    = "briefing-worker"
-  lambda_zip_path  = "./tests/fixtures/lambda.zip"
-  alerts_topic_arn = "arn:aws:sns:ap-southeast-2:000000000000:briefing-worker-alerts"
+  function_name            = "briefing-worker"
+  lambda_zip_path          = "./tests/fixtures/lambda.zip"
+  alerts_topic_arn         = "arn:aws:sns:ap-southeast-2:000000000000:briefing-worker-alerts"
+  user_storage_bucket_name = "control-panel-user-storage-test"
 }
 
 run "on_duty" {
@@ -90,17 +91,29 @@ run "on_duty" {
     error_message = "Log write access must be scoped to the worker's own group, not granted account-wide."
   }
 
-  # Both secrets are shells and stay shells. A version resource here would put
-  # the value in plan output, in state, and in the apply log — which is the one
-  # property this whole arrangement exists for, and a connection string carries
-  # a password.
+  # All three secrets are shells and stay shells. A version resource here would
+  # put the value in plan output, in state, and in the apply log — which is the
+  # one property this whole arrangement exists for, and a connection string
+  # carries a password.
   assert {
     condition = alltrue([
-      for secret in [aws_secretsmanager_secret.openai, aws_secretsmanager_secret.database] :
+      for secret in [
+        aws_secretsmanager_secret.openai,
+        aws_secretsmanager_secret.database,
+        aws_secretsmanager_secret.tavily,
+      ] :
       secret.recovery_window_in_days == 7
     ])
-    error_message = "Both secrets must keep a recovery window; a mistaken destroy is otherwise unrecoverable."
+    error_message = "Every secret must keep a recovery window; a mistaken destroy is otherwise unrecoverable."
   }
+
+  # Not asserted here: that `read_secrets` names all three ARNs. Its `resources`
+  # is a *set* of values a mocked provider does not know until apply, and a set
+  # of unknowns has an unknown length — two of them could turn out to be the
+  # same string. `length(...) == 3` is therefore unevaluatable at plan time,
+  # unlike the single-element `logs` document above. The grant staying in step
+  # with `local.environment` is covered by review and by the first cold start,
+  # which fails loudly on a secret it may not read.
 
   # The worker cannot find out what is due without this. Asserted on the key
   # rather than on the ARN it holds, because a mocked provider does not know an
@@ -117,6 +130,33 @@ run "on_duty" {
   assert {
     condition     = !contains(keys(local.environment), "DATABASE_URL")
     error_message = "The connection string must never be a Lambda environment variable — it would land in plan output and in state."
+  }
+
+  # Same arrangement for the search key, and the same reason.
+  assert {
+    condition     = contains(keys(local.environment), "TAVILY_SECRET_ID")
+    error_message = "TAVILY_SECRET_ID must be set on the function, or the scout has no way to search."
+  }
+
+  assert {
+    condition     = !contains(keys(local.environment), "TAVILY_API_KEY")
+    error_message = "The Tavily key must never be a Lambda environment variable — it would land in plan output and in state."
+  }
+
+  # Not secrets, so these carry their values rather than an ARN. Without them
+  # the store cannot be constructed at all, and every run fails at the upload
+  # having already paid for the model and the searches.
+  assert {
+    condition     = local.environment["USER_STORAGE_BUCKET_NAME"] == var.user_storage_bucket_name
+    error_message = "USER_STORAGE_BUCKET_NAME must carry the bucket the root wired in, or briefs are written somewhere nobody reads."
+  }
+
+  # The IAM attachment in briefing-worker.tf covers every environment's briefs
+  # policy on purpose, so this value — not the grant — is what decides where the
+  # worker actually writes.
+  assert {
+    condition     = local.environment["USER_STORAGE_ENVIRONMENT"] == "prod"
+    error_message = "USER_STORAGE_ENVIRONMENT must be set; it is the first segment of every object key."
   }
 }
 

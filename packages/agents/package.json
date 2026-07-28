@@ -31,7 +31,8 @@
   "dependencies": {
     "@langchain/core": "^1.2.3",
     "@workspace/agent-tools": "workspace:*",
-    "@workspace/agents-core": "workspace:*"
+    "@workspace/agents-core": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -100,11 +100,17 @@ Tests are their own task, and a thin one:
 pnpm test        # turbo test
 ```
 
-**Only `@workspace/user-storage` and `@workspace/db` have tests.** Vitest is the
-runner and is a devDependency of those two alone; `turbo test` is a no-op in the
-other six workspaces. Do not assume a package is covered because the command
-exits 0. Adding tests to another workspace means adding `vitest` to it and a
-`test` script — the `test` task in `turbo.json` is already there.
+**Only `@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools` and
+`@workspace/briefing-worker` have tests.** Vitest is the runner and is a
+devDependency of those four alone; `turbo test` is a no-op in the other four
+workspaces. Do not assume a package is covered because the command exits 0.
+Adding tests to another workspace means adding `vitest` to it and a `test`
+script — the `test` task in `turbo.json` is already there.
+
+In each of those workspaces the same arrangement repeats and is deliberate:
+`src/**/*.test.ts` is excluded from `tsconfig.json` so tests never reach
+`dist/`, and a `tsconfig.test.json` covers them with `noEmit` because Vitest
+transpiles without typechecking. `typecheck` runs both.
 
 `@workspace/db` splits its suite by whether the thing under test needs Postgres
 to _be_ Postgres. `schedule.test.ts` needs nothing. `stores.test.ts` needs a real
@@ -201,4 +207,4 @@ Two things here look wrong and are not:
 
 `.mcp.json` registers the LangChain docs and API-reference MCP servers, and `.claude/skills/` symlinks a set of vendored skills (tracked in `skills-lock.json`) into `.agents/skills/`.
 
-`CONTEXT.md` is the domain glossary — what "briefing", "proof run" and "run report" mean, and which words to avoid. `OVERVIEW.md` states the intended shape of the pipeline. Both describe a platform that is mostly still ahead of the code: the working tree today is the scaffold described above plus a deployed worker running a trivial proof task. Earlier commits carried more design material (a `.wayfinder/` ticket set, planning docs) that survives only in git history — historical intent, not current spec.
+`CONTEXT.md` is the domain glossary — what "briefing", "scout", "finding" and "run report" mean, and which words to avoid. Read it before writing prose about this system: **"job" means a row in `jobs`, a thing that runs on a cadence, and never an employment opportunity** — that is a "posting". The schema owns the word and prose must not borrow it back. `OVERVIEW.md` states the shape of the pipeline and, in its "Not built yet" section, which parts of the intended product do not exist (resume upload, profile extraction, scout fan-out, cover letters, any brief UI). Earlier commits carried more design material (a `.wayfinder/` ticket set, planning docs) that survives only in git history — historical intent, not current spec.

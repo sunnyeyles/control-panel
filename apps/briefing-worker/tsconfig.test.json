@@ -1,0 +1,13 @@
+{
+  // Tests are excluded from tsconfig.json, so `tsc --noEmit` would not look at
+  // them at all, and Vitest only transpiles — it does not typecheck. This
+  // config closes that gap; `pnpm typecheck` runs both.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "rootDir": "."
+  },
+  "include": ["src", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

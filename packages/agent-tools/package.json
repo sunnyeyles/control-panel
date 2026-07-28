@@ -26,7 +26,8 @@
     "dev": "tsc --build --watch",
     "lint": "eslint",
     "format": "prettier --write \"**/*.ts\"",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@langchain/core": "^1.2.3",
@@ -37,6 +38,7 @@
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "eslint": "^9",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

@@ -99,6 +99,43 @@ variable "log_retention_days" {
   default     = 30
 }
 
+variable "user_storage_bucket_name" {
+  description = <<-EOT
+    Bucket the worker writes briefs to, passed to the function as
+    `USER_STORAGE_BUCKET_NAME`.
+
+    No default, and not derived here. The bucket belongs to the user-storage
+    stack, so the root wires its output in — which is also what orders the two
+    stacks, since a worker deployed ahead of its bucket would fail every run at
+    the upload rather than at the apply.
+  EOT
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.user_storage_bucket_name))
+    error_message = "user_storage_bucket_name must be a valid S3 bucket name."
+  }
+}
+
+variable "user_storage_environment" {
+  description = <<-EOT
+    Which environment prefix the worker writes under, passed to the function as
+    `USER_STORAGE_ENVIRONMENT`. It is the first segment of every object key.
+
+    This, not the IAM attachment, is what decides where briefs land. The root
+    attaches every environment's `:briefs` policy so a second environment costs
+    no edit there, which means the grant is deliberately wider than the
+    behaviour — this value is the narrowing.
+  EOT
+  type        = string
+  default     = "prod"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]*$", var.user_storage_environment))
+    error_message = "user_storage_environment must be lowercase alphanumeric with hyphens, matching the user-storage module's environment names."
+  }
+}
+
 variable "alerts_topic_arn" {
   description = <<-EOT
     SNS topic the failure and missed-run alarms publish to. Owned by the root,

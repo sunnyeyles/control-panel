@@ -1,6 +1,7 @@
 import type { Db } from "@workspace/db"
+import type { BriefStore } from "@workspace/user-storage"
 
-import { runScheduledTask } from "./run-scheduled-task.ts"
+import { runBriefing } from "./run-briefing.ts"
 
 /**
  * The worker is no longer "the thing that runs at 09:00". It is "the thing that
@@ -12,8 +13,9 @@ import { runScheduledTask } from "./run-scheduled-task.ts"
  * Terraform is the tick itself, which is now the same for every job and so has
  * nothing left to drift.
  *
- * Platform-independent on purpose, like `run-scheduled-task.ts`: it takes a
- * `Db` rather than making one, so everything AWS-shaped stays in `index.ts`.
+ * Platform-independent on purpose, like `run-briefing.ts`: it takes a `Db` and
+ * a `BriefStore` rather than making either, so everything AWS-shaped stays in
+ * `index.ts`.
  */
 
 /**
@@ -55,6 +57,7 @@ export interface TickReport {
  */
 export async function runTick(
   db: Db,
+  briefs: BriefStore,
   now: Date = new Date()
 ): Promise<TickReport> {
   const startedAtMs = Date.now()
@@ -88,18 +91,18 @@ export async function runTick(
     report.claimed += 1
 
     try {
-      // Where the pipeline goes. `slot.scheduledFor` is the occurrence, and is
-      // what a brief's S3 partition day must be derived from — not the instant
-      // the run finishes, or a 23:30 slot completing after midnight files under
-      // a day its run row disagrees with.
-      await runScheduledTask()
+      // `slot.scheduledFor` is the occurrence, and is what the brief's S3
+      // partition day is derived from — not the instant the run finishes, or a
+      // 23:30 slot completing after midnight files under a day its run row
+      // disagrees with.
+      await runBriefing({ job, slot, briefs, artifacts: db.artifacts })
 
       await db.runs.finish(slot.runId)
       report.succeeded += 1
     } catch (error) {
       // Recorded, then carried. The row makes the failure queryable; the run
-      // report `runScheduledTask` already emitted keeps the diagnostics, and
-      // remains the only record if a run dies before it can write at all.
+      // report `runBriefing` already emitted keeps the diagnostics, and remains
+      // the only record if a run dies before it can write at all.
       await db.runs
         .fail(slot.runId, {
           message: error instanceof Error ? error.message : String(error),

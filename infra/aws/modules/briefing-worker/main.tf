@@ -5,13 +5,22 @@ locals {
   # line here rather than an edit inside the resource block, which keeps the
   # diff of "the worker learned about a new thing" small and obvious.
   #
-  # OPENAI_API_KEY and DATABASE_URL are deliberately absent: both values are
-  # fetched from Secrets Manager at cold start. Putting either here would place
-  # a secret in plan output, in state, and in the console's function
-  # configuration page.
+  # OPENAI_API_KEY, DATABASE_URL and TAVILY_API_KEY are deliberately absent: all
+  # three values are fetched from Secrets Manager at cold start. Putting any of
+  # them here would place a secret in plan output, in state, and in the
+  # console's function configuration page.
+  #
+  # The two USER_STORAGE_ variables are not secrets and so are passed directly.
+  # They are what `createS3UserObjectStore()` reads; AWS_REGION needs no entry
+  # because the Lambda runtime sets it, which keeps the region the function runs
+  # in and the region it writes to from being two facts that can disagree.
   environment = {
     OPENAI_SECRET_ID   = aws_secretsmanager_secret.openai.arn
     DATABASE_SECRET_ID = aws_secretsmanager_secret.database.arn
+    TAVILY_SECRET_ID   = aws_secretsmanager_secret.tavily.arn
+
+    USER_STORAGE_BUCKET_NAME = var.user_storage_bucket_name
+    USER_STORAGE_ENVIRONMENT = var.user_storage_environment
   }
 }
 

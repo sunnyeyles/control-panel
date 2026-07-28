@@ -14,15 +14,19 @@
     "lint": "eslint",
     "format": "prettier --write \"**/*.ts\"",
     "invoke": "node -e 'import(\"./dist/index.js\").then((m) => m.handler())'",
-    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "zip": "rm -f lambda.zip && cd dist && zip -qr ../lambda.zip ."
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1096.0",
     "@langchain/core": "^1.2.3",
     "@workspace/agent-tools": "workspace:*",
+    "@workspace/agents": "workspace:*",
     "@workspace/agents-core": "workspace:*",
-    "@workspace/db": "workspace:*"
+    "@workspace/db": "workspace:*",
+    "@workspace/user-storage": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22",
@@ -30,6 +34,7 @@
     "@workspace/typescript-config": "workspace:*",
     "esbuild": "^0.25.0",
     "eslint": "^9",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

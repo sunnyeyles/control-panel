@@ -7,7 +7,7 @@ and the alarms that notice when it stops.
 EventBridge Scheduler ──assumes role──► Lambda (nodejs22.x, arm64)
   cron(0 9 * * ? *) UTC                   │
   flexible window OFF                     ├─► Secrets Manager  (GetSecretValue at cold start)
-  retries = 0                             ├─► CloudWatch Logs  (one proof-run JSON line)
+  retries = 0                             ├─► CloudWatch Logs  (one briefing-run JSON line)
                                           └─► api.openai.com   (no VPC)
 
 CloudWatch alarms ──► alerts_topic_arn (the root's SNS topic)

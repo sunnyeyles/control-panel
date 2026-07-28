@@ -1,41 +1,65 @@
 # Daily Briefing Platform
 
 The single-user platform this repo is growing toward: a scheduled agent
-produces a daily briefing, and the dashboard surfaces it. Today the scaffold,
-the deployed worker, and the S3 storage layer exist; the briefing itself does
-not.
+produces a daily job-search briefing, and the dashboard surfaces it. Today the
+scaffold, the deployed worker, the S3 storage layer, and one end-to-end
+briefing path exist; the dashboard shows none of it yet.
 
 ## Language
 
 **Briefing**:
-The daily digest the real agent will eventually produce: several search
-agents fan out over one fixed topic using a Tavily search tool, an
-orchestrator agent synthesizes their findings into a single markdown file,
-and the worker writes it through `@workspace/user-storage`'s brief store to
-S3 — landing there is the success signal. Out of scope for the current
-foundation work (which proves the pipeline with a trivial task instead); the
-shape is decided but nothing here is built yet.
+The digest a scheduled run produces: a **Scout** searches the web for job
+postings matching the candidate's **Search Criteria**, a **Brief Writer** turns
+the resulting **Findings** into a single markdown file, and the worker writes it
+through `@workspace/user-storage`'s brief store to S3 — landing there is the
+success signal. Built and running.
 
-**Search Agent**:
-One of the fan-out agents in a briefing run; searches the internet on the
-fixed topic via Tavily and reports findings to the orchestrator.
+**Scout**:
+The agent that searches for postings and reports **Findings**. Carries the
+search tool and nothing else, so it has no way to write anything: "a scraper
+returns data and performs no side effects" is a property of its tool set, not a
+line in its prompt. Today there is one; a later change fans out across several
+and merges their results.
+_Avoid_: scraper, crawler, search agent
 
-**Orchestrator** (briefing context):
-The agent that synthesizes all search agents' findings into the briefing's
-single markdown file. Not to be confused with the LangGraph runtime in
+**Brief Writer**:
+The agent that renders **Findings** into the briefing's markdown. Has no tools
+at all, so it cannot look anything up and cannot supplement thin findings with
+something it half-remembers. Not to be confused with the LangGraph runtime in
 `agents-core`.
+_Avoid_: synthesiser, orchestrator
 
-**Proof Run**:
-One scheduled execution of the trivial agent task that proves the AWS
-foundation works end to end. Deliberately not a briefing.
-_Avoid_: heartbeat, smoke test, ping
+**Findings**:
+The scout's output and the writer's input: a validated list of **Postings**
+plus optional notes, defined by `FindingsSchema` in `@workspace/agents`. The
+hand-off travels as JSON in a message and is parsed before the writer sees it —
+that validation is the point of keeping the two agents apart, because data can
+be checked and prose cannot. An empty findings list is a legitimate result.
+
+**Posting**:
+One open job advertisement, with the URL a search actually returned. **Not** a
+`jobs` row — see **Job** below, which is the collision worth being careful
+about. A URL the scout assembled rather than received is a fabrication, and the
+schema rejects it.
+_Avoid_: job, listing, vacancy, opening
+
+**Search Criteria**:
+What a candidate is looking for — titles, locations, keywords, exclusions,
+preferred boards — held in `jobs.config` and interpreted by
+`apps/briefing-worker/src/job-search-config.ts`. The platform stores that column
+and never reads inside it, so the meaning lives with whatever runs the job.
+Filled in by hand today; the seam a resume extractor will eventually write to.
 
 **Job**:
-A thing to run on a cadence, and a row in `jobs`. Owns its own cron expression
-and IANA timezone — Postgres is the source of truth for cadence, not Terraform,
-so adding a job with a new cadence costs an INSERT rather than an apply. A job
-with no `next_run_at` is not scheduled; that one absence covers both paused and
-retired.
+A thing to run on a cadence, and a row in `jobs`. **Never an employment
+opportunity** — that is a **Posting**. The word is load-bearing in the schema
+(`jobs`, `job_id`, `dueJobs`, `JobStore`) and predates the job-search product,
+so the schema keeps it and prose must not borrow it back.
+
+Owns its own cron expression and IANA timezone — Postgres is the source of
+truth for cadence, not Terraform, so adding a job with a new cadence costs an
+INSERT rather than an apply. A job with no `next_run_at` is not scheduled; that
+one absence covers both paused and retired.
 
 **Tick**:
 The hourly invocation of the worker that asks the database which jobs are due
@@ -94,8 +118,9 @@ that is the point — the proxy is a routing concern, and the route is what must
 not be reachable by accident.
 
 **Run Report**:
-The single structured log line a proof run emits describing its outcome; the
-artifact a human queries to verify a run happened. A **Tick Report** is its
-per-tick counterpart, answering "was there anything to do" rather than "what
-happened in this run".
+The single structured log line a briefing run emits describing its outcome —
+`event: "briefing-run"`, carrying the search count, the model calls, and the
+object key. The artifact a human queries to verify a run happened. A **Tick
+Report** is its per-tick counterpart, answering "was there anything to do"
+rather than "what happened in this run".
 _Avoid_: run record, run log, result row

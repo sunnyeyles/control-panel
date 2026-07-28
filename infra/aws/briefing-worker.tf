@@ -24,6 +24,11 @@ module "briefing_worker" {
 
   schedule_enabled = var.schedule_enabled
 
+  # From the user-storage stack's output rather than restated here, so the two
+  # cannot disagree about which bucket exists. This reference is also what makes
+  # Terraform build the bucket before the function that writes to it.
+  user_storage_bucket_name = module.user_storage.bucket_name
+
   # The shared topic, created in alerting.tf. The module states which alarms
   # exist; where they are delivered is the root's business.
   alerts_topic_arn = aws_sns_topic.alerts.arn
@@ -54,7 +59,8 @@ module "briefing_worker" {
 # environment's briefs policy is attached rather than a named one, so this
 # survives a second environment being declared without an edit here — which
 # environment the worker writes to is `USER_STORAGE_ENVIRONMENT` on the
-# function, not something decided at attachment time.
+# function (the module's `user_storage_environment`), not something decided at
+# attachment time.
 resource "aws_iam_role_policy_attachment" "worker_user_storage" {
   for_each = {
     for key, arn in module.user_storage.kind_access_policy_arns :
