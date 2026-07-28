@@ -59,6 +59,40 @@ A run with no `scheduled_for` is ad-hoc: it occupies no slot, and any number of
 them may exist for one job.
 _Avoid_: execution, attempt, task run
 
+**Account**:
+The identity someone signs in with, held by Neon Auth in the `neon_auth`
+schema of this same database. Neon owns its shape; we never write to it. An
+account exists as soon as someone completes an OAuth flow — having one says
+nothing about whether they are allowed in.
+_Avoid_: login, profile, credentials
+
+**User**:
+The platform identity, and a row in `users`. What `jobs.user_id` references
+and what becomes the `userId` segment of every S3 object key, which is why it
+stays a uuid this repo generates. Deliberately carries no name or email —
+those live on the **Account**, and `users.auth_user_id` is the one link
+between the two.
+
+The two are not one thing wearing two hats: a user may exist with no account
+(the worker creates owners that never sign in), and an account may exist with
+no user (someone signed in but is not on the allowlist, so nothing was ever
+minted for them).
+
+**Allowlist**:
+The set of email addresses permitted past the gate, read from
+`AUTH_ALLOWED_EMAILS`. Signup is closed and this is what closes it — Neon Auth
+will happily create an account for anyone who completes an OAuth flow, so
+being refused happens on our side, on every request. An unset list refuses
+everyone.
+_Avoid_: whitelist, approved users, invite list
+
+**Gate**:
+The two layers that together refuse an anonymous request: `proxy.ts`, which
+matches everything but static assets and so is closed by default, and the
+authoritative check inside the route or page. Neither is sufficient alone, and
+that is the point — the proxy is a routing concern, and the route is what must
+not be reachable by accident.
+
 **Run Report**:
 The single structured log line a proof run emits describing its outcome; the
 artifact a human queries to verify a run happened. A **Tick Report** is its

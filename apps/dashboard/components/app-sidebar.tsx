@@ -23,11 +23,6 @@ import {
 } from "lucide-react"
 
 const data = {
-  user: {
-    name: "Sunny",
-    email: "sunnyeyles@gmail.com",
-    avatar: "",
-  },
   navMain: [
     {
       title: "Assistant",
@@ -49,7 +44,23 @@ const data = {
   ],
 }
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+/**
+ * The signed-in person, passed down from the page rather than read here.
+ *
+ * This is a client component and the session lives on the server, so the page —
+ * which is already `force-dynamic` for exactly this reason — resolves it once
+ * and hands it over.
+ */
+export interface SidebarUser {
+  name: string
+  email: string
+  avatar?: string | undefined
+}
+
+export function AppSidebar({
+  user,
+  ...props
+}: React.ComponentProps<typeof Sidebar> & { user: SidebarUser }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
@@ -72,7 +83,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <NavUser user={user} />
       </SidebarFooter>
     </Sidebar>
   )

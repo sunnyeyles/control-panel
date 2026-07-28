@@ -6,7 +6,10 @@
     "OPENAI_SECRET_ID",
     "DATABASE_URL",
     "DATABASE_URL_UNPOOLED",
-    "DATABASE_SECRET_ID"
+    "DATABASE_SECRET_ID",
+    "NEON_AUTH_BASE_URL",
+    "NEON_AUTH_COOKIE_SECRET",
+    "AUTH_ALLOWED_EMAILS"
   ],
   "tasks": {
     "build": {

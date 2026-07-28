@@ -81,6 +81,9 @@ terraform.rc
 # vercel
 .vercel
 
+# neon (linked project/branch ids, written by `neon link` / `neon checkout`)
+.neon
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

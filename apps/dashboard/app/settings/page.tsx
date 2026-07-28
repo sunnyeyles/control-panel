@@ -1,10 +1,21 @@
+import { redirect } from "next/navigation"
+
 import { AppSidebar } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { getCurrentUser } from "@/lib/auth/current-user"
 import { Label } from "@workspace/ui/components/label"
 import { SidebarInset, SidebarProvider } from "@workspace/ui/components/sidebar"
 
-export default function SettingsPage() {
+/** Required of any server component reading the session — it depends on cookies. */
+export const dynamic = "force-dynamic"
+
+export default async function SettingsPage() {
+  const user = await getCurrentUser()
+
+  if (user.status === "anonymous") redirect("/auth/sign-in")
+  if (user.status === "refused") redirect("/auth/refused")
+
   return (
     <SidebarProvider
       style={
@@ -14,7 +25,7 @@ export default function SettingsPage() {
         } as React.CSSProperties
       }
     >
-      <AppSidebar />
+      <AppSidebar user={user} />
       <SidebarInset className="h-svh overflow-hidden">
         <SiteHeader title="Settings" />
         <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
