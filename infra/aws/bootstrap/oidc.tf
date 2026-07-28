@@ -32,6 +32,24 @@ resource "aws_iam_openid_connect_provider" "github" {
   #   openssl s_client -servername token.actions.githubusercontent.com \
   #     -showcerts -connect token.actions.githubusercontent.com:443
   thumbprint_list = []
+
+  # And ignored after creation, because AWS does not leave the list empty. It
+  # populates a thumbprint of its own accord, immediately, every time — so
+  # without this every future `apply` of this root reports "1 to change",
+  # removes it, and has it back before the next plan. The drift never
+  # converges.
+  #
+  # That matters more than the noise: this root is applied by hand and rarely,
+  # so "no changes" is the signal that the file and the account agree. A diff
+  # that is always present is one nobody reads, and the day it says something
+  # else it will be skimmed past too.
+  #
+  # Ignoring is safe precisely because the value is not load-bearing — see the
+  # comment above on why the list is empty to begin with. If a thumbprint ever
+  # does need pinning, this block is what has to come off first.
+  lifecycle {
+    ignore_changes = [thumbprint_list]
+  }
 }
 
 data "aws_iam_policy_document" "deploy_trust" {
