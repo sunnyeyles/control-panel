@@ -1,79 +1,156 @@
 # @workspace/briefing-worker
 
-A scheduled Azure Functions timer that runs one agent task per day at 09:00 UTC.
+An AWS Lambda invoked **hourly** by EventBridge Scheduler. It is not "the thing
+that runs at 09:00" — it is "the thing that runs every hour and asks what is
+due".
 
-Today that task is a **proof task**: it asks an agent for the current UTC time
-using a single tool, and its only purpose is to prove the deployment foundation
-works end to end — secret delivery, outbound HTTPS, the built `dist/` of the
-agent packages resolving at runtime, and a full model → tools → model cycle
-through the LangGraph graph. The real briefing replaces the body of
-`runScheduledTask.ts` later; nothing else has to move.
+Each invocation is a **tick**: it loads its secrets, asks `@workspace/db` which
+jobs have reached their slot, claims each one, runs it, and records the outcome.
+A tick that finds nothing due is a success.
+
+A job's own cadence lives in Postgres, as `jobs.schedule_cron` and
+`jobs.schedule_timezone`, so adding a job with a different cadence costs an
+INSERT rather than a Terraform apply. What stayed in Terraform is the tick,
+which is the same for every job and therefore has nothing left to drift.
+
+Today the work a claimed job performs is still a **proof task**: it asks an
+agent for the current UTC time using a single tool, and its only purpose is to
+prove the deployment foundation works end to end — secret delivery, outbound
+HTTPS, the built `dist/` of the agent packages resolving at runtime, and a full
+model → tools → model cycle through the LangGraph graph. The real briefing
+replaces the body of `run-scheduled-task.ts` later; nothing else has to move.
 
 ## Layout
 
 ```
-src/functions/scheduledRun.ts   shallow — binds a schedule to the task
-src/runScheduledTask.ts         deep — owns the task and its success contract
-src/index.ts                    entry point; importing a trigger registers it
-host.json                       Functions host config (source of truth)
-build.mjs                       esbuild bundle + deploy-root assembly
-local.settings.json             gitignored; local `func start` settings
+src/index.ts               shallow — the Lambda handler, and the only AWS-aware file
+src/run-tick.ts            deep — claim, run, record; one invocation's worth of work
+src/run-scheduled-task.ts  deep — owns the task and its success contract
+build.mjs                  esbuild bundle + deploy-root assembly
 ```
 
-The split between the two `src` modules is the point of the design: the
-schedule and the Functions binding never change when the task changes.
+The split is the point of the design: neither `run-tick.ts` nor
+`run-scheduled-task.ts` knows where it runs, so both are testable and portable.
+Everything platform-shaped — the handler signature and fetching secrets — lives
+in `index.ts`.
+
+`runTick` takes a `Db` rather than constructing one, for the same reason.
+
+**Due jobs are run sequentially in one invocation.** Fanning out would mean a
+second Lambda, a second set of permissions and a second failure mode, bought to
+parallelise a list that is usually empty. The function timeout bounds it, and
+`dueJobs()` is limited, so a backlog is worked oldest-slot-first across several
+ticks rather than attempted all at once.
+
+The schedule is **not** in this package. It lives in
+`infra/aws/modules/briefing-worker/schedule.tf`, which keeps the tick reviewable
+in a diff rather than drifting invisibly in console configuration.
+
+## Connections and secrets
+
+Two secrets, both fetched from Secrets Manager at cold start and cached at
+module scope: `OPENAI_SECRET_ID` and `DATABASE_SECRET_ID`. Neither value is a
+Lambda environment variable — that would put it in plan output, in state, and on
+the console's function configuration page.
+
+The **connection** is deliberately not cached that way. A secret is a string and
+stays valid; a socket does not. The gap between ticks is an hour and Neon
+autosuspends after five minutes, so a reused connection is dead by the next
+invocation as the default outcome — hence one `createDb()` per invocation,
+closed in a `finally`.
+
+Migrations do not run here. Every cold start would race every other one for a
+schema it does not need; see `packages/db/README.md`.
 
 ## Commands
 
 ```bash
 pnpm turbo build --filter=@workspace/briefing-worker      # bundle to dist/
 pnpm turbo typecheck --filter=@workspace/briefing-worker
-pnpm --filter=@workspace/briefing-worker zip              # dist/ -> functionapp.zip
-pnpm --filter=@workspace/briefing-worker start            # func start, local host
+pnpm turbo zip --filter=@workspace/briefing-worker        # dist/ -> lambda.zip
+pnpm --filter=@workspace/briefing-worker invoke           # run the handler locally
 ```
 
-Running locally needs `OPENAI_API_KEY` in the environment and an Azure Storage
-emulator for the timer's checkpointing:
+Running locally needs `OPENAI_API_KEY` and `DATABASE_URL` in the environment and
+**nothing else** — no emulator, no AWS credentials, no local host:
 
 ```bash
-pnpm dlx azurite --silent --location /tmp/azurite &
 export OPENAI_API_KEY=...
-pnpm --filter=@workspace/briefing-worker build
-pnpm --filter=@workspace/briefing-worker start
+export DATABASE_URL=...            # the pooled endpoint
+pnpm turbo build --filter=@workspace/briefing-worker
+pnpm --filter=@workspace/briefing-worker invoke
 ```
 
-A timer will not fire on demand, so trigger a run through the admin endpoint:
+That works because `loadSecret()` short-circuits when the target variable is
+already set, so the Secrets Manager call never happens. It is also the escape
+hatch if Secrets Manager is unreachable but the values are known.
+
+Every invocation prints one JSON `tick` line — `due`, `claimed`, `skipped`,
+`succeeded`, `failed` — and one `proof-run` line per job that was actually
+claimed. A tick with `"due":0` is a success and exits 0. Any failed job makes
+the process exit non-zero, which is what produces the `Errors` datapoint the
+alarm watches.
+
+## Forcing a run in AWS
 
 ```bash
-curl -X POST http://localhost:7071/admin/functions/scheduledRun \
-  -H 'Content-Type: application/json' -d '{"input":""}'
+aws lambda invoke --function-name briefing-worker \
+  --cli-binary-format raw-in-base64-out --payload '{}' /dev/stdout
 ```
 
-Success prints one JSON `proof-run` line and the host logs `Succeeded`; failure
-prints one with `"outcome":"failure"` and the host logs `Failed`.
+Read the result in CloudWatch Logs Insights:
+
+```
+fields @timestamp, @message
+| filter @message like /"event":"tick"/ or @message like /"event":"proof-run"/
+| sort @timestamp desc
+| limit 40
+```
+
+A healthy hour with nothing scheduled is one `tick` line with `"due":0` and no
+`proof-run` line at all — which is why the tick line exists. When a job does
+run, good looks like `"outcome":"success"` with `"llmCalls":2`. Two calls is the
+number that matters: it means model → tool → model, rather than the model
+answering from memory without touching the tool.
+
+`"skipped"` above zero is not an error. It means another party already held the
+slot — an overlapping tick, or a manual invoke landing mid-tick — and the job
+was correctly left alone.
 
 ## Things that are load-bearing and look like they are not
 
-**`packageManager` in `package.json`.** azd detects the package manager from
-this field. Without it azd restores the service with `npm install`, which fails
-outright on this repo's `workspace:*` dependencies
-(`npm error EUNSUPPORTEDPROTOCOL`). It is a deployment dependency, not a note
-about local tooling.
+**The `createRequire` banner in `build.mjs`.** Some transitive CommonJS in the
+LangChain stack calls `require` at load time, which an ESM bundle has no binding
+for. It sits among the bundler options and reads like tuning; it is not.
+Removing it breaks the bundle at import with an opaque
+`require is not defined`.
 
-**`dist/` is a deploy root, not compiler output.** `build.mjs` copies
-`host.json` in and generates a second, minimal `package.json` there, because
-the Functions v4 programming model locates the module that registers functions
-through `main`. `azure.yaml` points azd's `dist` at this folder, so the uploaded
-zip is exactly these files — and in particular never `node_modules`, whose pnpm
-symlinks do not survive run-from-package mounting.
+**`"type": "module"` in the generated `dist/package.json`.** It is what makes
+Lambda load `index.js` as ESM and find the named `handler` export. Without it
+the runtime treats the bundle as CommonJS and fails at import. There is
+deliberately no `main` — Lambda locates the entry from its own
+`handler = "index.handler"` setting.
 
-**`local.settings.json` is deliberately not copied into `dist/`.** Keeping it
-out is what stops local settings from reaching a deploy artifact.
+**`dist/` is a deploy root, not compiler output.** The zip is exactly its
+contents — in particular never `node_modules`, whose pnpm symlinks do not
+survive being zipped. That is why the bundle has no externals at all.
 
-**`@azure/functions-core` is the one esbuild external.** It is not an npm
-package; the Functions host injects it at runtime, so it cannot be bundled.
+**Nothing catches the throw.** `runScheduledTask()` emits its one-line report
+and rethrows, `runTick()` records the failure and rethrows after attempting
+every other due job, and the handler lets it through. That throw is what marks
+the invocation failed, which is what produces the `Errors` datapoint the alarm
+watches. Catching it would turn a broken run into a silent one — and writing the
+`failed` row is not a substitute, because a run that dies before it can write
+leaves no row at all.
 
-**App Insights sampling is off in `host.json`.** The starter enables it. The
-verification for this service is a single trace line per run, and a sampled-out
-line reads as "the run never started" — the exact false signal that check
-exists to catch. At one run per day there is nothing to sample anyway.
+**A claim that returns nothing means skip the job entirely.** Not run it, not
+retry it, not touch the row. Claiming is at-most-once by design and every
+duplicate occurrence is a paid LLM run.
+
+**`db.close()` is in a `finally`.** Lambda freezes the process rather than
+tearing it down, so a connection left open is one Neon keeps accounting for
+while nothing is using it.
+
+**Build before `terraform plan`.** Terraform reads `lambda.zip` with
+`filebase64sha256` at plan time, so a plan on a tree that has not been built
+fails with a file-not-found that reads like a Terraform bug.

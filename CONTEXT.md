@@ -1,8 +1,9 @@
 # Daily Briefing Platform
 
 The single-user platform this repo is growing toward: a scheduled agent
-produces a daily briefing, and the dashboard surfaces it. Today only the
-scaffold and the Azure-foundation plan (`.wayfinder/`) exist.
+produces a daily briefing, and the dashboard surfaces it. Today the scaffold,
+the deployed worker, and the S3 storage layer exist; the briefing itself does
+not.
 
 ## Language
 
@@ -10,10 +11,10 @@ scaffold and the Azure-foundation plan (`.wayfinder/`) exist.
 The daily digest the real agent will eventually produce: several search
 agents fan out over one fixed topic using a Tavily search tool, an
 orchestrator agent synthesizes their findings into a single markdown file,
-and the worker uploads it to Azure Blob Storage — landing there is the
-success signal. Out of scope for the current foundation work (which proves
-the pipeline with a trivial task instead); the shape is decided but nothing
-here is built yet.
+and the worker writes it through `@workspace/user-storage`'s brief store to
+S3 — landing there is the success signal. Out of scope for the current
+foundation work (which proves the pipeline with a trivial task instead); the
+shape is decided but nothing here is built yet.
 
 **Search Agent**:
 One of the fan-out agents in a briefing run; searches the internet on the
@@ -25,11 +26,42 @@ single markdown file. Not to be confused with the LangGraph runtime in
 `agents-core`.
 
 **Proof Run**:
-One scheduled execution of the trivial agent task that proves the Azure
+One scheduled execution of the trivial agent task that proves the AWS
 foundation works end to end. Deliberately not a briefing.
 _Avoid_: heartbeat, smoke test, ping
 
+**Job**:
+A thing to run on a cadence, and a row in `jobs`. Owns its own cron expression
+and IANA timezone — Postgres is the source of truth for cadence, not Terraform,
+so adding a job with a new cadence costs an INSERT rather than an apply. A job
+with no `next_run_at` is not scheduled; that one absence covers both paused and
+retired.
+
+**Tick**:
+The hourly invocation of the worker that asks the database which jobs are due
+and runs them. What lives in Terraform is the tick, not any job's schedule —
+the tick is the same for every job, so there is nothing left in it to drift.
+A tick that finds nothing due is a success.
+_Avoid_: poll, sweep, cron run
+
+**Run**:
+One execution of a job, and a row in `runs`. Carries its status
+(`running` → `succeeded` | `failed`, both terminal), the slot it occupied, and
+its timings. This is the queryable state: what the dashboard lists and what a
+filter runs against.
+
+Distinct from the **Run Report** below, which is the log line. The two
+complement each other and neither replaces the other — the row is queryable,
+the report keeps the diagnostics nothing will ever query, and the report is the
+only record left when a run dies before it can write a row.
+
+A run with no `scheduled_for` is ad-hoc: it occupies no slot, and any number of
+them may exist for one job.
+_Avoid_: execution, attempt, task run
+
 **Run Report**:
 The single structured log line a proof run emits describing its outcome; the
-artifact a human queries to verify a run happened.
+artifact a human queries to verify a run happened. A **Tick Report** is its
+per-tick counterpart, answering "was there anything to do" rather than "what
+happened in this run".
 _Avoid_: run record, run log, result row

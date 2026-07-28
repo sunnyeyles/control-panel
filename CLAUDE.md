@@ -25,25 +25,79 @@ pnpm turbo dev --filter=@workspace/dashboard   # apps/dashboard
 pnpm turbo typecheck --filter=@workspace/ui
 ```
 
-The scheduled worker has its own build and run story — an esbuild bundle, a
-local Azure Functions host, and azd for deployment. See
-`apps/briefing-worker/README.md` and `infra/README.md`; neither the Next.js
-commands above nor `pnpm dev` cover it.
+The scheduled worker has its own build and run story — an esbuild bundle and
+Terraform for deployment. See `apps/briefing-worker/README.md` and
+`infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
+cover it.
 
-There is **no test setup** in this repo — no test runner, no `test` task in `turbo.json`, no test script in any package. Do not invent test commands; if tests are needed, the framework has to be chosen and wired up first.
+Database migrations are also outside Turborepo, and are run by hand:
+
+```bash
+DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
+```
+
+**`DATABASE_URL_UNPOOLED`, not `DATABASE_URL`** — the runner takes a
+session-level advisory lock, and the pooled endpoint runs PgBouncer in
+transaction mode, which does not carry one across statements. Through the
+pooler the lock appears to be taken while holding nothing. Migrations are
+forward-only; there are no down migrations. See `packages/db/README.md`.
+
+Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
+it**. One root holds two stacks — the worker and user storage — sharing a single
+state file, plus `bootstrap/` for the state bucket and the CI deploy role.
+Terraform runs directly:
+
+```bash
+terraform -chdir=infra/aws fmt -recursive -check
+terraform -chdir=infra/aws init -backend=false && terraform -chdir=infra/aws validate
+terraform -chdir=infra/aws test
+```
+
+`test` is the real check and needs no credentials: the suite under
+`infra/aws/tests/` runs a mocked plan and asserts on what it produces. Run
+`init` first — it installs the modules the run blocks target.
+
+`plan` is where credentials start being needed: it calls STS while configuring
+the provider and fails before reaching a resource. It also reads `lambda.zip` at
+plan time, so build before planning.
+
+Stack configuration lives in the committed `infra/aws/terraform.tfvars`, so
+`apply` takes no `-var` flags. Adding a stack means adding a
+`<stack>.{tf,variables.tf,outputs.tf}` triple and one line there — see
+`infra/aws/README.md`.
+
+Tests are their own task, and a thin one:
+
+```bash
+pnpm test        # turbo test
+```
+
+**Only `@workspace/user-storage` and `@workspace/db` have tests.** Vitest is the
+runner and is a devDependency of those two alone; `turbo test` is a no-op in the
+other six workspaces. Do not assume a package is covered because the command
+exits 0. Adding tests to another workspace means adding `vitest` to it and a
+`test` script — the `test` task in `turbo.json` is already there.
+
+`@workspace/db` splits its suite by whether the thing under test needs Postgres
+to _be_ Postgres. `schedule.test.ts` needs nothing. `stores.test.ts` needs a real
+database and **skips itself when `DATABASE_URL_UNPOOLED` is unset**, so a clean
+`pnpm test` locally does not mean the claim race, the CHECK constraints, or the
+partial unique index were exercised — only CI, with a database, exercises those.
 
 ## Layout
 
-| Path                         | Package name                   | Role                                                        |
-| ---------------------------- | ------------------------------ | ----------------------------------------------------------- |
-| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                          |
-| `apps/briefing-worker`       | `@workspace/briefing-worker`   | Azure Functions timer. Bundled by esbuild, deployed by azd. |
-| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.    |
-| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.               |
-| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.      |
-| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.     |
-| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.          |
-| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.           |
+| Path                         | Package name                   | Role                                                                |
+| ---------------------------- | ------------------------------ | ------------------------------------------------------------------- |
+| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                                  |
+| `apps/briefing-worker`       | `@workspace/briefing-worker`   | AWS Lambda, hourly tick. Bundled by esbuild, deployed by Terraform. |
+| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.            |
+| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.                       |
+| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.              |
+| `packages/db`                | `@workspace/db`                | Postgres: jobs, runs, artifacts. The only place SQL lives.          |
+| `packages/user-storage`      | `@workspace/user-storage`      | S3 storage for per-user data, behind an interface.                  |
+| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.             |
+| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.                  |
+| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.                   |
 
 ## Architecture
 
@@ -67,6 +121,14 @@ There is **no test setup** in this repo — no test runner, no `test` task in `t
 - **Both new packages use wildcard subpath exports** (`./*` → `./dist/*.js`). Adding `src/weather.ts` makes `@workspace/agent-tools/weather` importable with no config change — same spirit as the UI package's one-file-per-subpath rule, no barrel to update.
 - **Agents are exported as `createX()` factories, never as instances.** Building one constructs a model, which reads `OPENAI_API_KEY` and throws without it; a module-level instance would move that failure to import time and break any consumer that merely imports the module.
 - **Prefer per-tool imports over `allTools`.** A model picks worse as the tool list grows, so give an agent the tools its job needs.
+
+**`@workspace/user-storage` hides the AWS SDK behind one module.** `s3-user-object-store.ts` is the only file in the repo that imports `@aws-sdk/client-s3`. Everything else depends on the `UserObjectStore` interface — or, better, on the narrow `BriefStore` / `ResumeStore` facades over it, which know their kind's key shape and file types so a call site cannot get them wrong. Call `createS3UserObjectStore()` only at a composition root: same `createX()` factory rule as the agents, and for the same reason — constructing one reads configuration, so a module-level instance would move that failure to import time.
+
+Three things about that package are load-bearing and easy to undo by accident:
+
+- **Object keys are `{environment}/{userId}/{kind}/…tail.{ext}`, and `userId` sits above `kind` deliberately** — erasing a user is then one prefix, not one per kind. The segment validation in `keys.ts` is the ownership boundary, not a tidiness rule: an unvalidated `userId` of `../someone-else` addresses another user's prefix.
+- **Retention is driven by an object _tag_, not a key prefix.** S3 lifecycle filters take no wildcards, so with `userId` in the middle there is no prefix meaning "every user's briefs". Every object is tagged `kind=<kind>` at write time and the Terraform lifecycle rules filter on that — which is why the IAM policies must grant `s3:PutObjectTagging`, and why a kind added to `kinds.ts` without a matching `object_kinds` entry in Terraform silently gets no retention at all.
+- **Content types are derived from the extension, never accepted from the caller,** against a per-kind allowlist in `kinds.ts`. A caller-supplied media type would let a `.pdf` be stored as `text/html`. Uploaded kinds are also stored `Content-Disposition: attachment`.
 
 **Tailwind v4, single stylesheet, owned by the UI package.** There is no `tailwind.config.*` anywhere — v4 configures itself from CSS. The one source of truth is `packages/ui/src/styles/globals.css`; the app imports it as `@workspace/ui/globals.css` in `app/layout.tsx`. The app's `postcss.config.mjs` is a one-line re-export of the UI package's. Theme tokens, base colors, and animations belong in that stylesheet, not in the app.
 
@@ -94,4 +156,4 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 `.mcp.json` registers the LangChain docs and API-reference MCP servers, and `.claude/skills/` symlinks a set of vendored skills (tracked in `skills-lock.json`) into `.agents/skills/`.
 
-Earlier commits carried design documents — `CONTEXT.md` (a domain glossary) and `.wayfinder/` (numbered decision tickets) — for a local, single-user Gmail assistant with a Next.js dashboard and a Python/LangChain agent backend. Those files are deleted in the working tree and survive only in git history (`git show HEAD:CONTEXT.md`). Treat them as historical intent, not current spec; the working tree today is the scaffold described above.
+`CONTEXT.md` is the domain glossary — what "briefing", "proof run" and "run report" mean, and which words to avoid. `OVERVIEW.md` states the intended shape of the pipeline. Both describe a platform that is mostly still ahead of the code: the working tree today is the scaffold described above plus a deployed worker running a trivial proof task. Earlier commits carried more design material (a `.wayfinder/` ticket set, planning docs) that survives only in git history — historical intent, not current spec.
