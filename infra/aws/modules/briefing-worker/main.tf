@@ -11,8 +11,6 @@ locals {
   environment = {
     OPENAI_SECRET_ID = aws_secretsmanager_secret.openai.arn
   }
-
-  tags = merge(var.tags, { Component = "briefing-worker" })
 }
 
 # Declared before the function and depended on explicitly, because Lambda
@@ -24,7 +22,7 @@ resource "aws_cloudwatch_log_group" "worker" {
   name              = "/aws/lambda/${var.function_name}"
   retention_in_days = var.log_retention_days
 
-  tags = local.tags
+  tags = var.tags
 }
 
 resource "aws_lambda_function" "worker" {
@@ -52,7 +50,7 @@ resource "aws_lambda_function" "worker" {
     variables = local.environment
   }
 
-  tags = local.tags
+  tags = var.tags
 
   depends_on = [aws_cloudwatch_log_group.worker]
 }

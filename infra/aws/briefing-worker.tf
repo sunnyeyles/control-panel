@@ -1,18 +1,17 @@
-# The worker stack.
+# The briefing-worker stack: a Lambda, the schedule that fires it, the secret it
+# reads, and the alarms that notice when it stops.
 #
-# Kept in its own root file rather than added to main.tf so that the two stacks
-# sharing this root — brief storage and the briefing worker — never edit the
-# same file. Terraform reads every .tf in the directory as one configuration,
-# so this composes exactly as an extra block in main.tf would, without the
-# merge conflict.
+# One file per stack, and Terraform reads every .tf in the directory as one
+# configuration — so this composes exactly as an extra block in a shared file
+# would, without two stacks ever editing the same lines.
 
 locals {
   # Anchored to the root module rather than left relative, so a plan run from
   # the repository root and one run from inside this directory read the same
   # file. A variable default cannot call path.root, which is why this is a
-  # local and the variable defaults to null.
+  # local and the object field defaults to null.
   lambda_zip_path = coalesce(
-    var.lambda_zip_path,
+    var.briefing_worker.lambda_zip_path,
     "${path.root}/../../apps/briefing-worker/lambda.zip",
   )
 }
@@ -20,10 +19,18 @@ locals {
 module "briefing_worker" {
   source = "./modules/briefing-worker"
 
-  function_name    = var.function_name
-  lambda_zip_path  = local.lambda_zip_path
-  alert_email      = var.alert_email
+  function_name   = var.briefing_worker.function_name
+  lambda_zip_path = local.lambda_zip_path
+
   schedule_enabled = var.schedule_enabled
+
+  # The shared topic, created in alerting.tf. The module states which alarms
+  # exist; where they are delivered is the root's business.
+  alerts_topic_arn = aws_sns_topic.alerts.arn
+
+  # Not optional in practice — the deploy role may only create roles that carry
+  # it. See boundary.tf.
+  permissions_boundary_arn = data.aws_iam_policy.workload_boundary.arn
 
   tags = {
     Component = "briefing-worker"
@@ -42,15 +49,12 @@ module "briefing_worker" {
 # briefs, and a grant that also covers a user's uploaded documents is authority
 # it has no use for. In practice that means `prod:briefs`, not `prod`.
 #
-# The storage module has now merged, so this references it directly rather than
-# going through the placeholder variable that stood in while it was on its own
-# branch. The filter is what keeps the grant narrow: `kind_access_policy_arns`
-# is keyed `<environment>:<kind>`, and only the `:briefs` entries are taken.
-#
-# Every environment's briefs policy is attached, not just prod's, because one
-# worker deployment per environment reads this same root — which environment it
-# then writes to is `USER_STORAGE_ENVIRONMENT` on the function, not something
-# decided here.
+# The filter is what keeps the grant narrow: `kind_access_policy_arns` is keyed
+# `<environment>:<kind>`, and only the `:briefs` entries are taken. Every
+# environment's briefs policy is attached rather than a named one, so this
+# survives a second environment being declared without an edit here — which
+# environment the worker writes to is `USER_STORAGE_ENVIRONMENT` on the
+# function, not something decided at attachment time.
 resource "aws_iam_role_policy_attachment" "worker_user_storage" {
   for_each = {
     for key, arn in module.user_storage.kind_access_policy_arns :

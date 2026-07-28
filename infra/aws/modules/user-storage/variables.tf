@@ -15,7 +15,12 @@ variable "environments" {
     policy generated for `prod` cannot read or write `dev/`.
   EOT
   type        = list(string)
-  default     = ["dev", "prod"]
+
+  # No default, deliberately. The caller's root declares one — and passing
+  # `null` to a module input does not fall back to a module default, so a
+  # default here would be dead code that nonetheless reads as authoritative.
+  # Requiring the value also means no deployment gets an environment layout it
+  # never chose.
 
   validation {
     condition     = length(var.environments) > 0
@@ -91,7 +96,7 @@ variable "attach_to_role_names" {
 }
 
 variable "tags" {
-  description = "Tags applied to every resource this module creates."
+  description = "Tags applied verbatim to every resource this module creates. The module adds nothing of its own — the root owns the tag taxonomy, so `Component` comes from there rather than being merged in here where it could disagree."
   type        = map(string)
   default     = {}
 }

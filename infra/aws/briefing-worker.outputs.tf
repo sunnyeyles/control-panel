@@ -18,7 +18,3 @@ output "worker_openai_secret_arn" {
   value       = module.briefing_worker.openai_secret_arn
 }
 
-output "worker_alerts_topic_arn" {
-  description = "SNS topic for worker alarms. The email subscription needs confirming before anything is delivered."
-  value       = module.briefing_worker.alerts_topic_arn
-}

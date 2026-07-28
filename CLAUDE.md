@@ -30,19 +30,29 @@ Terraform for deployment. See `apps/briefing-worker/README.md` and
 `infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
 cover it.
 
-Infrastructure is **two stacks mid-migration**, and Turborepo covers neither.
-`infra/aws/` is Terraform for AWS and is where the worker deploys from;
-`infra/` is the Bicep-and-`azd` Azure deployment it replaces, kept until cutover
-so rollback stays a revert. Terraform runs directly:
+Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
+it**. One root holds two stacks — the worker and user storage — sharing a single
+state file, plus `bootstrap/` for the state bucket and the CI deploy role.
+Terraform runs directly:
 
 ```bash
 terraform -chdir=infra/aws fmt -recursive -check
 terraform -chdir=infra/aws init -backend=false && terraform -chdir=infra/aws validate
+terraform -chdir=infra/aws test
 ```
 
-`validate` is the ceiling without AWS credentials — `plan` calls STS while
-configuring the provider and fails before reaching a resource. `plan` also reads
-`lambda.zip` at plan time, so build before planning.
+`test` is the real check and needs no credentials: the suite under
+`infra/aws/tests/` runs a mocked plan and asserts on what it produces. Run
+`init` first — it installs the modules the run blocks target.
+
+`plan` is where credentials start being needed: it calls STS while configuring
+the provider and fails before reaching a resource. It also reads `lambda.zip` at
+plan time, so build before planning.
+
+Stack configuration lives in the committed `infra/aws/terraform.tfvars`, so
+`apply` takes no `-var` flags. Adding a stack means adding a
+`<stack>.{tf,variables.tf,outputs.tf}` triple and one line there — see
+`infra/aws/README.md`.
 
 Tests are their own task, and a thin one:
 
@@ -127,4 +137,4 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 `.mcp.json` registers the LangChain docs and API-reference MCP servers, and `.claude/skills/` symlinks a set of vendored skills (tracked in `skills-lock.json`) into `.agents/skills/`.
 
-Earlier commits carried design documents — `CONTEXT.md` (a domain glossary) and `.wayfinder/` (numbered decision tickets) — for a local, single-user Gmail assistant with a Next.js dashboard and a Python/LangChain agent backend. Those files are deleted in the working tree and survive only in git history (`git show HEAD:CONTEXT.md`). Treat them as historical intent, not current spec; the working tree today is the scaffold described above.
+`CONTEXT.md` is the domain glossary — what "briefing", "proof run" and "run report" mean, and which words to avoid. `OVERVIEW.md` states the intended shape of the pipeline. Both describe a platform that is mostly still ahead of the code: the working tree today is the scaffold described above plus a deployed worker running a trivial proof task. Earlier commits carried more design material (a `.wayfinder/` ticket set, planning docs) that survives only in git history — historical intent, not current spec.

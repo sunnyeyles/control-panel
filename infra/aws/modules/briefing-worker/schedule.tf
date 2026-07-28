@@ -27,9 +27,8 @@ resource "aws_scheduler_schedule" "daily" {
     # Zero, which is not the default. Scheduler retries 185 times over 24 hours
     # unless told otherwise, and for an LLM job that means re-billing a failing
     # run all day and emitting 186 `proof-run` failure lines where the daily
-    # check expects exactly one. A failed run waits for tomorrow's slot — the
-    # same decision the Azure deployment recorded, kept deliberately rather
-    # than inherited by accident.
+    # check expects exactly one. A failed run waits for tomorrow's slot, which
+    # is a deliberate choice rather than the default going unnoticed.
     retry_policy {
       maximum_retry_attempts = 0
     }

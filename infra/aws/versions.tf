@@ -1,5 +1,9 @@
 terraform {
-  required_version = ">= 1.9"
+  # 1.11, not 1.9, and backend.tf is why: `use_lockfile` is a 1.11 argument and
+  # 1.9 rejects it at `init` with an unsupported-argument error rather than
+  # falling back. Pinning the floor here makes that a version check instead of a
+  # confusing init failure.
+  required_version = ">= 1.11"
 
   required_providers {
     aws = {
@@ -7,10 +11,4 @@ terraform {
       version = "~> 6.0"
     }
   }
-
-  # No backend block, deliberately. There is no state bucket yet, and a backend
-  # pointing at one that does not exist makes `terraform init` fail rather than
-  # degrade — which would block `validate` in CI for everyone. State is local
-  # until the bootstrap described in README.md happens; see the same file for
-  # the block to paste in afterwards.
 }

@@ -1,7 +1,10 @@
 variable "function_name" {
   description = "Name of the Lambda function. Also prefixes the schedule, the roles and the secret, so every resource in this module is findable from it."
   type        = string
-  default     = "briefing-worker"
+
+  # No default: the caller's root declares one, and a default in both places
+  # would be dead code here — passing `null` to a module input does not fall
+  # back to a module default.
 
   validation {
     condition     = can(regex("^[a-zA-Z0-9-_]{1,64}$", var.function_name))
@@ -24,16 +27,16 @@ variable "schedule_expression" {
   description = <<-EOT
     When the worker runs, as an EventBridge Scheduler expression.
 
-    The default is the Azure NCRONTAB `0 0 9 * * *` translated: AWS has no
-    seconds field and requires `?` in exactly one of day-of-month or
-    day-of-week, so daily at 09:00 becomes `cron(0 9 * * ? *)`.
+    Note the dialect: EventBridge has no seconds field and requires `?` in
+    exactly one of day-of-month or day-of-week, so daily at 09:00 is
+    `cron(0 9 * * ? *)` rather than the five-field crontab it resembles.
   EOT
   type        = string
   default     = "cron(0 9 * * ? *)"
 }
 
 variable "schedule_timezone" {
-  description = "Timezone the schedule is evaluated in. UTC matches the Azure timer, which had no timezone setting and so was UTC by construction."
+  description = "Timezone the schedule is evaluated in. UTC by default, so the daily slot does not move under daylight saving and the schedule agrees with the UTC timestamps in the run reports."
   type        = string
   default     = "UTC"
 }
@@ -60,7 +63,7 @@ variable "timeout" {
     Invocation timeout in seconds. The agent loop is bounded at 10 LLM calls;
     at a worst-case 30s each, a 300s ceiling would cut off a legitimately slow
     run, and a truncated run looks identical to a hung one. 600 leaves headroom
-    under Lambda's 900s maximum and is a tightening of Azure's 30-minute limit.
+    under Lambda's 900s hard maximum without letting a wedged run burn it.
   EOT
   type        = number
   default     = 600
@@ -72,30 +75,46 @@ variable "timeout" {
 }
 
 variable "log_retention_days" {
-  description = "How long run reports are kept, matching the 30 days Log Analytics was configured with."
+  description = "How long run reports are kept. 30 days is long enough to answer 'did it run, and what happened' for any slot still worth asking about."
   type        = number
   default     = 30
 }
 
-variable "alert_email" {
+variable "alerts_topic_arn" {
   description = <<-EOT
-    Address that receives failure and missed-run alarms.
+    SNS topic the failure and missed-run alarms publish to. Owned by the root,
+    which runs one topic for every stack.
 
     No default, on purpose. Alerting that silently switches itself off is the
-    exact failure the alarm exists to catch, so an unset value must break the
-    apply rather than quietly produce an unmonitored worker. AWS sends a
-    confirmation mail that must be clicked before anything is delivered.
+    exact failure these alarms exist to catch, so an unset value must break the
+    apply rather than quietly produce an unmonitored worker.
   EOT
   type        = string
 
   validation {
-    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.alert_email))
-    error_message = "alert_email must be a single valid email address."
+    condition     = can(regex("^arn:aws[a-z-]*:sns:", var.alerts_topic_arn))
+    error_message = "alerts_topic_arn must be an SNS topic ARN."
   }
 }
 
+variable "permissions_boundary_arn" {
+  description = <<-EOT
+    Permissions boundary applied to both roles this module creates.
+
+    Not decoration. The role that deploys this module holds `iam:CreateRole` and
+    `iam:AttachRolePolicy`, and its own policy only permits those when the target
+    carries this boundary — so leaving this null does not produce an unbounded
+    role, it produces an access-denied on the next apply.
+
+    Null is still allowed, for using this module from a root that governs IAM
+    some other way.
+  EOT
+  type        = string
+  default     = null
+}
+
 variable "tags" {
-  description = "Tags applied to every resource this module creates."
+  description = "Tags applied verbatim to every resource this module creates. The module adds nothing of its own — the root owns the tag taxonomy, so `Component` comes from there rather than being merged in here where it could disagree."
   type        = map(string)
   default     = {}
 }

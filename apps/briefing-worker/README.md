@@ -18,15 +18,14 @@ src/run-scheduled-task.ts  deep — owns the task and its success contract
 build.mjs                  esbuild bundle + deploy-root assembly
 ```
 
-The split between the two `src` modules is the point of the design, and the
-migration off Azure is what proved it: `run-scheduled-task.ts` moved between
-cloud providers without a single line changing. Everything platform-shaped —
-the handler signature and fetching the API key — lives in `index.ts`.
+The split between the two `src` modules is the point of the design:
+`run-scheduled-task.ts` knows nothing about where it runs, so the task is
+testable and portable. Everything platform-shaped — the handler signature and
+fetching the API key — lives in `index.ts`.
 
 The schedule is **not** in this package. It lives in
 `infra/aws/modules/briefing-worker/schedule.tf`, which keeps it reviewable in a
-diff rather than drifting invisibly in console configuration — the same property
-the Azure NCRONTAB constant had, moved rather than lost.
+diff rather than drifting invisibly in console configuration.
 
 ## Commands
 
@@ -77,8 +76,8 @@ answering from memory without touching the tool.
 
 **The `createRequire` banner in `build.mjs`.** Some transitive CommonJS in the
 LangChain stack calls `require` at load time, which an ESM bundle has no binding
-for. It sits next to what used to be the Azure external and looks like part of
-it; it is not. Removing it breaks the bundle at import with an opaque
+for. It sits among the bundler options and reads like tuning; it is not.
+Removing it breaks the bundle at import with an opaque
 `require is not defined`.
 
 **`"type": "module"` in the generated `dist/package.json`.** It is what makes

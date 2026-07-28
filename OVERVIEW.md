@@ -26,11 +26,10 @@ The pipeline should run on a cron schedule and contain two stages:
 
 - The frontend and application are deployed on Vercel.
 - The application database is Neon Postgres.
-- Existing cloud infrastructure is managed with Terraform in the `infra/` directory.
-- The only existing cloud worker infrastructure is an Azure Function.
-- We are migrating the scheduled worker from Azure Functions to AWS Lambda.
-- Amazon EventBridge Scheduler will trigger the Lambda worker on a cron schedule.
-- Amazon S3 will privately store generated Markdown briefs.
+- All cloud infrastructure is managed with Terraform in the `infra/` directory.
+- The scheduled worker runs on AWS Lambda.
+- Amazon EventBridge Scheduler triggers the Lambda worker on a cron schedule.
+- Amazon S3 privately stores generated Markdown briefs.
 - Neon Postgres will store users, brief metadata, source records, job state, processing status, and S3 object keys.
 - AWS IAM will provide least-privilege access.
 - Secrets should use AWS Secrets Manager, SSM Parameter Store, or deployment-provided environment variables.

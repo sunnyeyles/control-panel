@@ -10,12 +10,36 @@ EventBridge Scheduler ──assumes role──► Lambda (nodejs22.x, arm64)
   retries = 0                             ├─► CloudWatch Logs  (one proof-run JSON line)
                                           └─► api.openai.com   (no VPC)
 
-CloudWatch alarms ──► SNS topic ──► email
+CloudWatch alarms ──► alerts_topic_arn (the root's SNS topic)
   Errors >= 1        (a run failed)
-  Invocations < 1    (a run never happened)
+  Invocations < 1    (a run never happened — only while the schedule is on)
 ```
 
+## Required inputs worth reading before use
+
+Both are required and neither has a default, because a default would be silently
+wrong rather than obviously missing:
+
+- **`alerts_topic_arn`** — where the alarms publish. This module creates no SNS
+  topic and no subscription; one topic serves every stack in the root, and a
+  per-stack topic would mean a per-stack confirmation mail to the same person.
+- **`function_name`** — also prefixes the schedule, both roles and the secret, so
+  every resource here is findable from it. The caller's root declares the
+  default; passing `null` to a module input does _not_ fall back to a module
+  default, so a default in both places would be dead code here.
+
+`permissions_boundary_arn` is nominally optional and is not in practice. The role
+that deploys this module may only create roles carrying that boundary, so leaving
+it null produces an access-denied on apply rather than an unbounded role.
+
 ## What this module does not create
+
+**No SNS topic, and no email subscription.** Alerting is a property of the
+deployment rather than of any one stack, so the root owns the topic and hands
+this module its ARN. That is also why the missed-run alarm is gated on
+`schedule_enabled`: it treats no invocation as breaching, so leaving it in place
+while the worker is deliberately off duty would hold it permanently in ALARM —
+and it is the only alarm that catches silence.
 
 **No IAM role for storage, and no bucket.** Briefs live in the bucket the
 `user-storage` module owns. That module creates no roles and this one creates
@@ -66,3 +90,15 @@ obvious one only covers half the problem:
 
 Together they preserve the contract the daily check depends on: exactly one
 `proof-run` line per slot, and a failed run waits for tomorrow.
+
+## If a second scheduled worker appears
+
+This module is not yet a reusable `scheduled-lambda-job`, and deliberately so.
+It hardcodes one secret and one environment variable name, so a second worker
+cannot use it as-is — but there is one caller today, and generalising now would
+mean designing an interface against an imagined second consumer rather than a
+real one.
+
+The change is mechanical when the trigger arrives: lift `secrets` to a map input
+and the rest of the module already generalises. Do it then, against the two
+actual callers.

@@ -40,18 +40,12 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
-# azure functions local host settings (holds a local OPENAI_API_KEY)
-# kept until the azure stack is decommissioned; see infra/README.md
-local.settings.json
-
-# azure functions deploy artifact (built from dist/ on demand)
-functionapp.zip
-
-# azure developer cli (per-machine environment state, incl. resolved secrets)
-.azure/
-
 # lambda deploy artifact (built from dist/ on demand)
 lambda.zip
+# ...except the tiny fixture the terraform tests plan against. filebase64sha256
+# reads the zip at plan time, so the suite needs *a* file there and must not
+# need a build first.
+!infra/aws/tests/fixtures/lambda.zip
 
 # terraform: provider binaries and modules, per-machine
 .terraform/
@@ -67,6 +61,13 @@ crash.*.log
 # variable files: the same resolved-values argument as plans
 *.tfvars
 *.tfvars.json
+# ...except the root's own, which is configuration rather than resolved values:
+# a bucket name, a function name and the alerting address, none of them secret
+# and all of them already in the READMEs. Committed so that `terraform apply`
+# needs no flags and a half-configured apply is not expressible. If this
+# repository ever becomes public, drop alert_email from it and pass
+# TF_VAR_alert_email instead — it is a flat variable so that override works.
+!infra/aws/terraform.tfvars
 # per-machine backend bucket, see infra/aws/bootstrap/README.md
 backend.hcl
 # per-machine cli config and local overrides

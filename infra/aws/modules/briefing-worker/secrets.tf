@@ -23,4 +23,12 @@ resource "aws_secretsmanager_secret" "openai" {
   recovery_window_in_days = 7
 
   tags = var.tags
+
+  # The value is the one thing here Terraform did not create and cannot put
+  # back: after the recovery window it is gone, and the replacement comes from
+  # the OpenAI dashboard rather than from an apply. Destroying this secret must
+  # take an edit to this file.
+  lifecycle {
+    prevent_destroy = true
+  }
 }

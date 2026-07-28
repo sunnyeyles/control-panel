@@ -1,30 +1,37 @@
 # Deploying the briefing worker
 
-The runbook for the AWS stack: first deploy, verification, cutover from Azure,
-and rollback.
+The runbook for the worker: first deploy, verification, and rollback.
 
 > **Housekeeping.** This is a separate file rather than a section of
-> `infra/aws/README.md` because that file is being written on another branch at
-> the same time, and two branches editing one README is a merge conflict for no
-> reason. Fold it in once both have landed.
+> `infra/aws/README.md` so the runbook stays skimmable next to that file's
+> architecture material. Fold it in if it stops earning the separation.
 
 ## Layout
 
 ```
 infra/aws/
   backend.tf                     partial S3 backend — bucket supplied at init
+  terraform.tfvars               committed; the values this deployment applies
   briefing-worker.tf             the module block, and the join to brief storage
-  briefing-worker.variables.tf   its variables
+  briefing-worker.variables.tf   its one object variable, plus schedule_enabled
   briefing-worker.outputs.tf     its outputs
+  alerting.tf  boundary.tf       shared: the SNS topic, the permissions boundary
   providers.tf  versions.tf      shared with the user-storage stack
   modules/briefing-worker/       the worker: lambda, schedule, secret, alarms
-  bootstrap/                     state bucket, GitHub OIDC, deploy role
+  bootstrap/                     state bucket, GitHub OIDC, deploy role, boundary
 ```
 
 Two stacks share this root and therefore share one state file, which is what
 lets the worker's execution role and the bucket policy that references it
 resolve in a single graph instead of across a remote-state lookup. Each stack
-keeps to its own files: nothing here edits `main.tf` or `modules/user-storage/`.
+keeps to its own files: nothing here edits `user-storage.tf` or
+`modules/user-storage/`.
+
+Two things the worker no longer owns. **The SNS topic and its email
+subscription** live in `alerting.tf`, because one topic serves every stack and a
+per-stack topic means a per-stack confirmation mail. **The permissions boundary**
+on both its roles comes from `boundary.tf`; the deploy role may only create roles
+that carry it.
 
 ## First deploy
 
@@ -44,8 +51,12 @@ Terraform bug.
 
 ```bash
 pnpm turbo zip --filter=@workspace/briefing-worker
-terraform -chdir=infra/aws apply -var="alert_email=you@example.com"
+terraform -chdir=infra/aws apply
 ```
+
+No `-var` flags. `alert_email` and the bucket name live in the committed
+`infra/aws/terraform.tfvars`, which Terraform auto-loads — check the bucket name
+in it is right for this account before the first apply.
 
 **4. Set the OpenAI key by hand.** Terraform creates the secret empty and can
 never write it — that is deliberate, see `bootstrap/README.md`.
@@ -56,12 +67,22 @@ aws secretsmanager put-secret-value \
   --secret-string "sk-..."
 ```
 
-**Rotate the key while doing this.** The current value was exposed in plaintext
-and has still not been rotated in Key Vault. The new value should exist only in
-Secrets Manager.
+**Rotate the key while doing this.** The value in use was exposed in plaintext
+and has never been rotated since. Issue a new one at the OpenAI dashboard,
+revoke the old one there, and put only the new value into Secrets Manager.
 
 **5. Confirm the SNS subscription.** AWS sends a confirmation mail. Until it is
 clicked the alarms deliver nothing, and silence will look like health.
+
+```bash
+aws sns list-subscriptions-by-topic \
+  --topic-arn "$(terraform -chdir=infra/aws output -raw alerts_topic_arn)"
+```
+
+`PendingConfirmation` rather than a real subscription ARN means nobody clicked.
+Worth re-checking after any change that recreates the topic — the subscription
+goes with it, and a fresh mail must be clicked before anything is delivered
+again.
 
 ## Verifying
 
@@ -89,7 +110,10 @@ filter @message like /"event":"proof-run"/
 
 Done means all of:
 
+- [ ] `terraform -chdir=infra/aws test` passes (no credentials needed)
 - [ ] `terraform apply` clean, and a following `plan` reports no changes
+- [ ] both roles carry the boundary:
+      `aws iam get-role --role-name briefing-worker-execution --query Role.PermissionsBoundary`
 - [ ] `aws secretsmanager describe-secret` shows a recent `LastChangedDate`
       (never print the value)
 - [ ] a manual invoke produces one `proof-run` line with `"outcome":"success"`
@@ -103,54 +127,49 @@ Done means all of:
       the clipboard
 - [ ] one scheduled run lands at 09:00 UTC unprompted
 
-## Cutover
+## Taking the worker off duty
 
-Both platforms have a live daily timer between the first AWS deploy and this
-step, so **the task runs twice a day**. That is harmless while the task is the
-proof task, which writes nothing. It stops being harmless the moment the brief
-storage work lands — two schedules would write every brief twice.
-
-Two ways to hold that line, and the first is better while AWS is unproven:
+Verifying a change without letting it write a brief a day:
 
 ```bash
-# keep AWS deployed but off duty
 terraform -chdir=infra/aws apply -var="schedule_enabled=false"
-
-# or, once AWS is verified: stop Azure, do not delete it
-az functionapp stop --name <function-app> --resource-group rg-briefing
 ```
 
-**Stopping Azure is what makes the duplicate go away while keeping rollback
-cheap.** Until the Azure resource group is deleted, rollback is
-`az functionapp start` plus a `git revert` — nothing on AWS needs undoing.
+The function stays deployed and manually invocable; only the schedule is
+disabled. Re-apply without the flag to put it back on duty.
 
-## Decommissioning Azure
+`schedule_enabled` is the one stack input kept as a flat top-level variable
+rather than a field of the `briefing_worker` object, precisely so it can be set
+this way — an object field cannot be overridden from the command line without
+restating the whole object.
 
-Only after AWS has run unattended for a settling period. Each of these is
-recoverable from git history, but the Key Vault secret is not: soft-delete
-retention is 7 days, after which the value must come from the OpenAI dashboard.
-
-- [ ] delete `infra/main.bicep`, `infra/main.parameters.json`,
-      `infra/abbreviations.json`, `infra/app/` and `infra/README.md`
-- [ ] delete `azure.yaml`
-- [ ] drop `local.settings.json`, `functionapp.zip` and `.azure/` from
-      `.gitignore`
-- [ ] remove `packageManager` from `apps/briefing-worker/package.json` if
-      nothing else needs it — it was there for azd's package-manager detection
-- [ ] `az group delete --name rg-briefing`
-- [ ] delete `briefing-worker-plan.md` at the repo root (untracked; its own
-      banner says to)
+The missed-run alarm is destroyed along with the schedule rather than left to
+fire. It treats no invocation as breaching, so leaving it in place would hold it
+permanently in ALARM while the worker is deliberately off duty — and it is the
+only alarm that catches silence, so teaching anyone to ignore its mail is the one
+habit worth avoiding.
 
 ## Rollback
 
-Before the Azure app is stopped, there is nothing to roll back — both run.
+Deploys are `git push` → CI → `terraform apply`, so a rollback is a revert and
+a re-apply:
 
-After stopping and before deleting: `az functionapp start`, then revert the
-branch if the application code also needs to go back.
+```bash
+git revert <the bad commit> && git push
+```
 
-After deleting the resource group: `git revert`, then
-`azd provision && azd deploy worker`, then re-set the Key Vault secret by hand.
+That rebuilds the zip from the reverted source and applies the reverted
+Terraform in one run, which is the same path that put the bad version there.
 
-One drift to know about: a hand-made Key Vault Secrets Officer assignment
-collides with the Bicep `guid()`-named one on the next local `azd provision`.
-It only matters on this path.
+To get out from under a broken function faster than CI can run, disable the
+schedule as above — that stops the damage without needing a good build to exist
+yet.
+
+Two things a revert does **not** undo:
+
+- **The secret.** Terraform never writes its value. If a rotation is what broke
+  the run, restore the previous one directly:
+  `aws secretsmanager get-secret-value --secret-id briefing-worker/openai-api-key --version-stage AWSPREVIOUS`
+- **Anything already written to S3.** The bucket is versioned, so an overwritten
+  brief is recoverable by version ID and a deleted one sits behind a delete
+  marker — but reverting code does not remove what a bad run produced.

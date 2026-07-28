@@ -16,7 +16,7 @@ module "user_storage" {
   source = "./modules/user-storage"
 
   bucket_name  = "control-panel-user-storage-<suffix>"
-  environments = ["dev", "prod"]
+  environments = ["prod"]
 }
 ```
 
@@ -35,11 +35,16 @@ resource "aws_iam_role_policy_attachment" "briefs" {
 | Name                   | Type                | Default             | Description                                                     |
 | ---------------------- | ------------------- | ------------------- | --------------------------------------------------------------- |
 | `bucket_name`          | `string`            | —                   | Globally unique. Validated against S3's naming rules.           |
-| `environments`         | `list(string)`      | `["dev", "prod"]`   | One key prefix and one IAM policy each.                         |
+| `environments`         | `list(string)`      | — (required)        | One key prefix and one IAM policy each.                         |
 | `object_kinds`         | `map(object)`       | `briefs`, `resumes` | Categories and their retention. See below.                      |
 | `kms_key_arn`          | `string`            | `null`              | Null uses SSE-S3. Set only when a key you rotate is required.   |
 | `attach_to_role_names` | `map(list(string))` | `{}`                | Roles to attach each environment's policy to. Creates no roles. |
-| `tags`                 | `map(string)`       | `{}`                | Applied to every resource.                                      |
+| `tags`                 | `map(string)`       | `{}`                | Applied verbatim; this module adds none of its own.             |
+
+`environments` has **no default**. The caller's root declares one — and passing
+`null` to a module input does not fall back to a module default, so a default
+here would be dead code that nonetheless reads as authoritative. Requiring it
+also means no deployment silently gets an environment layout it never chose.
 
 `environments` is validated against the same key-segment rule the TypeScript
 enforces in `packages/user-storage/src/keys.ts`. A name containing a slash or a
@@ -100,3 +105,8 @@ policies below can be expressed as `…/{environment}/*/{kind}/*`.
 - **No public access of any kind.** No website configuration, no ACL, no
   presigned-URL machinery.
 - **No bucket-level delete grant.** The access policies cover objects only.
+
+The bucket carries `prevent_destroy`, because it holds documents the user
+uploaded themselves — the one thing here no apply can recreate. `terraform
+destroy` on a root containing this module fails until that block is removed,
+which is the intent.

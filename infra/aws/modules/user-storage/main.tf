@@ -35,6 +35,17 @@ locals {
 resource "aws_s3_bucket" "user_storage" {
   bucket = var.bucket_name
   tags   = var.tags
+
+  # This holds documents the user uploaded themselves — the one thing in this
+  # repository that no apply can recreate. Versioning below protects an object;
+  # nothing protects the bucket, so destroying it must take an edit to this file
+  # rather than a mistyped `terraform destroy`.
+  #
+  # The consequence is intended: `terraform destroy` on the whole root now fails
+  # here until this block is removed.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Belt and braces against the single worst outcome for this bucket. It now
@@ -335,12 +346,17 @@ data "aws_iam_policy_document" "kind_access" {
   }
 }
 
+# Iterates the local, not the data source. `each.value` on a
+# `data.aws_iam_policy_document` instance is that data source's own attributes —
+# `json`, `id`, `version` — and has no `environment` or `kind`, so naming the
+# policy from it fails at plan time. The local carries the two fields the name
+# is built from; the document is then looked up by the same key.
 resource "aws_iam_policy" "kind_access" {
-  for_each = data.aws_iam_policy_document.kind_access
+  for_each = local.environment_kinds
 
   name        = "${var.bucket_name}-${each.value.environment}-${each.value.kind}"
   description = "Read, write and delete only ${each.value.kind} under ${each.value.environment}/ in ${var.bucket_name}."
-  policy      = each.value.json
+  policy      = data.aws_iam_policy_document.kind_access[each.key].json
   tags        = var.tags
 }
 

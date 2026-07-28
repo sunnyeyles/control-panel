@@ -34,8 +34,3 @@ output "openai_secret_arn" {
   description = "ARN of the (empty) OpenAI key secret. Set its value out-of-band; Terraform never writes it."
   value       = aws_secretsmanager_secret.openai.arn
 }
-
-output "alerts_topic_arn" {
-  description = "SNS topic the failure and missed-run alarms publish to."
-  value       = aws_sns_topic.alerts.arn
-}

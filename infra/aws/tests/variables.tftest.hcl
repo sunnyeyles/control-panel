@@ -1,0 +1,174 @@
+# Validation rules, checked by breaking them.
+#
+# Every run here is expected to fail, and to fail at variable validation rather
+# than at a resource — which is what makes the file runnable with no AWS
+# credentials, no network and no state. `mock_provider` covers the rest.
+#
+# Note the `module` blocks. `expect_failures` can only name checkable objects in
+# the module under test, and these validations live on the modules' own
+# variables rather than on the root's object wrappers — so each run points
+# directly at the module whose interface it is testing. That is the right
+# surface anyway: the rule belongs to the module, so the test should be able to
+# survive the root being rearranged around it.
+#
+# Only rules that encode a real invariant are covered. A validation that merely
+# restates a type is not worth a test.
+
+# `aws_iam_policy_document` is a data source, so under a mock provider its `json`
+# attribute is a generated placeholder string — and the provider validates that
+# string as JSON at plan time, on every role and policy that consumes one. Left
+# alone, every plan here fails with "not a JSON object" alongside the failure the
+# run is actually asserting, and `expect_failures` treats the extra error as a
+# failed test.
+#
+# So the mock returns a structurally valid, empty policy. That is enough for the
+# plan-time check and no more: these runs assert on validation rules, never on
+# what a policy document contains. Asserting on rendered policy JSON needs
+# `override_data` per address, which is worth doing and is not what this file is.
+mock_provider "aws" {
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  # Same shape of problem for the boundary lookup in boundary.tf: a mocked `arn`
+  # is a random string, and `aws_iam_role.permissions_boundary` is ARN-validated
+  # at plan time.
+  mock_data "aws_iam_policy" {
+    defaults = {
+      arn = "arn:aws:iam::000000000000:policy/control-panel-deploy-boundary"
+    }
+  }
+}
+
+# S3 bucket names are global and permanent. A name the API would reject is
+# better caught here than three minutes into an apply.
+run "rejects_invalid_bucket_name" {
+  command = plan
+
+  module {
+    source = "./modules/user-storage"
+  }
+
+  variables {
+    bucket_name  = "Not_A_Valid_Bucket"
+    environments = ["prod"]
+  }
+
+  expect_failures = [var.bucket_name]
+}
+
+# The one that matters most in this file. Environment names are the leading key
+# segment, and `packages/user-storage/src/keys.ts` enforces the same rule on the
+# other side of the seam. A name containing a slash would make the IAM prefix
+# scoping address a different place than the object keys do — a grant that reads
+# as narrow and is not.
+run "rejects_environment_name_with_slash" {
+  command = plan
+
+  module {
+    source = "./modules/user-storage"
+  }
+
+  variables {
+    bucket_name  = "control-panel-user-storage-test"
+    environments = ["prod/eu"]
+  }
+
+  expect_failures = [var.environments]
+}
+
+# At least one environment, or nothing can reach the bucket at all — a stack
+# that applies cleanly and is unusable.
+run "rejects_empty_environments" {
+  command = plan
+
+  module {
+    source = "./modules/user-storage"
+  }
+
+  variables {
+    bucket_name  = "control-panel-user-storage-test"
+    environments = []
+  }
+
+  expect_failures = [var.environments]
+}
+
+# Kind names become a key segment and an object tag value, and the tag is what
+# the lifecycle rules filter on.
+run "rejects_object_kind_name_with_uppercase" {
+  command = plan
+
+  module {
+    source = "./modules/user-storage"
+  }
+
+  variables {
+    bucket_name  = "control-panel-user-storage-test"
+    environments = ["prod"]
+    object_kinds = { Briefs = { expiration_days = 30 } }
+  }
+
+  expect_failures = [var.object_kinds]
+}
+
+# 900 seconds is Lambda's hard maximum. Above it the apply fails at the API with
+# a less obvious message.
+run "rejects_timeout_above_lambda_maximum" {
+  command = plan
+
+  module {
+    source = "./modules/briefing-worker"
+  }
+
+  variables {
+    function_name    = "briefing-worker"
+    lambda_zip_path  = "./tests/fixtures/lambda.zip"
+    alerts_topic_arn = "arn:aws:sns:ap-southeast-2:000000000000:test"
+    timeout          = 901
+  }
+
+  expect_failures = [var.timeout]
+}
+
+# The alarms have to publish somewhere real. A non-ARN here would apply cleanly
+# and deliver nothing.
+run "rejects_non_arn_alerts_topic" {
+  command = plan
+
+  module {
+    source = "./modules/briefing-worker"
+  }
+
+  variables {
+    function_name    = "briefing-worker"
+    lambda_zip_path  = "./tests/fixtures/lambda.zip"
+    alerts_topic_arn = "briefing-worker-alerts"
+  }
+
+  expect_failures = [var.alerts_topic_arn]
+}
+
+# Alerting that silently switches itself off is the failure the alarms exist to
+# catch, so a malformed address must break the apply rather than produce a
+# subscription that can never confirm. Root-level: the address is the root's,
+# because the topic is.
+run "rejects_malformed_alert_email" {
+  command = plan
+
+  variables {
+    alert_email = "not-an-email"
+
+    user_storage = {
+      bucket_name = "control-panel-user-storage-test"
+    }
+
+    briefing_worker = {
+      lambda_zip_path = "./tests/fixtures/lambda.zip"
+    }
+  }
+
+  expect_failures = [var.alert_email]
+}

@@ -26,11 +26,10 @@ let secretLoaded = false
  * Put the key where `getOpenAIApiKey()` already looks.
  *
  * Setting the environment variable rather than threading an `apiKey` through
- * `createAgent` is what keeps `packages/agents-core` and the task itself
- * untouched by the move to AWS. From the application's point of view the secret
- * is still just an environment variable, exactly as it was under the Key Vault
- * reference that Azure resolved before the process started; only the thing that
- * puts it there has changed.
+ * `createAgent` is what keeps `packages/agents-core` and the task itself free
+ * of any knowledge of where the secret comes from. From the application's point
+ * of view it is just an environment variable; fetching it is this file's job
+ * alone.
  *
  * A no-op when OPENAI_API_KEY is already set, which is what makes local
  * invocation work with no AWS credentials at all.

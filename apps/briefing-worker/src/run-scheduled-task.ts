@@ -42,9 +42,9 @@ export interface FailureReport extends RunReportFields {
 }
 
 /**
- * The verification artifact: one JSON line per run, on stdout, which the
- * Functions host ships to App Insights traces. A human checks the foundation
- * is alive by filtering `event == "proof-run"` over the last 24 h and
+ * The verification artifact: one JSON line per run, on stdout, which the Lambda
+ * runtime ships to the function's CloudWatch log group. A human checks the
+ * foundation is alive by filtering `event == "proof-run"` over the last 24 h and
  * expecting one `outcome == "success"` row per scheduled slot — a missing row
  * means the run never started, which an exit code alone cannot tell you.
  *
@@ -58,7 +58,8 @@ export type RunReport = SuccessReport | FailureReport
  *
  * Emits exactly one run report — on both paths, never twice, never zero times
  * — then returns it on success or rethrows on failure. The throw is the
- * authoritative signal: it is what marks the Functions invocation Failed.
+ * authoritative signal: it is what produces the Lambda `Errors` datapoint the
+ * failure alarm watches.
  */
 export async function runScheduledTask(): Promise<SuccessReport> {
   const startedAtMs = Date.now()

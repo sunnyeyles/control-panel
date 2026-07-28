@@ -40,9 +40,9 @@ await esbuild.build({
   // deployed version the one in the lockfile.
   //
   // Some transitive CommonJS in the LangChain stack calls `require` at load
-  // time, which an ESM bundle has no binding for. Supply one. This is not
-  // Azure-specific and must survive: without it the bundle dies at import with
-  // an opaque `require is not defined`.
+  // time, which an ESM bundle has no binding for. Supply one. This is
+  // load-bearing: without it the bundle dies at import with an opaque
+  // `require is not defined`.
   banner: {
     js: [
       'import { createRequire as __createRequire } from "node:module"',

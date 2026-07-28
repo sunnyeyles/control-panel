@@ -1,4 +1,4 @@
-name: Deploy briefing-worker
+name: Deploy infra
 
 # One workflow, not two: infra and worker code go up together. The zip reaches
 # Lambda through Terraform's `filename` + `source_code_hash` rather than a
@@ -10,25 +10,21 @@ on:
     # Path-scoped rather than relying on `turbo --filter` to no-op: a
     # dashboard-only or UI-only push does not start this workflow at all, which
     # is both stronger and cheaper than starting it and doing nothing.
-    #
-    # `infra/aws/**`, not `infra/**` — the Bicep beside it belongs to the Azure
-    # deployment this replaces, which is kept until cutover so rollback stays a
-    # revert. Editing it must not trigger an AWS deploy.
     paths:
       - "apps/briefing-worker/**"
       - "packages/agents-core/**"
       - "packages/agents/**"
       - "packages/agent-tools/**"
-      - "infra/aws/**"
-      - ".github/workflows/deploy-briefing-worker.yml"
+      - "infra/**"
+      - ".github/workflows/deploy-infra.yml"
   pull_request:
     paths:
       - "apps/briefing-worker/**"
       - "packages/agents-core/**"
       - "packages/agents/**"
       - "packages/agent-tools/**"
-      - "infra/aws/**"
-      - ".github/workflows/deploy-briefing-worker.yml"
+      - "infra/**"
+      - ".github/workflows/deploy-infra.yml"
   # Deliberately unfiltered — a manual run should always run.
   workflow_dispatch:
 
@@ -38,7 +34,7 @@ permissions:
 # A queued run deploys the same environment as the one in flight, so let the
 # newer commit win rather than racing.
 concurrency:
-  group: deploy-briefing-worker-${{ github.ref }}
+  group: deploy-infra-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -71,7 +67,12 @@ jobs:
       - name: Build worker
         run: pnpm turbo build typecheck lint --filter=@workspace/briefing-worker
 
+      # Pinned, and matching the version used locally. `fmt -check` and the
+      # test framework both move between minor releases, so a floating CLI can
+      # fail a pull request on a tree nobody touched.
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
 
       - name: Terraform fmt
         run: terraform -chdir=infra/aws fmt -recursive -check -diff
@@ -85,6 +86,15 @@ jobs:
           terraform -chdir=infra/aws validate
           terraform -chdir=infra/aws/bootstrap init -backend=false -input=false
           terraform -chdir=infra/aws/bootstrap validate
+
+      # The real check, and the reason this job is worth having on a pull
+      # request. `validate` catches type errors; these run a mocked plan and
+      # assert on what it produces — retries actually zero, every object kind
+      # actually retained, the missed-run alarm actually gated on the schedule.
+      # No credentials, no network, no state. `init` above installs the modules
+      # the run blocks target.
+      - name: Terraform test
+        run: terraform -chdir=infra/aws test
 
   deploy:
     if: github.event_name != 'pull_request'
@@ -102,13 +112,10 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-      # Consumed by `variable "alert_email"`, which has no default on purpose:
-      # an unset value must break the apply rather than quietly produce a
-      # worker nobody is watching.
-      TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
-      # Consumed by `variable "bucket_name"`, also defaultless on purpose: a
-      # shared default is how two deployments end up writing into one bucket.
-      TF_VAR_bucket_name: ${{ vars.USER_STORAGE_BUCKET_NAME }}
+      # No TF_VAR_* here any more. Stack configuration lives in the committed
+      # infra/aws/terraform.tfvars, which Terraform auto-loads — so the values
+      # CI applies are the values in the diff, rather than repository variables
+      # that can be changed without a commit and are invisible in review.
 
     steps:
       # Runs before anything else because it needs nothing else, and because
@@ -119,23 +126,17 @@ jobs:
       #     the missing input.
       #   - An empty TF_STATE_BUCKET makes `init` fall back to prompting, which
       #     with -input=false is a failure two steps later.
-      #   - An empty ALERT_EMAIL would have been a worker with no alarms, which
-      #     is the exact failure the alarms exist to catch.
-      #   - An empty USER_STORAGE_BUCKET_NAME stops `plan` on a required
-      #     variable, which with -input=false is a failure rather than a prompt.
       #
       # `vars.X` is an empty string whether the variable is unset or set to
       # empty, so these cases are indistinguishable here and both fail.
       - name: Check required repository variables
         run: |
           missing=()
-          for name in AWS_REGION AWS_DEPLOY_ROLE_ARN TF_STATE_BUCKET TF_VAR_alert_email TF_VAR_bucket_name; do
+          for name in AWS_REGION AWS_DEPLOY_ROLE_ARN TF_STATE_BUCKET; do
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ ${#missing[@]} -ne 0 ]; then
             echo "::error::Missing repository variables: ${missing[*]}"
-            echo "TF_VAR_alert_email comes from the ALERT_EMAIL variable, and"
-            echo "TF_VAR_bucket_name from USER_STORAGE_BUCKET_NAME."
             echo "Apply infra/aws/bootstrap once, then set these from its"
             echo "outputs — see infra/aws/bootstrap/README.md. Confirm with"
             echo "'gh variable list' that they landed as variables: this"
@@ -169,6 +170,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
 
       # Partial backend config: the bucket is supplied here rather than written
       # into backend.tf, so nothing in the repository names a bucket that might

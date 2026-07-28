@@ -55,3 +55,51 @@ variable "deployed_secret_arn_pattern" {
   type        = string
   default     = "*"
 }
+
+variable "workload_boundary_policy_name" {
+  description = <<-EOT
+    Name of the permissions boundary every role the deploy role creates must
+    carry. See boundary.tf.
+
+    The main root looks this up by name — `data "aws_iam_policy"` in
+    `infra/aws/boundary.tf` — rather than reading this root's state, which is a
+    local file on one laptop. Changing this name means changing it there too,
+    and the two roots are applied by different people at different times.
+  EOT
+  type        = string
+  default     = "control-panel-deploy-boundary"
+}
+
+variable "managed_role_arn_patterns" {
+  description = <<-EOT
+    IAM roles the deploy role may create, modify and pass, as ARN patterns.
+
+    This is the seam a new stack widens. A stack whose roles are named
+    `<something>-*` outside these patterns will fail its first apply with an
+    access-denied naming the role — which is the intended failure: adding a role
+    to what CI can create should be a reviewed edit here, not a side effect of
+    naming a resource.
+
+    Scoped rather than `*` so the pipeline cannot touch a role belonging to
+    something else in the same account.
+  EOT
+  type        = list(string)
+  default     = null
+}
+
+variable "managed_policy_arn_patterns" {
+  description = <<-EOT
+    IAM customer-managed policies the deploy role may create, modify and attach,
+    as ARN patterns.
+
+    `iam:AttachRolePolicy` is conditioned on these, which is what stops the
+    pipeline attaching an AWS-managed policy — `AdministratorAccess` above all —
+    to a role it creates.
+
+    The user-storage module names its policies after the bucket, so the default
+    pattern covers `control-panel-user-storage-<account>-prod-briefs` and its
+    siblings.
+  EOT
+  type        = list(string)
+  default     = null
+}
