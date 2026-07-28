@@ -40,10 +40,8 @@ DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
 session-level advisory lock, and the pooled endpoint runs PgBouncer in
 transaction mode, which does not carry one across statements. Through the
 pooler the lock appears to be taken while holding nothing. Migrations are
-forward-only; there are no down migrations. See `packages/db/README.md`.
-
-The runner executes TypeScript source through `tsx`, so it needs no prior
-build and can never apply a stale `dist/`.
+forward-only; there are no down migrations. The runner executes TypeScript
+source through `tsx`, so it needs no prior build. See `packages/db/README.md`.
 
 Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
 it**. One root holds two stacks — the worker and user storage — sharing a single
@@ -155,12 +153,14 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 **TypeScript is strict, including `noUncheckedIndexedAccess`** (`packages/typescript-config/base.json`). Indexed reads are `T | undefined` — narrow them. The base config is `NodeNext`; the Next.js preset overrides to `ESNext`/`Bundler` with `noEmit`.
 
-**Relative imports carry a `.ts` extension, and the compiler rewrites it.** Write `import { computeNextRunAt } from "./schedule.ts"` — the extension of the file that actually exists. `rewriteRelativeImportExtensions` in the base config turns that into `./schedule.js` on emit, so `dist/` stays valid Node ESM under NodeNext; the emitted JS is unchanged from when sources spelled `.js` by hand. It is also what lets `allowImportingTsExtensions` coexist with emit, which normally requires `noEmit`.
+**In the packages that emit `dist/`, relative imports carry a `.ts` extension and the compiler rewrites it.** Write `import { computeNextRunAt } from "./schedule.ts"` — the extension of the file that actually exists. `rewriteRelativeImportExtensions` in the base config turns that into `./schedule.js` on emit, so `dist/` stays valid Node ESM under NodeNext; the emitted JS is unchanged from when sources spelled `.js` by hand. It also implies `allowImportingTsExtensions`, which is why that flag can coexist with emit at all — on its own it requires `noEmit`.
+
+This rule is scoped to the NodeNext workspaces: `db`, `user-storage`, `agents`, `agents-core`, `agent-tools`, `briefing-worker`. `@workspace/ui` and `apps/dashboard` override to `Bundler` resolution, where nothing is rewritten and relative imports stay extensionless — `packages/ui/src/components/ai-elements/tool.tsx` importing `"./code-block"` is correct, not a straggler.
 
 Two things here look wrong and are not:
 
 - **Declaration output keeps the `.ts` specifier.** `dist/*.d.ts` reads `from "./keys.ts"`. Only TypeScript reads a `.d.ts`, and it resolves that to the sibling `.d.ts` — downstream packages typecheck against it without needing `allowImportingTsExtensions` themselves. Do not "fix" it.
-- **The extension is `.ts`, not nothing.** Extensionless imports would mean abandoning NodeNext for `Bundler` resolution, which breaks any `dist/` that Node runs directly — the migration CLI, and the worker before esbuild bundles it.
+- **The extension is `.ts`, not nothing.** Extensionless imports would mean abandoning NodeNext for `Bundler` resolution. NodeNext is what the emitted `dist/` and its `.d.ts` declare, and every relative specifier in NodeNext ESM must carry an explicit extension — that is the output contract consumers resolve against, whether Node runs a file directly or esbuild bundles it first.
 
 ## Repo context
 

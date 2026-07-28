@@ -7,5 +7,15 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts",
+    // A bin, not part of the published surface. Emitting it would put a
+    // second, unrun copy of the CLI in `dist/` — and because the exports map
+    // is a `"./*"` wildcard, `@workspace/db/migrate-cli` would resolve to a
+    // module that applies migrations as an import side effect. Still
+    // typechecked: `tsconfig.test.json` includes all of `src`.
+    "src/migrate-cli.ts"
+  ]
 }
