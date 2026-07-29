@@ -58,18 +58,30 @@ No `-var` flags. `alert_email` and the bucket name live in the committed
 `infra/aws/terraform.tfvars`, which Terraform auto-loads — check the bucket name
 in it is right for this account before the first apply.
 
-**4. Set the OpenAI key by hand.** Terraform creates the secret empty and can
+**4. Set all three secrets by hand.** Terraform creates each one empty and can
 never write it — that is deliberate, see `bootstrap/README.md`.
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/openai-api-key \
-  --secret-string "sk-..."
+  --secret-id briefing-worker/openai-api-key --secret-string "sk-..."
+aws secretsmanager put-secret-value \
+  --secret-id briefing-worker/database-url --secret-string "postgres://..."
+aws secretsmanager put-secret-value \
+  --secret-id briefing-worker/tavily-api-key --secret-string "tvly-..."
 ```
 
-**Rotate the key while doing this.** The value in use was exposed in plaintext
-and has never been rotated since. Issue a new one at the OpenAI dashboard,
-revoke the old one there, and put only the new value into Secrets Manager.
+**All three, not just the one you changed.** `loadSecrets` fetches them
+concurrently at handler init, so a single empty shell takes down _every_
+invocation — including ticks with nothing due — with
+`ResourceNotFoundException: … staging label: AWSCURRENT`, before `runTick` is
+reached and before any run report can be emitted. The failure names no secret,
+so the first useful question is always "which of the three is empty", not
+"what is wrong with the code".
+
+That is a live trap rather than a hypothetical: adding the Tavily secret in a
+later apply created the shell, the reference to it went out in the same apply,
+and the value was never put in behind it. Every tick failed until someone
+looked.
 
 **5. Confirm the SNS subscription.** AWS sends a confirmation mail. Until it is
 clicked the alarms deliver nothing, and silence will look like health.
@@ -118,10 +130,20 @@ Done means all of:
 - [ ] `terraform apply` clean, and a following `plan` reports no changes
 - [ ] both roles carry the boundary:
       `aws iam get-role --role-name briefing-worker-execution --query Role.PermissionsBoundary`
-- [ ] `aws secretsmanager describe-secret` shows a recent `LastChangedDate` for
-      **all three** of `briefing-worker/openai-api-key`,
-      `briefing-worker/database-url` and `briefing-worker/tavily-api-key`
-      (never print any of the values)
+- [ ] **all three** secrets hold a value — count versions, never print one.
+      `LastChangedDate` is not the check: creating an empty shell sets it too,
+      so a secret with no value at all reads as freshly changed.
+
+      ```bash
+              for s in openai-api-key database-url tavily-api-key; do
+                printf '%-16s ' "$s"
+                aws secretsmanager describe-secret --secret-id "briefing-worker/$s" \
+                  --query 'length(keys(VersionIdsToStages || `{}`))' --output text
+              done
+              ```
+
+              Every line must report `1` or more. A `0` is the outage in step 4.
+
 - [ ] the function carries `USER_STORAGE_BUCKET_NAME` and
       `USER_STORAGE_ENVIRONMENT`:
       `aws lambda get-function-configuration --function-name briefing-worker --query Environment.Variables`
