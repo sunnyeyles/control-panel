@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import { createBriefStore } from "./brief-store.ts"
 import { InvalidObjectKeyError } from "./errors.ts"
-import { acceptedResumeExtensions, createResumeStore } from "./resume-store.ts"
+import {
+  acceptedResumeExtensions,
+  createResumeStore,
+  type DocumentType,
+} from "./resume-store.ts"
 import type {
   FetchedObject,
   NewObject,
@@ -369,6 +373,169 @@ describe("ResumeStore", () => {
       })
 
       expect(objects.puts[0]?.metadata).toEqual({})
+    })
+  })
+
+  describe("the document type", () => {
+    it("round-trips through metadata alongside the filename", async () => {
+      const resumes = createResumeStore(objects)
+
+      await resumes.put({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+        bytes: BYTES,
+        originalFilename: "cover.pdf",
+        documentType: "cover-letter",
+      })
+
+      // Both fields, so the filename passthrough is not quietly replaced by
+      // the type one — they are merged into a single metadata map.
+      expect(objects.puts[0]?.metadata).toEqual({
+        "original-filename": "cover.pdf",
+        "document-type": "cover-letter",
+      })
+
+      const read = await resumes.head({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+      })
+      expect(read.documentType).toBe("cover-letter")
+      expect(read.originalFilename).toBe("cover.pdf")
+    })
+
+    it("is absent rather than defaulted when none was given", async () => {
+      const resumes = createResumeStore(objects)
+
+      await resumes.put({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+        bytes: BYTES,
+      })
+
+      // Nothing uploaded before this field existed carries it, so "unlabelled"
+      // has to be representable. Defaulting to `resume` here would invent a
+      // claim the user never made.
+      expect(objects.puts[0]?.metadata).toEqual({})
+
+      const read = await resumes.head({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+      })
+      expect(read.documentType).toBeUndefined()
+    })
+
+    it("is dropped on the way in when it is not on the allowlist", async () => {
+      const resumes = createResumeStore(objects)
+
+      await resumes.put({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+        bytes: BYTES,
+        // Reachable despite the type: this value crosses a form boundary
+        // before it gets here.
+        documentType: "curriculum-vitae" as DocumentType,
+      })
+
+      expect(objects.puts[0]?.metadata).toEqual({})
+    })
+
+    it("reads back as undefined when the stored value is unrecognised", async () => {
+      const resumes = createResumeStore(objects)
+
+      // An object written by an older version of this code, or edited by hand
+      // in the S3 console. Validating only on the way in would let it out.
+      await objects.put({
+        userId: "alice",
+        kind: "resumes",
+        segments: ["r"],
+        extension: ".pdf",
+        body: BYTES,
+        metadata: { "document-type": "something-else" },
+      })
+
+      const read = await resumes.head({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+      })
+      expect(read.documentType).toBeUndefined()
+    })
+
+    it("does not survive a listing, because ListObjectsV2 carries no metadata", async () => {
+      // `MemoryObjectStore` keeps metadata on a listed object; the real store
+      // cannot, and hardcodes `metadata: {}` in `list()` because ListObjectsV2
+      // does not return user metadata at all. Narrowing the fake to match is
+      // what makes this test about S3's behaviour rather than the fake's.
+      const listsWithoutMetadata: UserObjectStore = {
+        ...objects,
+        put: (object) => objects.put(object),
+        get: (ref) => objects.get(ref),
+        head: (ref) => objects.head(ref),
+        delete: (ref) => objects.delete(ref),
+        list: async (userId, kind) =>
+          (await objects.list(userId, kind)).map((object) => ({
+            ...object,
+            metadata: {},
+          })),
+      }
+
+      const resumes = createResumeStore(listsWithoutMetadata)
+
+      await resumes.put({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+        bytes: BYTES,
+        originalFilename: "cv.pdf",
+        documentType: "resume",
+      })
+
+      const [listed] = await resumes.list("alice")
+
+      // The trap this pins: both fields read as undefined from a listing even
+      // though the object plainly has them. A list view that shows a filename
+      // must `head()` each item.
+      expect(listed?.resumeId).toBe("r")
+      expect(listed?.size).toBe(BYTES.byteLength)
+      expect(listed?.documentType).toBeUndefined()
+      expect(listed?.originalFilename).toBeUndefined()
+
+      const headed = await resumes.head({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+      })
+      expect(headed.documentType).toBe("resume")
+      expect(headed.originalFilename).toBe("cv.pdf")
+    })
+
+    it("uses a metadata key the object store does not reserve", async () => {
+      // The reason the type can be metadata at all. `assertCustomMetadata` in
+      // the S3 store throws on `user-id`, `kind` or `environment`, so a facade
+      // writing one of those would fail every upload — and `user-id` is the
+      // ownership boundary, so shadowing it is the failure worth naming.
+      const resumes = createResumeStore(objects)
+
+      await resumes.put({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+        bytes: BYTES,
+        documentType: "portfolio",
+      })
+
+      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain(
+        "user-id"
+      )
+      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain("kind")
+      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain(
+        "environment"
+      )
     })
   })
 })

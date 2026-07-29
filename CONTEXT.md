@@ -102,6 +102,37 @@ The two are not one thing wearing two hats: a user may exist with no account
 no user (someone signed in but is not on the allowlist, so nothing was ever
 minted for them).
 
+**Document**:
+Something the user uploaded themselves — a CV, a cover letter, whatever they
+want kept beside their job search. The dashboard section is called
+**Documents**, and it is the user-facing word for the whole shelf.
+
+⚠️ **Three different meanings of "resume" collide here, and one of them is a
+key segment.** The storage _kind_ is `resumes`, so an object key reads
+`prod/{userId}/resumes/{id}.pdf` no matter what the document actually is; a
+cover letter is stored under `resumes` too. Meanwhile **Resume** is also one of
+the five selectable **Document Types**. The kind is not renamed because a kind
+is a key segment, an object tag and a file-type allowlist at once — the tag is
+what the S3 lifecycle rules filter on, so renaming it would orphan every
+existing object's retention. Read `resumes` as "the shelf uploads go on", not
+as "these are all CVs".
+_Avoid_: file, attachment, upload (as a noun)
+
+**Document Type**:
+What the user says a **Document** is: `resume`, `cover-letter`, `portfolio`,
+`reference` or `other`. Stored as S3 object metadata (`document-type`) within
+the one `resumes` kind, **not** as a kind of its own — a separate kind buys only
+separate retention and separate accepted file types, and these five want
+neither.
+
+Fixed at upload. S3 metadata cannot be changed without copying the object onto
+itself, which `UserObjectStore` deliberately does not expose, so relabelling
+means re-uploading. Absent is a legitimate value: nothing uploaded before the
+field existed carries one, and the list view shows those as unlabelled rather
+than guessing.
+_Avoid_: category, kind (which means the storage kind), tag (which means the S3
+tag that drives retention)
+
 **Allowlist**:
 The set of email addresses permitted past the gate, read from
 `AUTH_ALLOWED_EMAILS`. Signup is closed and this is what closes it — Neon Auth
@@ -116,6 +147,11 @@ matches everything but static assets and so is closed by default, and the
 authoritative check inside the route or page. Neither is sufficient alone, and
 that is the point — the proxy is a routing concern, and the route is what must
 not be reachable by accident.
+
+On a **non-GET** request the first layer is weaker than it looks: the auth SDK
+cannot evaluate a POST session, so the proxy falls back to checking that a
+session cookie is merely present. Every Server Action arrives that way, which
+makes the check inside the action the only real one.
 
 **Run Report**:
 The single structured log line a briefing run emits describing its outcome —

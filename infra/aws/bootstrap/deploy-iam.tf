@@ -186,6 +186,26 @@ data "aws_iam_policy_document" "deploy_iam" {
     resources = ["*"]
   }
 
+  # Finding the Vercel OIDC provider by URL, which is how
+  # `infra/aws/vercel-dashboard.tf` resolves it — same argument as the boundary
+  # lookup above, and the provider is created in this root rather than that one
+  # precisely because nothing below grants the ability to create it.
+  #
+  # Scoped the same way the provider statements would have to be: the provider
+  # resource type has no wildcard-friendly name, and `ListOpenIDConnectProviders`
+  # is authorized against `*` in the same way `ListPolicies` is. Both are
+  # read-only and confer nothing — creating a provider, or adding a client ID or
+  # thumbprint to one, is deliberately still absent from this document, so a
+  # compromised pipeline cannot mint a new federated trust for itself.
+  statement {
+    sid = "ReadOpenIDConnectProvidersToResolveTheIssuer"
+    actions = [
+      "iam:ListOpenIDConnectProviders",
+      "iam:GetOpenIDConnectProvider",
+    ]
+    resources = ["*"]
+  }
+
   # Handing a role to a service. Previously `*`, which meant the pipeline could
   # give any role in the account to a Lambda it created.
   statement {

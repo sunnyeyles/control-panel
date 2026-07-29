@@ -147,9 +147,12 @@ let a `.pdf` be stored as `text/html`. Each kind declares an allowlist in
 
 `attachment` on uploaded documents matters: those bytes arrived from outside,
 and a browser rendering an uploaded file inline on the bucket's origin is the
-standard stored-XSS route. Nothing is served directly from S3 today, so it is
-currently belt-and-braces — it becomes load-bearing if presigned URLs are ever
-added.
+standard stored-XSS route. **This is load-bearing now**, not belt-and-braces:
+`apps/dashboard/app/api/documents/[file]/route.ts` serves these bytes back to a
+browser, and it passes the stored disposition and content type straight through
+alongside `X-Content-Type-Options: nosniff`. Nothing is served directly from S3
+— the route reads through this package — but the browser still receives the
+upload.
 
 Bodies accept `string` (encoded UTF-8, with a byte-accurate `Content-Length`)
 or `Uint8Array` (stored verbatim, which an uploaded PDF requires).
@@ -158,6 +161,28 @@ An uploaded filename is recorded as metadata and **never** used as a key
 segment or an identifier — it is attacker-controlled text, and using it as a
 path is the classic traversal. It is reduced to its basename and stripped of
 anything an HTTP header cannot carry, since S3 metadata travels in headers.
+
+`ResumeStore` also records an optional **document type** (`document-type`
+metadata): one of `resume`, `cover-letter`, `portfolio`, `reference`, `other`.
+It is validated against that allowlist in both directions — on write because it
+crosses a form boundary, and on read because an object written by older code or
+edited by hand carries whatever it carries; an unrecognised value reads back as
+`undefined`. Absent is legitimate, since nothing written before the field
+existed has one.
+
+It is metadata rather than a kind on purpose. A kind buys separate retention and
+separate accepted extensions, and these five want neither — five kinds would
+cost five `kinds.ts` entries, five Terraform `object_kinds` entries and five IAM
+policies to label one shelf of documents. The cost is that S3 metadata is
+immutable without a copy, and no method here exposes one, so a type is fixed at
+upload.
+
+⚠️ **`list()` returns no user metadata at all.** ListObjectsV2 does not carry
+it, so every listed object has `metadata: {}` — meaning `originalFilename` and
+`documentType` are always `undefined` from a listing, while `key`, `size` and
+`storedAt` are real. Recovering either means a `head()` per object.
+`apps/dashboard/lib/documents/list-documents.ts` does exactly that, and explains
+why the N+1 is the right trade at this scale.
 
 ## Errors
 
