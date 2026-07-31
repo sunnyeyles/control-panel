@@ -9,6 +9,7 @@ import {
 import { z } from "zod"
 
 import type { DocumentActionState } from "./action-state"
+import { EXTENSION_PATTERN, RESUME_ID_PATTERN } from "./document-ref"
 import {
   checkUpload,
   describeRejection,
@@ -91,18 +92,14 @@ const uploadSchema = z.object({
  * Both arrive from a hidden form field, so both are untrusted. Neither is
  * trusted to name a *user*, though — see `deleteDocument`.
  *
- * The id is the full v4 uuid shape rather than "36 characters of `[0-9a-f-]`".
- * The loose form admits ids that `assertSegment` in `@workspace/user-storage`
- * rejects — anything not starting and ending alphanumeric — which would take a
- * malformed field past this check and fail it deep in the store instead, where
- * the only message available is about storing a file. Matching what
- * `crypto.randomUUID()` produces keeps the rejection here, where the wording
- * fits.
+ * The patterns come from `document-ref.ts`, which is also what the download
+ * route parses its path segment with. Why they are as tight as they are is
+ * documented there; what matters here is that a malformed field is rejected on
+ * this path, where the wording fits, rather than deep in the store, where the
+ * only message available is about storing a file.
  */
-const resumeIdSchema = z
-  .string()
-  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
-const extensionSchema = z.string().regex(/^\.[a-z0-9]{1,10}$/)
+const resumeIdSchema = z.string().regex(RESUME_ID_PATTERN)
+const extensionSchema = z.string().regex(EXTENSION_PATTERN)
 
 export function createDocumentActions(deps: DocumentActionsDeps) {
   const newResumeId = deps.newResumeId ?? (() => crypto.randomUUID())

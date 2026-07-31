@@ -1,5 +1,7 @@
 import type { DocumentType, ResumeStore } from "@workspace/user-storage"
 
+import { formatDocumentFile } from "./document-ref"
+
 /** One row of the documents table. Everything is already display-ready. */
 export interface DocumentSummary {
   resumeId: string
@@ -94,14 +96,13 @@ export async function listDocuments(
     return {
       resumeId: item.resumeId,
       extension: item.extension,
-      displayName:
-        detail?.originalFilename ?? `${item.resumeId}${item.extension}`,
+      displayName: detail?.originalFilename ?? formatDocumentFile(item),
       ...(detail?.documentType ? { documentType: detail.documentType } : {}),
       // From the listing, not the head: both are correct, and preferring the
       // listing keeps a row complete even when its head() failed.
       size: item.size,
       uploadedAt: item.uploadedAt,
-      file: `${item.resumeId}${item.extension}`,
+      file: formatDocumentFile(item),
     }
   })
 

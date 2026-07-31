@@ -1,5 +1,9 @@
 import { getCurrentUser } from "@/lib/auth/current-user"
 import { contentDisposition } from "@/lib/documents/content-disposition"
+import {
+  formatDocumentFile,
+  parseDocumentFile,
+} from "@/lib/documents/document-ref"
 import { getResumeStore } from "@/lib/storage"
 import { isUserStorageError } from "@workspace/user-storage"
 
@@ -23,21 +27,6 @@ import { isUserStorageError } from "@workspace/user-storage"
 /** Required of anything reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
 
-/**
- * `{resumeId}{extension}`, e.g. `…-….pdf`.
- *
- * The id half is the full v4 uuid shape rather than "36 characters of
- * `[0-9a-f-]`", and the difference is not pedantry. The loose form admits ids
- * that `assertSegment` in `@workspace/user-storage` rejects — anything not
- * starting and ending alphanumeric, such as a leading dash — so a request could
- * pass the check here and fail deep in the store, arriving as a 500 for what is
- * really a malformed request. Matching what `crypto.randomUUID()` actually
- * produces makes every id that reaches the store a valid key segment by
- * construction, and no id this app has ever written fails it.
- */
-const FILE_PATTERN =
-  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.[a-z0-9]{1,10})$/
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ file: string }> }
@@ -59,12 +48,11 @@ export async function GET(
   }
 
   const { file } = await params
-  const match = FILE_PATTERN.exec(file)
+  const ref = parseDocumentFile(file)
 
-  if (!match) return notFound()
+  if (!ref) return notFound()
 
-  const [, resumeId, extension] = match
-  if (!resumeId || !extension) return notFound()
+  const { resumeId, extension } = ref
 
   let stored
   try {
@@ -90,8 +78,8 @@ export async function GET(
       // `invalid_object_key` joins them, for a different reason: a key the
       // store will not address is one that cannot name an object, which from
       // the caller's side is indistinguishable from an object that is not
-      // there. `FILE_PATTERN` should already have caught every such id, so this
-      // is the second line rather than the first — but answering 500 would
+      // there. `parseDocumentFile` should already have caught every such id, so
+      // this is the second line rather than the first — but answering 500 would
       // report a malformed request as a server fault and fill the log with
       // alarms anyone can trigger from the address bar.
       if (
@@ -120,7 +108,7 @@ export async function GET(
       "Content-Type": stored.contentType,
       "Content-Length": String(stored.bytes.byteLength),
       "Content-Disposition": contentDisposition(
-        stored.originalFilename ?? `${resumeId}${extension}`
+        stored.originalFilename ?? formatDocumentFile(ref)
       ),
       // These bytes arrived from outside. `kinds.ts` calls the `attachment`
       // disposition the stored-XSS guard and notes it was belt-and-braces while
