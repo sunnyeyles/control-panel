@@ -210,10 +210,11 @@ describe("listDocuments — the head() fan-out", () => {
   /**
    * A store that records how many `head()` calls overlap.
    *
-   * The yield is a real timer rather than a microtask so the measurement is
-   * deterministic: every worker the pool starts calls `head()` and increments
-   * the counter before any of them suspends, so `peak` is exactly the pool
-   * size rather than whatever the scheduler happened to interleave.
+   * Built by swapping one method on {@link storeOf} rather than writing a
+   * second `ResumeStore` from scratch. Written out separately it immediately
+   * drifted on the one behaviour this file exists to model: its `list()`
+   * returned user metadata, which neither the real store nor `storeOf` does,
+   * so the fan-out tests were measuring a store unlike every other test here.
    */
   function countingStore(count: number) {
     const items = Array.from({ length: count }, (_, index) =>
@@ -224,16 +225,15 @@ describe("listDocuments — the head() fan-out", () => {
     let peak = 0
 
     const store: ResumeStore = {
-      put: async () => {
-        throw new Error("not used")
-      },
-      get: async () => {
-        throw new Error("not used")
-      },
+      ...storeOf(items),
       head: async (ref: ResumeRef) => {
         inFlight += 1
         peak = Math.max(peak, inFlight)
 
+        // A real timer rather than a microtask, so the measurement is
+        // deterministic: every worker the pool starts calls `head()` and
+        // increments the counter before any of them suspends, making `peak`
+        // exactly the pool size rather than whatever the scheduler interleaved.
         await new Promise((resolve) => setTimeout(resolve, 0))
 
         inFlight -= 1
@@ -241,8 +241,6 @@ describe("listDocuments — the head() fan-out", () => {
           originalFilename: `${ref.resumeId}.pdf`,
         })
       },
-      delete: async () => {},
-      list: async () => items,
     }
 
     return { store, peak: () => peak }

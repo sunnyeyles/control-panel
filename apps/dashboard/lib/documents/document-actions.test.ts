@@ -81,13 +81,13 @@ beforeEach(() => {
 
 function actionsFor(
   user: CurrentUser,
-  overrides: { contentLength?: number } = {}
+  overrides: { contentLength?: number; newResumeId?: () => string } = {}
 ) {
   return createDocumentActions({
     getUser: async () => user,
     getResumes: () => store,
     getContentLength: async () => overrides.contentLength,
-    newResumeId: () => RESUME_ID,
+    newResumeId: overrides.newResumeId ?? (() => RESUME_ID),
   })
 }
 
@@ -428,10 +428,7 @@ describe("uploadDocument — the reset nonce", () => {
 
   it("advances on the next success, which is what resets the form", async () => {
     const ids = ["id-one", "id-two"]
-    const actions = createDocumentActions({
-      getUser: async () => SIGNED_IN,
-      getResumes: () => store,
-      getContentLength: async () => undefined,
+    const actions = actionsFor(SIGNED_IN, {
       newResumeId: () => ids.shift() ?? "exhausted",
     })
 
