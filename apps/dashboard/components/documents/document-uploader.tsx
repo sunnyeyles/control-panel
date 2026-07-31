@@ -83,9 +83,15 @@ export function DocumentUploader({
         all**: resetting from `useEffect` would call `setState` inside it, which
         cascades a render and is what `react-hooks/set-state-in-effect` warns
         about. One reset per success, never one per re-render.
+
+        ⚠️ **Read the nonce on every non-idle state, not only on a success.** An
+        error state carries the previous success's nonce forward precisely so
+        this key holds still; keying on `status === "success"` instead sends it
+        back to "new" the moment an upload fails, remounting the fields and
+        discarding the file the user picked while telling them to try again.
       */}
       <UploadFields
-        key={state.status === "success" ? state.nonce : "new"}
+        key={state.status === "idle" ? "new" : (state.nonce ?? "new")}
         acceptedExtensions={acceptedExtensions}
         pending={pending}
       />

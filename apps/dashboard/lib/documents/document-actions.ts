@@ -103,9 +103,13 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
    * A thrown error here is treated as "not authorized" rather than propagated:
    * `getCurrentUser` touches the database to map an auth id onto a platform
    * user, and a database blip must not turn into an unauthenticated write.
+   *
+   * Returns a *message* rather than a finished state so the caller can stamp
+   * the carried nonce onto it — see {@link carryNonce}. A refusal is a failure
+   * like any other and must not reset the form either.
    */
   async function requireUser(): Promise<
-    { ok: true; userId: string } | { ok: false; state: DocumentActionState }
+    { ok: true; userId: string } | { ok: false; message: string }
   > {
     let user: CurrentUser
 
@@ -113,20 +117,25 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
       user = await deps.getUser()
     } catch (error) {
       console.error("documents: failed to resolve the caller", error)
-      return { ok: false, state: { status: "error", message: NOT_AUTHORIZED } }
+      return { ok: false, message: NOT_AUTHORIZED }
     }
 
     if (user.status !== "ok") {
-      return { ok: false, state: { status: "error", message: NOT_AUTHORIZED } }
+      return { ok: false, message: NOT_AUTHORIZED }
     }
 
     return { ok: true, userId: user.userId }
   }
 
   async function uploadDocument(
-    _state: DocumentActionState,
+    state: DocumentActionState,
     formData: FormData
   ): Promise<DocumentActionState> {
+    // Every failure below goes through this rather than building its own error
+    // state, so the carried nonce cannot be forgotten on one branch out of
+    // eight — which is exactly how the form came to reset itself mid-retry.
+    const fail = (message: string) => carryNonce(state, message)
+
     // Before the body is touched at all.
     //
     // Not belt-and-braces here, unlike on a GET. `proxy.ts` cannot evaluate a
@@ -136,17 +145,17 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     // path, and Next's own documentation says the same thing: a Server Function
     // is reachable by direct POST, not only through the UI.
     const caller = await requireUser()
-    if (!caller.ok) return caller.state
+    if (!caller.ok) return fail(caller.message)
 
-    // Before `arrayBuffer()`, so an enormous body is refused rather than read
-    // into memory. See MAX_REQUEST_BYTES for why a client-supplied header is
-    // worth consulting at all, and why only to reject.
+    // Before `arrayBuffer()`, so the bytes are not copied a second time. Note
+    // what this does *not* buy: by the time a Server Action runs, Next has
+    // already parsed and buffered the multipart body, so the first copy is
+    // unavoidable here — `serverActions.bodySizeLimit` is what caps it. See
+    // MAX_REQUEST_BYTES for why a client-supplied header is worth consulting at
+    // all, and why only to reject.
     const declared = await deps.getContentLength()
     if (declared !== undefined && declared > MAX_REQUEST_BYTES) {
-      return {
-        status: "error",
-        message: "That upload is too large.",
-      }
+      return fail("That upload is too large.")
     }
 
     const parsed = uploadSchema.safeParse({
@@ -155,7 +164,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     })
 
     if (!parsed.success) {
-      return { status: "error", message: "Choose a file to upload." }
+      return fail("Choose a file to upload.")
     }
 
     const { file } = parsed.data
@@ -171,7 +180,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     )
 
     if (!check.ok) {
-      return { status: "error", message: describeRejection(check.rejection) }
+      return fail(describeRejection(check.rejection))
     }
 
     // A `<select>` value arrives in the same untrusted form data as everything
@@ -203,7 +212,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         ...(documentType ? { documentType } : {}),
       })
     } catch (error) {
-      return { status: "error", message: storageMessage("upload", error) }
+      return fail(storageMessage("upload", error))
     }
 
     // The nonce is the new object's id: unique per success by construction, so
@@ -219,8 +228,12 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     _state: DocumentActionState,
     formData: FormData
   ): Promise<DocumentActionState> {
+    // No `carryNonce` here, unlike the upload. Nothing keys on a delete's
+    // nonce — the button lives inside the row it deletes, so a success unmounts
+    // it rather than resetting it — and inventing a use for the value would be
+    // symmetry for its own sake.
     const caller = await requireUser()
-    if (!caller.ok) return caller.state
+    if (!caller.ok) return { status: "error", message: caller.message }
 
     const resumeId = resumeIdSchema.safeParse(formData.get("resumeId"))
     const extension = extensionSchema.safeParse(formData.get("extension"))
@@ -254,6 +267,29 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
   }
 
   return { uploadDocument, deleteDocument }
+}
+
+/**
+ * An error state that preserves whatever nonce the previous state held.
+ *
+ * The uploader keys its fields on the nonce, so the nonce is not really an
+ * identifier — it is "how many times has an upload succeeded". A failure is not
+ * a success, so it must not move that number. Building the error state without
+ * the previous nonce reads as harmless and is not: the key flips back to its
+ * initial value, React remounts the fields, and the file the user picked is
+ * discarded underneath the message telling them to try again.
+ *
+ * Takes the whole previous state rather than a nonce so that a caller cannot
+ * pass the wrong one, and so the `idle` case — nothing to carry — is handled
+ * here once.
+ */
+function carryNonce(
+  previous: DocumentActionState,
+  message: string
+): DocumentActionState {
+  const nonce = previous.status === "idle" ? undefined : previous.nonce
+
+  return { status: "error", message, ...(nonce ? { nonce } : {}) }
 }
 
 /**

@@ -12,7 +12,24 @@
  */
 export type DocumentActionState =
   | { status: "idle" }
-  | { status: "error"; message: string }
+  | {
+      status: "error"
+      message: string
+      /**
+       * The **previous** success's nonce, carried forward unchanged.
+       *
+       * Not decoration. The uploader keys its fields on the nonce, so a value
+       * that disappeared here would be a value that *changed* — and the fields
+       * would remount, throwing away the file the user picked, at the exact
+       * moment they are being told to try again. Carrying it makes the key
+       * stable across a failure, which is what "one reset per success" was
+       * always supposed to mean.
+       *
+       * Absent when no upload has succeeded yet, which is the only case where
+       * there is nothing to preserve.
+       */
+      nonce?: string
+    }
   | {
       status: "success"
       message: string

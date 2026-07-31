@@ -352,6 +352,97 @@ describe("uploadDocument — storage failures", () => {
   })
 })
 
+describe("uploadDocument — the reset nonce", () => {
+  // The uploader keys its fields on the nonce, so these assertions are really
+  // about whether a retry keeps the file the user picked. Invisible from the
+  // action's own vantage point, which is why they say so out loud.
+
+  it("carries the previous success's nonce through a failure", async () => {
+    const { uploadDocument } = actionsFor(SIGNED_IN)
+
+    const success = await uploadDocument(IDLE, uploadForm(pdf()))
+    expect(success).toEqual({
+      status: "success",
+      message: "Uploaded My CV.pdf.",
+      nonce: RESUME_ID,
+    })
+
+    store.putError = new StorageUnavailableError("nope")
+    const failure = await uploadDocument(success, uploadForm(pdf()))
+
+    // Unchanged, so the key holds still and the fields do not remount.
+    expect(failure).toEqual({
+      status: "error",
+      message: "Document storage is unavailable. Try again in a moment.",
+      nonce: RESUME_ID,
+    })
+  })
+
+  it("carries it through a refusal too, not just a storage failure", async () => {
+    // A session that expired between the first upload and the second is the
+    // most likely way to hit this, and losing the file to it would be galling.
+    const success = await actionsFor(SIGNED_IN).uploadDocument(
+      IDLE,
+      uploadForm(pdf())
+    )
+
+    const failure = await actionsFor(ANONYMOUS).uploadDocument(
+      success,
+      uploadForm(pdf())
+    )
+
+    expect(failure).toEqual({
+      status: "error",
+      message: "You are not signed in.",
+      nonce: RESUME_ID,
+    })
+  })
+
+  it("carries it across a run of consecutive failures", async () => {
+    const { uploadDocument } = actionsFor(SIGNED_IN)
+
+    const success = await uploadDocument(IDLE, uploadForm(pdf()))
+    store.putError = new StorageUnavailableError("nope")
+
+    const first = await uploadDocument(success, uploadForm(pdf()))
+    const second = await uploadDocument(first, uploadForm(pdf()))
+    const third = await uploadDocument(second, uploadForm(pdf()))
+
+    // One reset per success means zero resets across three failures.
+    expect(third.status === "error" && third.nonce).toBe(RESUME_ID)
+  })
+
+  it("has no nonce to carry before the first success", async () => {
+    const result = await actionsFor(ANONYMOUS).uploadDocument(
+      IDLE,
+      uploadForm(pdf())
+    )
+
+    // Absent rather than empty: there is genuinely nothing to preserve, and the
+    // uploader falls back to its initial key.
+    expect(result).toEqual({
+      status: "error",
+      message: "You are not signed in.",
+    })
+  })
+
+  it("advances on the next success, which is what resets the form", async () => {
+    const ids = ["id-one", "id-two"]
+    const actions = createDocumentActions({
+      getUser: async () => SIGNED_IN,
+      getResumes: () => store,
+      getContentLength: async () => undefined,
+      newResumeId: () => ids.shift() ?? "exhausted",
+    })
+
+    const first = await actions.uploadDocument(IDLE, uploadForm(pdf()))
+    const second = await actions.uploadDocument(first, uploadForm(pdf()))
+
+    expect(first.status === "success" && first.nonce).toBe("id-one")
+    expect(second.status === "success" && second.nonce).toBe("id-two")
+  })
+})
+
 describe("deleteDocument", () => {
   function deleteForm(resumeId: string, extension: string): FormData {
     const form = new FormData()
