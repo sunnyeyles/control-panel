@@ -33,10 +33,21 @@ import {
  * so a green build says less about this file than it does about most.
  */
 let resumes: ResumeStore | undefined
+
+/**
+ * The role the memoized client assumes, or `undefined` for the default chain.
+ *
+ * The role ARN *is* the identity, so it is also the whole memo key: changing it
+ * is a change of identity, and the existing client would otherwise keep
+ * assuming the role it was built with. `undefined !== undefined` is `false`, so
+ * the default-chain case memoizes exactly as well as the OIDC one; `!resumes`
+ * is what distinguishes "never built" from "built for the default chain".
+ */
 let builtFor: string | undefined
 
 export function getResumeStore(): ResumeStore {
-  // ⚠️ **The mode is recomputed every call; only the client is memoized.**
+  // ⚠️ **The credential source is recomputed every call; only the client is
+  // memoized.**
   //
   // `createClient` decides between OIDC and the SDK's default chain by reading
   // the environment. Deciding that once, at whatever moment the first request
@@ -46,46 +57,25 @@ export function getResumeStore(): ResumeStore {
   // `DEPLOYING.md` has to warn surfaces as nothing more specific than "Document
   // storage is unavailable". Cheap to re-read a string; expensive to diagnose.
   //
-  // In the steady state the mode never changes, so this rebuilds nothing and
-  // the connection pool is still shared across requests.
-  const mode = credentialMode()
-  const key = modeKey(mode)
+  // In the steady state this never changes, so it rebuilds nothing and the
+  // connection pool is still shared across requests.
+  const roleArn = oidcRoleArn()
 
-  if (!resumes || builtFor !== key) {
+  if (!resumes || builtFor !== roleArn) {
     const config = readUserStorageConfig()
 
     resumes = createResumeStore(
-      createS3UserObjectStore({ config, client: createClient(config, mode) })
+      createS3UserObjectStore({ config, client: createClient(config, roleArn) })
     )
-    builtFor = key
+    builtFor = roleArn
   }
 
   return resumes
 }
 
-type CredentialMode = { kind: "default" } | { kind: "oidc"; roleArn: string }
-
-function credentialMode(): CredentialMode {
-  const roleArn = process.env.AWS_ROLE_ARN
-
-  return roleArn && process.env.VERCEL_OIDC_TOKEN
-    ? { kind: "oidc", roleArn }
-    : { kind: "default" }
-}
-
-/**
- * The mode as something comparable.
- *
- * `credentialMode()` allocates, so comparing its result to the previous one
- * with `!==` is always true and would rebuild the client — and its connection
- * pool — on every single request, which is the exact cost the memoization
- * exists to avoid. Compare the value, not the object.
- *
- * The role ARN is part of the key because changing it is a change of identity:
- * the same client would otherwise keep assuming the role it was built with.
- */
-function modeKey(mode: CredentialMode): string {
-  return mode.kind === "oidc" ? `oidc:${mode.roleArn}` : "default"
+/** The role to assume on Vercel, or `undefined` anywhere else. */
+function oidcRoleArn(): string | undefined {
+  return process.env.VERCEL_OIDC_TOKEN ? process.env.AWS_ROLE_ARN : undefined
 }
 
 /**
@@ -124,14 +114,12 @@ function modeKey(mode: CredentialMode): string {
  */
 function createClient(
   config: UserStorageConfig,
-  mode: CredentialMode
+  roleArn: string | undefined
 ): S3Client {
-  if (mode.kind === "default") {
-    return new S3Client({ region: config.region })
-  }
+  if (!roleArn) return new S3Client({ region: config.region })
 
   return new S3Client({
     region: config.region,
-    credentials: awsCredentialsProvider({ roleArn: mode.roleArn }),
+    credentials: awsCredentialsProvider({ roleArn }),
   })
 }

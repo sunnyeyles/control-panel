@@ -65,16 +65,18 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
               </TableCell>
 
               <TableCell>
+                {/*
+                  The label lookup needs no `??` fallback, and one would be dead
+                  code. `noUncheckedIndexedAccess` does not apply to it — a
+                  `Record<DocumentType, string>` over a literal union is a
+                  mapped type with declared properties, not an index signature,
+                  so the lookup is `string`. The runtime half is covered too:
+                  `head()` in the storage package narrows an unrecognised stored
+                  value to `undefined`, which takes the em-dash branch.
+                */}
                 {document.documentType ? (
                   <Badge variant="secondary">
-                    {/*
-                      The `??` survives the map being exhaustive, because
-                      `noUncheckedIndexedAccess` makes the lookup
-                      `string | undefined` and because a stored value that is
-                      no longer a known type would otherwise render as blank.
-                    */}
-                    {DOCUMENT_TYPE_LABELS[document.documentType] ??
-                      document.documentType}
+                    {DOCUMENT_TYPE_LABELS[document.documentType]}
                   </Badge>
                 ) : (
                   // Everything uploaded before document types existed lands

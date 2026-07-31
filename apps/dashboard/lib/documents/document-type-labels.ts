@@ -14,9 +14,12 @@ import type { DocumentType } from "@workspace/user-storage"
  * reached from a client component, and `@workspace/user-storage` carries the
  * AWS SDK. A type-only import is erased before bundling, so the labels cost the
  * browser nothing while `Record<DocumentType, …>` still makes the compiler
- * insist the set is exhaustive — which is the whole point. Importing
- * `DOCUMENT_TYPES` as a *value* to derive the keys would work and would ship
- * the SDK to the browser.
+ * insist the set is exhaustive — which is the whole point. Restating the five
+ * keys is the price of that, and it is the right trade: importing
+ * `DOCUMENT_TYPES` as a *value* would single-source them, but the guarantee
+ * would then rest on a bundler continuing to resolve a package subpath to a
+ * module that happens not to reach the SDK, which is a weaker thing to depend
+ * on than an import the compiler erases unconditionally.
  */
 export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   resume: "Resume",
@@ -27,15 +30,3 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   // mislabelled as one of them, and a label nobody trusts is worse than none.
   other: "Other",
 }
-
-/**
- * The types in the order the form offers them, as `<Select>` items.
- *
- * Derived from the map rather than written out again, so the order is the only
- * thing this adds. `Object.entries` on a `Record<DocumentType, string>` widens
- * the key back to `string`, hence the cast — the exhaustiveness that matters is
- * already enforced on the map above.
- */
-export const DOCUMENT_TYPE_OPTIONS = Object.entries(DOCUMENT_TYPE_LABELS).map(
-  ([value, label]) => ({ value: value as DocumentType, label })
-)

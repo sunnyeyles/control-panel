@@ -10,6 +10,25 @@
  */
 
 /**
+ * Module scope, not inline in the functions below.
+ *
+ * A regex *literal* constructs a fresh `RegExp` every time the expression is
+ * evaluated, so leaving these in the function bodies allocates four throwaway
+ * objects per download. Sharing them is only safe because every use below is
+ * `String.prototype.replace`, which resets `lastIndex` around the call — a
+ * shared `/g/` regex used with `.test()` would carry `lastIndex` between calls
+ * and skip every second match.
+ */
+// `no-control-regex` exists to catch a control character that got into a
+// pattern by accident. Here they are the subject of the pattern, and the whole
+// point of the line.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\x00-\x1F\x7F]/g
+const BACKSLASH = /\\/g
+const QUOTE = /"/g
+const NON_ATTR_CHARACTERS = /[!'()*]/g
+
+/**
  * A `Content-Disposition` a browser will accept for any stored filename.
  *
  * `cleanFilename()` in `@workspace/user-storage` already stripped path
@@ -34,13 +53,9 @@ export function contentDisposition(filename: string): string {
   // the guarantee gets quietly dropped when someone relaxes the other end.
   // The `filename*` half already encoded these; this is the half that did not.
   const quoted = filename
-    // `no-control-regex` exists to catch a control character that got into a
-    // pattern by accident. Here they are the subject of the pattern, and the
-    // whole point of the line.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x1F\x7F]/g, "")
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
+    .replace(CONTROL_CHARACTERS, "")
+    .replace(BACKSLASH, "\\\\")
+    .replace(QUOTE, '\\"')
 
   return `attachment; filename="${quoted}"; filename*=UTF-8''${encodeExtValue(filename)}`
 }
@@ -59,9 +74,11 @@ export function contentDisposition(filename: string): string {
  * characters in a character class.
  */
 function encodeExtValue(value: string): string {
+  // No `padStart`: the class is exactly `!'()*`, code points 0x21–0x2A, so
+  // every one of them is already two hex digits. A pad that can never fire
+  // reads as though some input needs it.
   return encodeURIComponent(value).replace(
-    /[!'()*]/g,
-    (character) =>
-      `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
+    NON_ATTR_CHARACTERS,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
   )
 }

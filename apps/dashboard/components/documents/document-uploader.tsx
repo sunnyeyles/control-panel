@@ -4,7 +4,7 @@ import { useActionState, useState } from "react"
 
 import { uploadDocumentAction } from "@/app/documents/actions"
 import { IDLE } from "@/lib/documents/action-state"
-import { DOCUMENT_TYPE_OPTIONS } from "@/lib/documents/document-type-labels"
+import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import { MAX_DOCUMENT_BYTES } from "@/lib/documents/upload-validation"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { Button } from "@workspace/ui/components/button"
@@ -165,9 +165,14 @@ function UploadFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {DOCUMENT_TYPE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
+            {/*
+              Straight off the map — the offered order is its key order, and a
+              `SelectItem` value is a `string`, so nothing here needs the map's
+              keys narrowed back to `DocumentType`.
+            */}
+            {Object.entries(DOCUMENT_TYPE_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
               </SelectItem>
             ))}
           </SelectContent>
