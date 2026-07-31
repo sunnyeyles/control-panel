@@ -31,13 +31,22 @@ export { createDb, type Db } from "./db.ts"
 
 export {
   readDatabaseConfig,
+  readMailboxEncryptionConfig,
   readMigrationConfig,
   DATABASE_URL,
   DATABASE_URL_UNPOOLED,
+  MAILBOX_ENCRYPTION_KEY,
   type DatabaseConfig,
+  type MailboxEncryptionConfig,
 } from "./config.ts"
 
 export { createUserStore, type UserStore } from "./users.ts"
+
+export {
+  createMailboxStore,
+  type ConnectMailbox,
+  type MailboxStore,
+} from "./mailboxes.ts"
 
 export {
   createJobStore,
@@ -64,6 +73,7 @@ export type {
   DueJob,
   Job,
   JobConfig,
+  Mailbox,
   Run,
   RunFailure,
   RunStatus,

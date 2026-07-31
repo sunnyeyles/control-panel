@@ -12,6 +12,7 @@ errors.ts      the typed error union                            no pg import
 config.ts      reads the environment                            no pg import
 schedule.ts    computeNextRunAt — pure, and where the bugs are  no pg import
 users.ts       UserStore facade                                 no pg import
+mailboxes.ts   MailboxStore facade, and the token crypto        no pg import
 jobs.ts        JobStore facade, and the claim                   no pg import
 runs.ts        RunStore facade, and the transition guard        no pg import
 artifacts.ts   ArtifactStore facade                             no pg import
@@ -123,17 +124,17 @@ pnpm --filter @workspace/db test
 Two suites, split by whether the thing under test needs Postgres to _be_
 Postgres:
 
-- **`schedule.test.ts` needs nothing.** DST boundaries across IANA zones, missed
-  slots, the UTC partition day. This is where the real bugs live, and it is the
-  entire argument for `computeNextRunAt` being application code rather than a
-  database trigger.
+- **`schedule.test.ts` and `mailboxes.test.ts` need nothing.** DST boundaries
+  across IANA zones, missed slots, the UTC partition day; and the refresh-token
+  envelope — round trip, tamper refusal, wrong key, missing key.
 - **`stores.test.ts` needs a real database** and **skips when
   `DATABASE_URL_UNPOOLED` is unset**, so `pnpm test` stays runnable with no
   credentials. It asserts the claim race, unlimited ad-hoc runs beside unique
-  scheduled ones, the `object_key` CHECK, and the refusal to walk a terminal run
-  back to `running` — all properties of the database, none of which a mocked
-  driver could assert. It runs inside a schema it creates and drops, so it
-  cannot touch data it did not write.
+  scheduled ones, the `object_key` CHECK, the refusal to walk a terminal run
+  back to `running`, and the mailbox upsert under concurrency — all properties
+  of the database, none of which a mocked driver could assert. It runs inside a
+  schema it creates and drops, so it cannot touch data it did not write. It
+  sets `MAILBOX_ENCRYPTION_KEY` itself when unset, so it never skips for that.
 
 `CLAUDE.md`'s warning still holds: `turbo test` is a no-op in packages without
 Vitest, so a clean exit code proves nothing on its own.
@@ -158,3 +159,14 @@ Vitest, so a clean exit code proves nothing on its own.
   no leading slash. There is no `kind` column; the key already encodes it and
   `parseObjectKey()` recovers it, which is why this package does not depend on
   `@workspace/user-storage` at all.
+- **`mailboxes.refresh_token_encrypted` is AES-256-GCM ciphertext** under
+  `MAILBOX_ENCRYPTION_KEY`, enveloped `v1:<iv>:<tag>:<data>`. It defends
+  against database-only exposure — a leaked backup, a `select *` in a log, a
+  Neon branch — and **not** against anyone holding the Vercel environment, who
+  has the key and `DATABASE_URL` together. The crypto lives inside
+  `mailboxes.ts` with the key read lazily per call, so the worker — which
+  opens this database and never touches a Mailbox — never needs the variable.
+- **`MailboxStore` splits `get()` from `refreshToken()`** so the Settings page
+  that renders connection state cannot leak the credential, enforced by the
+  type rather than by discipline. `lapsed_at` names no cause on purpose:
+  Google reports every refresh failure as the same bare `invalid_grant`.

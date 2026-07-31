@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { randomBytes, randomUUID } from "node:crypto"
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
@@ -64,6 +64,12 @@ describeWithDatabase("against a real database", () => {
   beforeAll(async () => {
     const base = CONNECTION_STRING as string
     config = { connectionString: withSearchPath(base, SCHEMA) }
+
+    // The mailbox store reads this lazily on every encrypt/decrypt. Set here
+    // rather than required from the environment: the schema is already a
+    // throwaway, and a suite that skips on a *second* unset variable would be
+    // twice as easy to believe you had run.
+    process.env.MAILBOX_ENCRYPTION_KEY ??= randomBytes(32).toString("base64")
 
     admin = createConnection({ connectionString: base })
     await admin.query(`create schema "${SCHEMA}"`)
@@ -459,6 +465,141 @@ describeWithDatabase("against a real database", () => {
           [authUserId, other.id]
         )
       ).rejects.toThrow()
+    })
+  })
+
+  describe("mailboxes", () => {
+    /** Each test gets its own User, because a User has at most one Mailbox. */
+    async function ownerAndMailbox(emailAddress = "sunny@gmail.com") {
+      const owner = await db.users.create()
+      const mailbox = await db.mailboxes.connect({
+        userId: owner.id,
+        emailAddress,
+        scope: "https://www.googleapis.com/auth/gmail.readonly",
+        refreshToken: `1//refresh-${randomUUID()}`,
+      })
+      return { owner, mailbox }
+    }
+
+    it("stores what Settings renders, and get() returns no token", async () => {
+      const { owner, mailbox } = await ownerAndMailbox()
+
+      const read = await db.mailboxes.get(owner.id)
+      expect(read?.emailAddress).toBe("sunny@gmail.com")
+      expect(read?.scope).toContain("gmail.readonly")
+      expect(read?.lapsedAt).toBeNull()
+      expect(read?.connectedAt.getTime()).toBe(mailbox.connectedAt.getTime())
+      // The type split is the guarantee; this asserts the runtime shape agrees.
+      expect(read).not.toHaveProperty("refreshToken")
+      expect(read).not.toHaveProperty("refresh_token_encrypted")
+    })
+
+    it("round-trips the refresh token through encryption at rest", async () => {
+      const owner = await db.users.create()
+      const token = `1//refresh-${randomUUID()}`
+
+      await db.mailboxes.connect({
+        userId: owner.id,
+        emailAddress: "sunny@gmail.com",
+        scope: "https://www.googleapis.com/auth/gmail.readonly",
+        refreshToken: token,
+      })
+
+      expect(await db.mailboxes.refreshToken(owner.id)).toBe(token)
+
+      // And the column genuinely holds ciphertext, not the token with a prefix.
+      const { rows } = await admin.query<{ refresh_token_encrypted: string }>(
+        `select refresh_token_encrypted from "${SCHEMA}".mailboxes where user_id = $1`,
+        [owner.id]
+      )
+      expect(rows[0]?.refresh_token_encrypted).toMatch(/^v1:/)
+      expect(rows[0]?.refresh_token_encrypted).not.toContain(token)
+    })
+
+    it("upserts on reconnect and clears lapsed_at", async () => {
+      const { owner } = await ownerAndMailbox()
+
+      await db.mailboxes.markLapsed(owner.id)
+      expect((await db.mailboxes.get(owner.id))?.lapsedAt).not.toBeNull()
+
+      const reconnected = await db.mailboxes.connect({
+        userId: owner.id,
+        emailAddress: "other@gmail.com",
+        scope: "https://www.googleapis.com/auth/gmail.readonly",
+        refreshToken: `1//refresh-${randomUUID()}`,
+      })
+
+      expect(reconnected.emailAddress).toBe("other@gmail.com")
+      expect(reconnected.lapsedAt).toBeNull()
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".mailboxes where user_id = $1`,
+        [owner.id]
+      )
+      expect(rows[0]?.count).toBe("1")
+    })
+
+    it("keeps lapsed_at meaning 'when it stopped working'", async () => {
+      const { owner } = await ownerAndMailbox()
+
+      await db.mailboxes.markLapsed(owner.id)
+      const first = (await db.mailboxes.get(owner.id))?.lapsedAt
+
+      // A turn with several Gmail calls can notice the same dead credential
+      // more than once; only the first notice is the fact worth keeping.
+      await db.mailboxes.markLapsed(owner.id)
+      const second = (await db.mailboxes.get(owner.id))?.lapsedAt
+
+      expect(second?.getTime()).toBe(first?.getTime())
+    })
+
+    it("holds one row under two concurrent connects", async () => {
+      const owner = await db.users.create()
+      const rival = createDb(config)
+
+      const input = (token: string) => ({
+        userId: owner.id,
+        emailAddress: "sunny@gmail.com",
+        scope: "https://www.googleapis.com/auth/gmail.readonly",
+        refreshToken: token,
+      })
+
+      try {
+        await Promise.all([
+          db.mailboxes.connect(input("1//first")),
+          rival.mailboxes.connect(input("1//second")),
+        ])
+
+        const { rows } = await admin.query<{ count: string }>(
+          `select count(*)::text as count from "${SCHEMA}".mailboxes where user_id = $1`,
+          [owner.id]
+        )
+        expect(rows[0]?.count).toBe("1")
+
+        // Whichever write won, the row decrypts to one of the two tokens
+        // rather than to an interleaving of both.
+        const token = await db.mailboxes.refreshToken(owner.id)
+        expect(["1//first", "1//second"]).toContain(token)
+      } finally {
+        await rival.close()
+      }
+    })
+
+    it("refuses to delete a user who still holds a mailbox", async () => {
+      const { owner } = await ownerAndMailbox()
+
+      await expect(
+        admin.query(`delete from "${SCHEMA}".users where id = $1`, [owner.id])
+      ).rejects.toThrow()
+    })
+
+    it("forgets the mailbox on disconnect", async () => {
+      const { owner } = await ownerAndMailbox()
+
+      await db.mailboxes.disconnect(owner.id)
+
+      expect(await db.mailboxes.get(owner.id)).toBeUndefined()
+      expect(await db.mailboxes.refreshToken(owner.id)).toBeUndefined()
     })
   })
 
