@@ -117,6 +117,39 @@ authoritative check inside the route or page. Neither is sufficient alone, and
 that is the point — the proxy is a routing concern, and the route is what must
 not be reachable by accident.
 
+**Mailbox**:
+A Gmail account this platform holds read access to — the standing grant plus
+whatever proves it. A Gmail account nobody has granted us is not a Mailbox; it
+becomes one by being connected and stops being one by being disconnected.
+Read-only is structural, a property of the tool set the way it is for the
+**Scout**: there is no way to send, only to search and read.
+
+Not an **Account**, which is the identity someone signs in with — a Mailbox is a
+third-party resource a **User** has granted us access to. A Mailbox may be
+**lapsed**: the grant has stopped working, and why is not knowable, because
+Google reports every failure identically whether the user withdrew access,
+changed their password, or left it unused too long. The repair is to reconnect.
+Having no Mailbox at all is a third state, and says something different to the
+user than a lapsed one.
+_Avoid_: account, inbox, integration, linked account, connection
+
+**Email**:
+One message retrieved from a **Mailbox**. Never called a message: in this
+codebase **message** means a `BaseMessage` in an agent's transcript, the sense
+that is load-bearing in the graph state, the chat request body and the UI
+stream. Gmail's API calls it a `Message`, and that name is used only for the
+wire type. Never a **Finding** either — findings are the scout's validated
+output for the writer, and nothing hands an Email to a second agent.
+_Avoid_: message, mail, item, record
+
+**Connect / Disconnect**:
+Granting this platform read access to a **Mailbox**, and ending it. Distinct
+from **revoke**, which is what happens at Google's end — the user withdrawing
+access in their Google account, or us asking Google to. Disconnecting may or may
+not also revoke; the word claims only our side of it, so it stays true either
+way.
+_Avoid_: link/unlink, remove, revoke (for our own action)
+
 **Run Report**:
 The single structured log line a briefing run emits describing its outcome —
 `event: "briefing-run"`, carrying the search count, the model calls, and the
