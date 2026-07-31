@@ -72,6 +72,23 @@ export const MAX_REQUEST_BYTES = 4 * 1024 * 1024
  */
 export const MAX_ACTION_BODY_BYTES = MAX_REQUEST_BYTES + 128 * 1024
 
+/**
+ * `experimental.proxyClientMaxBodySize` in `next.config.ts` — the top rung.
+ *
+ * Here for the same reason as the rung below it. Deriving the action limit from
+ * `MAX_REQUEST_BYTES` fixed one tie and left this one written out as `"6mb"` in
+ * a different file, in a different unit, related to the others only by prose —
+ * which is exactly the arrangement that produced the tie in the first place.
+ * Raising `MAX_REQUEST_BYTES` past ~5.87 MiB would have silently inverted the
+ * pair `next.config.ts` warns loudest about, with nothing failing.
+ *
+ * The gap is generous because this rung is not a limit anyone should reach:
+ * exceeding it truncates the buffered body *without failing the request*, so
+ * the design is for the action limit to always bind first. See the comment in
+ * `next.config.ts` for what truncation would mean.
+ */
+export const MAX_PROXY_BUFFER_BYTES = MAX_ACTION_BODY_BYTES + 2 * 1024 * 1024
+
 export type UploadRejection =
   | { reason: "empty-filename" }
   | { reason: "no-extension"; filename: string }

@@ -7,6 +7,7 @@ import {
   extensionOf,
   MAX_ACTION_BODY_BYTES,
   MAX_DOCUMENT_BYTES,
+  MAX_PROXY_BUFFER_BYTES,
   MAX_REQUEST_BYTES,
 } from "./upload-validation"
 
@@ -178,6 +179,14 @@ describe("the limit ladder", () => {
     expect(MAX_ACTION_BODY_BYTES).toBeGreaterThan(MAX_REQUEST_BYTES)
   })
 
+  it("keeps the proxy buffer above the action limit, so it never truncates", () => {
+    // The one rung whose failure is silent: exceeding it buffers a partial
+    // body and lets the request continue, so a truncated multipart upload
+    // could reach S3 as a corrupt document. It has to be the rung nothing
+    // reaches, which means the action limit must bind first.
+    expect(MAX_PROXY_BUFFER_BYTES).toBeGreaterThan(MAX_ACTION_BODY_BYTES)
+  })
+
   it("leaves every rung under Vercel's ~4.5 MB platform cap", () => {
     // Enforced before the request reaches Next, so exceeding it produces a
     // platform 413 that no code in this repo can turn into a friendly message.
@@ -189,12 +198,17 @@ describe("the limit ladder", () => {
 
     expect(MAX_REQUEST_BYTES).toBeLessThan(PLATFORM_CAP)
     expect(MAX_ACTION_BODY_BYTES).toBeLessThan(PLATFORM_CAP)
+    // Deliberately not `MAX_PROXY_BUFFER_BYTES`. It sits above the platform
+    // cap on purpose — on Vercel the platform refuses the request long before
+    // the buffer is the binding constraint, and the rung exists for the
+    // self-hosted case where nothing else is watching.
   })
 
-  it("is a whole number of bytes, which is what the config option takes", () => {
-    // Not idle. The obvious way to write this limit is `4.2 * 1024 * 1024`,
+  it("is whole numbers of bytes, which is what the config options take", () => {
+    // Not idle. The obvious way to write these limits is `4.2 * 1024 * 1024`,
     // which is 4404019.2 — a fraction of a byte handed to `bodySizeLimit`.
     expect(Number.isInteger(MAX_ACTION_BODY_BYTES)).toBe(true)
+    expect(Number.isInteger(MAX_PROXY_BUFFER_BYTES)).toBe(true)
   })
 })
 

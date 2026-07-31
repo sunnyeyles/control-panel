@@ -1,6 +1,9 @@
 import type { NextConfig } from "next"
 
-import { MAX_ACTION_BODY_BYTES } from "./lib/documents/upload-validation"
+import {
+  MAX_ACTION_BODY_BYTES,
+  MAX_PROXY_BUFFER_BYTES,
+} from "./lib/documents/upload-validation"
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@workspace/ui"],
@@ -47,13 +50,18 @@ const nextConfig: NextConfig = {
      * buffer is ever the binding constraint. **Inverting the two reintroduces
      * silent corruption**, and nothing fails loudly to tell you.
      *
-     * The full ladder, smallest first, in the units each rung is actually
-     * expressed in: client pre-check 3 MiB, authoritative byte check 3 MiB,
-     * `content-length` check 4 MiB, the action limit 4.2 MiB, Vercel's platform
-     * cap ~4.5 MB, this buffer 6 MiB. Every step is a strict inequality — where
+     * Imported rather than written as `"6mb"`, for the same reason as the rung
+     * below: the ordering these comments insist on should hold by construction,
+     * not because two literals in two files in two different units happen to
+     * agree. The option takes a byte count as happily as a string.
+     *
+     * The full ladder, smallest first: client pre-check 3 MiB, authoritative
+     * byte check 3 MiB, `content-length` check 4 MiB, the action limit
+     * 4 MiB + 128 KiB, Vercel's platform cap ~4.5 MB, this buffer a further
+     * 2 MiB above the action limit. Every step is a strict inequality — where
      * two rungs were equal, the lower one was unreachable.
      */
-    proxyClientMaxBodySize: "6mb",
+    proxyClientMaxBodySize: MAX_PROXY_BUFFER_BYTES,
   },
 }
 
