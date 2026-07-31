@@ -34,6 +34,10 @@ export function contentDisposition(filename: string): string {
   // the guarantee gets quietly dropped when someone relaxes the other end.
   // The `filename*` half already encoded these; this is the half that did not.
   const quoted = filename
+    // `no-control-regex` exists to catch a control character that got into a
+    // pattern by accident. Here they are the subject of the pattern, and the
+    // whole point of the line.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x1F\x7F]/g, "")
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
