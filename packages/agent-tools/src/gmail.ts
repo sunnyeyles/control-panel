@@ -59,15 +59,18 @@ const HYDRATE_CONCURRENCY = 5
  * `format=full` with a `fields` mask that excludes `body.data`, rather than
  * `format=metadata`: metadata returns headers only — no part tree — and the
  * attachment line on a search stanza (filename, type, size) is most of the
- * answer to an invoice question. The mask keeps the response near metadata
- * size; quota cost is identical either way. Parts are spelled three levels
- * deep because the fields syntax cannot recurse; anything nested deeper than
+ * answer to an invoice question. The mask trims the dominant cost, the body
+ * data; the full header block still comes (`fields` cannot filter an array by
+ * value), which `metadataHeaders` would have trimmed — a few KB per hit, on
+ * the wire only, never in the transcript. Quota cost is identical either
+ * way. Parts are spelled three levels deep because the fields syntax cannot
+ * recurse; anything nested deeper than
  * `multipart/mixed(multipart/related(multipart/alternative))` loses only its
  * attachment listing, not its headers.
  */
-const PART_FIELDS = "mimeType,filename,headers,body(size,attachmentId)"
+const PART_FIELDS = "mimeType,filename,headers,body/size"
 const SEARCH_FIELDS =
-  `id,internalDate,snippet,payload(${PART_FIELDS},` +
+  `id,snippet,payload(${PART_FIELDS},` +
   `parts(${PART_FIELDS},parts(${PART_FIELDS},parts(${PART_FIELDS}))))`
 
 /**
@@ -101,10 +104,10 @@ const REFUSALS: Record<Exclude<GmailAccess["status"], "connected">, string> = {
     "they can connect their Gmail mailbox from the Settings page. Do not call " +
     "the Gmail tools again in this conversation.",
   lapsed:
-    "The Gmail connection has lapsed and no longer works. Tell the user to " +
-    "reconnect their mailbox from the Settings page — they have connected it " +
-    "before and need to do so again. Do not call the Gmail tools again in " +
-    "this conversation.",
+    "The Gmail mailbox has lapsed — its access no longer works. Tell the " +
+    "user to reconnect their mailbox from the Settings page; they have " +
+    "connected it before and need to do so again. Do not call the Gmail " +
+    "tools again in this conversation.",
   narrow:
     "Gmail is connected, but without permission to read email, so the mailbox " +
     "cannot be searched. Tell the user to reconnect their mailbox from the " +
@@ -159,7 +162,6 @@ interface GmailHeader {
 interface GmailBody {
   size?: number
   data?: string
-  attachmentId?: string
 }
 
 /** Gmail's wire name for this is `MessagePart`; "part" here always means the
@@ -174,7 +176,6 @@ interface GmailPart {
 
 interface GmailMessage {
   id?: string
-  internalDate?: string
   snippet?: string
   payload?: GmailPart
 }
@@ -207,10 +208,19 @@ function isValidTimeZone(timeZone: string): boolean {
   }
 }
 
-function parseDate(date: string): { y: number; m: number; d: number } | null {
+/** A calendar day as the model names one — meaningless without a zone. */
+interface CalendarDay {
+  y: number
+  m: number
+  d: number
+}
+
+function parseDate(date: string): CalendarDay | null {
   if (!DATE_SHAPE.test(date)) return null
 
-  const [y, m, d] = date.split("-").map(Number) as [number, number, number]
+  const [y, m, d] = date.split("-").map(Number)
+  if (y === undefined || m === undefined || d === undefined) return null
+
   // Date.UTC normalises 2025-02-31 to March; a round-trip mismatch is how an
   // impossible date is caught.
   const roundTrip = new Date(Date.UTC(y, m - 1, d))
@@ -259,12 +269,12 @@ function wallClockAt(epochMs: number, timeZone: string) {
  * the instant being converted (DST). Two passes converge everywhere except a
  * spring-forward gap that swallows midnight itself, where the result lands on
  * the closest representable wall clock — inside the half-open window's one
- * message-boundary of slop either way.
+ * Email of slop either way.
  *
  * Exported for the test suite; callers use the tools.
  */
 export function startOfDayEpochSeconds(
-  date: { y: number; m: number; d: number },
+  date: CalendarDay,
   timeZone: string
 ): number {
   const desired = Date.UTC(date.y, date.m - 1, date.d, 0, 0, 0)
@@ -287,7 +297,7 @@ export function startOfDayEpochSeconds(
   return Math.floor(ts / 1000)
 }
 
-function dayAfter(date: { y: number; m: number; d: number }) {
+function dayAfter(date: CalendarDay): CalendarDay {
   const next = new Date(Date.UTC(date.y, date.m - 1, date.d + 1))
   return {
     y: next.getUTCFullYear(),
@@ -555,7 +565,7 @@ function describeFailure(failure: GmailFailure): string {
   }
 
   if (status === 401 || status === 403) {
-    return `Gmail refused the request (HTTP ${status}). The mailbox connection may no longer be valid — suggest the user reconnect it from the Settings page, and do not retry now.`
+    return `Gmail refused the request (HTTP ${status}) — access to the mailbox may no longer be valid. Do not retry now; the user can reconnect the mailbox from the Settings page.`
   }
 
   return `The Gmail request failed (HTTP ${status}). Try again, or continue with what you already have.`
@@ -587,12 +597,11 @@ async function mapLimit<T, R>(
   fn: (item: T) => Promise<R>
 ): Promise<R[]> {
   const results = new Array<R>(items.length)
-  let next = 0
+  const queue = items.map((item, index) => ({ item, index }))
 
   async function worker() {
-    while (next < items.length) {
-      const index = next++
-      results[index] = await fn(items[index] as T)
+    for (let entry = queue.shift(); entry; entry = queue.shift()) {
+      results[entry.index] = await fn(entry.item)
     }
   }
 

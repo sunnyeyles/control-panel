@@ -6,6 +6,7 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { getCurrentUser } from "@/lib/auth/current-user"
 import { getDb } from "@/lib/db"
 import { hasGmailScope } from "@/lib/mailbox/access"
+import { isMailboxOutcome, type MailboxOutcome } from "@/lib/mailbox/outcome"
 import type { Mailbox } from "@workspace/db"
 import { Button } from "@workspace/ui/components/button"
 import { Label } from "@workspace/ui/components/label"
@@ -18,9 +19,14 @@ export const dynamic = "force-dynamic"
 
 /**
  * What the callback route left in the query string. One word each, ours —
- * never Google's error text.
+ * never Google's error text. Keyed by the shared `MailboxOutcome` type, so
+ * an outcome without a notice is a compile error here rather than a silently
+ * blank page.
  */
-const MAILBOX_NOTICES: Record<string, { failed: boolean; text: string }> = {
+const MAILBOX_NOTICES: Record<
+  MailboxOutcome,
+  { failed: boolean; text: string }
+> = {
   connected: { failed: false, text: "Mailbox connected." },
   declined: {
     failed: true,
@@ -87,11 +93,11 @@ function MailboxCard({ mailbox }: { mailbox: Mailbox | undefined }) {
     return (
       <div className="flex items-center justify-between gap-4 rounded-lg border border-destructive/50 p-4">
         <div className="flex flex-col gap-1">
-          <Label>{mailbox.emailAddress} — connection lapsed</Label>
+          <Label>{mailbox.emailAddress} — needs reconnecting</Label>
           <p className="text-sm text-muted-foreground">
-            The connection stopped working. Google does not say why — it may
-            have been revoked, a password change, or simple expiry. Reconnect to
-            keep searching your email.
+            Access to this mailbox stopped working. Google does not say why — it
+            may have been revoked, a password change, or simple expiry.
+            Reconnect to keep searching your email.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -108,8 +114,8 @@ function MailboxCard({ mailbox }: { mailbox: Mailbox | undefined }) {
         <div className="flex flex-col gap-1">
           <Label>{mailbox.emailAddress} — connected without read access</Label>
           <p className="text-sm text-muted-foreground">
-            Google granted the connection, but read access was left unticked on
-            the consent screen, so the assistant cannot search this mailbox.
+            This mailbox was connected with read access left unticked on the
+            consent screen, so the assistant cannot search this mailbox.
             Reconnect and leave it ticked.
           </p>
         </div>
@@ -147,7 +153,8 @@ export default async function SettingsPage({
 
   const mailbox = await getDb().mailboxes.get(user.userId)
   const { mailbox: outcome } = await searchParams
-  const notice = outcome ? MAILBOX_NOTICES[outcome] : undefined
+  const notice =
+    outcome && isMailboxOutcome(outcome) ? MAILBOX_NOTICES[outcome] : undefined
 
   return (
     <SidebarProvider

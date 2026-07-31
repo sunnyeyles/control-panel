@@ -7,6 +7,7 @@ import {
   authorizationUrl,
   MAILBOX_CALLBACK_PATH,
   STATE_COOKIE,
+  stateCookieOptions,
 } from "@/lib/mailbox/google"
 
 /**
@@ -35,16 +36,9 @@ export async function GET(request: NextRequest): Promise<Response> {
     authorizationUrl({ redirectUri, state })
   )
 
-  // Scoped to the callback path and short-lived: the cookie exists for one
-  // round trip to Google and nothing else. `lax` still sends it on the
-  // top-level redirect back from accounts.google.com.
-  response.cookies.set(STATE_COOKIE, state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: MAILBOX_CALLBACK_PATH,
-    maxAge: 600,
-  })
+  // Short-lived: the cookie exists for one round trip to Google and nothing
+  // else.
+  response.cookies.set(STATE_COOKIE, state, stateCookieOptions(600))
 
   return response
 }

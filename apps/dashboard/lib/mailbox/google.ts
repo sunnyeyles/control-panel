@@ -26,6 +26,22 @@ export const MAILBOX_CALLBACK_PATH = "/mailbox/callback"
 /** The `state` round trip between /mailbox/connect and the callback. */
 export const STATE_COOKIE = "mailbox_oauth_state"
 
+/**
+ * One definition for setting (`maxAge` 600) and clearing (`maxAge` 0) the
+ * state cookie — the attributes must match or the clear silently misses.
+ * Scoped to the callback path and `lax`, which still sends it on the
+ * top-level redirect back from accounts.google.com.
+ */
+export function stateCookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: MAILBOX_CALLBACK_PATH,
+    maxAge,
+  }
+}
+
 const AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 const TOKEN_URL = "https://oauth2.googleapis.com/token"
 const REVOKE_URL = "https://oauth2.googleapis.com/revoke"

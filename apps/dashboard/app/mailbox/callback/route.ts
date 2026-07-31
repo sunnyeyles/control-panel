@@ -7,7 +7,9 @@ import {
   fetchMailboxAddress,
   MAILBOX_CALLBACK_PATH,
   STATE_COOKIE,
+  stateCookieOptions,
 } from "@/lib/mailbox/google"
+import type { MailboxOutcome } from "@/lib/mailbox/outcome"
 
 /**
  * Where Google sends the browser back. Exchanges the code, learns which
@@ -19,29 +21,29 @@ import {
  * `getCurrentUser()` below is the authoritative check — the connecting
  * browser holds a signed-in, allowlisted session, so the Mailbox can only
  * ever be written to the caller's own row.
+ *
+ * Every exit clears the state cookie: a code is single-use, so a replayed or
+ * re-visited callback must start over from /mailbox/connect.
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  const user = await getCurrentUser()
-  if (user.status === "anonymous")
-    return NextResponse.redirect(new URL("/auth/sign-in", request.url))
-  if (user.status === "refused")
-    return NextResponse.redirect(new URL("/auth/refused", request.url))
-
-  /** Every exit clears the state cookie: a code is single-use, so a replayed
-   * or re-visited callback must start over from /mailbox/connect. */
-  const settings = (outcome: string): NextResponse => {
+  const clearingState = (destination: URL | string): NextResponse => {
     const response = NextResponse.redirect(
-      new URL(`/settings?mailbox=${outcome}`, request.nextUrl.origin)
+      typeof destination === "string"
+        ? new URL(destination, request.nextUrl.origin)
+        : destination
     )
-    response.cookies.set(STATE_COOKIE, "", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: MAILBOX_CALLBACK_PATH,
-      maxAge: 0,
-    })
+    response.cookies.set(STATE_COOKIE, "", stateCookieOptions(0))
     return response
   }
+
+  const settings = (outcome: MailboxOutcome): NextResponse =>
+    clearingState(`/settings?mailbox=${outcome}`)
+
+  const user = await getCurrentUser()
+  if (user.status === "anonymous")
+    return clearingState(new URL("/auth/sign-in", request.url))
+  if (user.status === "refused")
+    return clearingState(new URL("/auth/refused", request.url))
 
   const params = request.nextUrl.searchParams
 
