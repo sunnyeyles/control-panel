@@ -3,7 +3,7 @@ import type {
   ResumeStore,
   StoredResume,
 } from "@workspace/user-storage"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { listDocuments } from "./list-documents"
 
@@ -57,6 +57,13 @@ function storeOf(
       })),
   }
 }
+
+// Several tests below silence `console.error`, and `vi.spyOn` on an already
+// spied method hands back the *same* mock with its call list intact. Without
+// this, "was nothing logged?" reads calls another test made.
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe("listDocuments", () => {
   it("recovers the display name and type that list() cannot return", async () => {
@@ -165,5 +172,100 @@ describe("listDocuments", () => {
 
     expect(document?.size).toBe(4096)
     expect(document?.uploadedAt).toEqual(new Date("2026-07-01T00:00:00Z"))
+  })
+
+  it("logs the key and the reason when a head fails", async () => {
+    // The degradation above is silent by design, so this log is the only place
+    // the failure exists. Without it a broken IAM attachment renders every row
+    // as a raw uuid and looks exactly like a user who never named their files.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const reason = new Error("head failed")
+    const items = [stored("broken", "2026-07-01T00:00:00Z")]
+
+    await listDocuments(USER_ID, storeOf(items, { broken: reason }))
+
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining("could not read metadata"),
+      `prod/${USER_ID}/resumes/broken.pdf`,
+      reason
+    )
+  })
+
+  it("says nothing when every head succeeds", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const items = [stored("a", "2026-07-01T00:00:00Z")]
+    const store = storeOf(items, {
+      a: stored("a", "2026-07-01T00:00:00Z", { originalFilename: "cv.pdf" }),
+    })
+
+    await listDocuments(USER_ID, store)
+
+    expect(logged).not.toHaveBeenCalled()
+  })
+})
+
+describe("listDocuments — the head() fan-out", () => {
+  /**
+   * A store that records how many `head()` calls overlap.
+   *
+   * The yield is a real timer rather than a microtask so the measurement is
+   * deterministic: every worker the pool starts calls `head()` and increments
+   * the counter before any of them suspends, so `peak` is exactly the pool
+   * size rather than whatever the scheduler happened to interleave.
+   */
+  function countingStore(count: number) {
+    const items = Array.from({ length: count }, (_, index) =>
+      stored(`doc-${index}`, "2026-07-01T00:00:00Z")
+    )
+
+    let inFlight = 0
+    let peak = 0
+
+    const store: ResumeStore = {
+      put: async () => {
+        throw new Error("not used")
+      },
+      get: async () => {
+        throw new Error("not used")
+      },
+      head: async (ref: ResumeRef) => {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        inFlight -= 1
+        return stored(ref.resumeId, "2026-07-01T00:00:00Z", {
+          originalFilename: `${ref.resumeId}.pdf`,
+        })
+      },
+      delete: async () => {},
+      list: async () => items,
+    }
+
+    return { store, peak: () => peak }
+  }
+
+  it("caps how many head() calls overlap, without dropping rows", async () => {
+    // 30 documents is not a realistic number for one person. That is the
+    // point: the burst is bounded by this code rather than by how few files
+    // the user happens to have.
+    const counting = countingStore(30)
+
+    const documents = await listDocuments(USER_ID, counting.store)
+
+    expect(counting.peak()).toBe(8)
+    // Bounded, not truncated — every row still comes back, only slower.
+    expect(documents).toHaveLength(30)
+  })
+
+  it("does not spawn workers it has no items for", async () => {
+    const counting = countingStore(3)
+
+    await listDocuments(USER_ID, counting.store)
+
+    expect(counting.peak()).toBe(3)
   })
 })

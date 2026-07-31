@@ -527,4 +527,56 @@ describe("deleteDocument", () => {
 
     expect(ownership).toEqual(notFound)
   })
+
+  it("does not tell someone deleting a document to check its file name", async () => {
+    // `invalid_object_key` carries upload wording by default, and there is no
+    // file and no name to check on this path — the id came from a hidden field
+    // the user never saw.
+    store.deleteError = new InvalidObjectKeyError("bad key")
+
+    const result = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm(RESUME_ID, ".pdf")
+    )
+
+    expect(result).toEqual({
+      status: "error",
+      message: "That document no longer exists.",
+    })
+  })
+
+  it("rejects an id that is uuid-shaped only by length", async () => {
+    // 36 characters of [0-9a-f-], and rejected by `assertSegment` in the
+    // storage package for not starting alphanumeric. Caught here, where the
+    // wording fits, rather than in the store, where it does not.
+    const result = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm("-aaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", ".pdf")
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.deletes).toHaveLength(0)
+  })
+
+  it("rejects an id of the right length that is all dashes", async () => {
+    const result = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm("-".repeat(36), ".pdf")
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.deletes).toHaveLength(0)
+  })
+
+  it("accepts what crypto.randomUUID actually produces", async () => {
+    // The tightened pattern has to admit every id this app has ever written,
+    // or it turns existing documents undeletable.
+    const result = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm(crypto.randomUUID(), ".pdf")
+    )
+
+    expect(result.status).toBe("success")
+    expect(store.deletes).toHaveLength(1)
+  })
 })

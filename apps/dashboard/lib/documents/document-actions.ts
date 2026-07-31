@@ -90,8 +90,18 @@ const uploadSchema = z.object({
  *
  * Both arrive from a hidden form field, so both are untrusted. Neither is
  * trusted to name a *user*, though — see `deleteDocument`.
+ *
+ * The id is the full v4 uuid shape rather than "36 characters of `[0-9a-f-]`".
+ * The loose form admits ids that `assertSegment` in `@workspace/user-storage`
+ * rejects — anything not starting and ending alphanumeric — which would take a
+ * malformed field past this check and fail it deep in the store instead, where
+ * the only message available is about storing a file. Matching what
+ * `crypto.randomUUID()` produces keeps the rejection here, where the wording
+ * fits.
  */
-const resumeIdSchema = z.string().regex(/^[0-9a-f-]{36}$/)
+const resumeIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
 const extensionSchema = z.string().regex(/^\.[a-z0-9]{1,10}$/)
 
 export function createDocumentActions(deps: DocumentActionsDeps) {
@@ -301,17 +311,34 @@ function carryNonce(
  *
  * Detail goes to the server log and nowhere else, matching `chat-handler.ts`.
  */
-function storageMessage(operation: string, error: unknown): string {
+function storageMessage(
+  // Narrowed from `string` because a branch below turns on it, and a typo in a
+  // call site would silently pick the delete wording for an upload.
+  operation: "upload" | "delete",
+  error: unknown
+): string {
   console.error(`documents: ${operation} failed`, error)
 
   if (!isUserStorageError(error)) return "Something went wrong."
 
   switch (error.code) {
     case "invalid_object_key":
-      // Reachable, and not only through a bad extension: `cleanFilename` in the
-      // resume store throws when a filename has no representable ASCII left at
-      // all, which `checkUpload` does not catch because the extension is fine.
-      return "That file couldn't be stored. Check the file name and type."
+      // Two very different situations behind one code, so the copy follows the
+      // operation rather than the error.
+      //
+      // On an upload it is reachable, and not only through a bad extension:
+      // `cleanFilename` in the resume store throws when a filename has no
+      // representable ASCII left at all, which `checkUpload` does not catch
+      // because the extension is fine. "Check the file name" is the right
+      // advice, and the user has a file in front of them to check.
+      //
+      // On a delete there is no file and no name to check — the id came from a
+      // hidden field the user never saw. `resumeIdSchema` should have caught it
+      // first, so reaching here means the row is unaddressable, which is the
+      // same thing as gone as far as anyone can act on it.
+      return operation === "upload"
+        ? "That file couldn't be stored. Check the file name and type."
+        : "That document no longer exists."
 
     case "object_not_found":
     case "object_ownership":
