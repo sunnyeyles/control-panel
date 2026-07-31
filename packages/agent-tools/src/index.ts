@@ -11,6 +11,17 @@ export {
   type WebSearchInput,
 } from "./web-search.ts"
 
+// Deliberately absent from `allTools`: the Gmail tools need a per-user
+// credential, so they exist only as a factory, composed per request at the
+// caller's composition root.
+export {
+  createGmailTools,
+  type CreateGmailToolsOptions,
+  type GmailAccess,
+  type ReadEmailInput,
+  type SearchEmailInput,
+} from "./gmail.ts"
+
 /**
  * Every tool in the catalog.
  *
