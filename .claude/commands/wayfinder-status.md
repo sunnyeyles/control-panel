@@ -1,51 +1,81 @@
 ---
-description: Render the wayfinder ticket board — which tickets are ready, which are blocked, and on what
+description: Reconcile the local plans/ directory against GitHub and render the wayfinder board
 argument-hint: "[map issue number]"
-allowed-tools: Bash(gh issue list:*), Bash(gh issue view:*)
+allowed-tools: Bash(gh issue list:*), Bash(gh issue view:*), Bash(ls:*), Bash(mv:*), Bash(head:*), Read, Edit
 ---
 
-Render the current state of the wayfinder ticket board. Derive everything from
-GitHub on demand — nothing about status is stored anywhere, so nothing can drift.
+Planning lives in `plans/<map-number>-<slug>/`, which is gitignored. One
+directory per wayfinder map, one file per ticket, named
+`<status>-<issue>-<slug>.md` with the map itself at `_map.md`. The filename
+prefix is the board — `ls` is the status report.
 
-Map to report on: $ARGUMENTS (empty means every open map).
+Map to report on: $ARGUMENTS (empty means every directory under `plans/`).
 
-## Collect
+## The contract, which matters more than the rendering
 
-One call. It returns only the fields that matter, so the board stays cheap to run:
+**The files are where planning happens. GitHub is the durable record.** So:
+
+- **Never overwrite the body of a file that already exists.** It holds work that
+  is not on GitHub. Reconciling means renaming and touching the `status:` line in
+  frontmatter — nothing else.
+- **Do create a file for a wayfinder issue that has none**, using the layout
+  below. A ticket opened on GitHub since the last run should appear locally.
+- **Never rename or retitle the GitHub issue.** The prefix is a local view. The
+  issue title is the identity that `_map.md` and every cross-reference cite.
+
+## Reconcile
+
+Read the local frontmatter first — it carries `issue`, `blocked_by` and the
+current `status` — then one call for the real states:
 
 ```bash
-gh issue list --state all --limit 200 --json number,title,state,labels,body --jq '.[] | select(any(.labels[]; .name | startswith("wayfinder"))) | {n:.number, t:.title, s:.state, kind:([.labels[].name | select(startswith("wayfinder"))][0] | ltrimstr("wayfinder:")), map:([.body | scan("Part of #[0-9]+") | scan("[0-9]+")][0]), blockedBy:([.body | split("\n\n")[] | select(test("^Blocked|Blocked until|Blocked by")) | scan("#[0-9]+")] | unique), blockedText:([.body | split("\n\n")[] | select(test("^Blocked|Blocked until|Blocked by"))])} | tojson'
+gh issue list --state all --limit 200 --json number,state,title,labels --jq '.[] | select(any(.labels[]; .name | startswith("wayfinder"))) | "\(.number)\t\(.state)\t\([.labels[].name | select(startswith("wayfinder"))][0] | ltrimstr("wayfinder:"))\t\(.title)"'
 ```
 
-`blockedBy` is scraped from whole paragraphs rather than lines, because these
-bodies are hard-wrapped at 80 columns and a blocker reference routinely lands on
-a different line from the word "Blocked".
+Compute each open ticket's status:
 
-## Derive
+- `resolved` — the issue is CLOSED.
+- `blocked` — any issue in its `blocked_by` is still open.
+- `ready` — everything else.
 
-A ticket is **ready** when it is open and every issue in its `blockedBy` is
-closed. It is **blocked** otherwise. Do not trust any status written in a title
-or a label — the point of this command is that status is computed, not stored.
+Where the computed status differs from the filename prefix, `mv` the file and
+update its `status:` frontmatter line to match. Report every rename you make. If
+nothing moved, say so in one line rather than listing the whole board as unchanged.
 
-Then check three things the raw data will not tell you:
+`blocked_by` in frontmatter is the authority, because it was read once from the
+issue's prose and prose drifts. When you create a _new_ file, derive it from the
+body by scraping whole paragraphs that start with "Blocked" — these bodies are
+hard-wrapped at 80 columns, so a blocker reference routinely lands on a different
+line from the word "Blocked", and a line-based scrape silently drops the second
+of a two-blocker sentence.
 
-- **Mislinked blockers.** `blockedText` carries the markdown link text as well as
-  the number. If the text names a ticket whose actual title belongs to a
-  different number, say so — a blocker pointing at the wrong issue silently
-  reports a ticket as ready, or holds it shut forever.
-- **A blocker that resolved the ticket away.** Some tickets are written to close
-  as out of scope depending on how their blocker lands. If a `blockedText`
-  paragraph says so and the blocker is now closed, flag that the ticket may not
-  need answering at all rather than listing it as ready.
-- **Hinges.** A ready ticket that appears in more than one other ticket's
-  `blockedBy` is worth doing first. Mark it with what it unblocks.
+## New-file layout
+
+```markdown
+---
+issue: 65
+map: 59
+kind: grilling
+status: ready
+blocked_by: [61]
+url: https://github.com/sunnyeyles/control-panel/issues/65
+---
+
+# Where the Gmail credential lives
+
+<the issue body>
+
+## Thread
+
+<each comment, separated by ---, so resolution comments survive locally>
+```
 
 ## Report
 
 Per map, one tree. Terse — this is a board, not prose:
 
 ```
-#59 Gmail as a tool the assistant can query
+#59 Gmail as a tool the assistant can query        plans/59-gmail-as-a-tool/
 
   READY
     #60 What we call a connected mailbox        (gates prose everywhere)
@@ -61,7 +91,17 @@ Per map, one tree. Terse — this is a board, not prose:
   CLOSED  #61 #62 #63 #70
 ```
 
-Annotate a ready ticket only when there is something to say — what it gates, that
-it needs a human at a console, that it may be moot. Sort READY with hinges first.
-Below the trees, list any mislinks or moot tickets you found, and nothing else.
-No summary paragraph, no next-steps section unless asked.
+Then flag anything the numbers alone do not say, and nothing else:
+
+- **Mislinked blockers.** If a blocker's markdown link text names a ticket whose
+  real title belongs to a different number, say so — a blocker pointing at the
+  wrong issue reports a ticket ready when it is not, or holds it shut forever.
+  #68 has one today: its second blocker reads "The tool surface the model sees"
+  but points at `#65` rather than `#66`.
+- **Tickets that may be moot.** Some are written to close as out of scope
+  depending on how a blocker landed. If the body says so and the blocker is now
+  closed, flag it rather than listing it as ready work.
+- **Hinges.** A ready ticket that appears in more than one other ticket's
+  `blocked_by`. Sort READY with hinges first and mark what they unblock.
+
+No summary paragraph and no next-steps section unless asked.
