@@ -90,3 +90,6 @@ next-env.d.ts
 
 # claude code worktrees (scratch checkouts, never part of the repo)
 .claude/worktrees/
+
+# planning (local working surface; source of truth is the GitHub issues)
+plans/

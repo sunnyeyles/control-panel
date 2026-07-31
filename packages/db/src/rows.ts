@@ -41,6 +41,30 @@ export interface User {
   createdAt: Date
 }
 
+/**
+ * A Gmail account this platform holds read access to (see CONTEXT.md).
+ *
+ * Deliberately without the refresh token: this is what `mailboxes.get()`
+ * returns and what Settings renders, and the page that renders connection
+ * state must not be *able* to hold the credential. The token has its own
+ * accessor, `mailboxes.refreshToken()`.
+ */
+export interface Mailbox {
+  id: string
+  userId: string
+  /** Which Google account is connected — shown so a wrong-account grant is visible. */
+  emailAddress: string
+  /** Exactly as Google echoed it in the token response, never as we asked. */
+  scope: string
+  /** Rewritten on every reconnect, not preserved from the first one. */
+  connectedAt: Date
+  /**
+   * When a refresh came back `invalid_grant`; `null` means healthy. Names no
+   * cause on purpose — Google reports every failure identically.
+   */
+  lapsedAt: Date | null
+}
+
 export interface Job {
   id: string
   userId: string

@@ -65,6 +65,14 @@ value; re-pull it.
 supply it. Generate with `openssl rand -base64 32`; the SDK requires 32+
 characters.
 
+**Three more app-owned variables serve the Mailbox** (Gmail-as-a-tool), all
+dashboard-only — the briefing worker must never need them.
+`MAILBOX_ENCRYPTION_KEY` encrypts the Gmail refresh token at rest (also
+`openssl rand -base64 32`, and it must decode to exactly 32 bytes);
+`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` come from the OAuth client on our
+own Google Cloud project — External user type, published to In production,
+never submitted for verification.
+
 **Signup is closed, and `AUTH_ALLOWED_EMAILS` is what closes it.** Neon Auth
 creates an account for anyone who completes an OAuth flow; the allowlist check
 in `apps/dashboard/lib/auth/current-user.ts` is the only thing standing between
@@ -171,6 +179,20 @@ Three things here are easy to undo by accident:
 - **The proxy converts its redirect to a 401 under `/api/`.** The SDK only knows how to redirect to a login page, which for an API route means a `fetch` caller receives an HTML page with a success status and cannot tell it was refused. Removing that conversion also stops the chat route's own 401 from ever running, because the request no longer reaches it.
 - **The SDK's skip list is hardcoded** — `/api/auth`, `/auth/callback`, `/auth/sign-in`, `/auth/sign-up` are ungated no matter what `config.matcher` says, and nothing in this repo can extend or override it. It is also why `/auth/sign-up` would be public if anyone built it.
 - **`users.id` is the platform identity; the Neon Auth id is only a mapping.** `lib/auth/current-user.ts` returns the uuid from `users`, never `session.user.id`. That uuid is what `jobs.user_id` references and what becomes the `userId` segment of every S3 key, where `assertSegment()` in `@workspace/user-storage` treats it as the ownership boundary. `UserStore.ensureForAuthUser()` is a single idempotent upsert, so it is safe on every request and self-heals — there is no transaction to coordinate with, because Neon has already created the account by the time our code runs.
+
+**The Gmail tools are a per-user factory, not catalog tools.**
+`createGmailTools({ getAccessToken })` in `@workspace/agent-tools` is
+deliberately absent from `allTools`; `chat-handler.ts` composes it per request
+from `mailboxAccessFor(userId)` and hands it to `createAssistant()` through
+`extraTools`. That getter answers from Postgres without a Google call — no
+`mailboxes` row means not connected, `lapsed_at` set means lapsed, a stored
+scope without `gmail.readonly` means narrow — and only a healthy row spends
+the token exchange, memoized so one turn exchanges once. `invalid_grant`
+writes `lapsed_at` right there, so Settings is correct on its next load. The
+tools are passed whether or not a Mailbox exists: a refusal string teaches the
+model to point at Settings, where an absent tool would leave it unaware email
+was ever readable. The OAuth callback lives at `/mailbox/callback` — **never
+`/auth/callback`**, which the Neon Auth SDK's hardcoded skip list ungates.
 
 **Tailwind v4, single stylesheet, owned by the UI package.** There is no `tailwind.config.*` anywhere — v4 configures itself from CSS. The one source of truth is `packages/ui/src/styles/globals.css`; the app imports it as `@workspace/ui/globals.css` in `app/layout.tsx`. The app's `postcss.config.mjs` is a one-line re-export of the UI package's. Theme tokens, base colors, and animations belong in that stylesheet, not in the app.
 

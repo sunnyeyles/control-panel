@@ -14,7 +14,11 @@
     "AWS_REGION",
     "NEON_AUTH_BASE_URL",
     "NEON_AUTH_COOKIE_SECRET",
-    "AUTH_ALLOWED_EMAILS"
+    "AUTH_ALLOWED_EMAILS",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "MAILBOX_ENCRYPTION_KEY",
+    "NODE_ENV"
   ],
   "tasks": {
     "build": {

@@ -2,6 +2,7 @@ import { createArtifactStore, type ArtifactStore } from "./artifacts.ts"
 import { createConnection } from "./client.ts"
 import { readDatabaseConfig, type DatabaseConfig } from "./config.ts"
 import { createJobStore, type JobStore } from "./jobs.ts"
+import { createMailboxStore, type MailboxStore } from "./mailboxes.ts"
 import { createRunStore, type RunStore } from "./runs.ts"
 import { createUserStore, type UserStore } from "./users.ts"
 
@@ -24,6 +25,7 @@ export interface Db {
   jobs: JobStore
   runs: RunStore
   artifacts: ArtifactStore
+  mailboxes: MailboxStore
 
   /**
    * Close the connection. **Always call it**, in a `finally`.
@@ -59,6 +61,7 @@ export function createDb(config: DatabaseConfig = readDatabaseConfig()): Db {
     jobs: createJobStore(connection),
     runs: createRunStore(connection),
     artifacts: createArtifactStore(connection),
+    mailboxes: createMailboxStore(connection),
     close: () => connection.close(),
   }
 }

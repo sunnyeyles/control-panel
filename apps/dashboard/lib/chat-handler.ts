@@ -1,5 +1,7 @@
 import { toBaseMessages, toUIMessageStream } from "@ai-sdk/langchain"
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/current-user"
+import { mailboxAccessFor } from "@/lib/mailbox/access"
+import { createGmailTools } from "@workspace/agent-tools/gmail"
 import type { Agent } from "@workspace/agents"
 import { createAssistant } from "@workspace/agents/assistant"
 import {
@@ -24,8 +26,9 @@ const STREAM_ERROR_TEXT = "Something went wrong while running the agent."
 const requestBodySchema = z.object({ messages: z.array(z.unknown()) })
 
 export interface ChatHandlerDeps {
-  /** Agent factory — the seam a test fake plugs into. Defaults to createAssistant. */
-  createAgent?: () => Agent
+  /** Agent factory — the seam a test fake plugs into. Defaults to createAssistant
+   * carrying that user's Gmail tools. */
+  createAgent?: (userId: string) => Agent
   /**
    * Who is asking. Same seam idea as `createAgent`, and it exists so this
    * handler can be exercised in all three states without a live session.
@@ -57,7 +60,21 @@ function maskErrorChunks(
 export function createChatHandler(
   deps: ChatHandlerDeps = {}
 ): (req: Request) => Promise<Response> {
-  const createAgent = deps.createAgent ?? (() => createAssistant())
+  // The Gmail tools are present whether or not a Mailbox is connected — an
+  // absent tool would mean the model never learns email was something it
+  // could have read, while a present one can say the thing the user needs to
+  // hear ("connect it in Settings"). The token getter behind them reads
+  // nothing until a tool is actually called, and its factory memoizes the
+  // exchange, so an unconnected mailbox costs one refusal per turn and a
+  // turn that never mentions email costs nothing.
+  const createAgent =
+    deps.createAgent ??
+    ((userId: string) =>
+      createAssistant({
+        extraTools: createGmailTools({
+          getAccessToken: mailboxAccessFor(userId),
+        }),
+      }))
   const getUser = deps.getUser ?? getCurrentUser
 
   return async function POST(req: Request): Promise<Response> {
@@ -106,7 +123,7 @@ export function createChatHandler(
 
     let stream
     try {
-      const agent = createAgent()
+      const agent = createAgent(user.userId)
       stream = await agent.stream(
         { messages: await toBaseMessages(validated.data) },
         { streamMode: CHAT_STREAM_MODE }
