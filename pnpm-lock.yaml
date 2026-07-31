@@ -90,6 +90,9 @@ importers:
       '@neondatabase/auth':
         specifier: 0.4.2-beta
         version: 0.4.2-beta(4151a3fcefb1739ae5c0d05e06153f2d)
+      '@workspace/agent-tools':
+        specifier: workspace:*
+        version: link:../../packages/agent-tools
       '@workspace/agents':
         specifier: workspace:*
         version: link:../../packages/agents

@@ -14,6 +14,7 @@
   "dependencies": {
     "@ai-sdk/langchain": "^3.0.37",
     "@neondatabase/auth": "0.4.2-beta",
+    "@workspace/agent-tools": "workspace:*",
     "@workspace/agents": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/ui": "workspace:*",
