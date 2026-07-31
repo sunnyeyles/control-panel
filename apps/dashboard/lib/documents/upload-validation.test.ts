@@ -4,6 +4,7 @@ import {
   checkUpload,
   describeRejection,
   extensionOf,
+  MAX_ACTION_BODY_BYTES,
   MAX_DOCUMENT_BYTES,
   MAX_REQUEST_BYTES,
 } from "./upload-validation"
@@ -151,10 +152,31 @@ describe("the limit ladder", () => {
     expect(MAX_REQUEST_BYTES).toBeGreaterThan(MAX_DOCUMENT_BYTES)
   })
 
-  it("leaves both under Vercel's ~4.5 MB platform cap", () => {
+  it("keeps Next's ceiling above our own, so our error is the one that fires", () => {
+    // These were both 4 MiB, which is a tie rather than a ladder — and Next
+    // wins a tie, because it enforces its limit while the body streams and
+    // before the action function is called. The tuned "That upload is too
+    // large." was therefore unreachable through the UI.
+    expect(MAX_ACTION_BODY_BYTES).toBeGreaterThan(MAX_REQUEST_BYTES)
+  })
+
+  it("leaves every rung under Vercel's ~4.5 MB platform cap", () => {
     // Enforced before the request reaches Next, so exceeding it produces a
     // platform 413 that no code in this repo can turn into a friendly message.
-    expect(MAX_REQUEST_BYTES).toBeLessThan(4.5 * 1024 * 1024)
+    //
+    // Read as decimal megabytes — 4,500,000 — which is how Vercel writes it and
+    // is the smaller of the two readings. Assuming MiB here would leave half a
+    // megabyte of headroom that may not exist.
+    const PLATFORM_CAP = 4_500_000
+
+    expect(MAX_REQUEST_BYTES).toBeLessThan(PLATFORM_CAP)
+    expect(MAX_ACTION_BODY_BYTES).toBeLessThan(PLATFORM_CAP)
+  })
+
+  it("is a whole number of bytes, which is what the config option takes", () => {
+    // Not idle. The obvious way to write this limit is `4.2 * 1024 * 1024`,
+    // which is 4404019.2 — a fraction of a byte handed to `bodySizeLimit`.
+    expect(Number.isInteger(MAX_ACTION_BODY_BYTES)).toBe(true)
   })
 })
 

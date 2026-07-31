@@ -33,17 +33,59 @@ import {
  * so a green build says less about this file than it does about most.
  */
 let resumes: ResumeStore | undefined
+let builtFor: string | undefined
 
 export function getResumeStore(): ResumeStore {
-  if (!resumes) {
+  // ⚠️ **The mode is recomputed every call; only the client is memoized.**
+  //
+  // `createClient` decides between OIDC and the SDK's default chain by reading
+  // the environment. Deciding that once, at whatever moment the first request
+  // happened to arrive, means an instance that came up before
+  // `VERCEL_OIDC_TOKEN` was injected is pinned to the default chain for its
+  // whole life — and every upload it serves fails on absent credentials, which
+  // `DEPLOYING.md` has to warn surfaces as nothing more specific than "Document
+  // storage is unavailable". Cheap to re-read a string; expensive to diagnose.
+  //
+  // In the steady state the mode never changes, so this rebuilds nothing and
+  // the connection pool is still shared across requests.
+  const mode = credentialMode()
+  const key = modeKey(mode)
+
+  if (!resumes || builtFor !== key) {
     const config = readUserStorageConfig()
 
     resumes = createResumeStore(
-      createS3UserObjectStore({ config, client: createClient(config) })
+      createS3UserObjectStore({ config, client: createClient(config, mode) })
     )
+    builtFor = key
   }
 
   return resumes
+}
+
+type CredentialMode = { kind: "default" } | { kind: "oidc"; roleArn: string }
+
+function credentialMode(): CredentialMode {
+  const roleArn = process.env.AWS_ROLE_ARN
+
+  return roleArn && process.env.VERCEL_OIDC_TOKEN
+    ? { kind: "oidc", roleArn }
+    : { kind: "default" }
+}
+
+/**
+ * The mode as something comparable.
+ *
+ * `credentialMode()` allocates, so comparing its result to the previous one
+ * with `!==` is always true and would rebuild the client — and its connection
+ * pool — on every single request, which is the exact cost the memoization
+ * exists to avoid. Compare the value, not the object.
+ *
+ * The role ARN is part of the key because changing it is a change of identity:
+ * the same client would otherwise keep assuming the role it was built with.
+ */
+function modeKey(mode: CredentialMode): string {
+  return mode.kind === "oidc" ? `oidc:${mode.roleArn}` : "default"
 }
 
 /**
@@ -60,6 +102,11 @@ export function getResumeStore(): ResumeStore {
  *    the instance. If `ExpiredToken` ever does appear, stop memoizing the
  *    client — never reach for a static access key.
  *
+ *    Note the limit of that: memoizing the client is fine, memoizing *which
+ *    branch below was taken* is not. See `getResumeStore`, which re-reads the
+ *    environment on every call for exactly that reason and passes the answer
+ *    in, rather than letting this function decide once and for all.
+ *
  * 2. **Branch on `VERCEL_OIDC_TOKEN`, not `VERCEL`.** `VERCEL=1` is set during
  *    builds too, where no token exists, so branching on it would take this path
  *    at build time and fail resolving a token that is not there.
@@ -75,15 +122,16 @@ export function getResumeStore(): ResumeStore {
  * `readUserStorageConfig` documents. Note that a local run therefore writes to
  * whatever `USER_STORAGE_ENVIRONMENT` says, and there is only one environment.
  */
-function createClient(config: UserStorageConfig): S3Client {
-  const roleArn = process.env.AWS_ROLE_ARN
-
-  if (!roleArn || !process.env.VERCEL_OIDC_TOKEN) {
+function createClient(
+  config: UserStorageConfig,
+  mode: CredentialMode
+): S3Client {
+  if (mode.kind === "default") {
     return new S3Client({ region: config.region })
   }
 
   return new S3Client({
     region: config.region,
-    credentials: awsCredentialsProvider({ roleArn }),
+    credentials: awsCredentialsProvider({ roleArn: mode.roleArn }),
   })
 }

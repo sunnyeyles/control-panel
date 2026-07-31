@@ -41,8 +41,36 @@ export const MAX_DOCUMENT_BYTES = 3 * 1024 * 1024
  * by truncation, which makes it the one honest witness to how large the request
  * claimed to be. A liar that only ever lies downward is still useful for
  * catching the too-big case.
+ *
+ * Must stay strictly **below** {@link MAX_ACTION_BODY_BYTES}, or Next refuses
+ * the request before the action runs and this check never gets to speak.
  */
 export const MAX_REQUEST_BYTES = 4 * 1024 * 1024
+
+/**
+ * `experimental.serverActions.bodySizeLimit` in `next.config.ts`, which imports
+ * this constant rather than restating it.
+ *
+ * ⚠️ **The gap above `MAX_REQUEST_BYTES` is the whole point of the number.**
+ * These two were both 4 MiB, which is not a ladder — it is a tie, and Next won
+ * it. Next enforces its own limit on the body as it streams, before the action
+ * function is ever called, so at parity the friendly "That upload is too large."
+ * was unreachable through the UI and every real oversized upload surfaced as a
+ * generic Server Action error instead. A limit whose error message cannot be
+ * reached is not a limit, it is a comment.
+ *
+ * Bounded on the other side by Vercel's ~4.5 MB platform cap, which is enforced
+ * before the request reaches Next and which no code here can turn into a
+ * friendly message. So this value has to sit strictly between the two.
+ *
+ * Derived from `MAX_REQUEST_BYTES` rather than written as its own number, so
+ * that raising one cannot silently re-create the tie — which is the mistake
+ * this constant exists to undo. 128 KiB of headroom is far more than a
+ * multipart envelope needs and still leaves ~175 KB under the platform cap.
+ * (`4.2 * 1024 * 1024` would have been the obvious literal and is not a whole
+ * number of bytes.)
+ */
+export const MAX_ACTION_BODY_BYTES = MAX_REQUEST_BYTES + 128 * 1024
 
 export type UploadRejection =
   | { reason: "empty-filename" }

@@ -1,14 +1,28 @@
 import type { NextConfig } from "next"
 
+import { MAX_ACTION_BODY_BYTES } from "./lib/documents/upload-validation"
+
 const nextConfig: NextConfig = {
   transpilePackages: ["@workspace/ui"],
 
   experimental: {
     serverActions: {
-      // Documents are capped at 3 MiB by `lib/documents/upload-validation.ts`;
-      // this leaves room for the multipart envelope around one. The default is
-      // 1 MB, which a scanned CV does not reliably fit inside.
-      bodySizeLimit: "4mb",
+      /**
+       * Documents are capped at 3 MiB by `lib/documents/upload-validation.ts`;
+       * this leaves room for the multipart envelope around one. The default is
+       * 1 MB, which a scanned CV does not reliably fit inside.
+       *
+       * **Imported rather than written as a string, so it cannot drift from
+       * `MAX_REQUEST_BYTES`.** It used to read `"4mb"`, which the `bytes`
+       * parser resolves to 4 MiB — the same number as the `content-length`
+       * check it is supposed to sit above. Next enforces this limit while the
+       * body streams, before the action function is called, so at parity it
+       * always won and the app's own "That upload is too large." never ran. Two
+       * literals that had to stay ordered were kept in two files; now there is
+       * one, and a test asserts the ordering. The option takes a byte count as
+       * happily as a string.
+       */
+      bodySizeLimit: MAX_ACTION_BODY_BYTES,
     },
 
     /**
@@ -33,9 +47,11 @@ const nextConfig: NextConfig = {
      * buffer is ever the binding constraint. **Inverting the two reintroduces
      * silent corruption**, and nothing fails loudly to tell you.
      *
-     * The full ladder, smallest first: client pre-check 3 MiB, authoritative
-     * byte check 3 MiB, `content-length` check 4 MiB, the action limit above
-     * 4 MB, Vercel's platform cap ~4.5 MB, this buffer 6 MB.
+     * The full ladder, smallest first, in the units each rung is actually
+     * expressed in: client pre-check 3 MiB, authoritative byte check 3 MiB,
+     * `content-length` check 4 MiB, the action limit 4.2 MiB, Vercel's platform
+     * cap ~4.5 MB, this buffer 6 MiB. Every step is a strict inequality — where
+     * two rungs were equal, the lower one was unreachable.
      */
     proxyClientMaxBodySize: "6mb",
   },
