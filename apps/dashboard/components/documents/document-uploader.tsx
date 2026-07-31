@@ -4,6 +4,7 @@ import { useActionState, useState } from "react"
 
 import { uploadDocumentAction } from "@/app/documents/actions"
 import { IDLE } from "@/lib/documents/action-state"
+import { DOCUMENT_TYPE_OPTIONS } from "@/lib/documents/document-type-labels"
 import { MAX_DOCUMENT_BYTES } from "@/lib/documents/upload-validation"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { Button } from "@workspace/ui/components/button"
@@ -18,23 +19,6 @@ import {
 } from "@workspace/ui/components/select"
 import { Spinner } from "@workspace/ui/components/spinner"
 
-/**
- * The document types, as label and value.
- *
- * Restated here rather than imported from `@workspace/user-storage`, because
- * this is a client component and that package pulls in the AWS SDK — seven
- * strings are not worth shipping an SDK to the browser for. The server
- * validates against its own copy and never trusts this one, so a drift shows up
- * as a rejected label rather than as a mislabelled document.
- */
-const DOCUMENT_TYPE_OPTIONS = [
-  { value: "resume", label: "Resume" },
-  { value: "cover-letter", label: "Cover letter" },
-  { value: "portfolio", label: "Portfolio" },
-  { value: "reference", label: "Reference" },
-  { value: "other", label: "Other" },
-] as const
-
 const MAX_MB = (MAX_DOCUMENT_BYTES / (1024 * 1024)).toFixed(0)
 
 /**
@@ -42,9 +26,14 @@ const MAX_MB = (MAX_DOCUMENT_BYTES / (1024 * 1024)).toFixed(0)
  *
  * This is the whole of what makes the type field feel like a confirmation
  * rather than a chore: a file called `cv.pdf` or `alice-resume.pdf` arrives
- * with the right answer already selected and the user never touches it. Order
- * matters — "cover letter (from my resume pack).pdf" should read as a cover
- * letter, so that test comes first.
+ * with the right answer already selected and the user never touches it.
+ *
+ * Order matters and is not free of trade-offs. `cover|letter` runs first so
+ * that "cover letter (from my resume pack).pdf" reads as a cover letter — but
+ * the same rule makes "letter of reference.pdf" one too, since `letter` matches
+ * before the reference test is reached. That is accepted rather than solved: a
+ * guess is offered next to a visible control for changing it, and reordering
+ * the two only moves which case is wrong.
  */
 function inferDocumentType(filename: string): string {
   const name = filename.toLowerCase()

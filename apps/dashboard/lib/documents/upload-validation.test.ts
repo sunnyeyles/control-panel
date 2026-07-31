@@ -1,3 +1,4 @@
+import { acceptedResumeExtensions } from "@workspace/user-storage"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -9,8 +10,25 @@ import {
   MAX_REQUEST_BYTES,
 } from "./upload-validation"
 
-/** The real allowlist, restated so this file imports nothing. */
+/**
+ * The real allowlist, restated so the cases below read as literal inputs.
+ *
+ * `upload-validation.ts` says the coupling between this list and the storage
+ * package's is "checked by the caller's own test rather than by an import" —
+ * which was not true of any test. It is checked below, by the one import in
+ * this file. The module under test still imports nothing; only its test does,
+ * and only to assert that this literal is the real thing.
+ */
 const ACCEPTED = [".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".md"]
+
+describe("the allowlist this file restates", () => {
+  it("is the one the storage package actually enforces", () => {
+    // Without this, every case below could be exercising a list that no upload
+    // is ever measured against, and the whole file would keep passing while
+    // saying nothing.
+    expect(ACCEPTED).toEqual(acceptedResumeExtensions())
+  })
+})
 
 const ok = { filename: "cv.pdf", byteLength: 1024 }
 

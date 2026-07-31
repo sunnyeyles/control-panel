@@ -1,4 +1,5 @@
 import { DeleteDocumentButton } from "@/components/documents/delete-document-button"
+import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import type { DocumentSummary } from "@/lib/documents/list-documents"
 import { Badge } from "@workspace/ui/components/badge"
 import {
@@ -17,15 +18,6 @@ import {
  * and React reports that as a hydration mismatch rather than as the timezone
  * bug it is.
  */
-
-/** Display labels for the stored values. `other` is a real choice, not a gap. */
-const TYPE_LABELS: Record<string, string> = {
-  resume: "Resume",
-  "cover-letter": "Cover letter",
-  portfolio: "Portfolio",
-  reference: "Reference",
-  other: "Other",
-}
 
 export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
   if (documents.length === 0) {
@@ -75,7 +67,13 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
               <TableCell>
                 {document.documentType ? (
                   <Badge variant="secondary">
-                    {TYPE_LABELS[document.documentType] ??
+                    {/*
+                      The `??` survives the map being exhaustive, because
+                      `noUncheckedIndexedAccess` makes the lookup
+                      `string | undefined` and because a stored value that is
+                      no longer a known type would otherwise render as blank.
+                    */}
+                    {DOCUMENT_TYPE_LABELS[document.documentType] ??
                       document.documentType}
                   </Badge>
                 ) : (

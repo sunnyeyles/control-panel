@@ -1,4 +1,5 @@
 import { getCurrentUser } from "@/lib/auth/current-user"
+import { contentDisposition } from "@/lib/documents/content-disposition"
 import { getResumeStore } from "@/lib/storage"
 import { isUserStorageError } from "@workspace/user-storage"
 
@@ -137,23 +138,4 @@ export async function GET(
 
 function notFound(): Response {
   return Response.json({ error: "Not found" }, { status: 404 })
-}
-
-/**
- * A `Content-Disposition` a browser will accept for any stored filename.
- *
- * `cleanFilename()` already stripped path separators and non-ASCII at write
- * time, so the quoted form is nearly always fine — but "nearly always" is not a
- * reason to skip escaping a value that reaches a response header. A stray `"`
- * would end the quoted string early and let the rest of the filename be read as
- * further header parameters.
- *
- * The RFC 5987 `filename*` is emitted alongside because it is what browsers
- * actually prefer, and it round-trips characters the quoted form cannot.
- */
-function contentDisposition(filename: string): string {
-  const quoted = filename.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-  const encoded = encodeURIComponent(filename)
-
-  return `attachment; filename="${quoted}"; filename*=UTF-8''${encoded}`
 }
