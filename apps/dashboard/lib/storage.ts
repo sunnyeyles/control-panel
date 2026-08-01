@@ -51,11 +51,11 @@ export function getResumeStore(): ResumeStore {
   //
   // `createClient` decides between OIDC and the SDK's default chain by reading
   // the environment. Deciding that once, at whatever moment the first request
-  // happened to arrive, means an instance that came up before
-  // `VERCEL_OIDC_TOKEN` was injected is pinned to the default chain for its
-  // whole life — and every upload it serves fails on absent credentials, which
-  // `DEPLOYING.md` has to warn surfaces as nothing more specific than "Document
-  // storage is unavailable". Cheap to re-read a string; expensive to diagnose.
+  // happened to arrive, means an instance that came up before `AWS_ROLE_ARN`
+  // was in place is pinned to the default chain for its whole life — and every
+  // upload it serves fails on absent credentials, which `DEPLOYING.md` has to
+  // warn surfaces as nothing more specific than "Document storage is
+  // unavailable". Cheap to re-read a string; expensive to diagnose.
   //
   // In the steady state this never changes, so it rebuilds nothing and the
   // connection pool is still shared across requests.
@@ -73,9 +73,35 @@ export function getResumeStore(): ResumeStore {
   return resumes
 }
 
-/** The role to assume on Vercel, or `undefined` anywhere else. */
+/**
+ * The role to assume on Vercel, or `undefined` anywhere else.
+ *
+ * ⚠️ **Do not gate this on `VERCEL_OIDC_TOKEN`.** That variable is not how the
+ * token reaches a deployed function, and reading it here is what made every
+ * upload fail with `Could not load credentials from any providers` — a message
+ * that names no role, so it looks like a missing IAM attachment rather than a
+ * branch that was never taken. `@vercel/oidc` resolves the token as
+ *
+ *     getContext().headers?.["x-vercel-oidc-token"] ?? process.env.VERCEL_OIDC_TOKEN
+ *
+ * — a **per-request header**, with the environment variable only as a fallback
+ * for `vercel env pull` locally. On a real deployment nothing sets it, so a
+ * gate on it is always false, `createClient` takes its no-credentials branch,
+ * and STS is never called at all. That last part is the tell: a trust-policy or
+ * audience mismatch still produces a CloudTrail event, and this produces none.
+ *
+ * `AWS_ROLE_ARN` is the right signal because it is the one that says *assume a
+ * role*, and it is set only where that is wanted. It is safe at build time
+ * despite `VERCEL=1` being set then too: `awsCredentialsProvider` returns a
+ * lazy provider that resolves nothing until the SDK first asks, and nothing in
+ * this module runs during `next build` anyway.
+ *
+ * It stays a function, and `getResumeStore` still calls it on every request,
+ * for the reason given there — the answer must not be frozen at whichever
+ * moment the first request happened to arrive.
+ */
 function oidcRoleArn(): string | undefined {
-  return process.env.VERCEL_OIDC_TOKEN ? process.env.AWS_ROLE_ARN : undefined
+  return process.env.AWS_ROLE_ARN
 }
 
 /**
@@ -97,9 +123,11 @@ function oidcRoleArn(): string | undefined {
  *    environment on every call for exactly that reason and passes the answer
  *    in, rather than letting this function decide once and for all.
  *
- * 2. **Branch on `VERCEL_OIDC_TOKEN`, not `VERCEL`.** `VERCEL=1` is set during
- *    builds too, where no token exists, so branching on it would take this path
- *    at build time and fail resolving a token that is not there.
+ * 2. **Branch on `AWS_ROLE_ARN`, and on nothing else.** Neither `VERCEL` nor
+ *    `VERCEL_OIDC_TOKEN` belongs in that test — the first is set during builds
+ *    as well as at runtime, and the second is never set on a deployment at all,
+ *    because the token is a per-request header. See `oidcRoleArn`, which is
+ *    where that mistake was made and is worth reading before changing this.
  *
  * 3. **`AWS_ROLE_ARN` collides with the SDK's own `fromTokenFile` provider,**
  *    which reads the same variable. It never fires here, because it also
