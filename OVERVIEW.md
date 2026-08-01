@@ -68,8 +68,7 @@ that do not exist, and none of them is implied by the code today:
 
 ```mermaid
 flowchart TD
-    A[Dashboard] -->|Upload resume| B[Resume in S3]
-    B --> C[Profile extraction]
+    B[Document in S3] --> C[Profile extraction]
     C --> D[(Neon — search criteria)]
     D -.->|replaces hand-written jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
@@ -77,12 +76,15 @@ flowchart TD
     P --> Q[Dashboard views a brief]
 ```
 
-- **Resume upload and profile extraction.** `resumes` is a live object kind in
-  `@workspace/user-storage` with no runtime consumer: nothing uploads one, and
-  no Postgres row points at one. Search criteria are hand-written into
-  `jobs.config` instead. Extraction would most naturally be a `createX()`
-  factory in `packages/agents/src/` invoked from a route handler under
-  `apps/dashboard/app/api/`.
+- **Profile extraction.** Upload now exists — `/documents` in the dashboard
+  writes to the `resumes` object kind through a Server Action, and lists,
+  downloads and deletes what is there. What does not exist is anything that
+  _reads_ a stored document: no Postgres row points at one, and search criteria
+  are still hand-written into `jobs.config`. Extraction would most naturally be
+  a `createX()` factory in `packages/agents/src/`, reading through
+  `ResumeStore`. Note that S3 is the only record of an upload — `artifacts` has
+  no row shape for one, because `artifacts.run_id` is `NOT NULL` and references
+  `runs`.
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.

@@ -30,3 +30,32 @@ user_storage = {
 briefing_worker = {
   function_name = "briefing-worker"
 }
+
+# The dashboard's access to the user-storage bucket, via Vercel OIDC.
+#
+# Commented out rather than filled in with a placeholder, and unset it creates
+# nothing. CI applies this root on every push to `main` touching `infra/**`, so
+# a placeholder slug here would not sit harmlessly waiting to be corrected — it
+# would be applied, producing a role whose trust policy names a team that does
+# not exist. Unconfigured, the dashboard falls back to the SDK's default
+# credential chain, which is what local development uses anyway.
+#
+# Before uncommenting:
+#
+#   1. `terraform -chdir=infra/aws/bootstrap apply -var="vercel_team_slug=…"`
+#      (plus the flags bootstrap/README.md already documents) to create the OIDC
+#      provider. The data source here fails without it.
+#   2. Decode a real `VERCEL_OIDC_TOKEN` — it is a JWT — and check `iss`, `aud`
+#      and `sub` against what the defaults derive. A project in Vercel's
+#      *Global* issuer mode needs `issuer_url`, `audience` and `subjects` set
+#      explicitly; the derived team-mode strings will not match. `terraform
+#      test` cannot catch this, and the failure surfaces only as an AccessDenied
+#      at the first upload.
+#
+# `team_slug` is the slug, not the `orgId` in `.vercel/project.json` — that is an
+# opaque `team_…` identifier that appears in no claim. Read it off the team
+# dashboard URL or from `vercel teams ls`.
+#
+# vercel_dashboard = {
+#   team_slug = "<your-vercel-team-slug>"
+# }

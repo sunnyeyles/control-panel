@@ -1,5 +1,8 @@
 "use client"
 
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+
 import { Button } from "@workspace/ui/components/button"
 import {
   SidebarGroup,
@@ -19,6 +22,8 @@ export function NavMain({
     icon?: React.ReactNode
   }[]
 }) {
+  const pathname = usePathname()
+
   return (
     <SidebarGroup>
       <SidebarGroupContent className="flex flex-col gap-2">
@@ -42,11 +47,24 @@ export function NavMain({
           </SidebarMenuItem>
         </SidebarMenu>
         <SidebarMenu>
+          {/*
+            `asChild` with a `<Link>`, matching `nav-secondary.tsx` five lines
+            away. Without it `SidebarMenuButton` renders a bare <button> and
+            every url in `navMain` is inert — the items looked like navigation
+            and did nothing, which went unnoticed while there was only one of
+            them and it pointed at the page you were already on.
+          */}
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton tooltip={item.title}>
-                {item.icon}
-                <span>{item.title}</span>
+              <SidebarMenuButton
+                asChild
+                tooltip={item.title}
+                isActive={pathname === item.url}
+              >
+                <Link href={item.url}>
+                  {item.icon}
+                  <span>{item.title}</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}

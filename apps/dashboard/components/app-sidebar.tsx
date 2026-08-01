@@ -18,6 +18,7 @@ import {
 import {
   BotIcon,
   CircleHelpIcon,
+  FileTextIcon,
   MessageSquareIcon,
   Settings2Icon,
 } from "lucide-react"
@@ -28,6 +29,11 @@ const data = {
       title: "Assistant",
       url: "/",
       icon: <MessageSquareIcon />,
+    },
+    {
+      title: "Documents",
+      url: "/documents",
+      icon: <FileTextIcon />,
     },
   ],
   navSecondary: [

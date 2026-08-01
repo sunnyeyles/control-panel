@@ -50,6 +50,53 @@ variable "github_subject_patterns" {
   default     = null
 }
 
+variable "vercel_team_slug" {
+  description = <<-EOT
+    Vercel team the dashboard deploys under, used to build the OIDC issuer URL
+    and audience in vercel-oidc.tf.
+
+    Null — the default — creates no provider at all, so this root stays
+    applyable with exactly the flags README.md documents. Supply it when the
+    dashboard needs to reach the user-storage bucket.
+
+    It is the **slug**, not the `orgId` in `.vercel/project.json`, which is an
+    opaque `team_…` identifier and will not appear in any claim. Read it off the
+    team dashboard URL, or from `vercel teams ls`.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "vercel_oidc_issuer_url" {
+  description = <<-EOT
+    Overrides the issuer URL derived from `vercel_team_slug`.
+
+    Vercel projects run in one of two issuer modes, and which one is a setting
+    in the Vercel dashboard rather than anything derivable from the slug. Team
+    mode issues from `https://oidc.vercel.com/<team-slug>`; **Global mode issues
+    from `https://oidc.vercel.com` with no team path at all**, which the derived
+    default would get wrong.
+
+    Decode a real `VERCEL_OIDC_TOKEN` — it is a JWT — and read `iss` from the
+    payload rather than guessing. A mismatch is not caught by `terraform test`
+    and surfaces only as an AccessDenied at the first upload.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "vercel_oidc_audience" {
+  description = <<-EOT
+    Overrides the audience derived from `vercel_team_slug`.
+
+    Team mode uses `https://vercel.com/<team-slug>`; Global mode uses the bare
+    `https://vercel.com`. Same advice as `vercel_oidc_issuer_url`: read `aud`
+    off a real token.
+  EOT
+  type        = string
+  default     = null
+}
+
 variable "deployed_secret_arn_pattern" {
   description = "ARN pattern for secrets the deploy role may manage the shell of but never read. Defaults to every secret in the account."
   type        = string

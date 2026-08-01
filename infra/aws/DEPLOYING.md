@@ -1,6 +1,9 @@
-# Deploying the briefing worker
+# Deploying
 
-The runbook for the worker: first deploy, verification, and rollback.
+Two runbooks. **The briefing worker** — first deploy, verification, rollback —
+and, at the end, **giving the dashboard access to user storage** via Vercel
+OIDC. They are unrelated deployments that happen to share a bucket and a state
+file.
 
 > **Housekeeping.** This is a separate file rather than a section of
 > `infra/aws/README.md` so the runbook stays skimmable next to that file's
@@ -225,3 +228,140 @@ Two things a revert does **not** undo:
 - **Anything already written to S3.** The bucket is versioned, so an overwritten
   brief is recoverable by version ID and a deleted one sits behind a delete
   marker — but reverting code does not remove what a bad run produced.
+
+---
+
+# Giving the dashboard access to user storage
+
+The dashboard on Vercel reads and writes uploaded **Documents** in the same
+bucket the worker writes briefs to. It gets there by exchanging a Vercel OIDC
+token for the `control-panel-vercel-dashboard` role — no access key exists on
+this path either.
+
+**The stack is off until you configure it.** `vercel_dashboard` in
+`infra/aws/terraform.tfvars` is commented out and defaults to null, which
+creates no provider, no role and no attachment. Unconfigured, the dashboard
+falls back to the AWS SDK's default credential chain, which is what local
+development uses and what production has no answer for — so uploads fail.
+
+## 1. Read the real claim values off a token
+
+Do this **before** applying anything. It is the one part of this change that no
+test can check, and getting it wrong produces a failure that names nothing.
+
+Vercel projects run in one of two issuer modes, and which one is a project
+setting rather than something derivable:
+
+|        | Issuer (`iss`)                        | Audience (`aud`)                 | Subject (`sub`)                                         |
+| ------ | ------------------------------------- | -------------------------------- | ------------------------------------------------------- |
+| Team   | `https://oidc.vercel.com/<team-slug>` | `https://vercel.com/<team-slug>` | `owner:<team-slug>:project:<project>:environment:<env>` |
+| Global | `https://oidc.vercel.com`             | `https://vercel.com`             | built from opaque `owner_id` / `project_id`             |
+
+Terraform derives the **team-mode** strings from `team_slug`. If the project is
+in Global mode those derived values are wrong, and the overrides
+(`issuer_url`, `audience`, `subjects`) are how you correct it.
+
+Get the truth from a real token — it is a JWT, so the payload decodes without a
+key:
+
+```bash
+vercel env pull .env.vercel          # or read VERCEL_OIDC_TOKEN from a deployment
+cut -d. -f2 <<<"$VERCEL_OIDC_TOKEN" | base64 -d 2>/dev/null | jq '{iss, aud, sub}'
+```
+
+The team **slug** is also not the `orgId` in `.vercel/project.json` — that is an
+opaque `team_…` identifier that appears in no claim. Use `vercel teams ls`.
+
+## 2. Create the OIDC provider (bootstrap, by hand)
+
+The deploy role cannot do this: `bootstrap/deploy-iam.tf` grants nothing in the
+`iam:*OpenIDConnectProvider*` family, deliberately — a pipeline that can mint a
+federated trust for itself is a pipeline that can grant itself anything.
+
+```bash
+cd infra/aws/bootstrap
+terraform apply \
+  -var="state_bucket_name=control-panel-tfstate-<account-id>" \
+  -var="github_owner=<owner>" \
+  -var="vercel_team_slug=<slug>"
+```
+
+Add `-var="vercel_oidc_issuer_url=…"` and `-var="vercel_oidc_audience=…"` if
+step 1 showed Global mode.
+
+## 3. Configure and apply the stack
+
+Uncomment `vercel_dashboard` in `infra/aws/terraform.tfvars` and fill in the
+slug, plus any overrides. Then let CI apply it (push to `main` touching
+`infra/**`), or apply by hand. Read the role ARN out:
+
+```bash
+terraform -chdir=infra/aws output -raw vercel_dashboard_role_arn
+```
+
+## 4. Set the Vercel project environment
+
+Production scope, four variables:
+
+| Variable                   | Value                                            |
+| -------------------------- | ------------------------------------------------ |
+| `USER_STORAGE_BUCKET_NAME` | `terraform output -raw user_storage_bucket_name` |
+| `USER_STORAGE_ENVIRONMENT` | `prod`                                           |
+| `AWS_REGION`               | `ap-southeast-2` — **an override, not a gap**    |
+| `AWS_ROLE_ARN`             | the output from step 3                           |
+
+**`AWS_REGION` is the row to be careful with, and not because it is missing.**
+Vercel sets it for you, to the region the function happened to execute in. Its
+own OIDC documentation says so and warns that under multi-region routing or
+failover the value changes between invocations, which "may route your AWS calls
+to a region where your resources don't exist". So this row overrides a value
+that is already there rather than supplying one that is not.
+
+That distinction is the whole reason to state it, because it inverts the failure
+mode `readUserStorageConfig` was built around. That function throws on an unset
+variable, loudly and by name — but on Vercel this variable is never unset. Skip
+the row and nothing throws: the S3 client is pointed at whichever region the
+invocation ran in, and the bucket exists in exactly one. What you get is a
+region error against a bucket that looks absent, not a missing-configuration
+error naming the setting you forgot.
+
+Then **enable OIDC Federation** in the Vercel project's Settings → Security.
+Without it no `VERCEL_OIDC_TOKEN` is injected, `lib/storage.ts` silently takes
+its local-development branch, and every upload fails on absent credentials —
+with nothing in the error mentioning OIDC.
+
+## Verifying
+
+Upload a small PDF at `/documents`, then:
+
+```bash
+aws s3api list-objects-v2 --bucket <bucket> --prefix "prod/<userId>/resumes/"
+aws s3api get-object-tagging --bucket <bucket> --key "prod/<userId>/resumes/<id>.pdf"
+aws s3api head-object       --bucket <bucket> --key "prod/<userId>/resumes/<id>.pdf"
+```
+
+Three things to confirm, because each fails silently:
+
+- The key is `prod/{userId}/resumes/{uuid}.pdf` — `{userId}` is `users.id`, the
+  uuid this repo generates, not the Neon Auth id.
+- The **tag** is `kind=resumes`. The tag is what the lifecycle rules filter on;
+  metadata alone gives the object no retention policy.
+- Metadata carries `original-filename` and, if a type was chosen,
+  `document-type`.
+
+## The first failure to expect
+
+`AccessDenied` on `sts:AssumeRoleWithWebIdentity`, from a `sub` that does not
+match what step 1 established.
+
+**It does not look like a permissions problem in the UI.** The store maps
+`AccessDenied` to `StorageUnavailableError`, and the action maps that to
+_"Document storage is unavailable. Try again in a moment."_ — which reads as
+transient. The diagnosis is in the Vercel function logs, where
+`documents: upload failed` carries the underlying SDK error.
+
+Check, in order: OIDC Federation is enabled; `AWS_ROLE_ARN` matches the output;
+the role's trust policy `sub` matches the token's `sub` exactly (it is
+`StringEquals`, so near enough is not enough); and `AWS_REGION` names the
+bucket's region rather than whatever Vercel filled in — "set" is not the test,
+since it is always set.

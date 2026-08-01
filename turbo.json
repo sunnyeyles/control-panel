@@ -12,10 +12,12 @@
     "USER_STORAGE_BUCKET_NAME",
     "USER_STORAGE_ENVIRONMENT",
     "AWS_REGION",
+    "AWS_ROLE_ARN",
     "NEON_AUTH_BASE_URL",
     "NEON_AUTH_COOKIE_SECRET",
     "AUTH_ALLOWED_EMAILS"
   ],
+  "globalPassThroughEnv": ["VERCEL_OIDC_TOKEN"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

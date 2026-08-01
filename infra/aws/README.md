@@ -1,11 +1,12 @@
 # AWS infrastructure
 
-Terraform for everything this project runs in the cloud. Two stacks today —
-**user storage** and the **briefing worker** — in one root sharing one state
-file, plus `bootstrap/`, which is applied by hand and creates the things that
-cannot create themselves.
+Terraform for everything this project runs in the cloud. Three stacks today —
+**user storage**, the **briefing worker** and the **Vercel dashboard**'s access
+to that storage — in one root sharing one state file, plus `bootstrap/`, which
+is applied by hand and creates the things that cannot create themselves.
 
-The worker has its own runbook: `DEPLOYING.md`.
+The worker has its own runbook: `DEPLOYING.md`, which also covers the Vercel
+OIDC setup.
 
 ```
 infra/aws/
@@ -14,10 +15,11 @@ infra/aws/
   alerting.tf boundary.tf                            shared by every stack
   user-storage.{tf,variables.tf,outputs.tf}          one triple per stack
   briefing-worker.{tf,variables.tf,outputs.tf}
+  vercel-dashboard.{tf,variables.tf,outputs.tf}      root-level resources, no module
   tests/                                             terraform test, no credentials needed
   modules/user-storage/                              the bucket, its guards, its IAM
   modules/briefing-worker/                           the lambda, schedule, secret, alarms
-  bootstrap/                                         state bucket, GitHub OIDC, deploy role, boundary
+  bootstrap/                                         state bucket, GitHub + Vercel OIDC, deploy role, boundary
 ```
 
 ## The rule this layout encodes
@@ -36,8 +38,17 @@ would — without two stacks ever editing the same lines.
 Two conventions keep the root from re-becoming a pass-through:
 
 - **One variable per stack, not one per module input.** The root's whole
-  interface is five names: `region`, `alert_email`, `schedule_enabled`,
-  `user_storage`, `briefing_worker`. Stack number three makes it six.
+  interface is six names: `region`, `alert_email`, `schedule_enabled`,
+  `user_storage`, `briefing_worker`, `vercel_dashboard`. Stack number four makes
+  it seven.
+- **A stack whose configuration is not knowable from this repository defaults to
+  null and creates nothing.** `vercel_dashboard` is the case: its trust policy
+  needs a Vercel team slug and a claim format that has to be read off a real
+  token. CI applies this root on every push to `main` touching `infra/**`, so a
+  placeholder in `terraform.tfvars` would not sit waiting to be corrected — it
+  would be applied. Gating on null means the unconfigured state is a no-op
+  rather than a wrong deployment, and `tests/vercel_dashboard.tftest.hcl` asserts
+  that it stays one.
 - **A field appears in a stack's object only if a deployment varies it,** and
   field documentation is never copied from the module — `modules/<stack>/
 variables.tf` is the single source. Duplicated descriptions are how the two
