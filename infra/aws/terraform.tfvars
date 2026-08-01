@@ -56,6 +56,6 @@ briefing_worker = {
 # opaque `team_…` identifier that appears in no claim. Read it off the team
 # dashboard URL or from `vercel teams ls`.
 #
-# vercel_dashboard = {
-#   team_slug = "<your-vercel-team-slug>"
-# }
+vercel_dashboard = {
+  team_slug = "sunnys-projects-8f69bfb9"
+}
