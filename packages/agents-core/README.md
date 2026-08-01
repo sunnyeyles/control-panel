@@ -123,8 +123,9 @@ for await (const chunk of await agent.stream(input, {
 
 ## Model configuration
 
-Uses OpenAI via `@langchain/openai`, defaulting to `gpt-5.5` (see
-`src/model.ts`). Two things to know:
+Uses OpenAI via `@langchain/openai`. The default is `DEFAULT_MODEL` in
+`src/model.ts` — read it there rather than trusting a name written here. Two
+things to know:
 
 - **`temperature` is not set.** Reasoning-capable models reject a non-default
   value. Pass it through `overrides` only on a model that accepts it.

@@ -89,10 +89,10 @@ flowchart TD
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
 - **Cover letters.**
-- **Any dashboard UI for briefs.** `apps/dashboard` has an assistant chat, a
-  settings page and the auth pages, and calls the database only to upsert the
-  signed-in user. `JobStore.listForUser()` and `ArtifactStore.latestForJob()`
-  already exist and have no caller.
+- **Any dashboard UI for briefs.** `apps/dashboard` has an assistant chat, the
+  documents section, a settings page and the auth pages, and calls the database
+  only to upsert the signed-in user. `JobStore.listForUser()` and
+  `ArtifactStore.latestForJob()` already exist and have no caller.
 
 ## Infrastructure
 

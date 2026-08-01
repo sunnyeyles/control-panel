@@ -206,17 +206,14 @@ it looking for the wrong thing.
 
 ## IAM
 
-Per environment **and** per kind, so "the worker can write briefs" and "the
-worker can delete a user's CV" are not the same grant:
+Grants are per environment **and** per kind, so "the worker can write briefs"
+and "the worker can delete a user's CV" are not the same grant.
+`infra/aws/README.md` §Least privilege has the rendered policies and the
+reasoning; `infra/aws/modules/user-storage` emits them and exports the ARNs.
 
-- `s3:PutObject`, `s3:PutObjectTagging`, `s3:GetObject`, `s3:GetObjectTagging`,
-  `s3:DeleteObject` on `{bucket}/{environment}/*/{kind}/*`
-- `s3:ListBucket` on `{bucket}`, `s3:prefix` like `{environment}/*/{kind}/*`
-
-`PutObjectTagging` is not optional — the write 403s without it, and the
-lifecycle rules depend on the tag it sets. `HeadObject` is authorised by
-`s3:GetObject`. `infra/aws/modules/user-storage` emits exactly these and
-exports the ARNs.
+The one thing to carry back into this package: **`PutObjectTagging` is not
+optional.** Every `put` here tags the object with its kind, so the write 403s
+without it and the lifecycle rules have nothing to filter on.
 
 ## Commands
 

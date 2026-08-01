@@ -69,24 +69,18 @@ emitted at all — the absence is the guarantee, rather than a very large number
 
 ## How per-kind retention actually works
 
-Not by prefix, and the reason is worth knowing before editing this module.
-
-S3 lifecycle filters match a **literal** prefix — no wildcards. The key layout
-is `environment/userId/kind/…`, so there is no prefix meaning "every user's
-briefs": `userId` sits between the two fixed parts. Putting kind above userId
-would fix lifecycle but scatter a user's data across kinds, making erasure N
-deletes instead of one.
-
-So the store tags every object `kind=<kind>` at write time, and these rules
-filter on the tag. Consequences:
+By **tag**, not by prefix — the store tags every object `kind=<kind>` at write
+time and these rules filter on that. Why the key layout forces it is in
+`packages/user-storage/README.md` §What this layout costs; the two consequences
+for anyone editing this module are:
 
 - The access policies must include **`s3:PutObjectTagging`**. Without it the
   write 403s.
 - A kind added to `kinds.ts` with no matching entry here gets **no retention
   policy at all**. It will not error; it will just accumulate.
 
-IAM is different — resource ARNs _do_ take wildcards, which is why per-kind
-policies below can be expressed as `…/{environment}/*/{kind}/*`.
+IAM is unaffected — resource ARNs _do_ take wildcards, which is why the per-kind
+policies can be expressed as `…/{environment}/*/{kind}/*`.
 
 ## Outputs
 

@@ -3,38 +3,19 @@
 Two runbooks. **The briefing worker** — first deploy, verification, rollback —
 and, at the end, **giving the dashboard access to user storage** via Vercel
 OIDC. They are unrelated deployments that happen to share a bucket and a state
-file.
+file. The layout, the one-triple-per-stack rule and the architecture behind them
+live in `infra/aws/README.md` and are not restated here.
 
-> **Housekeeping.** This is a separate file rather than a section of
-> `infra/aws/README.md` so the runbook stays skimmable next to that file's
-> architecture material. Fold it in if it stops earning the separation.
+Worth knowing before the first deploy: **all three stacks share this root and
+therefore one state file**, which is what lets the worker's execution role and
+the bucket policy that references it resolve in a single graph instead of across
+a remote-state lookup. Each stack keeps to its own files.
 
-## Layout
-
-```
-infra/aws/
-  backend.tf                     partial S3 backend — bucket supplied at init
-  terraform.tfvars               committed; the values this deployment applies
-  briefing-worker.tf             the module block, and the join to brief storage
-  briefing-worker.variables.tf   its one object variable, plus schedule_enabled
-  briefing-worker.outputs.tf     its outputs
-  alerting.tf  boundary.tf       shared: the SNS topic, the permissions boundary
-  providers.tf  versions.tf      shared with the user-storage stack
-  modules/briefing-worker/       the worker: lambda, schedule, secret, alarms
-  bootstrap/                     state bucket, GitHub OIDC, deploy role, boundary
-```
-
-Two stacks share this root and therefore share one state file, which is what
-lets the worker's execution role and the bucket policy that references it
-resolve in a single graph instead of across a remote-state lookup. Each stack
-keeps to its own files: nothing here edits `user-storage.tf` or
-`modules/user-storage/`.
-
-Two things the worker no longer owns. **The SNS topic and its email
-subscription** live in `alerting.tf`, because one topic serves every stack and a
-per-stack topic means a per-stack confirmation mail. **The permissions boundary**
-on both its roles comes from `boundary.tf`; the deploy role may only create roles
-that carry it.
+Two things the worker does not own. **The SNS topic and its email subscription**
+live in `alerting.tf`, because one topic serves every stack and a per-stack topic
+means a per-stack confirmation mail. **The permissions boundary** on both its
+roles comes from `boundary.tf`; the deploy role may only create roles that carry
+it.
 
 ## First deploy
 
@@ -101,22 +82,13 @@ again.
 
 ## Verifying
 
-```bash
-aws lambda invoke --function-name briefing-worker \
-  --cli-binary-format raw-in-base64-out --payload '{}' /dev/stdout
-```
+Forcing a run and reading the log lines it emits is
+`apps/briefing-worker/README.md` §Forcing a run in AWS — the worker defines
+those lines, so it documents them.
 
-In CloudWatch Logs Insights:
-
-```
-fields @timestamp, @message
-| filter @message like /"event":"tick"/ or @message like /"event":"briefing-run"/
-| sort @timestamp desc
-| limit 40
-```
-
-and for the daily health check — count ticks, not runs, since most hours have
-nothing due and a run report is only emitted when a job is actually claimed:
+What belongs here is the daily health check — count ticks, not runs, since most
+hours have nothing due and a run report is only emitted when a job is actually
+claimed:
 
 ```
 filter @message like /"event":"tick"/
@@ -133,20 +105,7 @@ Done means all of:
 - [ ] `terraform apply` clean, and a following `plan` reports no changes
 - [ ] both roles carry the boundary:
       `aws iam get-role --role-name briefing-worker-execution --query Role.PermissionsBoundary`
-- [ ] **all three** secrets hold a value — count versions, never print one.
-      `LastChangedDate` is not the check: creating an empty shell sets it too,
-      so a secret with no value at all reads as freshly changed.
-
-      ```bash
-              for s in openai-api-key database-url tavily-api-key; do
-                printf '%-16s ' "$s"
-                aws secretsmanager describe-secret --secret-id "briefing-worker/$s" \
-                  --query 'length(keys(VersionIdsToStages || `{}`))' --output text
-              done
-              ```
-
-              Every line must report `1` or more. A `0` is the outage in step 4.
-
+- [ ] **all three** secrets hold a value — see "Counting secret versions" below
 - [ ] the function carries `USER_STORAGE_BUCKET_NAME` and
       `USER_STORAGE_ENVIRONMENT`:
       `aws lambda get-function-configuration --function-name briefing-worker --query Environment.Variables`
@@ -173,6 +132,22 @@ Done means all of:
       `aws secretsmanager get-secret-value --version-stage AWSPREVIOUS`, not from
       the clipboard
 - [ ] ticks land on the hour unprompted
+
+### Counting secret versions
+
+Count versions, never print one. `LastChangedDate` is not the check: creating an
+empty shell sets it too, so a secret with no value at all reads as freshly
+changed.
+
+```bash
+for s in openai-api-key database-url tavily-api-key; do
+  printf '%-16s ' "$s"
+  aws secretsmanager describe-secret --secret-id "briefing-worker/$s" \
+    --query 'length(keys(VersionIdsToStages || `{}`))' --output text
+done
+```
+
+Every line must report `1` or more. A `0` is the outage in step 4.
 
 ## Taking the worker off duty
 
@@ -238,11 +213,16 @@ bucket the worker writes briefs to. It gets there by exchanging a Vercel OIDC
 token for the `control-panel-vercel-dashboard` role — no access key exists on
 this path either.
 
-**The stack is off until you configure it.** `vercel_dashboard` in
-`infra/aws/terraform.tfvars` is commented out and defaults to null, which
-creates no provider, no role and no attachment. Unconfigured, the dashboard
-falls back to the AWS SDK's default credential chain, which is what local
-development uses and what production has no answer for — so uploads fail.
+**This stack is configured and on.** `vercel_dashboard` in
+`infra/aws/terraform.tfvars` names a `team_slug`, so the role and its
+attachment exist. The steps below are the record of how it got there — follow
+them when standing up a new account, a second Vercel project, or a changed team
+slug, and read step 4 whenever an upload starts failing.
+
+The variable still defaults to null, and null creates no provider, no role and
+no attachment. Left that way, the dashboard falls back to the AWS SDK's default
+credential chain — which is what local development uses and what production has
+no answer for, so uploads fail.
 
 ## 1. Read the real claim values off a token
 
@@ -291,8 +271,8 @@ step 1 showed Global mode.
 
 ## 3. Configure and apply the stack
 
-Uncomment `vercel_dashboard` in `infra/aws/terraform.tfvars` and fill in the
-slug, plus any overrides. Then let CI apply it (push to `main` touching
+Set `vercel_dashboard` in `infra/aws/terraform.tfvars` — the slug, plus any
+overrides step 1 turned up. Then let CI apply it (push to `main` touching
 `infra/**`), or apply by hand. Read the role ARN out:
 
 ```bash

@@ -9,9 +9,8 @@ jobs have reached their slot, claims each one, runs it, and records the outcome.
 A tick that finds nothing due is a success.
 
 A job's own cadence lives in Postgres, as `jobs.schedule_cron` and
-`jobs.schedule_timezone`, so adding a job with a different cadence costs an
-INSERT rather than a Terraform apply. What stayed in Terraform is the tick,
-which is the same for every job and therefore has nothing left to drift.
+`jobs.schedule_timezone`; what stayed in Terraform is the tick. `CONTEXT.md`
+§Tick has the reasoning.
 
 The work a claimed job performs is a **briefing run**: a scout agent searches
 the web for job postings matching the criteria in `jobs.config`, a writer agent
@@ -193,6 +192,6 @@ duplicate occurrence is a paid LLM run.
 tearing it down, so a connection left open is one Neon keeps accounting for
 while nothing is using it.
 
-**Build before `terraform plan`.** Terraform reads `lambda.zip` with
-`filebase64sha256` at plan time, so a plan on a tree that has not been built
-fails with a file-not-found that reads like a Terraform bug.
+**`lambda.zip` is read at Terraform _plan_ time, not apply time.** This package
+produces it, so an unbuilt tree breaks a plan; see `infra/aws/README.md`
+§Applying it.

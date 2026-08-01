@@ -1,22 +1,27 @@
 # Bootstrap
 
 Applied **once, by hand, by a human with admin**, before anything in
-`infra/aws/` can be applied at all. It creates the four things that cannot
-create themselves:
+`infra/aws/` can be applied at all. It creates the things that cannot create
+themselves:
 
 - the S3 bucket the main root keeps its state in,
-- the GitHub OIDC provider,
-- the deploy role CI assumes, and its five permission policies,
+- the GitHub OIDC provider, and the Vercel one the dashboard federates through,
+- the deploy role CI assumes, and its permission policies,
 - the **permissions boundary** every role that role creates must carry.
 
 ```
 bootstrap/
   state.tf             the state bucket
   oidc.tf              GitHub OIDC provider + the deploy role itself
+  vercel-oidc.tf       Vercel OIDC provider, for the dashboard's storage role
   boundary.tf          the ceiling on every role CI creates — read this first
   deploy-policies.tf   state / compute / storage / secrets, and the split rationale
   deploy-iam.tf        the IAM half, with the conditions that make the boundary stick
 ```
+
+Both OIDC providers live here for the same reason: `deploy-iam.tf` grants nothing
+in the `iam:*OpenIDConnectProvider*` family, because a pipeline that can mint a
+federated trust for itself is a pipeline that can grant itself anything.
 
 ## Running it
 
@@ -26,8 +31,13 @@ cd infra/aws/bootstrap
 terraform init
 terraform apply \
   -var="state_bucket_name=control-panel-tfstate-<account-id>" \
-  -var="github_owner=<owner>"
+  -var="github_owner=<owner>" \
+  -var="vercel_team_slug=<slug>"
 ```
+
+`vercel_team_slug` is the slug, not the `orgId` in `.vercel/project.json`. Omit
+it only if the dashboard's storage access is not being set up — see
+`../DEPLOYING.md`, which also covers the Global-issuer-mode overrides.
 
 Get `<account-id>` from `aws sts get-caller-identity --query Account --output text`.
 
@@ -52,19 +62,13 @@ it means creating a new empty one and abandoning the old one's contents.
 
 ## Then point the main root at the bucket
 
-`infra/aws/backend.tf` is a partial configuration — the bucket is supplied at
-init time, so nothing in the repository names a bucket that might not exist:
-
 ```bash
 cd infra/aws
 terraform init -backend-config="bucket=control-panel-tfstate-<account-id>"
 ```
 
-Keep a local `backend.hcl` (gitignored) so repeat inits are one flag:
-
-```hcl
-bucket = "control-panel-tfstate-<account-id>"
-```
+`infra/aws/README.md` §State explains the partial-backend arrangement and the
+`backend.hcl` shortcut that saves retyping this.
 
 ## The OIDC subject claim will probably not match on the first try
 
@@ -97,14 +101,8 @@ create, tag and destroy the secret container; provisioning a secret and reading
 one are different jobs, and CI has only the first.
 
 A consequence worth stating plainly: adding an `aws_secretsmanager_secret_version`
-resource will fail in CI. That is the guardrail working. The key is set once, by
-a person:
-
-```bash
-aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/openai-api-key \
-  --secret-string "sk-..."
-```
+resource will fail in CI. That is the guardrail working. Values are set once, by
+a person — `../DEPLOYING.md` step 4.
 
 **It cannot create a role that escapes the boundary.** `iam:CreateRole`,
 `iam:PutRolePolicy` and `iam:AttachRolePolicy` are each conditioned on
@@ -148,19 +146,18 @@ resources.
 
 ## A note on this root's own state
 
-`terraform.tfstate` here is a local file, and `.gitignore` covers `*.tfstate`, so
-it cannot be committed. Today that means it lives on exactly one laptop, and
-losing it means importing every resource in this root to regain control of the
-role CI depends on.
-
-The chicken-and-egg is only real at creation time. Once the state bucket exists,
-this root can move into it:
+`backend.tf` is already a partial S3 backend, so the block no longer needs
+writing — but adopting it is one deliberate command rather than something that
+happens on the next `init` by accident:
 
 ```bash
-cd infra/aws/bootstrap
-# add a backend "s3" block with key = "bootstrap/terraform.tfstate"
-terraform init -migrate-state -backend-config="bucket=control-panel-tfstate-<account-id>"
+terraform -chdir=infra/aws/bootstrap init -migrate-state \
+  -backend-config="bucket=control-panel-tfstate-<account-id>" \
+  -backend-config="region=ap-southeast-2"
 ```
 
-Recommended, and deliberately left as a step someone takes on purpose rather than
-something done here — migrating state is not a thing to discover mid-apply.
+Until that is run, `terraform.tfstate` here is a local file — `.gitignore` covers
+`*.tfstate`, so it lives on exactly one laptop, and losing it means importing
+every resource in this root to regain control of the role CI depends on. The full
+reasoning, including why the first apply had nowhere remote to go, is in
+`backend.tf`'s own comment.

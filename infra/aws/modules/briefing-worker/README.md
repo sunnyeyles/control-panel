@@ -5,10 +5,11 @@ and the alarms that notice when it stops.
 
 ```
 EventBridge Scheduler ──assumes role──► Lambda (nodejs22.x, arm64)
-  cron(0 9 * * ? *) UTC                   │
-  flexible window OFF                     ├─► Secrets Manager  (GetSecretValue at cold start)
-  retries = 0                             ├─► CloudWatch Logs  (one briefing-run JSON line)
-                                          └─► api.openai.com   (no VPC)
+  cron(0 * * * ? *) UTC                   │
+  flexible window OFF                     ├─► Secrets Manager  (all three, at cold start)
+  retries = 0                             ├─► CloudWatch Logs  (one tick line, plus one
+                                          │                     briefing-run line per job)
+                                          └─► OpenAI, Tavily, Neon  (no VPC)
 
 CloudWatch alarms ──► alerts_topic_arn (the root's SNS topic)
   Errors >= 1        (a run failed)
@@ -53,42 +54,32 @@ else a user has stored is authority it never exercises.
 to invoke the function, so permission is expressed once, in `iam.tf`, rather
 than split between a role and a resource-based policy that have to agree.
 
-**No secret value.** `aws_secretsmanager_secret` creates an empty shell;
-`aws_secretsmanager_secret_version` is deliberately absent so the key never
-enters plan output or state. Set it once by hand:
+**No secret value.** Each `aws_secretsmanager_secret` is an empty shell;
+`aws_secretsmanager_secret_version` is deliberately absent, so no value ever
+enters plan output or state. Filling them is step 4 of `infra/aws/DEPLOYING.md`,
+which also covers what happens when one is left empty.
 
-```bash
-aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/openai-api-key \
-  --secret-string "sk-..."
-```
-
-**No VPC.** Outbound traffic is `api.openai.com` and AWS APIs only. Putting the
-function in a VPC to reach the public internet would need a NAT gateway and buy
-nothing.
+**No VPC.** Outbound traffic is OpenAI, Tavily, Neon and AWS APIs only. Putting
+the function in a VPC to reach the public internet would need a NAT gateway and
+buy nothing.
 
 ## Ordering trap
 
-`lambda_zip_path` is read by `filebase64sha256` at **plan** time, not apply
-time. The zip must exist before `terraform plan` runs, or the plan fails with a
-file-not-found that looks like a Terraform problem and is not:
-
-```bash
-pnpm turbo zip --filter=@workspace/briefing-worker   # then plan
-```
+`lambda_zip_path` is read by `filebase64sha256` at **plan** time, not apply time,
+so the zip must exist before `terraform plan` runs. See `infra/aws/README.md`
+§Applying it.
 
 ## The schedule is a tick, not a briefing time
 
 `schedule_expression` is `cron(0 * * * ? *)` — hourly — and it says when the
-worker _asks what is due_, not when any briefing runs. A job's own cadence lives
-in Postgres as `jobs.schedule_cron` and `jobs.schedule_timezone`, so adding a
-job with a new cadence costs an INSERT rather than an apply.
+worker _asks what is due_, not when any briefing runs. See `CONTEXT.md` for what
+a tick is and why a job's cadence lives in Postgres instead.
 
-That makes hourly the resolution of the whole system: a job may name any hour in
-any IANA timezone, and nothing finer than an hour is observable. Setting this
-back to a daily expression would not "run the briefing daily" — it would
-silently round every job's schedule to whichever hour it named, with no job row
-disagreeing.
+The consequence that belongs to this module: **hourly is the resolution of the
+whole system.** A job may name any hour in any IANA timezone, and nothing finer
+than an hour is observable. Setting this back to a daily expression would not
+"run the briefing daily" — it would silently round every job's schedule to
+whichever hour it named, with no job row disagreeing.
 
 ## One invocation per tick
 
@@ -108,21 +99,22 @@ for the next hour.
 
 ## Secrets
 
-Two, both provisioned as empty shells and never written by Terraform:
+Three, all provisioned as empty shells and never written by Terraform:
 
 | Secret                      | Environment variable | Holds                            |
 | --------------------------- | -------------------- | -------------------------------- |
 | `<function>/openai-api-key` | `OPENAI_SECRET_ID`   | the OpenAI API key               |
 | `<function>/database-url`   | `DATABASE_SECRET_ID` | the **pooled** connection string |
+| `<function>/tavily-api-key` | `TAVILY_SECRET_ID`   | the Tavily search key            |
 
 The function gets each secret's **ARN**, never its value. A value passed through
 Terraform appears in plan output, in state, and in the log of whatever ran the
-apply — and a connection string carries a password. Set both by hand:
+apply — and a connection string carries a password.
 
-```bash
-aws secretsmanager put-secret-value --secret-id briefing-worker/database-url \
-  --secret-string "postgresql://…-pooler.…neon.tech/neondb?sslmode=require"
-```
+Adding a fourth means a resource here, an environment variable in `main.tf`, a
+`loadSecret` call in the worker, and a line in `DEPLOYING.md` step 4. Miss the
+last and the shell ships empty, which takes down **every** invocation — the
+worker fetches all of them concurrently at handler init.
 
 Migrations need the **direct** endpoint and are not run by this function.
 

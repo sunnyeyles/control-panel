@@ -179,19 +179,16 @@ too fails loudly rather than quietly.
 
 ## Retention: why it is tag-based
 
-S3 lifecycle filters match a **literal** prefix and accept no wildcards. The key
-layout is `environment/userId/kind/…`, so there is no prefix meaning "every
-user's briefs" — `userId` sits between the two fixed parts.
+Lifecycle rules filter on an object **tag**, not a key prefix, because the key
+layout puts `userId` between the two fixed segments and S3 lifecycle filters take
+no wildcards. `packages/user-storage/README.md` §What this layout costs has the
+full reasoning, including why the layout is worth that price.
 
-Putting kind above userId would fix lifecycle but scatter a user's data across
-kinds, making erasure N deletes instead of one. Keeping userId above kind and
-tagging each object with its kind gets both. IAM is unaffected either way: IAM
-resource ARNs _do_ take wildcards.
-
-The practical consequence: a kind added to `packages/user-storage/src/kinds.ts`
-without a matching entry in `object_kinds` gets **no retention policy at all**.
-It will not error; it will just accumulate. `tests/user_storage.tftest.hcl`
-asserts the correspondence, so that failure is now caught on a pull request.
+The consequence that lands here: a kind added to
+`packages/user-storage/src/kinds.ts` without a matching entry in `object_kinds`
+gets **no retention policy at all**. It will not error; it will just accumulate.
+`tests/user_storage.tftest.hcl` asserts the correspondence, so that failure is
+caught on a pull request.
 
 ## Applying it
 
@@ -200,11 +197,15 @@ root's backend points at, and the permissions boundary `boundary.tf` looks up.
 See `bootstrap/README.md`.
 
 ```bash
-pnpm turbo zip --filter=@workspace/briefing-worker   # plan reads the zip
+pnpm turbo zip --filter=@workspace/briefing-worker   # build first — see below
 terraform -chdir=infra/aws init -backend-config="bucket=<state-bucket>"
 terraform -chdir=infra/aws plan
 terraform -chdir=infra/aws apply
 ```
+
+**Build before planning, not before applying.** `filebase64sha256` reads
+`lambda.zip` at _plan_ time, so a plan on an unbuilt tree fails with a
+file-not-found that reads like a Terraform bug and is not one.
 
 No `-var` flags: `terraform.tfvars` is committed and auto-loaded, so the values
 applied are the values in the diff. It is the one exception to the `*.tfvars`
@@ -217,13 +218,14 @@ state and in the diff of every plan.
 
 ### Variables
 
-| Variable           | Type   | Default          | Notes                                                   |
-| ------------------ | ------ | ---------------- | ------------------------------------------------------- |
-| `region`           | string | `ap-southeast-2` | Sydney — nearest region to the only user                |
-| `alert_email`      | string | —                | required; feeds the one shared SNS topic                |
-| `schedule_enabled` | bool   | `true`           | flat on purpose — the one CLI override                  |
-| `user_storage`     | object | —                | `bucket_name` required; see `user-storage.variables.tf` |
-| `briefing_worker`  | object | `{}`             | see `briefing-worker.variables.tf`                      |
+| Variable           | Type   | Default          | Notes                                                     |
+| ------------------ | ------ | ---------------- | --------------------------------------------------------- |
+| `region`           | string | `ap-southeast-2` | Sydney — nearest region to the only user                  |
+| `alert_email`      | string | —                | required; feeds the one shared SNS topic                  |
+| `schedule_enabled` | bool   | `true`           | flat on purpose — the one CLI override                    |
+| `user_storage`     | object | —                | `bucket_name` required; see `user-storage.variables.tf`   |
+| `briefing_worker`  | object | `{}`             | see `briefing-worker.variables.tf`                        |
+| `vercel_dashboard` | object | `null`           | null creates nothing; see `vercel-dashboard.variables.tf` |
 
 Fields inside the objects are documented on the modules' own variables, not
 restated here.
@@ -237,7 +239,8 @@ restated here.
 | `user_storage_policy_arns`      | per environment, every kind — the broad grant           |
 | `user_storage_kind_policy_arns` | keyed `<environment>:<kind>` — the narrow grant, prefer |
 | `alerts_topic_arn`              | the one topic every stack's alarms publish to           |
-| `worker_*`                      | function name, roles, log group, secret ARN             |
+| `worker_*`                      | function name, roles, log group, the two secret ARNs    |
+| `vercel_dashboard_role_arn`     | `AWS_ROLE_ARN` on the Vercel project                    |
 
 The workload also needs `USER_STORAGE_ENVIRONMENT`, which is not an output — it
 is the workload's own identity, and the bucket has no opinion about which

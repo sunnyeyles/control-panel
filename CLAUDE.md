@@ -71,9 +71,10 @@ in `apps/dashboard/lib/auth/current-user.ts` is the only thing standing between
 that account and the app. An unset list refuses everyone, deliberately.
 
 Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
-it**. One root holds two stacks — the worker and user storage — sharing a single
-state file, plus `bootstrap/` for the state bucket and the CI deploy role.
-Terraform runs directly:
+it**. One root holds three stacks — the worker, user storage, and the Vercel
+dashboard's access to that storage — sharing a single state file, plus
+`bootstrap/` for the state bucket and the CI deploy role. Terraform runs
+directly:
 
 ```bash
 terraform -chdir=infra/aws fmt -recursive -check
@@ -100,17 +101,18 @@ Tests are their own task, and a thin one:
 pnpm test        # turbo test
 ```
 
-**Only `@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools` and
-`@workspace/briefing-worker` have tests.** Vitest is the runner and is a
-devDependency of those four alone; `turbo test` is a no-op in the other four
-workspaces. Do not assume a package is covered because the command exits 0.
-Adding tests to another workspace means adding `vitest` to it and a `test`
-script — the `test` task in `turbo.json` is already there.
+**Only five workspaces have tests** — `@workspace/dashboard`,
+`@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools` and
+`@workspace/briefing-worker`. Vitest is a devDependency of those alone; `turbo
+test` is a no-op in the other five. Do not assume a package is covered because
+the command exits 0. Adding tests to another workspace means adding `vitest` to
+it and a `test` script — the `test` task in `turbo.json` is already there.
 
-In each of those workspaces the same arrangement repeats and is deliberate:
+In the four that emit `dist/` the same arrangement repeats and is deliberate:
 `src/**/*.test.ts` is excluded from `tsconfig.json` so tests never reach
 `dist/`, and a `tsconfig.test.json` covers them with `noEmit` because Vitest
-transpiles without typechecking. `typecheck` runs both.
+transpiles without typechecking. `typecheck` runs both. The dashboard needs
+neither half — it is `noEmit` already.
 
 `@workspace/db` splits its suite by whether the thing under test needs Postgres
 to _be_ Postgres. `schedule.test.ts` needs nothing. `stores.test.ts` needs a real

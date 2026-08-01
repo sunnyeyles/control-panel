@@ -3,7 +3,8 @@
 The single-user platform this repo is growing toward: a scheduled agent
 produces a daily job-search briefing, and the dashboard surfaces it. Today the
 scaffold, the deployed worker, the S3 storage layer, and one end-to-end
-briefing path exist; the dashboard shows none of it yet.
+briefing path exist. The dashboard manages **Documents** but surfaces no
+briefing yet — `OVERVIEW.md` §Not built yet is the current list.
 
 ## Language
 
