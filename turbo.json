@@ -17,7 +17,7 @@
     "NEON_AUTH_COOKIE_SECRET",
     "AUTH_ALLOWED_EMAILS"
   ],
-  "globalPassThroughEnv": ["VERCEL_OIDC_TOKEN"],
+  "globalPassThroughEnv": ["VERCEL_OIDC_TOKEN", "NO_COLOR"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

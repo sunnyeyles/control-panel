@@ -24,6 +24,11 @@ dist
 # turbo
 .turbo
 
+# briefing-worker local harness output: briefs it generated and the traces of
+# the runs that made them. Real model output against real search results, so it
+# is per-machine and disposable — see apps/briefing-worker/README.md §Watching.
+.briefings/
+
 # misc
 .DS_Store
 *.pem

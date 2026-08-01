@@ -161,3 +161,16 @@ object key. The artifact a human queries to verify a run happened. A **Tick
 Report** is its per-tick counterpart, answering "was there anything to do"
 rather than "what happened in this run".
 _Avoid_: run record, run log, result row
+
+**Trace**:
+The transcript of one **Run**: every step boundary, prompt, model message and
+tool round trip, emitted as it happens through the optional sink
+`runBriefing` takes. The third thing beside the **Run** and the **Run Report**,
+and neither replaces it — the row is queryable state, the report is the
+outcome, and the trace is what the run actually did on the way there.
+
+Answers "why did it do that", which the other two structurally cannot: a
+report saying `"searches":2` cannot say what was searched for. A run with no
+sink emits none of it and behaves identically, so a trace is a thing you ask
+for rather than a thing the worker always pays to produce.
+_Avoid_: log, debug output, history

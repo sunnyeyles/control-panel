@@ -1,0 +1,8 @@
+{
+  "titles": ["senior backend engineer", "staff software engineer"],
+  "locations": ["Sydney", "Remote (Australia)"],
+  "keywords": ["TypeScript", "Postgres", "AWS"],
+  "exclude": ["graduate", "internship"],
+  "sources": ["seek.com.au", "au.linkedin.com"],
+  "maxPostings": 5
+}

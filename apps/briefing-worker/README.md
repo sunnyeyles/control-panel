@@ -30,7 +30,10 @@ between the two halves.
 src/index.ts               shallow — the Lambda handler, and the only AWS-aware file
 src/run-tick.ts            deep — claim, run, record; one invocation's worth of work
 src/run-briefing.ts        deep — owns one briefing and its success contract
+src/run-agent.ts           deep — drives one agent, watching it work
 src/job-search-config.ts   deep — what `jobs.config` means to this worker
+src/trace.ts               the run's event stream, and where it can be sent
+src/dev/                   the local harness. Never bundled, never deployed.
 build.mjs                  esbuild bundle + deploy-root assembly
 ```
 
@@ -88,6 +91,7 @@ pnpm turbo typecheck --filter=@workspace/briefing-worker
 pnpm --filter=@workspace/briefing-worker test             # run logic, fake agents
 pnpm turbo zip --filter=@workspace/briefing-worker        # dist/ -> lambda.zip
 pnpm --filter=@workspace/briefing-worker invoke           # run the handler locally
+pnpm --filter=@workspace/briefing-worker watch            # watch one briefing, step by step
 ```
 
 Running locally needs no emulator, no AWS credentials and no local host — only
@@ -120,6 +124,59 @@ The unit tests need none of the above. They drive `runBriefing` with fake agents
 through its `createScout`/`createWriter` seams and assert on the shape of a run —
 did a search succeed, did the hand-off validate, is the key derived from the
 occurrence — never on what a model said.
+
+## Watching a run
+
+`invoke` runs the real handler, and the real handler **claims a slot**. Claiming
+is at-most-once by design, so using it to see what a job does consumes that
+job's occurrence, writes a real object and spends real money. Debugging should
+not cost the thing being debugged.
+
+`watch` exists for that. It drives `runBriefing` directly — no claim, no `runs`
+row, no `next_run_at` advance, no S3 and no AWS credentials — and renders the
+run as it happens: the prompt each agent got, every search query with what came
+back, the findings as they validated, and the brief.
+
+```bash
+export OPENAI_API_KEY=... TAVILY_API_KEY=...
+pnpm --filter=@workspace/briefing-worker watch --config ./fixtures/example-search.json
+```
+
+The model and the web search are real, because they are the parts worth
+watching. Everything else is local: the brief lands under `.briefings/` at the
+key S3 would have used, and the trace is kept beside it as JSON lines.
+
+```
+--config <path>  search criteria to run, as a jobs.config payload. No database.
+--job <uuid>     take the criteria from a real job row, read-only. Needs DATABASE_URL.
+--at <iso>       the slot to run for, which decides the key's partition day.
+--out <dir>      where the brief and the trace land. Default ./.briefings
+--json           print the raw trace as JSON lines instead of rendering it.
+--verbose        do not truncate messages or tool results.
+```
+
+`--job` reads the row and nothing more. It does not claim it, advance its
+schedule, or create a run — the job stays exactly as due as it was.
+
+**The trace is a seam, not a log format.** `runBriefing` takes an optional
+`trace` sink (`src/trace.ts`) and emits every step boundary, model message and
+tool round trip through it; the terminal renderer under `src/dev/` is one
+consumer, `--json` is another, and a run with no sink behaves exactly as it did
+before the seam existed, down to the log lines. Persisting a trace beside the
+brief, or streaming one to the dashboard, is a third consumer and needs nothing
+new here.
+
+What made this possible is a two-line change in `run-briefing.ts`: the agents
+are driven with `.stream()` instead of `.invoke()`. `.invoke()` runs the graph
+to completion and returns the final state, discarding the queries, the results
+and the turns it took to get there — which is why `countToolResults` has to
+re-derive a search count by filtering the finished message array. `.stream()`
+yields the same run one superstep at a time and returns the same final state.
+`@workspace/agents-core` and the agents themselves are untouched.
+
+Nothing under `src/dev/` is reachable from the deployed bundle: `build.mjs`
+takes `src/index.ts` as its only entry point, so the harness cannot ship even by
+accident.
 
 ## Forcing a run in AWS
 

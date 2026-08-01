@@ -9,12 +9,13 @@ import {
   createBriefWriter,
   createJobScout,
   parseFindings,
-  type Agent,
 } from "@workspace/agents"
 import type { ArtifactStore, ClaimedSlot, DueJob } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
 import { parseJobSearchConfig, toSearchBrief } from "./job-search-config.ts"
+import { runAgent, type AgentLike } from "./run-agent.ts"
+import { createTracer, type TraceSink } from "./trace.ts"
 
 /**
  * One briefing run: search, compose, upload, record.
@@ -82,9 +83,21 @@ export interface RunBriefingInput {
    * Injected in tests, exactly as `chat-handler.ts` injects its agent. Called
    * inside the run, never at module scope: building an agent constructs a model,
    * which reads `OPENAI_API_KEY`.
+   *
+   * Typed as {@link AgentLike} rather than `Agent` — the run drives one method,
+   * so that is what it asks for. A compiled agent from `@workspace/agents`
+   * satisfies it.
    */
-  createScout?: () => Agent
-  createWriter?: () => Agent
+  createScout?: () => AgentLike
+  createWriter?: () => AgentLike
+  /**
+   * Where to send the step-by-step transcript. Omitted in production, where the
+   * run report is the record; supplied by the local harness, which renders it.
+   *
+   * Additive by construction: a run with no sink behaves exactly as it did
+   * before this existed, down to the log lines.
+   */
+  trace?: TraceSink
 }
 
 /**
@@ -101,6 +114,7 @@ export async function runBriefing(
   const { job, slot, briefs, artifacts } = input
   const startedAtMs = Date.now()
   const startedAt = new Date(startedAtMs).toISOString()
+  const trace = createTracer(input.trace)
 
   // Read outside the try so a failure report still carries however far the run
   // got before it broke — "failed after two searches" and "failed before
@@ -119,34 +133,81 @@ export async function runBriefing(
     searches,
   })
 
-  try {
-    const config = parseJobSearchConfig(job.config, job.name)
+  trace({
+    type: "run",
+    phase: "start",
+    jobId: job.id,
+    jobName: job.name,
+    runId: slot.runId,
+    scheduledFor: slot.scheduledFor.toISOString(),
+  })
 
-    const scout = (input.createScout ?? createJobScout)()
-    const scouted = await scout.invoke({
-      messages: [new HumanMessage(toSearchBrief(config, slot.scheduledFor))],
-    })
+  try {
+    const config = await trace.step(
+      "config",
+      async () => parseJobSearchConfig(job.config, job.name),
+      (parsed) =>
+        `${plural(parsed.titles.length, "title")}, ${plural(parsed.locations.length, "location")}`
+    )
+
+    const scouted = await trace.step(
+      "scout",
+      async () => {
+        const prompt = toSearchBrief(config, slot.scheduledFor)
+        trace({ type: "prompt", agent: "scout", text: prompt })
+
+        const scout = (input.createScout ?? createJobScout)()
+        return runAgent(
+          scout,
+          "scout",
+          { messages: [new HumanMessage(prompt)] },
+          trace
+        )
+      },
+      (result) => plural(result.llmCalls, "model call")
+    )
 
     llmCalls += scouted.llmCalls
     searches = countToolResults(scouted.messages, WEB_SEARCH_TOOL_NAME)
 
-    const scoutAnswer = finalAnswer(scouted.messages, "scout")
+    const findings = await trace.step(
+      "handoff",
+      async () => {
+        const scoutAnswer = finalAnswer(scouted.messages, "scout")
 
-    // No successful search means the findings, however well-formed, came from
-    // the model rather than the web. Better a failed run than a confident brief
-    // citing postings nobody can visit.
-    if (searches === 0) {
-      throw new Error(
-        `The scout completed no successful ${WEB_SEARCH_TOOL_NAME} round trip, so nothing it reported came from the web.`
-      )
-    }
+        // No successful search means the findings, however well-formed, came
+        // from the model rather than the web. Better a failed run than a
+        // confident brief citing postings nobody can visit.
+        if (searches === 0) {
+          throw new Error(
+            `The scout completed no successful ${WEB_SEARCH_TOOL_NAME} round trip, so nothing it reported came from the web.`
+          )
+        }
 
-    const findings = parseFindings(scoutAnswer)
+        const parsed = parseFindings(scoutAnswer)
+        trace({ type: "handoff", findings: parsed })
+        return parsed
+      }
+      // No summary: the `handoff` event above already carries the findings, and
+      // a step detail restating the count is the same fact twice.
+    )
 
-    const writer = (input.createWriter ?? createBriefWriter)()
-    const written = await writer.invoke({
-      messages: [new HumanMessage(toWriterPrompt(findings))],
-    })
+    const written = await trace.step(
+      "writer",
+      async () => {
+        const prompt = toWriterPrompt(findings)
+        trace({ type: "prompt", agent: "writer", text: prompt })
+
+        const writer = (input.createWriter ?? createBriefWriter)()
+        return runAgent(
+          writer,
+          "writer",
+          { messages: [new HumanMessage(prompt)] },
+          trace
+        )
+      },
+      (result) => plural(result.llmCalls, "model call")
+    )
 
     llmCalls += written.llmCalls
     const markdown = finalAnswer(written.messages, "brief writer").trim()
@@ -161,18 +222,36 @@ export async function runBriefing(
     // `artifacts.object_key`, which is UNIQUE — a same-day ad-hoc run beside a
     // scheduled one would otherwise fail on the insert rather than on anything
     // real.
-    const stored = await briefs.put({
-      userId: job.userId,
-      briefId: slot.runId,
-      occurrence: slot.scheduledFor,
-      generatedAt: new Date(),
-      markdown,
+    // No summary, for the same reason as the hand-off: the `artifact` event
+    // below states the key and the size, which is all an upload accomplished.
+    const stored = await trace.step("upload", async () => {
+      const result = await briefs.put({
+        userId: job.userId,
+        briefId: slot.runId,
+        occurrence: slot.scheduledFor,
+        generatedAt: new Date(),
+        markdown,
+      })
+
+      // Inside the step, not after it, so the key is reported as part of the
+      // upload rather than trailing the line that closed it.
+      trace({ type: "artifact", objectKey: result.key, bytes: result.size })
+      return result
     })
 
     // Last, and deliberately so: the row is the claim that a brief exists, so it
     // is written only once the object does. The reverse order can leave a row
     // pointing at nothing.
-    await artifacts.record(slot.runId, stored.key)
+    await trace.step("record", async () =>
+      artifacts.record(slot.runId, stored.key)
+    )
+
+    trace({
+      type: "run",
+      phase: "end",
+      outcome: "success",
+      durationMs: Date.now() - startedAtMs,
+    })
 
     return emit({
       ...common(),
@@ -182,11 +261,17 @@ export async function runBriefing(
       objectKey: stored.key,
     })
   } catch (error) {
-    emit({
-      ...common(),
+    const message = error instanceof Error ? error.message : String(error)
+
+    trace({
+      type: "run",
+      phase: "end",
       outcome: "failure",
-      error: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAtMs,
+      error: message,
     })
+
+    emit({ ...common(), outcome: "failure", error: message })
 
     throw error
   }
@@ -195,6 +280,11 @@ export async function runBriefing(
 function emit<T extends RunReport>(report: T): T {
   console.log(JSON.stringify(report))
   return report
+}
+
+/** Trace summaries are read by people, and `1 posting(s)` is not English. */
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`
 }
 
 /**

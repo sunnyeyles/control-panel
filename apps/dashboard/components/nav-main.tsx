@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
+import { type NavItem } from "@/lib/nav"
 import { Button } from "@workspace/ui/components/button"
 import {
   SidebarGroup,
@@ -13,15 +14,7 @@ import {
 } from "@workspace/ui/components/sidebar"
 import { CirclePlusIcon, MailIcon } from "lucide-react"
 
-export function NavMain({
-  items,
-}: {
-  items: {
-    title: string
-    url: string
-    icon?: React.ReactNode
-  }[]
-}) {
+export function NavMain({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname()
 
   return (
@@ -62,7 +55,7 @@ export function NavMain({
                 isActive={pathname === item.url}
               >
                 <Link href={item.url}>
-                  {item.icon}
+                  <item.icon />
                   <span>{item.title}</span>
                 </Link>
               </SidebarMenuButton>

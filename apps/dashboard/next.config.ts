@@ -62,6 +62,28 @@ const nextConfig: NextConfig = {
      * two rungs were equal, the lower one was unreachable.
      */
     proxyClientMaxBodySize: MAX_PROXY_BUFFER_BYTES,
+
+    /**
+     * Lets the client router reuse a page segment for 30 seconds instead of
+     * re-rendering it on the server every single time.
+     *
+     * Every page here is `force-dynamic` — they read cookies — and the default
+     * `dynamic` stale time is **0 seconds, meaning not cached at all**
+     * (`next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/staleTimes.md`;
+     * the default dropped from 30s to 0s in Next 15). So bouncing between `/`
+     * and `/documents` paid a full server round trip in each direction, every
+     * time, including for a page visited two seconds earlier.
+     *
+     * Safe for the one page with mutable content: `app/(app)/documents/actions.ts`
+     * calls `refresh()` after an upload or a delete, which clears this cache —
+     * so a stale list cannot outlive a change the user just made. Without that
+     * call this setting would be a bug rather than a fix.
+     *
+     * `static` is left at its 5-minute default; nothing here is static.
+     */
+    staleTimes: {
+      dynamic: 30,
+    },
   },
 }
 

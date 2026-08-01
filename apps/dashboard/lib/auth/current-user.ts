@@ -1,3 +1,5 @@
+import { cache } from "react"
+
 import { auth } from "@/lib/auth/server"
 import { getDb } from "@/lib/db"
 
@@ -52,25 +54,42 @@ function isAllowed(email: string): boolean {
   return allowed.includes(email.trim().toLowerCase())
 }
 
-export async function getCurrentUser(): Promise<CurrentUser> {
-  const { data: session } = await auth.getSession()
+/**
+ * Wrapped in React's `cache()`, which memoizes per request and not beyond.
+ *
+ * `app/(app)/layout.tsx` needs the user to render the sidebar, and every page
+ * beneath it calls this again to run its own authorization check — a
+ * duplication that is deliberate, because a layout does not re-render on
+ * navigation and so cannot be the only gate. Without memoization that shape
+ * would cost two session resolutions and two identity upserts on every full
+ * page load, purely to ask the same question twice.
+ *
+ * `cache()` and not a module-level variable: the scope is one request. A
+ * module-level cache on a server handling many users would serve one person's
+ * identity to the next, which here is the identity that becomes the `userId`
+ * segment of their S3 keys.
+ */
+export const getCurrentUser = cache(
+  async function getCurrentUser(): Promise<CurrentUser> {
+    const { data: session } = await auth.getSession()
 
-  const user = session?.user
-  if (!user?.email) return { status: "anonymous" }
+    const user = session?.user
+    if (!user?.email) return { status: "anonymous" }
 
-  if (!isAllowed(user.email)) {
-    return { status: "refused", email: user.email }
+    if (!isAllowed(user.email)) {
+      return { status: "refused", email: user.email }
+    }
+
+    // Idempotent by construction, so this is safe to run on every request and
+    // self-heals if a previous attempt failed after the account existed upstream.
+    const platformUser = await getDb().users.ensureForAuthUser(user.id)
+
+    return {
+      status: "ok",
+      userId: platformUser.id,
+      email: user.email,
+      name: user.name || user.email,
+      image: user.image ?? undefined,
+    }
   }
-
-  // Idempotent by construction, so this is safe to run on every request and
-  // self-heals if a previous attempt failed after the account existed upstream.
-  const platformUser = await getDb().users.ensureForAuthUser(user.id)
-
-  return {
-    status: "ok",
-    userId: platformUser.id,
-    email: user.email,
-    name: user.name || user.email,
-    image: user.image ?? undefined,
-  }
-}
+)

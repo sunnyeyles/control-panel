@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 
+import { type NavItem } from "@/lib/nav"
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -15,11 +16,7 @@ export function NavSecondary({
   items,
   ...props
 }: {
-  items: {
-    title: string
-    url: string
-    icon: React.ReactNode
-  }[]
+  items: readonly NavItem[]
 } & React.ComponentPropsWithoutRef<typeof SidebarGroup>) {
   return (
     <SidebarGroup {...props}>
@@ -29,7 +26,7 @@ export function NavSecondary({
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton asChild>
                 <Link href={item.url}>
-                  {item.icon}
+                  <item.icon />
                   <span>{item.title}</span>
                 </Link>
               </SidebarMenuButton>

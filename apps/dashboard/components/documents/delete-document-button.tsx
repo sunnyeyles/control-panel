@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react"
 
-import { deleteDocumentAction } from "@/app/documents/actions"
+import { deleteDocumentAction } from "@/app/(app)/documents/actions"
 import { IDLE } from "@/lib/documents/action-state"
 import { Button } from "@workspace/ui/components/button"
 import {

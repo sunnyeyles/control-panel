@@ -6,6 +6,7 @@ import Link from "next/link"
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
+import { navMain, navSecondary } from "@/lib/nav"
 import {
   Sidebar,
   SidebarContent,
@@ -15,47 +16,17 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@workspace/ui/components/sidebar"
-import {
-  BotIcon,
-  CircleHelpIcon,
-  FileTextIcon,
-  MessageSquareIcon,
-  Settings2Icon,
-} from "lucide-react"
-
-const data = {
-  navMain: [
-    {
-      title: "Assistant",
-      url: "/",
-      icon: <MessageSquareIcon />,
-    },
-    {
-      title: "Documents",
-      url: "/documents",
-      icon: <FileTextIcon />,
-    },
-  ],
-  navSecondary: [
-    {
-      title: "Settings",
-      url: "/settings",
-      icon: <Settings2Icon />,
-    },
-    {
-      title: "Get Help",
-      url: "#",
-      icon: <CircleHelpIcon />,
-    },
-  ],
-}
+import { BotIcon } from "lucide-react"
 
 /**
- * The signed-in person, passed down from the page rather than read here.
+ * The signed-in person, passed down from `app/(app)/layout.tsx` rather than
+ * read here.
  *
- * This is a client component and the session lives on the server, so the page —
- * which is already `force-dynamic` for exactly this reason — resolves it once
- * and hands it over.
+ * This is a client component and the session lives on the server, so the layout
+ * — which is `force-dynamic` for exactly this reason — resolves it once and
+ * hands it over. Once, and not once per page: a layout does not re-render on
+ * navigation, so this no longer costs a session lookup every time the user
+ * switches tabs.
  */
 export interface SidebarUser {
   name: string
@@ -85,8 +56,8 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
+        <NavMain items={navMain} />
+        <NavSecondary items={navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={user} />

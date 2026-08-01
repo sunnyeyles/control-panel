@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react"
 
-import { uploadDocumentAction } from "@/app/documents/actions"
+import { uploadDocumentAction } from "@/app/(app)/documents/actions"
 import { IDLE } from "@/lib/documents/action-state"
 import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import { MAX_DOCUMENT_BYTES } from "@/lib/documents/upload-validation"

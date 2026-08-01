@@ -1,5 +1,8 @@
-import { AIMessage, ToolMessage } from "@langchain/core/messages"
-import type { Agent } from "@workspace/agents"
+import {
+  AIMessage,
+  ToolMessage,
+  type BaseMessage,
+} from "@langchain/core/messages"
 import type {
   Artifact,
   ArtifactStore,
@@ -9,7 +12,9 @@ import type {
 import type { BriefStore, NewBrief, StoredBrief } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { AgentLike } from "./run-agent.ts"
 import { runBriefing } from "./run-briefing.ts"
+import type { TraceEvent } from "./trace.ts"
 
 /**
  * The run is driven with fake agents rather than a fake model, which is what
@@ -65,14 +70,27 @@ function searchResult(): ToolMessage {
 }
 
 /**
- * A fake agent. `runBriefing` only invokes it and reads `messages`/`llmCalls`,
- * so a cast is honest here — building a real compiled graph would test
- * LangGraph rather than this file.
+ * A fake agent, satisfying `AgentLike` outright rather than by a cast — which
+ * is what widening that seam to a structural type bought. Building a real
+ * compiled graph would test LangGraph rather than this file.
+ *
+ * It yields one `updates` chunk per message, keyed by the node that would have
+ * produced it, then the `values` chunk carrying the final state. That is the
+ * shape LangGraph streams, so the correlation of a tool result back to the
+ * arguments that asked for it is genuinely exercised here.
  */
-function fakeAgent(messages: unknown[], llmCalls = 2): Agent {
+function fakeAgent(messages: BaseMessage[], llmCalls = 2): AgentLike {
   return {
-    invoke: async () => ({ messages, llmCalls }),
-  } as unknown as Agent
+    stream: async () =>
+      (async function* stream() {
+        for (const message of messages) {
+          const node = AIMessage.isInstance(message) ? "model" : "tools"
+          yield ["updates", { [node]: { messages: [message] } }]
+        }
+
+        yield ["values", { messages, llmCalls }]
+      })(),
+  }
 }
 
 function scoutReturning(text: string, tools: ToolMessage[] = [searchResult()]) {
@@ -269,5 +287,129 @@ describe("runBriefing", () => {
     // A failure report still carries how far the run got.
     expect(failure.searches).toBe(1)
     expect(failure.runId).toBe(SLOT.runId)
+  })
+
+  /**
+   * The trace is the transcript, and these assert on its *shape* — that the
+   * steps happen in the stated order, that a tool result is reunited with the
+   * arguments that asked for it, and that a sink can neither fail a run nor be
+   * skipped by one. Never on what a model said.
+   */
+  describe("trace", () => {
+    function tracedRun(
+      overrides: Partial<Parameters<typeof runBriefing>[0]> = {}
+    ) {
+      const events: TraceEvent[] = []
+      const result = run({ trace: (event) => events.push(event), ...overrides })
+      return { events, result }
+    }
+
+    it("reports each step, in the order the pipeline runs them", async () => {
+      const { events, result } = tracedRun()
+      await result
+
+      const completed = events
+        .filter((event) => event.type === "step" && event.phase === "end")
+        .map((event) => (event.type === "step" ? event.step : ""))
+
+      expect(completed).toEqual([
+        "config",
+        "scout",
+        "handoff",
+        "writer",
+        "upload",
+        "record",
+      ])
+    })
+
+    it("opens with the run and closes with its outcome", async () => {
+      const { events, result } = tracedRun()
+      await result
+
+      expect(events.at(0)).toMatchObject({
+        type: "run",
+        phase: "start",
+        jobId: JOB.id,
+        jobName: JOB.name,
+        runId: SLOT.runId,
+      })
+      expect(events.at(-1)).toMatchObject({
+        type: "run",
+        phase: "end",
+        outcome: "success",
+      })
+    })
+
+    it("pairs a tool result with the arguments that asked for it", async () => {
+      const asking = new AIMessage({
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            name: "web_search",
+            args: { query: "senior backend engineer Sydney" },
+          },
+        ],
+      })
+
+      const { events, result } = tracedRun({
+        createScout: () =>
+          fakeAgent([
+            asking,
+            searchResult(),
+            new AIMessage(JSON.stringify(FINDINGS)),
+          ]),
+      })
+      await result
+
+      // The call and the result arrive one superstep apart, so a trace that did
+      // not correlate them would show "web_search returned five results" with
+      // no way to know what was searched for.
+      expect(events.filter((event) => event.type === "tool")).toEqual([
+        expect.objectContaining({
+          type: "tool",
+          agent: "scout",
+          name: "web_search",
+          args: { query: "senior backend engineer Sydney" },
+          ok: true,
+        }),
+      ])
+    })
+
+    it("carries the error on a failed run's closing event", async () => {
+      const { events, result } = tracedRun({
+        createWriter: writerReturning("   "),
+      })
+      await expect(result).rejects.toThrow(/empty brief/)
+
+      expect(events.at(-1)).toMatchObject({
+        type: "run",
+        phase: "end",
+        outcome: "failure",
+        error: expect.stringMatching(/empty brief/) as unknown as string,
+      })
+
+      // The steps that did run still reported, so a failure trace shows how far
+      // it got rather than only where it stopped.
+      const completed = events
+        .filter((event) => event.type === "step" && event.phase === "end")
+        .map((event) => (event.type === "step" ? event.step : ""))
+      expect(completed).toEqual(["config", "scout", "handoff", "writer"])
+    })
+
+    it("survives a sink that throws", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {})
+
+      // A debugging aid must not fail a run that costs money and cannot be
+      // retried. The complaint is made once, not once per event.
+      const report = await run({
+        trace: () => {
+          throw new Error("the renderer broke")
+        },
+      })
+
+      expect(report.outcome).toBe("success")
+      expect(error).toHaveBeenCalledTimes(1)
+    })
   })
 })

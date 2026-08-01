@@ -2,6 +2,7 @@ import type { Db } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
 import { runBriefing } from "./run-briefing.ts"
+import type { TraceSink } from "./trace.ts"
 
 /**
  * The worker is no longer "the thing that runs at 09:00". It is "the thing that
@@ -55,11 +56,22 @@ export interface TickReport {
  * bad run is visible without anyone reading logs. Every due job is attempted
  * first — one failing job must not stop the others from running.
  */
+export interface RunTickOptions {
+  /** Defaults to now. Supplied by a test that needs a fixed clock. */
+  now?: Date
+  /**
+   * Passed to every briefing this tick runs. Omitted in production, where the
+   * reports are the record.
+   */
+  trace?: TraceSink
+}
+
 export async function runTick(
   db: Db,
   briefs: BriefStore,
-  now: Date = new Date()
+  options: RunTickOptions = {}
 ): Promise<TickReport> {
+  const { now = new Date(), trace } = options
   const startedAtMs = Date.now()
   const report: TickReport = {
     event: "tick",
@@ -95,7 +107,13 @@ export async function runTick(
       // partition day is derived from — not the instant the run finishes, or a
       // 23:30 slot completing after midnight files under a day its run row
       // disagrees with.
-      await runBriefing({ job, slot, briefs, artifacts: db.artifacts })
+      await runBriefing({
+        job,
+        slot,
+        briefs,
+        artifacts: db.artifacts,
+        ...(trace ? { trace } : {}),
+      })
 
       await db.runs.finish(slot.runId)
       report.succeeded += 1

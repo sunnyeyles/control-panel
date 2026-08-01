@@ -24,7 +24,7 @@ export type { DocumentActionState } from "./action-state"
  * **Nothing in this file imports Next.** That is what lets the security
  * branches be tested at all: every one of them turns on who is asking, and a
  * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/documents/actions.ts`, which is `"use server"`, supplies the real
+ * `app/(app)/documents/actions.ts`, which is `"use server"`, supplies the real
  * dependencies, and calls `refresh()` — cache invalidation needs a request
  * store, so it stays there rather than here.
  *
