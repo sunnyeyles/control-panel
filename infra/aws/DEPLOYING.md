@@ -285,8 +285,23 @@ Production scope, four variables:
 | -------------------------- | ------------------------------------------------ |
 | `USER_STORAGE_BUCKET_NAME` | `terraform output -raw user_storage_bucket_name` |
 | `USER_STORAGE_ENVIRONMENT` | `prod`                                           |
-| `AWS_REGION`               | `ap-southeast-2` — **Vercel does not set this**  |
+| `AWS_REGION`               | `ap-southeast-2` — **an override, not a gap**    |
 | `AWS_ROLE_ARN`             | the output from step 3                           |
+
+**`AWS_REGION` is the row to be careful with, and not because it is missing.**
+Vercel sets it for you, to the region the function happened to execute in. Its
+own OIDC documentation says so and warns that under multi-region routing or
+failover the value changes between invocations, which "may route your AWS calls
+to a region where your resources don't exist". So this row overrides a value
+that is already there rather than supplying one that is not.
+
+That distinction is the whole reason to state it, because it inverts the failure
+mode `readUserStorageConfig` was built around. That function throws on an unset
+variable, loudly and by name — but on Vercel this variable is never unset. Skip
+the row and nothing throws: the S3 client is pointed at whichever region the
+invocation ran in, and the bucket exists in exactly one. What you get is a
+region error against a bucket that looks absent, not a missing-configuration
+error naming the setting you forgot.
 
 Then **enable OIDC Federation** in the Vercel project's Settings → Security.
 Without it no `VERCEL_OIDC_TOKEN` is injected, `lib/storage.ts` silently takes
@@ -325,4 +340,6 @@ transient. The diagnosis is in the Vercel function logs, where
 
 Check, in order: OIDC Federation is enabled; `AWS_ROLE_ARN` matches the output;
 the role's trust policy `sub` matches the token's `sub` exactly (it is
-`StringEquals`, so near enough is not enough); and `AWS_REGION` is set.
+`StringEquals`, so near enough is not enough); and `AWS_REGION` names the
+bucket's region rather than whatever Vercel filled in — "set" is not the test,
+since it is always set.
