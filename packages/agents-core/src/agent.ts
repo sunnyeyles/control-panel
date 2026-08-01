@@ -29,7 +29,7 @@ export const DEFAULT_SYSTEM_PROMPT = [
  * Ceiling on model calls per run. Each tool round trip costs one, so this
  * bounds a loop where the model keeps calling tools without converging.
  */
-export const DEFAULT_MAX_LLM_CALLS = 10
+export const DEFAULT_MAX_LLM_CALLS = 5
 
 /**
  * The minimal chat-model surface the graph needs: bind tools, then invoke.

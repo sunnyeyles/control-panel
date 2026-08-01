@@ -17,7 +17,7 @@ import { jobScoutSchemaDescription } from "./findings.ts"
  * would divert it to `halt` mid-search and produce a partial answer that still
  * looks well-formed.
  */
-export const JOB_SCOUT_MAX_LLM_CALLS = 16
+export const JOB_SCOUT_MAX_LLM_CALLS = 10
 
 export const JOB_SCOUT_SYSTEM_PROMPT = [
   "You find real, currently-open job postings that match a candidate's criteria.",

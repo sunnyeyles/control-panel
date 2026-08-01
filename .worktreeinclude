@@ -1,1 +1,2 @@
 .env.local
+apps/dashboard/.env.local
