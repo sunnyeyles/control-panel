@@ -1,9 +1,10 @@
 "use client"
 
 import { startTransition, useActionState, useOptimistic } from "react"
+import { ActionError } from "@/components/forms/action-error"
 
 import { setJobEnabledAction } from "@/app/(app)/settings/actions"
-import { IDLE } from "@/lib/jobs/action-state"
+import { IDLE } from "@/lib/actions/action-state"
 import { Switch } from "@workspace/ui/components/switch"
 
 /**
@@ -66,15 +67,7 @@ export function JobEnabledSwitch({
         disabled={pending}
         aria-label={`Turn ${name} ${optimistic ? "off" : "on"}`}
       />
-      {state.status === "error" ? (
-        <p
-          className="text-sm text-destructive"
-          role="status"
-          aria-live="polite"
-        >
-          {state.message}
-        </p>
-      ) : null}
+      <ActionError state={state} />
     </div>
   )
 }

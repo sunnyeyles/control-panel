@@ -50,7 +50,27 @@ const KEY_PATTERN =
 const SEGMENT_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9._-]{0,126}[A-Za-z0-9]$|^[A-Za-z0-9]$/
 
-const EXTENSION_PATTERN = /^\.[a-z0-9]{1,16}$/
+/**
+ * The extension half of a stored object's address, including its dot.
+ *
+ * Exported as the pattern *source* rather than a compiled `RegExp` because the
+ * dashboard composes it into a larger expression — the download route parses a
+ * `<uuid><ext>` path segment in one match — and a compiled anchored regex
+ * cannot be embedded in another one without unpicking its anchors.
+ *
+ * It is exported at all because this is the single source of truth for the
+ * shape, and it used to be two: the dashboard carried its own copy bounded at
+ * 10 characters against this one's 16. The looser bound here is what actually
+ * gates key construction, so the stricter copy only meant a request could be
+ * refused at the edge for a shape the store would have accepted — latent rather
+ * than broken, and exactly the kind of drift two copies produce.
+ *
+ * Note what this does *not* decide: which extensions are allowed. That is the
+ * per-kind allowlist in `kinds.ts`, and it is far narrower than this shape.
+ */
+export const EXTENSION_SOURCE = "\\.[a-z0-9]{1,16}"
+
+const EXTENSION_PATTERN = new RegExp(`^${EXTENSION_SOURCE}$`)
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 

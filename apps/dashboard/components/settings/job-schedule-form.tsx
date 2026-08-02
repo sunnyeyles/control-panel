@@ -1,14 +1,13 @@
 "use client"
 
 import { useActionState } from "react"
+import { ActionAlert } from "@/components/forms/action-alert"
+import { SubmitButton } from "@/components/forms/submit-button"
 
 import { updateJobScheduleAction } from "@/app/(app)/settings/actions"
 import { IntervalField } from "@/components/settings/interval-field"
-import { IDLE } from "@/lib/jobs/action-state"
+import { IDLE } from "@/lib/actions/action-state"
 import type { BriefingSummary } from "@/lib/jobs/briefing-summary"
-import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Button } from "@workspace/ui/components/button"
-import { Spinner } from "@workspace/ui/components/spinner"
 
 /**
  * Change how often one briefing runs.
@@ -32,7 +31,7 @@ export function JobScheduleForm({ briefing }: { briefing: BriefingSummary }) {
       <input type="hidden" name="jobId" value={briefing.id} />
 
       {/*
-        Not keyed on the nonce, unlike the create form. This field is the
+        Not keyed on the reset key, unlike the create form. This field is the
         current schedule rather than a blank slate, so a success should leave it
         showing what was just saved — and the server re-render supplies the new
         value anyway.
@@ -46,21 +45,14 @@ export function JobScheduleForm({ briefing }: { briefing: BriefingSummary }) {
       />
 
       <div>
-        <Button type="submit" disabled={pending}>
-          {pending ? <Spinner /> : null}
-          {pending ? "Saving…" : "Save schedule"}
-        </Button>
+        <SubmitButton
+          pending={pending}
+          label="Save schedule"
+          pendingLabel="Saving…"
+        />
       </div>
 
-      {state.status !== "idle" ? (
-        <Alert
-          variant={state.status === "success" ? "default" : "destructive"}
-          role="status"
-          aria-live="polite"
-        >
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-      ) : null}
+      <ActionAlert state={state} />
     </form>
   )
 }

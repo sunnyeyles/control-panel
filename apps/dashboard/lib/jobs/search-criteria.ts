@@ -48,9 +48,3 @@ export const searchCriteriaSchema = z.object({
   titles: criteriaList,
   locations: criteriaList,
 })
-
-/**
- * Exactly the shape `parseJobSearchConfig()` will later accept, so the round
- * trip is checked by the worker's own schema rather than asserted here.
- */
-export type SearchCriteria = z.infer<typeof searchCriteriaSchema>

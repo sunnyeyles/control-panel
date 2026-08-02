@@ -11,11 +11,7 @@ export { getOpenAIApiKey } from "./env.ts"
 
 export { createModel, DEFAULT_MODEL, type ModelOptions } from "./model.ts"
 
-export {
-  AgentState,
-  type AgentStateUpdate,
-  type AgentStateValue,
-} from "./state.ts"
+export { AgentState } from "./state.ts"
 
 export {
   createToolRegistry,

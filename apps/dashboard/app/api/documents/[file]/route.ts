@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser } from "@/lib/auth/current-user"
 import { contentDisposition } from "@/lib/documents/content-disposition"
 import {
@@ -34,16 +35,13 @@ export async function GET(
   // Before the params are even read. An unauthenticated caller learns nothing
   // about what a well-formed request looks like, and both "not signed in" and
   // "not on the allowlist" answer identically — telling them apart would
-  // confirm to an unapproved caller that their account exists.
-  let user
-  try {
-    user = await getCurrentUser()
-  } catch (error) {
-    console.error("documents: failed to resolve the caller", error)
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  // confirm to an unapproved caller that their account exists. `requireUser`
+  // makes that conflation, and the refusal of a thrown `getCurrentUser`, one
+  // decision rather than four copies of it; the 401 stays here because a route
+  // answers with a `Response` and an action does not.
+  const caller = await requireUser(getCurrentUser, "documents")
 
-  if (user.status !== "ok") {
+  if (!caller.ok) {
     return Response.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -61,7 +59,7 @@ export async function GET(
       // therefore **structural**: a caller cannot construct a request that
       // names another user's object at all, so `assertOwnedBy` inside the store
       // is a second line of defence rather than the only one.
-      userId: user.userId,
+      userId: caller.userId,
       resumeId,
       extension,
     })

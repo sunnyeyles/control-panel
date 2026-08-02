@@ -1,4 +1,5 @@
 import { toBaseMessages, toUIMessageStream } from "@ai-sdk/langchain"
+import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/current-user"
 import type { Agent } from "@workspace/agents"
 import { createAssistant } from "@workspace/agents/assistant"
@@ -72,15 +73,9 @@ export function createChatHandler(
     // them here would tell an unapproved caller that their account exists and
     // is merely not on the list, which is more than they need to know; the
     // pages, which have already established who they are, do tell them apart.
-    let user: CurrentUser
-    try {
-      user = await getUser()
-    } catch (error) {
-      console.error("chat: failed to resolve the caller", error)
-      return Response.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const caller = await requireUser(getUser, "chat")
 
-    if (user.status !== "ok") {
+    if (!caller.ok) {
       return Response.json({ error: "Unauthorized" }, { status: 401 })
     }
 

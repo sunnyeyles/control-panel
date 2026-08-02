@@ -47,9 +47,6 @@ export const OBJECT_KINDS = {
 
 export type ObjectKind = keyof typeof OBJECT_KINDS
 
-/** Every kind, for iteration and validation. */
-export const OBJECT_KIND_NAMES = Object.keys(OBJECT_KINDS) as ObjectKind[]
-
 export function isObjectKind(value: unknown): value is ObjectKind {
   return typeof value === "string" && value in OBJECT_KINDS
 }

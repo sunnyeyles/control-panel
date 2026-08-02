@@ -1,15 +1,14 @@
 "use client"
 
 import { useActionState } from "react"
+import { ActionAlert } from "@/components/forms/action-alert"
+import { SubmitButton } from "@/components/forms/submit-button"
 
 import { createJobAction } from "@/app/(app)/settings/actions"
 import { IntervalField } from "@/components/settings/interval-field"
-import { IDLE } from "@/lib/jobs/action-state"
-import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Button } from "@workspace/ui/components/button"
+import { IDLE } from "@/lib/actions/action-state"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
-import { Spinner } from "@workspace/ui/components/spinner"
 
 export function CreateBriefingForm() {
   const [state, formAction, pending] = useActionState(createJobAction, IDLE)
@@ -21,26 +20,18 @@ export function CreateBriefingForm() {
     >
       {/*
         Keyed on the new job's id, so exactly one success clears the fields —
-        and no effect is involved. An error state carries the previous nonce
+        and no effect is involved. An error state carries the previous key
         forward precisely so this key holds still through a failure; keying on
         `status === "success"` instead would remount the fields and discard
         everything typed, at the moment the user is being told to fix one of
         them.
       */}
       <CreateFields
-        key={state.status === "idle" ? "new" : (state.nonce ?? "new")}
+        key={state.status === "idle" ? "new" : (state.resetKey ?? "new")}
         pending={pending}
       />
 
-      {state.status !== "idle" ? (
-        <Alert
-          variant={state.status === "success" ? "default" : "destructive"}
-          role="status"
-          aria-live="polite"
-        >
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-      ) : null}
+      <ActionAlert state={state} />
     </form>
   )
 }
@@ -98,10 +89,11 @@ function CreateFields({ pending }: { pending: boolean }) {
       <IntervalField idPrefix="briefing-new" pending={pending} />
 
       <div>
-        <Button type="submit" disabled={pending}>
-          {pending ? <Spinner /> : null}
-          {pending ? "Creating…" : "Create briefing"}
-        </Button>
+        <SubmitButton
+          pending={pending}
+          label="Create briefing"
+          pendingLabel="Creating…"
+        />
       </div>
     </>
   )

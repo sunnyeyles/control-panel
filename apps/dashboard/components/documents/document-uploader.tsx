@@ -1,13 +1,13 @@
 "use client"
 
 import { useActionState, useState } from "react"
+import { ActionAlert } from "@/components/forms/action-alert"
+import { SubmitButton } from "@/components/forms/submit-button"
 
 import { uploadDocumentAction } from "@/app/(app)/documents/actions"
-import { IDLE } from "@/lib/documents/action-state"
+import { IDLE } from "@/lib/actions/action-state"
 import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import { MAX_DOCUMENT_BYTES } from "@/lib/documents/upload-validation"
-import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import {
@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
-import { Spinner } from "@workspace/ui/components/spinner"
 
 const MAX_MB = (MAX_DOCUMENT_BYTES / (1024 * 1024)).toFixed(0)
 
@@ -73,27 +72,19 @@ export function DocumentUploader({
         cascades a render and is what `react-hooks/set-state-in-effect` warns
         about. One reset per success, never one per re-render.
 
-        ⚠️ **Read the nonce on every non-idle state, not only on a success.** An
-        error state carries the previous success's nonce forward precisely so
+        ⚠️ **Read the reset key on every non-idle state, not only on a success.**
+        An error state carries the previous success's key forward precisely so
         this key holds still; keying on `status === "success"` instead sends it
         back to "new" the moment an upload fails, remounting the fields and
         discarding the file the user picked while telling them to try again.
       */}
       <UploadFields
-        key={state.status === "idle" ? "new" : (state.nonce ?? "new")}
+        key={state.status === "idle" ? "new" : (state.resetKey ?? "new")}
         acceptedExtensions={acceptedExtensions}
         pending={pending}
       />
 
-      {state.status !== "idle" ? (
-        <Alert
-          variant={state.status === "success" ? "default" : "destructive"}
-          role="status"
-          aria-live="polite"
-        >
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-      ) : null}
+      <ActionAlert state={state} />
     </form>
   )
 }
@@ -192,15 +183,12 @@ function UploadFields({
       </div>
 
       <div>
-        <Button type="submit" disabled={pending || Boolean(tooLarge)}>
-          {/*
-            A spinner, not a progress bar. A Server Action surfaces no upload
-            progress events, so a bar would either be fake or sit at zero —
-            both of which read as the app having hung.
-          */}
-          {pending ? <Spinner /> : null}
-          {pending ? "Uploading…" : "Upload"}
-        </Button>
+        <SubmitButton
+          pending={pending}
+          disabled={Boolean(tooLarge)}
+          label="Upload"
+          pendingLabel="Uploading…"
+        />
       </div>
     </>
   )

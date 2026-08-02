@@ -114,20 +114,6 @@ export async function runMigrations(
   }
 }
 
-/** Which migrations a database has already had, for a status command or a test. */
-export async function appliedMigrations(
-  config: DatabaseConfig = readMigrationConfig()
-): Promise<string[]> {
-  const connection = createConnection(config)
-
-  try {
-    await ensureLedger(connection)
-    return [...(await appliedFilenames(connection))].sort()
-  } finally {
-    await connection.close()
-  }
-}
-
 /**
  * The ledger, created outside any migration file.
  *

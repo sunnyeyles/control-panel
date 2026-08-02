@@ -1,10 +1,8 @@
 "use server"
 
 import { getCurrentUser } from "@/lib/auth/current-user"
-import {
-  createDocumentActions,
-  type DocumentActionState,
-} from "@/lib/documents/document-actions"
+import type { ActionState } from "@/lib/actions/action-state"
+import { createDocumentActions } from "@/lib/documents/document-actions"
 import { getResumeStore } from "@/lib/storage"
 import { refresh } from "next/cache"
 import { headers } from "next/headers"
@@ -36,40 +34,6 @@ import { headers } from "next/headers"
  * `upload-validation.ts`.
  */
 
-const actions = createDocumentActions({
-  getUser: getCurrentUser,
-  getResumes: getResumeStore,
-  getContentLength: async () => {
-    const value = (await headers()).get("content-length")
-    if (!value) return undefined
-
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : undefined
-  },
-})
-
-export async function uploadDocumentAction(
-  state: DocumentActionState,
-  formData: FormData
-): Promise<DocumentActionState> {
-  const result = await actions.uploadDocument(state, formData)
-
-  if (result.status === "success") refreshDocuments()
-
-  return result
-}
-
-export async function deleteDocumentAction(
-  state: DocumentActionState,
-  formData: FormData
-): Promise<DocumentActionState> {
-  const result = await actions.deleteDocument(state, formData)
-
-  if (result.status === "success") refreshDocuments()
-
-  return result
-}
-
 /**
  * `refresh()`, not `revalidatePath` or `revalidateTag`.
  *
@@ -84,6 +48,36 @@ export async function deleteDocumentAction(
  * for no benefit. `revalidateTag` and `updateTag` need a `use cache` boundary,
  * which requires `cacheComponents: true`, which this app does not set.
  */
-function refreshDocuments(): void {
-  refresh()
+const actions = createDocumentActions({
+  getUser: getCurrentUser,
+  getResumes: getResumeStore,
+  getContentLength: async () => {
+    const value = (await headers()).get("content-length")
+    if (!value) return undefined
+
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  },
+})
+
+export async function uploadDocumentAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await actions.uploadDocument(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+export async function deleteDocumentAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await actions.deleteDocument(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
 }

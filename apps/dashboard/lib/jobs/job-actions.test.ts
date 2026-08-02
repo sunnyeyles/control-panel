@@ -3,13 +3,14 @@ import type { ClaimedSlot, JobStore, NewJob } from "@workspace/db/jobs"
 import type { DueJob, Job } from "@workspace/db/rows"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { IDLE, type JobActionState } from "./action-state"
+import { IDLE, type ActionState } from "@/lib/actions/action-state"
+import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
 import { createJobActions } from "./job-actions"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
 const JOB_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-const NONCE = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
+const RESET_KEY = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
 
 const NOW = new Date("2026-08-01T00:00:00.000Z")
 const NEXT_RUN = new Date("2026-08-02T09:00:00.000Z")
@@ -154,7 +155,7 @@ function actionsFor(user: CurrentUser) {
     getUser: async () => user,
     getJobs: () => store,
     now: () => NOW,
-    newNonce: () => NONCE,
+    newResetKey: () => RESET_KEY,
   })
 }
 
@@ -206,6 +207,11 @@ describe("the gate", () => {
     )
 
     expect(refused).toEqual(anonymous)
+    // Both say the *same* thing, and specifically the shared constant — the
+    // document actions have asserted this since they were written, and the
+    // briefing actions now share the constant with them, so the property is
+    // worth pinning on both sides rather than trusting the import.
+    expect(refused).toMatchObject({ message: NOT_AUTHORIZED })
     expect(store.mutations).toBe(0)
   })
 
@@ -476,22 +482,22 @@ describe("createJob", () => {
     )
   })
 
-  it("uses the new row's id as the nonce, so the form resets once per success", async () => {
+  it("uses the new row's id as the reset key, so the form resets once per success", async () => {
     const result = await actionsFor(SIGNED_IN).createJob(IDLE, createForm())
 
-    expect(result.status === "success" && result.nonce).toBe(JOB_ID)
+    expect(result.status === "success" && result.resetKey).toBe(JOB_ID)
   })
 })
 
-describe("the reset nonce", () => {
-  it("carries the previous nonce forward on failure", async () => {
-    // The create form keys its fields on the nonce. Dropping it here would
+describe("the reset key", () => {
+  it("carries the previous reset key forward on failure", async () => {
+    // The create form keys its fields on the reset key. Dropping it here would
     // remount the fields and discard what the user typed, at the exact moment
     // they are being told to fix it.
-    const previous: JobActionState = {
+    const previous: ActionState = {
       status: "success",
       message: "Created.",
-      nonce: NONCE,
+      resetKey: RESET_KEY,
     }
 
     const result = await actionsFor(SIGNED_IN).createJob(
@@ -502,16 +508,16 @@ describe("the reset nonce", () => {
     expect(result).toEqual({
       status: "error",
       message: expect.any(String),
-      nonce: NONCE,
+      resetKey: RESET_KEY,
     })
   })
 
-  it("omits the nonce when no action has succeeded yet", async () => {
+  it("omits the reset key when no action has succeeded yet", async () => {
     const result = await actionsFor(SIGNED_IN).createJob(
       IDLE,
       createForm({ titles: "" })
     )
 
-    expect(result).not.toHaveProperty("nonce")
+    expect(result).not.toHaveProperty("resetKey")
   })
 })

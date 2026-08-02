@@ -1,3 +1,5 @@
+import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   acceptedResumeExtensions,
@@ -8,15 +10,12 @@ import {
 } from "@workspace/user-storage"
 import { z } from "zod"
 
-import type { DocumentActionState } from "./action-state"
 import { EXTENSION_PATTERN, RESUME_ID_PATTERN } from "./document-ref"
 import {
   checkUpload,
   describeRejection,
   MAX_REQUEST_BYTES,
 } from "./upload-validation"
-
-export type { DocumentActionState } from "./action-state"
 
 /**
  * The document actions, as plain functions over injected dependencies.
@@ -32,20 +31,6 @@ export type { DocumentActionState } from "./action-state"
  * an injectable `getUser` seam, the auth check before any body handling, and
  * client-facing messages that say less than the server log does.
  */
-
-/**
- * One message for both "not signed in" and "signed in but not allowed".
- *
- * Identical on purpose, and the same choice `lib/chat-handler.ts` makes when it
- * answers 401 rather than 403 for both. Telling the second caller apart from
- * the first confirms to someone outside the allowlist that their account exists
- * and merely is not approved — which is more than they need to know. The
- * *pages* do distinguish them, because by then the user has been identified.
- *
- * Easy to regress by "improving" the copy, and invisible in review, which is
- * why it is one constant with a test asserting both paths produce it.
- */
-const NOT_AUTHORIZED = "You are not signed in."
 
 export interface DocumentActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
@@ -104,44 +89,16 @@ const extensionSchema = z.string().regex(EXTENSION_PATTERN)
 export function createDocumentActions(deps: DocumentActionsDeps) {
   const newResumeId = deps.newResumeId ?? (() => crypto.randomUUID())
 
-  /**
-   * Resolve the caller, or the message to show instead.
-   *
-   * A thrown error here is treated as "not authorized" rather than propagated:
-   * `getCurrentUser` touches the database to map an auth id onto a platform
-   * user, and a database blip must not turn into an unauthenticated write.
-   *
-   * Returns a *message* rather than a finished state so the caller can stamp
-   * the carried nonce onto it — see {@link carryNonce}. A refusal is a failure
-   * like any other and must not reset the form either.
-   */
-  async function requireUser(): Promise<
-    { ok: true; userId: string } | { ok: false; message: string }
-  > {
-    let user: CurrentUser
-
-    try {
-      user = await deps.getUser()
-    } catch (error) {
-      console.error("documents: failed to resolve the caller", error)
-      return { ok: false, message: NOT_AUTHORIZED }
-    }
-
-    if (user.status !== "ok") {
-      return { ok: false, message: NOT_AUTHORIZED }
-    }
-
-    return { ok: true, userId: user.userId }
-  }
+  const requireCaller = () => requireUser(deps.getUser, "documents")
 
   async function uploadDocument(
-    state: DocumentActionState,
+    state: ActionState,
     formData: FormData
-  ): Promise<DocumentActionState> {
+  ): Promise<ActionState> {
     // Every failure below goes through this rather than building its own error
-    // state, so the carried nonce cannot be forgotten on one branch out of
+    // state, so the carried reset key cannot be forgotten on one branch out of
     // eight — which is exactly how the form came to reset itself mid-retry.
-    const fail = (message: string) => carryNonce(state, message)
+    const fail = (message: string) => carryResetKey(state, message)
 
     // Before the body is touched at all.
     //
@@ -151,7 +108,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     // session cookie substring is present. This is the only real check on the
     // path, and Next's own documentation says the same thing: a Server Function
     // is reachable by direct POST, not only through the UI.
-    const caller = await requireUser()
+    const caller = await requireCaller()
     if (!caller.ok) return fail(caller.message)
 
     // Before `arrayBuffer()`, so the bytes are not copied a second time. Note
@@ -222,24 +179,24 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
       return fail(storageMessage("upload", error))
     }
 
-    // The nonce is the new object's id: unique per success by construction, so
+    // The reset key is the new object's id: unique per success by construction, so
     // the uploader can key its fields on it and reset without an effect.
     return {
       status: "success",
       message: `Uploaded ${file.name}.`,
-      nonce: resumeId,
+      resetKey: resumeId,
     }
   }
 
   async function deleteDocument(
-    _state: DocumentActionState,
+    _state: ActionState,
     formData: FormData
-  ): Promise<DocumentActionState> {
-    // No `carryNonce` here, unlike the upload. Nothing keys on a delete's
-    // nonce — the button lives inside the row it deletes, so a success unmounts
+  ): Promise<ActionState> {
+    // No `carryResetKey` here, unlike the upload. Nothing keys on a delete's
+    // reset key — the button lives inside the row it deletes, so a success unmounts
     // it rather than resetting it — and inventing a use for the value would be
     // symmetry for its own sake.
-    const caller = await requireUser()
+    const caller = await requireCaller()
     if (!caller.ok) return { status: "error", message: caller.message }
 
     const resumeId = resumeIdSchema.safeParse(formData.get("resumeId"))
@@ -269,34 +226,11 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     return {
       status: "success",
       message: "Document deleted.",
-      nonce: resumeId.data,
+      resetKey: resumeId.data,
     }
   }
 
   return { uploadDocument, deleteDocument }
-}
-
-/**
- * An error state that preserves whatever nonce the previous state held.
- *
- * The uploader keys its fields on the nonce, so the nonce is not really an
- * identifier — it is "how many times has an upload succeeded". A failure is not
- * a success, so it must not move that number. Building the error state without
- * the previous nonce reads as harmless and is not: the key flips back to its
- * initial value, React remounts the fields, and the file the user picked is
- * discarded underneath the message telling them to try again.
- *
- * Takes the whole previous state rather than a nonce so that a caller cannot
- * pass the wrong one, and so the `idle` case — nothing to carry — is handled
- * here once.
- */
-function carryNonce(
-  previous: DocumentActionState,
-  message: string
-): DocumentActionState {
-  const nonce = previous.status === "idle" ? undefined : previous.nonce
-
-  return { status: "error", message, ...(nonce ? { nonce } : {}) }
 }
 
 /**
