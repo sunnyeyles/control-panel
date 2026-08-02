@@ -37,7 +37,7 @@ export const JobSearchConfigSchema = z.object({
     .array(nonEmpty)
     .optional()
     .describe(
-      'Domains to prefer, e.g. ["seek.com.au"]. Omit for the open web.'
+      'Job boards the candidate follows, e.g. ["seek.com.au"]. A soft hint: the scout searches what its tools reach.'
     ),
   maxPostings: z
     .number()
@@ -105,7 +105,7 @@ export function toSearchBrief(
 
   if (config.sources?.length) {
     lines.push(
-      `Prefer these job boards, but do not search them exclusively: ${config.sources.join("; ")}`
+      `Job boards the candidate follows: ${config.sources.join("; ")}. Search the ones your tools reach; note any you cannot.`
     )
   }
 

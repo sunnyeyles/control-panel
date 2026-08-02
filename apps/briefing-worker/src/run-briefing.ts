@@ -4,7 +4,7 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
-import { webSearch } from "@workspace/agent-tools/web-search"
+import { seekSearch } from "@workspace/agent-tools/seek-search"
 import {
   createBriefWriter,
   createJobScout,
@@ -37,7 +37,7 @@ import { createTracer, type TraceSink } from "./trace.ts"
  * Taken from the tool rather than written out, so renaming the tool cannot
  * leave this looking for a name nothing emits.
  */
-const WEB_SEARCH_TOOL_NAME = webSearch.name
+const SEARCH_TOOL_NAME = seekSearch.name
 
 interface RunReportFields {
   event: "briefing-run"
@@ -168,7 +168,11 @@ export async function runBriefing(
     )
 
     llmCalls += scouted.llmCalls
-    searches = countToolResults(scouted.messages, WEB_SEARCH_TOOL_NAME)
+    const searchResults = successfulToolResults(
+      scouted.messages,
+      SEARCH_TOOL_NAME
+    )
+    searches = searchResults.length
 
     const findings = await trace.step(
       "handoff",
@@ -176,15 +180,30 @@ export async function runBriefing(
         const scoutAnswer = finalAnswer(scouted.messages, "scout")
 
         // No successful search means the findings, however well-formed, came
-        // from the model rather than the web. Better a failed run than a
+        // from the model rather than a live search. Better a failed run than a
         // confident brief citing postings nobody can visit.
         if (searches === 0) {
           throw new Error(
-            `The scout completed no successful ${WEB_SEARCH_TOOL_NAME} round trip, so nothing it reported came from the web.`
+            `The scout completed no successful ${SEARCH_TOOL_NAME} round trip, so nothing it reported came from a live search.`
           )
         }
 
         const parsed = parseFindings(scoutAnswer)
+
+        // The schema has already said every URL *parses*; this says every URL
+        // was *returned*. Plain substring containment against the raw search
+        // results, because that is the exact claim the prompt makes — copied
+        // verbatim, never assembled — and a fabricated URL that survives it
+        // would have to appear, byte for byte, in a result that arrived over
+        // the network.
+        for (const posting of parsed.postings) {
+          if (!searchResults.some((text) => text.includes(posting.url))) {
+            throw new Error(
+              `The scout reported a URL no search returned: ${posting.url}. Every posting URL must appear verbatim in a search result.`
+            )
+          }
+        }
+
         trace({ type: "handoff", findings: parsed })
         return parsed
       }
@@ -302,14 +321,23 @@ function toWriterPrompt(findings: ReturnType<typeof parseFindings>): string {
   ].join("\n")
 }
 
-/** Tool results that actually worked — an error result proves nothing ran. */
-function countToolResults(messages: BaseMessage[], toolName: string): number {
-  return messages.filter(
-    (message) =>
-      ToolMessage.isInstance(message) &&
-      message.name === toolName &&
-      message.status !== "error"
-  ).length
+/**
+ * The text of every tool result that actually worked — an error result proves
+ * nothing ran. The length is the run report's search count; the texts are what
+ * the hand-off checks posting URLs against.
+ */
+function successfulToolResults(
+  messages: BaseMessage[],
+  toolName: string
+): string[] {
+  return messages
+    .filter(
+      (message): message is ToolMessage =>
+        ToolMessage.isInstance(message) &&
+        message.name === toolName &&
+        message.status !== "error"
+    )
+    .map((message) => message.text)
 }
 
 /**

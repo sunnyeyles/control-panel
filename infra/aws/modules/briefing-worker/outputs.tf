@@ -35,9 +35,9 @@ output "openai_secret_arn" {
   value       = aws_secretsmanager_secret.openai.arn
 }
 
-output "tavily_secret_arn" {
-  description = "ARN of the (empty) Tavily key secret. Set its value out-of-band; Terraform never writes it."
-  value       = aws_secretsmanager_secret.tavily.arn
+output "apify_secret_arn" {
+  description = "ARN of the (empty) Apify token secret. Set its value out-of-band; Terraform never writes it."
+  value       = aws_secretsmanager_secret.apify.arn
 }
 
 output "database_secret_arn" {

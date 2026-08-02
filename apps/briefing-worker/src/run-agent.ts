@@ -62,7 +62,7 @@ export async function runAgent(
 ): Promise<AgentOutcome> {
   // A tool result names only the call id it answers, so the arguments the model
   // passed live on the AI message one superstep earlier. Correlated here rather
-  // than left to the reader: "web_search returned nothing" is not a useful line
+  // than left to the reader: "seek_search returned nothing" is not a useful line
   // without the query next to it.
   const argsByCallId = new Map<string, unknown>()
   let final: AgentOutcome | undefined

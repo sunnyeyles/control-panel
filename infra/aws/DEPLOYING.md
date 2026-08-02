@@ -51,7 +51,7 @@ aws secretsmanager put-secret-value \
 aws secretsmanager put-secret-value \
   --secret-id briefing-worker/database-url --secret-string "postgres://..."
 aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/tavily-api-key --secret-string "tvly-..."
+  --secret-id briefing-worker/apify-token --secret-string "apify_api_..."
 ```
 
 **All three, not just the one you changed.** `loadSecrets` fetches them
@@ -140,7 +140,7 @@ empty shell sets it too, so a secret with no value at all reads as freshly
 changed.
 
 ```bash
-for s in openai-api-key database-url tavily-api-key; do
+for s in openai-api-key database-url apify-token; do
   printf '%-16s ' "$s"
   aws secretsmanager describe-secret --secret-id "briefing-worker/$s" \
     --query 'length(keys(VersionIdsToStages || `{}`))' --output text

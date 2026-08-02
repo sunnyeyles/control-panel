@@ -9,7 +9,7 @@ EventBridge Scheduler ──assumes role──► Lambda (nodejs22.x, arm64)
   flexible window OFF                     ├─► Secrets Manager  (all three, at cold start)
   retries = 0                             ├─► CloudWatch Logs  (one tick line, plus one
                                           │                     briefing-run line per job)
-                                          └─► OpenAI, Tavily, Neon  (no VPC)
+                                          └─► OpenAI, Apify, Neon  (no VPC)
 
 CloudWatch alarms ──► alerts_topic_arn (the root's SNS topic)
   Errors >= 1        (a run failed)
@@ -59,7 +59,7 @@ than split between a role and a resource-based policy that have to agree.
 enters plan output or state. Filling them is step 4 of `infra/aws/DEPLOYING.md`,
 which also covers what happens when one is left empty.
 
-**No VPC.** Outbound traffic is OpenAI, Tavily, Neon and AWS APIs only. Putting
+**No VPC.** Outbound traffic is OpenAI, Apify, Neon and AWS APIs only. Putting
 the function in a VPC to reach the public internet would need a NAT gateway and
 buy nothing.
 
@@ -105,7 +105,7 @@ Three, all provisioned as empty shells and never written by Terraform:
 | --------------------------- | -------------------- | -------------------------------- |
 | `<function>/openai-api-key` | `OPENAI_SECRET_ID`   | the OpenAI API key               |
 | `<function>/database-url`   | `DATABASE_SECRET_ID` | the **pooled** connection string |
-| `<function>/tavily-api-key` | `TAVILY_SECRET_ID`   | the Tavily search key            |
+| `<function>/apify-token`    | `APIFY_SECRET_ID`    | the Apify API token              |
 
 The function gets each secret's **ARN**, never its value. A value passed through
 Terraform appears in plan output, in state, and in the log of whatever ran the

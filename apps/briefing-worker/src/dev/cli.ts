@@ -58,8 +58,8 @@ Watch one briefing run, step by step.
   --help
 
 Always a dry run. The brief is written to --out, never to S3, and no artifacts
-row is recorded. OPENAI_API_KEY and TAVILY_API_KEY must be set; the model and
-the web search are real.
+row is recorded. OPENAI_API_KEY and APIFY_TOKEN must be set; the model and
+the SEEK search are real.
 `
 
 interface Options {
@@ -234,7 +234,7 @@ async function main(): Promise<void> {
   const options = readOptions()
   if (!options) return
 
-  requireEnv("OPENAI_API_KEY", "TAVILY_API_KEY")
+  requireEnv("OPENAI_API_KEY", "APIFY_TOKEN")
 
   const job = await resolveJob(options)
   const slot: ClaimedSlot = {
