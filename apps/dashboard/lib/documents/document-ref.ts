@@ -1,10 +1,15 @@
+import { EXTENSION_SOURCE } from "@workspace/user-storage/keys"
+
 /**
  * Addressing a stored document: the two halves of its key, and the single
  * string the download route carries them in.
  *
- * No imports, for the same reason `upload-validation.ts` and
- * `content-disposition.ts` have none — a test can reach it without Next. But
- * the reason it is *shared* is separate. These patterns were written twice,
+ * Imports nothing from Next, for the same reason `upload-validation.ts` and
+ * `content-disposition.ts` do not — a test can reach it directly. Its one
+ * import is the extension pattern from `@workspace/user-storage`, which is a
+ * pure module and is the point of the paragraph on {@link EXTENSION_SOURCE}
+ * there. But the reason this file is *shared* is separate. These patterns were
+ * written twice,
  * once as a combined `FILE_PATTERN` in `app/api/documents/[file]/route.ts` and
  * once as Zod schemas in `document-actions.ts`, along with the same paragraph
  * explaining them; the composite was formatted in a third place,
@@ -35,8 +40,19 @@
  */
 const RESUME_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
-/** The extension half, including its dot, lowercase — see `extensionOf`. */
-const EXTENSION = "\\.[a-z0-9]{1,10}"
+/**
+ * The extension half, including its dot, lowercase — see `extensionOf`.
+ *
+ * Taken from `@workspace/user-storage` rather than restated. This file already
+ * reasons about staying in step with `assertSegment` over in that package for
+ * the id half; the extension half used to be the part that was *not*
+ * single-sourced, and the two copies had already drifted to different length
+ * bounds. Importing the source string is what makes them one fact.
+ *
+ * The subpath, not the barrel: `keys.ts` imports only `errors.ts` and
+ * `kinds.ts`, so nothing here pulls in the AWS SDK.
+ */
+const EXTENSION = EXTENSION_SOURCE
 
 export const RESUME_ID_PATTERN = new RegExp(`^${RESUME_ID}$`)
 export const EXTENSION_PATTERN = new RegExp(`^${EXTENSION}$`)

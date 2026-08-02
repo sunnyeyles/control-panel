@@ -14,6 +14,3 @@ export const AgentState = new StateSchema({
     reducer: (current: number, update: number) => current + update,
   }),
 })
-
-export type AgentStateValue = typeof AgentState.State
-export type AgentStateUpdate = typeof AgentState.Update

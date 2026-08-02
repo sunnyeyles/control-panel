@@ -1,8 +1,6 @@
-import { redirect } from "next/navigation"
-
 import { DocumentList } from "@/components/documents/document-list"
 import { DocumentUploader } from "@/components/documents/document-uploader"
-import { getCurrentUser } from "@/lib/auth/current-user"
+import { requirePageUser } from "@/lib/auth/require-page-user"
 import {
   listDocuments,
   type DocumentSummary,
@@ -22,10 +20,7 @@ export const dynamic = "force-dynamic"
 export const maxDuration = 30
 
 export default async function DocumentsPage() {
-  const user = await getCurrentUser()
-
-  if (user.status === "anonymous") redirect("/auth/sign-in")
-  if (user.status === "refused") redirect("/auth/refused")
+  const user = await requirePageUser()
 
   // A storage outage should degrade this page to "upload is unavailable", not
   // replace it with an error boundary — the user can still read what the page

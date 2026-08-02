@@ -74,7 +74,6 @@ export {
   contentTypeFor,
   extensionsFor,
   isObjectKind,
-  OBJECT_KIND_NAMES,
   OBJECT_KINDS,
   type ObjectKind,
 } from "./kinds.ts"

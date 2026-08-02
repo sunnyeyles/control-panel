@@ -1,18 +1,13 @@
-import { redirect } from "next/navigation"
-
 import { BriefingSection } from "@/components/settings/briefing-section"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { getCurrentUser } from "@/lib/auth/current-user"
+import { requirePageUser } from "@/lib/auth/require-page-user"
 import { Label } from "@workspace/ui/components/label"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
 
 export default async function SettingsPage() {
-  const user = await getCurrentUser()
-
-  if (user.status === "anonymous") redirect("/auth/sign-in")
-  if (user.status === "refused") redirect("/auth/refused")
+  const user = await requirePageUser()
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">

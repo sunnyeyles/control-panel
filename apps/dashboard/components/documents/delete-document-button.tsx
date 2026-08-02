@@ -1,9 +1,11 @@
 "use client"
 
 import { useActionState, useState } from "react"
+import { ActionError } from "@/components/forms/action-error"
+import { SubmitButton } from "@/components/forms/submit-button"
 
 import { deleteDocumentAction } from "@/app/(app)/documents/actions"
-import { IDLE } from "@/lib/documents/action-state"
+import { IDLE } from "@/lib/actions/action-state"
 import { Button } from "@workspace/ui/components/button"
 import {
   Dialog,
@@ -15,7 +17,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@workspace/ui/components/dialog"
-import { Spinner } from "@workspace/ui/components/spinner"
 import { Trash2Icon } from "lucide-react"
 
 /**
@@ -74,11 +75,7 @@ export function DeleteDocumentButton({
           <input type="hidden" name="resumeId" value={resumeId} />
           <input type="hidden" name="extension" value={extension} />
 
-          {state.status === "error" ? (
-            <p className="mb-4 text-sm text-destructive" role="status">
-              {state.message}
-            </p>
-          ) : null}
+          <ActionError state={state} className="mb-4" />
 
           <DialogFooter>
             <DialogClose asChild>
@@ -86,10 +83,11 @@ export function DeleteDocumentButton({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" variant="destructive" disabled={pending}>
-              {pending ? <Spinner /> : null}
-              Delete
-            </Button>
+            <SubmitButton
+              pending={pending}
+              variant="destructive"
+              label="Delete"
+            />
           </DialogFooter>
         </form>
       </DialogContent>

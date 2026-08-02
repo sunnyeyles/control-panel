@@ -53,7 +53,6 @@ export { createArtifactStore, type ArtifactStore } from "./artifacts.ts"
 export { computeNextRunAt, isValidSchedule } from "./schedule.ts"
 
 export {
-  appliedMigrations,
   runMigrations,
   type MigrationsResult,
   type RunMigrationsOptions,

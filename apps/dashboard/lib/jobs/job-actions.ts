@@ -1,9 +1,11 @@
+import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
+import { isDbError } from "@workspace/db/errors"
 import type { JobStore } from "@workspace/db/jobs"
 import type { Job } from "@workspace/db/rows"
 import { z } from "zod"
 
-import type { JobActionState } from "./action-state"
 import {
   isIntervalHours,
   SCHEDULE_TIMEZONE,
@@ -11,8 +13,6 @@ import {
   type IntervalHours,
 } from "./interval"
 import { searchCriteriaSchema } from "./search-criteria"
-
-export type { JobActionState } from "./action-state"
 
 /**
  * The briefing actions, as plain functions over injected dependencies.
@@ -28,15 +28,6 @@ export type { JobActionState } from "./action-state"
  * set instead. So "off" is `pause()` and "on" is `resume()`, and the question
  * "is this briefing on?" is `job.nextRunAt !== null` everywhere.
  */
-
-/**
- * One message for both "not signed in" and "signed in but not allowed".
- *
- * Identical on purpose, exactly as in `document-actions.ts`: telling the second
- * caller apart from the first confirms to someone outside the allowlist that
- * their account exists and is merely unapproved.
- */
-const NOT_AUTHORIZED = "You are not signed in."
 
 /**
  * One message for "no such job" and "someone else's job".
@@ -67,8 +58,8 @@ export interface JobActionsDeps {
   getJobs: () => JobStore
   /** Overridden in tests, so an assertion can name the occurrence. */
   now?: () => Date
-  /** Overridden in tests, so an assertion can name the nonce. */
-  newNonce?: () => string
+  /** Overridden in tests, so an assertion can name the reset key. */
+  newResetKey?: () => string
 }
 
 /**
@@ -111,66 +102,20 @@ function readIntervalHours(
 
 export function createJobActions(deps: JobActionsDeps) {
   const now = deps.now ?? (() => new Date())
-  const newNonce = deps.newNonce ?? (() => crypto.randomUUID())
+  const newResetKey = deps.newResetKey ?? (() => crypto.randomUUID())
 
-  /**
-   * Resolve the caller, or the message to show instead.
-   *
-   * A thrown error here is treated as "not authorized" rather than propagated:
-   * `getCurrentUser` touches the database to map an auth id onto a platform
-   * user, and a database blip must not turn into an unauthenticated write.
-   */
-  async function requireUser(): Promise<
-    { ok: true; userId: string } | { ok: false; message: string }
-  > {
-    let user: CurrentUser
-
-    try {
-      user = await deps.getUser()
-    } catch (error) {
-      console.error("briefings: failed to resolve the caller", error)
-      return { ok: false, message: NOT_AUTHORIZED }
-    }
-
-    if (user.status !== "ok") return { ok: false, message: NOT_AUTHORIZED }
-
-    return { ok: true, userId: user.userId }
-  }
-
-  /**
-   * The ownership boundary, and the reason it is a function.
-   *
-   * `pause`, `resume` and `updateSchedule` take an id and **do not filter by
-   * `user_id`** — `JobStore` is not a per-user facade the way `ResumeStore` is,
-   * because the worker's tick legitimately operates across every user's jobs.
-   * So a `jobId` from a form addresses any row in the table, and the check has
-   * to happen here. Every mutating action routes through this; none of them
-   * touches the store with a client-supplied id first.
-   *
-   * Returns `undefined` for both "no such row" and "not yours", so the two are
-   * indistinguishable from outside.
-   */
-  async function requireOwnedJob(
-    jobs: JobStore,
-    jobId: string,
-    userId: string
-  ): Promise<Job | undefined> {
-    const job = await jobs.get(jobId)
-    if (!job || job.userId !== userId) return undefined
-
-    return job
-  }
+  const requireCaller = () => requireUser(deps.getUser, "briefings")
 
   async function setJobEnabled(
-    state: JobActionState,
+    state: ActionState,
     formData: FormData
-  ): Promise<JobActionState> {
-    const fail = (message: string) => carryNonce(state, message)
+  ): Promise<ActionState> {
+    const fail = (message: string) => carryResetKey(state, message)
 
     // Before the body is touched at all. `proxy.ts` cannot evaluate a non-GET
     // request, so for this POST it degrades to checking that *some* session
     // cookie substring is present — this is the only real check on the path.
-    const caller = await requireUser()
+    const caller = await requireCaller()
     if (!caller.ok) return fail(caller.message)
 
     const parsed = setEnabledSchema.safeParse({
@@ -203,17 +148,17 @@ export function createJobActions(deps: JobActionsDeps) {
     return {
       status: "success",
       message: enable ? "Briefing turned on." : "Briefing turned off.",
-      nonce: newNonce(),
+      resetKey: newResetKey(),
     }
   }
 
   async function updateJobSchedule(
-    state: JobActionState,
+    state: ActionState,
     formData: FormData
-  ): Promise<JobActionState> {
-    const fail = (message: string) => carryNonce(state, message)
+  ): Promise<ActionState> {
+    const fail = (message: string) => carryResetKey(state, message)
 
-    const caller = await requireUser()
+    const caller = await requireCaller()
     if (!caller.ok) return fail(caller.message)
 
     const parsed = scheduleSchema.safeParse({ jobId: formData.get("jobId") })
@@ -253,17 +198,17 @@ export function createJobActions(deps: JobActionsDeps) {
         job.nextRunAt === null
           ? "Schedule saved. This briefing is still turned off."
           : "Schedule saved.",
-      nonce: newNonce(),
+      resetKey: newResetKey(),
     }
   }
 
   async function createJob(
-    state: JobActionState,
+    state: ActionState,
     formData: FormData
-  ): Promise<JobActionState> {
-    const fail = (message: string) => carryNonce(state, message)
+  ): Promise<ActionState> {
+    const fail = (message: string) => carryResetKey(state, message)
 
-    const caller = await requireUser()
+    const caller = await requireCaller()
     if (!caller.ok) return fail(caller.message)
 
     const parsed = createSchema.safeParse({ name: formData.get("name") })
@@ -305,7 +250,7 @@ export function createJobActions(deps: JobActionsDeps) {
         now()
       )
     } catch (error) {
-      return fail(createMessage(error))
+      return fail(storeMessage("create", error))
     }
 
     // The new row's id: unique per success by construction, so the create form
@@ -313,7 +258,7 @@ export function createJobActions(deps: JobActionsDeps) {
     return {
       status: "success",
       message: `Created “${job.name}”.`,
-      nonce: job.id,
+      resetKey: job.id,
     }
   }
 
@@ -321,71 +266,78 @@ export function createJobActions(deps: JobActionsDeps) {
 }
 
 /**
- * An error state that preserves whatever nonce the previous state held.
+ * The ownership boundary, and the reason it exists at all.
  *
- * Lifted wholesale from `document-actions.ts`, including the reasoning: the
- * create form keys its fields on the nonce, so a failure that dropped it would
- * remount the fields and throw away what the user typed underneath the message
- * telling them to fix it. A failure is not a success and must not move that
- * number.
+ * `pause`, `resume` and `updateSchedule` take an id and **do not filter by
+ * `user_id`** — `JobStore` is not a per-user facade the way `ResumeStore` is,
+ * because the worker's tick legitimately operates across every user's jobs. So a
+ * `jobId` from a form addresses any row in the table, and the check has to
+ * happen here. Every mutating action routes through this; none of them touches
+ * the store with a client-supplied id first.
+ *
+ * Returns `undefined` for both "no such row" and "not yours", so the two are
+ * indistinguishable from outside.
+ *
+ * At module scope rather than inside the factory: it closes over nothing — all
+ * three inputs are parameters — so nesting it only reallocated it per
+ * `createJobActions()` call.
  */
-function carryNonce(previous: JobActionState, message: string): JobActionState {
-  const nonce = previous.status === "idle" ? undefined : previous.nonce
+async function requireOwnedJob(
+  jobs: JobStore,
+  jobId: string,
+  userId: string
+): Promise<Job | undefined> {
+  const job = await jobs.get(jobId)
+  if (!job || job.userId !== userId) return undefined
 
-  return { status: "error", message, ...(nonce ? { nonce } : {}) }
+  return job
 }
 
 /**
  * A store failure as something safe to show.
  *
- * Branches on `code`, never `instanceof` — `packages/db/src/errors.ts` says so
- * explicitly, because an error crossing a bundler or package boundary can fail
- * a prototype check while carrying a perfectly good discriminant.
+ * Branches on `code`, never `instanceof`, via `isDbError` — the narrowing helper
+ * `packages/db/src/errors.ts` ships for exactly this. Its own `instanceof` test
+ * is against the base `Error`, which is the cross-bundle-safe form; what it
+ * discriminates on is the `code` string, so an error that crossed a bundler
+ * boundary still narrows. Going through it rather than reading `.code` by hand
+ * also types the comparison against `DbErrorCode`, so a misspelt code stops
+ * compiling instead of silently never matching.
+ *
+ * `create` gets one extra branch. `jobs` carries `unique (user_id, name)`, and
+ * `packages/db/src/client.ts` deliberately remaps only class-08 connection
+ * faults — a constraint violation is "a real result, not a transport failure" —
+ * so a duplicate name arrives as a raw Postgres error carrying `23505` and never
+ * as a `DbError`. Left uncaught it would reach the client as an opaque Next
+ * digest.
  */
 function storeMessage(operation: "create" | "update", error: unknown): string {
   console.error(`briefings: ${operation} failed`, error)
 
-  // Not reachable from the form, since the expression is derived from a closed
-  // set — but `updateSchedule` and `create` are the two calls that throw rather
-  // than return, so the branch stays rather than becoming an opaque digest if a
-  // future interval is added wrong.
-  if (isDbErrorCode(error, "invalid_schedule")) return INVALID_INTERVAL
+  if (operation === "create" && isUniqueViolation(error)) {
+    return "You already have a briefing with that name."
+  }
 
-  if (isDbErrorCode(error, "database_unavailable")) {
-    return "The database is unavailable. Try again in a moment."
+  if (isDbError(error)) {
+    switch (error.code) {
+      case "invalid_schedule":
+        // Not reachable from the form, since the expression is derived from a
+        // closed set — but `updateSchedule` and `create` are the two calls that
+        // throw rather than return, so the branch stays rather than becoming an
+        // opaque digest if a future interval is added wrong.
+        return INVALID_INTERVAL
+
+      case "database_unavailable":
+        return "The database is unavailable. Try again in a moment."
+    }
   }
 
   return "Something went wrong."
 }
 
-/**
- * Create's extra failure: the name is already taken.
- *
- * `jobs` carries `unique (user_id, name)`, and `packages/db/src/client.ts`
- * deliberately remaps only class-08 connection faults — a constraint violation
- * is "a real result, not a transport failure" — so this arrives as a raw
- * Postgres error carrying `23505`. Left uncaught it would reach the client as
- * an opaque Next digest.
- */
-function createMessage(error: unknown): string {
-  if (isUniqueViolation(error)) {
-    console.error("briefings: create rejected a duplicate name", error)
-    return "You already have a briefing with that name."
-  }
-
-  return storeMessage("create", error)
-}
-
-function isDbErrorCode(error: unknown, code: string): boolean {
-  return readCode(error) === code
-}
-
+/** The one failure `isDbError` cannot cover — see {@link storeMessage}. */
 function isUniqueViolation(error: unknown): boolean {
-  return readCode(error) === "23505"
-}
+  if (typeof error !== "object" || error === null) return false
 
-function readCode(error: unknown): unknown {
-  if (typeof error !== "object" || error === null) return undefined
-
-  return (error as { code?: unknown }).code
+  return (error as { code?: unknown }).code === "23505"
 }

@@ -11,7 +11,8 @@ import {
 } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { IDLE } from "./action-state"
+import { IDLE } from "@/lib/actions/action-state"
+import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
 import { createDocumentActions } from "./document-actions"
 import { MAX_DOCUMENT_BYTES } from "./upload-validation"
 
@@ -156,7 +157,7 @@ describe("uploadDocument — the gate", () => {
     // request looks like.
     expect(result).toEqual({
       status: "error",
-      message: "You are not signed in.",
+      message: NOT_AUTHORIZED,
     })
   })
 })
@@ -352,19 +353,19 @@ describe("uploadDocument — storage failures", () => {
   })
 })
 
-describe("uploadDocument — the reset nonce", () => {
-  // The uploader keys its fields on the nonce, so these assertions are really
+describe("uploadDocument — the reset key", () => {
+  // The uploader keys its fields on the reset key, so these assertions are really
   // about whether a retry keeps the file the user picked. Invisible from the
   // action's own vantage point, which is why they say so out loud.
 
-  it("carries the previous success's nonce through a failure", async () => {
+  it("carries the previous success's reset key through a failure", async () => {
     const { uploadDocument } = actionsFor(SIGNED_IN)
 
     const success = await uploadDocument(IDLE, uploadForm(pdf()))
     expect(success).toEqual({
       status: "success",
       message: "Uploaded My CV.pdf.",
-      nonce: RESUME_ID,
+      resetKey: RESUME_ID,
     })
 
     store.putError = new StorageUnavailableError("nope")
@@ -374,7 +375,7 @@ describe("uploadDocument — the reset nonce", () => {
     expect(failure).toEqual({
       status: "error",
       message: "Document storage is unavailable. Try again in a moment.",
-      nonce: RESUME_ID,
+      resetKey: RESUME_ID,
     })
   })
 
@@ -393,8 +394,8 @@ describe("uploadDocument — the reset nonce", () => {
 
     expect(failure).toEqual({
       status: "error",
-      message: "You are not signed in.",
-      nonce: RESUME_ID,
+      message: NOT_AUTHORIZED,
+      resetKey: RESUME_ID,
     })
   })
 
@@ -409,10 +410,10 @@ describe("uploadDocument — the reset nonce", () => {
     const third = await uploadDocument(second, uploadForm(pdf()))
 
     // One reset per success means zero resets across three failures.
-    expect(third.status === "error" && third.nonce).toBe(RESUME_ID)
+    expect(third.status === "error" && third.resetKey).toBe(RESUME_ID)
   })
 
-  it("has no nonce to carry before the first success", async () => {
+  it("has no reset key to carry before the first success", async () => {
     const result = await actionsFor(ANONYMOUS).uploadDocument(
       IDLE,
       uploadForm(pdf())
@@ -422,7 +423,7 @@ describe("uploadDocument — the reset nonce", () => {
     // uploader falls back to its initial key.
     expect(result).toEqual({
       status: "error",
-      message: "You are not signed in.",
+      message: NOT_AUTHORIZED,
     })
   })
 
@@ -435,8 +436,8 @@ describe("uploadDocument — the reset nonce", () => {
     const first = await actions.uploadDocument(IDLE, uploadForm(pdf()))
     const second = await actions.uploadDocument(first, uploadForm(pdf()))
 
-    expect(first.status === "success" && first.nonce).toBe("id-one")
-    expect(second.status === "success" && second.nonce).toBe("id-two")
+    expect(first.status === "success" && first.resetKey).toBe("id-one")
+    expect(second.status === "success" && second.resetKey).toBe("id-two")
   })
 })
 
