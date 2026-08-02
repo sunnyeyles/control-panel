@@ -24,8 +24,10 @@ const MAX_ARGS_LENGTH = 160
 export interface RenderOptions {
   /** Show every line of every message and tool result. */
   verbose?: boolean
-  /** Defaults to `process.stdout`, minus colour when it is not a terminal. */
-  write?: (text: string) => void
+  /**
+   * Overrides the default, which is colour only when stdout is a terminal and
+   * `NO_COLOR` is unset. Pass this to force the answer, not to restate it.
+   */
   color?: boolean
 }
 
@@ -77,7 +79,6 @@ function palette(enabled: boolean): Palette {
 }
 
 export function createTerminalRenderer(options: RenderOptions = {}): TraceSink {
-  const write = options.write ?? ((text: string) => process.stdout.write(text))
   const color =
     options.color ?? (Boolean(process.stdout.isTTY) && !process.env.NO_COLOR)
   const c = palette(color)
@@ -85,7 +86,9 @@ export function createTerminalRenderer(options: RenderOptions = {}): TraceSink {
     ? Number.POSITIVE_INFINITY
     : DEFAULT_MAX_LINES
 
-  const line = (text = "") => write(`${text}\n`)
+  const line = (text = "") => {
+    process.stdout.write(`${text}\n`)
+  }
 
   /** Indented, truncated, and prefixed — the shape every block of content takes. */
   const block = (text: string, indent: string, paint: Paint = c.dim) => {

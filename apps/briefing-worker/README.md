@@ -61,6 +61,26 @@ The schedule is **not** in this package. It lives in
 `infra/aws/modules/briefing-worker/schedule.tf`, which keeps the tick reviewable
 in a diff rather than drifting invisibly in console configuration.
 
+## Two off-switches, at different scopes
+
+Neither is in this package either, and confusing them wastes an afternoon.
+
+| Off                     | Mechanism                                          | Changed by                                                          |
+| ----------------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
+| The tick, for every job | `schedule_enabled` → EventBridge Scheduler `state` | `terraform apply -var="schedule_enabled=false"`, see `DEPLOYING.md` |
+| One job                 | `jobs.next_run_at IS NULL`                         | The dashboard's `/settings`, or `JobStore.pause()`                  |
+
+A job is off when it has no `next_run_at` — there is no `enabled` column, and
+`packages/db/migrations/0001_init.sql` explains why one absence covers both
+paused and retired. `dueJobs()` filters on a partial index over exactly that
+predicate, so a paused job is not merely skipped, it is absent from the index
+the tick reads.
+
+The consequence worth remembering: a tick reporting `"due":0` proves nothing
+about whether the schedule is enabled, and an enabled job proves nothing about
+whether the tick will ever wake to notice it. Check both before concluding the
+worker is broken.
+
 ## Connections and secrets
 
 Three secrets, all fetched from Secrets Manager at cold start and cached at

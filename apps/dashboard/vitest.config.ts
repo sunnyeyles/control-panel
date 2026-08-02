@@ -14,10 +14,12 @@ import { defineConfig } from "vitest/config"
  * covers these tests for free. Adding a second tsconfig for symmetry would only
  * give the tests a config that never runs.
  *
- * Only `lib/documents` is covered. Everything else in this app needs a Next
- * request context, a live session, or a browser — things Vitest cannot supply
- * and a fake would only pretend to. The logic worth testing was deliberately
- * put where it can be reached without any of them.
+ * Only `lib/` is covered — `lib/documents` and `lib/jobs` today. Everything else
+ * in this app needs a Next request context, a live session, or a browser —
+ * things Vitest cannot supply and a fake would only pretend to. The logic worth
+ * testing was deliberately put where it can be reached without any of them,
+ * which is why neither `document-actions.ts` nor `job-actions.ts` imports Next
+ * and both take their dependencies through a `createXActions(deps)` seam.
  */
 export default defineConfig({
   test: {

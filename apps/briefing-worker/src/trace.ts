@@ -116,9 +116,6 @@ export type TraceEvent = TraceEventBody & {
  */
 export type TraceSink = (event: TraceEvent) => void
 
-/** The default. A run with nobody watching pays nothing for the seam. */
-export const noTrace: TraceSink = () => undefined
-
 /**
  * Wrap a sink so it cannot take the run down with it.
  *
@@ -128,7 +125,7 @@ export const noTrace: TraceSink = () => undefined
  * swallowed: a sink that silently stopped emitting would be worse than one that
  * crashed.
  */
-export function safely(sink: TraceSink): TraceSink {
+function safely(sink: TraceSink): TraceSink {
   let complained = false
 
   return (event) => {
@@ -160,10 +157,15 @@ export interface Tracer {
   ): Promise<T>
 }
 
-export function createTracer(sink: TraceSink = noTrace): Tracer {
-  const guarded = sink === noTrace ? sink : safely(sink)
+/**
+ * No sink is the production case, and it costs nothing: with nobody watching,
+ * an event is never built at all — not stamped, not copied, not passed on.
+ */
+export function createTracer(sink?: TraceSink): Tracer {
+  const guarded = sink && safely(sink)
 
   const emit = ((event: TraceEventBody) => {
+    if (!guarded) return
     guarded({ ...event, at: new Date().toISOString() })
   }) as Tracer
 

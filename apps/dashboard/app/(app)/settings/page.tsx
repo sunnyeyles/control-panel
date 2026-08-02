@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 
+import { BriefingSection } from "@/components/settings/briefing-section"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { getCurrentUser } from "@/lib/auth/current-user"
 import { Label } from "@workspace/ui/components/label"
@@ -15,7 +16,14 @@ export default async function SettingsPage() {
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-2xl px-4 py-8 lg:px-6">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-10 px-4 py-8 lg:px-6">
+        {/*
+          `user.userId` is `users.id` — the platform identity — not the Neon
+          Auth id. It is what `jobs.user_id` references, so it is the only thing
+          that can scope this list.
+        */}
+        <BriefingSection userId={user.userId} />
+
         <section className="flex flex-col gap-4">
           <div>
             <h2 className="text-lg font-medium">Appearance</h2>

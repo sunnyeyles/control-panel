@@ -90,9 +90,12 @@ flowchart TD
   of it alone.
 - **Cover letters.**
 - **Any dashboard UI for briefs.** `apps/dashboard` has an assistant chat, the
-  documents section, a settings page and the auth pages, and calls the database
-  only to upsert the signed-in user. `JobStore.listForUser()` and
-  `ArtifactStore.latestForJob()` already exist and have no caller.
+  documents section, a settings page and the auth pages. Settings now manages
+  **jobs** — create a briefing, turn it on or off, change its cadence, through
+  `JobStore.listForUser()`, `create()`, `pause()`, `resume()` and
+  `updateSchedule()`. What is still missing is anything that surfaces a
+  **brief**: `ArtifactStore.latestForJob()` exists and has no caller, so a run's
+  output is reachable only from S3.
 
 ## Infrastructure
 

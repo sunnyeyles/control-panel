@@ -105,26 +105,19 @@ export function createDirectoryObjectStore(
 }
 
 /**
- * An {@link ArtifactStore} that records nothing.
+ * An {@link ArtifactStore} that writes no row.
  *
  * A dry run has no `runs` row to reference — `artifacts.run_id` is `NOT NULL`
  * and the foreign key is `on delete restrict` — so there is no honest row to
- * write. Recording the call and returning a plausible `Artifact` keeps the run
- * on its real code path, including the ordering rule that the object is written
- * before the row.
+ * write. Returning a plausible `Artifact` keeps the run on its real code path,
+ * including the ordering rule that the object is written before the row.
+ *
+ * It keeps no record of the calls, because the trace already is one: the
+ * `artifact` event carries the key and the size at the moment the object landed.
  */
-export interface RecordingArtifactStore extends ArtifactStore {
-  readonly recorded: Array<{ runId: string; objectKey: string }>
-}
-
-export function createRecordingArtifactStore(): RecordingArtifactStore {
-  const recorded: Array<{ runId: string; objectKey: string }> = []
-
+export function createDryRunArtifactStore(): ArtifactStore {
   return {
-    recorded,
-
     async record(runId: string, objectKey: string): Promise<Artifact> {
-      recorded.push({ runId, objectKey })
       return {
         id: "00000000-0000-4000-8000-000000000000",
         runId,

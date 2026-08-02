@@ -13,7 +13,7 @@ import type { TraceEvent, TraceSink } from "../trace.ts"
 import { createTerminalRenderer } from "./render.ts"
 import {
   createDirectoryObjectStore,
-  createRecordingArtifactStore,
+  createDryRunArtifactStore,
 } from "./stores.ts"
 
 /**
@@ -53,7 +53,8 @@ Watch one briefing run, step by step.
                     Default now.
   --json            Print the raw trace as JSON lines instead of rendering it.
   --verbose         Do not truncate messages or tool results.
-  --no-color        Plain text, no ANSI.
+  --no-color        Plain text. Already the default when stdout is not a
+                    terminal, or when NO_COLOR is set.
   --help
 
 Always a dry run. The brief is written to --out, never to S3, and no artifacts
@@ -68,7 +69,12 @@ interface Options {
   at?: string
   json: boolean
   verbose: boolean
-  color: boolean
+  /**
+   * Set only by `--no-color`. Left undefined otherwise so the renderer's own
+   * answer — a terminal, and no `NO_COLOR` — is the one that applies; a flag
+   * that always has a value would make piped output colourful.
+   */
+  color?: boolean
 }
 
 function readOptions(): Options | undefined {
@@ -105,7 +111,7 @@ function readOptions(): Options | undefined {
     ...(values.at ? { at: values.at } : {}),
     json: values.json ?? false,
     verbose: values.verbose ?? false,
-    color: !values["no-color"],
+    ...(values["no-color"] ? { color: false } : {}),
   }
 }
 
@@ -242,7 +248,7 @@ async function main(): Promise<void> {
   await mkdir(dirname(tracePath), { recursive: true })
 
   const objects = createDirectoryObjectStore({ directory: out })
-  const artifacts = createRecordingArtifactStore()
+  const artifacts = createDryRunArtifactStore()
   const traceFile = createWriteStream(tracePath, { flags: "a" })
 
   try {
