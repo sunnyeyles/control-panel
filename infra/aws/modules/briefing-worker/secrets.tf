@@ -66,25 +66,25 @@ resource "aws_secretsmanager_secret" "database" {
   }
 }
 
-# The Tavily API key, on the same terms and for the same reason.
+# The Apify API token, on the same terms and for the same reason.
 #
-# The scout's search tool reads it. Without it a run reaches the model, spends a
-# turn discovering it cannot search, and fails — which is the intended outcome:
-# a brief assembled without a single successful search would cite postings that
-# were never looked up.
+# The scout's SEEK search tool reads it. Without it a run reaches the model,
+# spends a turn discovering it cannot search, and fails — which is the intended
+# outcome: a brief assembled without a single successful search would cite
+# postings that were never looked up.
 #
 #   aws secretsmanager put-secret-value \
-#     --secret-id briefing-worker/tavily-api-key \
-#     --secret-string "tvly-..."
-resource "aws_secretsmanager_secret" "tavily" {
-  name        = "${var.function_name}/tavily-api-key"
-  description = "Tavily API key for the briefing worker's search tool. Set out-of-band; never written by Terraform."
+#     --secret-id briefing-worker/apify-token \
+#     --secret-string "apify_api_..."
+resource "aws_secretsmanager_secret" "apify" {
+  name        = "${var.function_name}/apify-token"
+  description = "Apify API token for the briefing worker's SEEK search tool. Set out-of-band; never written by Terraform."
 
   recovery_window_in_days = 7
 
   tags = var.tags
 
-  # Recoverable from the Tavily dashboard, unlike the OpenAI key, but destroying
+  # Recoverable from the Apify console, unlike the OpenAI key, but destroying
   # it still stops every briefing with no warning and holds the name for the
   # length of the recovery window.
   lifecycle {

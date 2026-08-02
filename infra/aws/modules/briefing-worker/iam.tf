@@ -44,7 +44,7 @@ resource "aws_iam_role_policy" "logs" {
 }
 
 # Three secrets, each by ARN. The worker reads the OpenAI key, the connection
-# string and the Tavily key, and nothing else — listing them explicitly rather
+# string and the Apify token, and nothing else — listing them explicitly rather
 # than granting a prefix keeps "what may this function read" answerable from
 # this block alone.
 data "aws_iam_policy_document" "read_secrets" {
@@ -54,7 +54,7 @@ data "aws_iam_policy_document" "read_secrets" {
     resources = [
       aws_secretsmanager_secret.openai.arn,
       aws_secretsmanager_secret.database.arn,
-      aws_secretsmanager_secret.tavily.arn,
+      aws_secretsmanager_secret.apify.arn,
     ]
   }
 }

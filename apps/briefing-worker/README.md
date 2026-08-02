@@ -13,9 +13,13 @@ A job's own cadence lives in Postgres, as `jobs.schedule_cron` and
 §Tick has the reasoning.
 
 The work a claimed job performs is a **briefing run**: a scout agent searches
-the web for job postings matching the criteria in `jobs.config`, a writer agent
-turns those findings into markdown, the worker uploads it to private S3 through
-`@workspace/user-storage`, and records the object key in `artifacts`.
+SEEK's live listings for postings matching the criteria in `jobs.config`, a
+writer agent turns those findings into markdown, the worker uploads it to
+private S3 through `@workspace/user-storage`, and records the object key in
+`artifacts`. Live listings rather than web search, deliberately: a search
+engine's index carries a board's browse pages, not its postings, and the
+posting URLs it does surface are often expired — the live inventory is what
+makes every URL in a brief a page someone can actually open.
 
 The two agents are joined by plain TypeScript rather than by a LangGraph
 fan-out. Fanning out across several scouts and merging their findings is a later
@@ -84,7 +88,7 @@ worker is broken.
 ## Connections and secrets
 
 Three secrets, all fetched from Secrets Manager at cold start and cached at
-module scope: `OPENAI_SECRET_ID`, `DATABASE_SECRET_ID` and `TAVILY_SECRET_ID`.
+module scope: `OPENAI_SECRET_ID`, `DATABASE_SECRET_ID` and `APIFY_SECRET_ID`.
 No value is a Lambda environment variable — that would put it in plan output, in
 state, and on the console's function configuration page.
 
@@ -120,7 +124,7 @@ the values the function would otherwise fetch, plus the two storage variables:
 ```bash
 export OPENAI_API_KEY=...
 export DATABASE_URL=...                  # the pooled endpoint
-export TAVILY_API_KEY=...
+export APIFY_TOKEN=...
 export USER_STORAGE_BUCKET_NAME=...
 export USER_STORAGE_ENVIRONMENT=prod
 export AWS_REGION=ap-southeast-2
@@ -158,11 +162,11 @@ run as it happens: the prompt each agent got, every search query with what came
 back, the findings as they validated, and the brief.
 
 ```bash
-export OPENAI_API_KEY=... TAVILY_API_KEY=...
+export OPENAI_API_KEY=... APIFY_TOKEN=...
 pnpm --filter=@workspace/briefing-worker watch --config ./fixtures/example-search.json
 ```
 
-The model and the web search are real, because they are the parts worth
+The model and the SEEK search are real, because they are the parts worth
 watching. Everything else is local: the brief lands under `.briefings/` at the
 key S3 would have used, and the trace is kept beside it as JSON lines.
 

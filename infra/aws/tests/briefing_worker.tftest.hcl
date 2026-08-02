@@ -100,7 +100,7 @@ run "on_duty" {
       for secret in [
         aws_secretsmanager_secret.openai,
         aws_secretsmanager_secret.database,
-        aws_secretsmanager_secret.tavily,
+        aws_secretsmanager_secret.apify,
       ] :
       secret.recovery_window_in_days == 7
     ])
@@ -132,15 +132,15 @@ run "on_duty" {
     error_message = "The connection string must never be a Lambda environment variable — it would land in plan output and in state."
   }
 
-  # Same arrangement for the search key, and the same reason.
+  # Same arrangement for the search token, and the same reason.
   assert {
-    condition     = contains(keys(local.environment), "TAVILY_SECRET_ID")
-    error_message = "TAVILY_SECRET_ID must be set on the function, or the scout has no way to search."
+    condition     = contains(keys(local.environment), "APIFY_SECRET_ID")
+    error_message = "APIFY_SECRET_ID must be set on the function, or the scout has no way to search."
   }
 
   assert {
-    condition     = !contains(keys(local.environment), "TAVILY_API_KEY")
-    error_message = "The Tavily key must never be a Lambda environment variable — it would land in plan output and in state."
+    condition     = !contains(keys(local.environment), "APIFY_TOKEN")
+    error_message = "The Apify token must never be a Lambda environment variable — it would land in plan output and in state."
   }
 
   # Not secrets, so these carry their values rather than an ARN. Without them

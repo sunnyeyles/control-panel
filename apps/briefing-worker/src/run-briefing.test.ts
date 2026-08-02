@@ -59,12 +59,12 @@ const FINDINGS = {
   ],
 }
 
-/** A successful search result — what proves the scout actually reached the web. */
+/** A successful search result — what proves the scout actually searched. */
 function searchResult(): ToolMessage {
   return new ToolMessage({
     content: "1. Senior Backend Engineer\n   https://example.com/jobs/1",
     tool_call_id: "call_1",
-    name: "web_search",
+    name: "seek_search",
     status: "success",
   })
 }
@@ -224,7 +224,7 @@ describe("runBriefing", () => {
       const failedSearch = new ToolMessage({
         content: "search failed",
         tool_call_id: "call_1",
-        name: "web_search",
+        name: "seek_search",
         status: "error",
       })
 
@@ -232,7 +232,23 @@ describe("runBriefing", () => {
         run({
           createScout: scoutReturning(JSON.stringify(FINDINGS), [failedSearch]),
         })
-      ).rejects.toThrow(/no successful web_search round trip/)
+      ).rejects.toThrow(/no successful seek_search round trip/)
+      expect(puts).toHaveLength(0)
+    })
+
+    it("the scout reported a URL no search returned", async () => {
+      // Every field valid, every URL well-formed — and one of them never came
+      // back from a search. The verbatim check is what turns "the model made
+      // up a plausible link" into a failed run instead of a broken brief.
+      const invented = {
+        postings: [
+          { ...FINDINGS.postings[0], url: "https://example.com/jobs/999" },
+        ],
+      }
+
+      await expect(
+        run({ createScout: scoutReturning(JSON.stringify(invented)) })
+      ).rejects.toThrow(/no search returned/)
       expect(puts).toHaveLength(0)
     })
 
@@ -346,7 +362,7 @@ describe("runBriefing", () => {
         tool_calls: [
           {
             id: "call_1",
-            name: "web_search",
+            name: "seek_search",
             args: { query: "senior backend engineer Sydney" },
           },
         ],
@@ -363,13 +379,13 @@ describe("runBriefing", () => {
       await result
 
       // The call and the result arrive one superstep apart, so a trace that did
-      // not correlate them would show "web_search returned five results" with
+      // not correlate them would show "seek_search returned five results" with
       // no way to know what was searched for.
       expect(events.filter((event) => event.type === "tool")).toEqual([
         expect.objectContaining({
           type: "tool",
           agent: "scout",
-          name: "web_search",
+          name: "seek_search",
           args: { query: "senior backend engineer Sydney" },
           ok: true,
         }),

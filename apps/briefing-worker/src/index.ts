@@ -95,9 +95,9 @@ async function loadSecrets(): Promise<void> {
       "Neither DATABASE_URL nor DATABASE_SECRET_ID is set, so there is no way to find out what is due."
     ),
     loadSecret(
-      "TAVILY_API_KEY",
-      "TAVILY_SECRET_ID",
-      "Neither TAVILY_API_KEY nor TAVILY_SECRET_ID is set, so there is no way to search the web."
+      "APIFY_TOKEN",
+      "APIFY_SECRET_ID",
+      "Neither APIFY_TOKEN nor APIFY_SECRET_ID is set, so there is no way to search SEEK."
     ),
   ])
 }

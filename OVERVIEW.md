@@ -3,9 +3,9 @@
 A scheduled worker turns a candidate's search criteria into a private, per-user
 job-search brief.
 
-Each run: read the criteria → search the web for matching postings → validate
-the findings → compose markdown → upload to private S3 → record the object key
-in Neon.
+Each run: read the criteria → query SEEK's live listings for matching postings
+→ validate the findings → compose markdown → upload to private S3 → record the
+object key in Neon.
 
 Vocabulary is in `CONTEXT.md`, and it is worth reading first — in particular
 **Job** means "a row in `jobs`, a thing that runs on a cadence" and never an
@@ -37,10 +37,12 @@ employment opportunity, which is a **Posting**.
 - **The scout returns data, not side effects.** No writes, no uploads, no DB
   calls inside it. It carries one tool, so this is structural.
 - **URLs are copied, never composed.** Every posting must carry a URL a search
-  actually returned; the findings schema rejects anything that is not a URL.
+  actually returned; the findings schema rejects anything that is not a URL,
+  and the worker rejects any URL that does not appear verbatim in a search
+  result.
 - **A run with no successful search fails.** Well-formed findings that never
-  touched the web would produce a confident brief citing postings nobody looked
-  up — worse than no brief.
+  touched a live search would produce a confident brief citing postings nobody
+  looked up — worse than no brief.
 - **New `kinds.ts` entries need a matching `object_kinds` entry in Terraform**,
   or the objects get no retention and writes 403 for want of the per-kind grant.
 
@@ -51,8 +53,8 @@ flowchart TD
     E[EventBridge Scheduler — hourly tick] --> F[AWS Lambda briefing worker]
     F --> D[(Neon Postgres — jobs, runs)]
     D -->|due job + criteria| G[Scout agent]
-    G --> T[web_search tool → Tavily]
-    T --> X[External websites]
+    G --> T[seek_search tool → Apify SEEK actor]
+    T --> X[seek.com.au live listings]
     G -->|Findings JSON, validated| L[Brief writer agent]
     L --> Z[Markdown]
     Z --> U[Upload to private S3]

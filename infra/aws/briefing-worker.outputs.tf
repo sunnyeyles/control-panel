@@ -18,7 +18,7 @@ output "worker_openai_secret_arn" {
   value       = module.briefing_worker.openai_secret_arn
 }
 
-output "worker_tavily_secret_arn" {
+output "worker_apify_secret_arn" {
   description = "Set this secret's value by hand; Terraform creates it empty and never writes it. Without it the scout cannot search and every run fails."
-  value       = module.briefing_worker.tavily_secret_arn
+  value       = module.briefing_worker.apify_secret_arn
 }

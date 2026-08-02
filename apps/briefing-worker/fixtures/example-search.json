@@ -3,6 +3,6 @@
   "locations": ["Sydney", "Remote (Australia)"],
   "keywords": ["TypeScript"],
   "exclude": ["senior"],
-  "sources": ["seek.com.au", "au.linkedin.com", "indeed.com.au", "au.jora.com"],
+  "sources": ["seek.com.au"],
   "maxPostings": 5
 }

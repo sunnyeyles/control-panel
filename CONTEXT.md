@@ -9,8 +9,9 @@ briefing yet — `OVERVIEW.md` §Not built yet is the current list.
 ## Language
 
 **Briefing**:
-The digest a scheduled run produces: a **Scout** searches the web for job
-postings matching the candidate's **Search Criteria**, a **Brief Writer** turns
+The digest a scheduled run produces: a **Scout** searches SEEK's live listings
+for job postings matching the candidate's **Search Criteria**, a **Brief
+Writer** turns
 the resulting **Findings** into a single markdown file, and the worker writes it
 through `@workspace/user-storage`'s brief store to S3 — landing there is the
 success signal. Built and running.

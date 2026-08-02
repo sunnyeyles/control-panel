@@ -1,4 +1,4 @@
-import { webSearch } from "@workspace/agent-tools/web-search"
+import { seekSearch } from "@workspace/agent-tools/seek-search"
 import {
   createAgent,
   type Agent,
@@ -13,18 +13,18 @@ import { jobScoutSchemaDescription } from "./findings.ts"
  *
  * The runtime default of 10 is sized for a question with one tool round trip.
  * A scout is expected to make a handful of focused searches — one per role
- * title, per location, per source — and each costs a model call, so the default
- * would divert it to `halt` mid-search and produce a partial answer that still
+ * title and location — and each costs a model call, so the default would
+ * divert it to `halt` mid-search and produce a partial answer that still
  * looks well-formed.
  */
 export const JOB_SCOUT_MAX_LLM_CALLS = 10
 
 export const JOB_SCOUT_SYSTEM_PROMPT = [
-  "You find real, currently-open job postings that match a candidate's criteria.",
+  "You find real, currently-open job postings that match a candidate's criteria, by searching SEEK's live listings.",
   "",
-  "How to search: make several focused searches rather than one broad one — vary the role title, the location, and the source. Prefer recent results; a posting from last year is not open. You may restrict a search to a specific job board when that helps.",
+  'How to search: make one focused search per role title and location rather than one broad one. Results arrive newest first with their listing dates; keep daysOld tight when recency matters. Pass locations the way SEEK writes them, e.g. "Sydney NSW" or "All Australia".',
   "",
-  "What counts as a finding: a page that is an actual job posting. Aggregator index pages, salary guides, blog posts about hiring, and expired listings are not findings — leave them out rather than padding the list.",
+  "What counts as a finding: a returned posting whose title, location and description genuinely fit the criteria. Filter rather than pad — sharing a keyword is not a match. A criterion your searches cannot express, such as a job board you cannot reach, belongs in `notes` rather than in guesswork.",
   "",
   "Never invent a posting, and never invent or repair a URL. Every URL you report must be one a search returned to you verbatim. If you found nothing worth reporting, return an empty list and say why in `notes`. An empty, honest result is a success; a fabricated one is not.",
   "",
@@ -65,6 +65,6 @@ export function createJobScout(options: CreateJobScoutOptions = {}): Agent {
     ...rest,
     systemPrompt,
     maxLlmCalls,
-    tools: [webSearch, ...extraTools],
+    tools: [seekSearch, ...extraTools],
   })
 }
