@@ -5,7 +5,7 @@ job-search brief.
 
 Each run: read the criteria → query SEEK's live listings for matching postings →
 validate the findings → compose markdown → upload to private S3 → record the
-object key in Neon.
+object key and the findings in Neon.
 
 Vocabulary is in `CONTEXT.md`, and it is worth reading first — in particular
 **Job** means "a row in `jobs`, a thing that runs on a cadence" and never an
@@ -73,6 +73,7 @@ flowchart TD
     Z --> U[Upload to private S3]
     U --> V[(S3 bucket — markdown briefs)]
     V --> W[Record object key in artifacts]
+    W --> K[Keep findings on the run row]
     F --> CW[CloudWatch logs & metrics]
     F -.->|optional, keys permitting| LF[Langfuse trace: generate-briefing]
 ```
@@ -108,12 +109,12 @@ flowchart TD
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
 - **Cover letters.** `packages/agents/src/` holds `assistant`, `brief-writer`,
-  `findings` and `job-scout`, and nothing else. Ticketed as #77 with #80–#87
-  beneath it; `docs/cover-letter-agent-plan.md` is the staged plan. Note the
-  constraint that is invisible from the TypeScript: the dashboard's IAM grant is
-  `prod:resumes` and the worker's is `prod:briefs`, and `infra/aws/tests/`
-  asserts both, so a dashboard-side agent cannot read what the worker wrote
-  without an infrastructure change.
+  `findings`, `job-scout` and `posting-id`, and nothing else. Ticketed as #77
+  with #80–#87 beneath it; `docs/cover-letter-agent-plan.md` is the staged
+  plan. Note the constraint that is invisible from the TypeScript: the
+  dashboard's IAM grant is `prod:resumes` and the worker's is `prod:briefs`,
+  and `infra/aws/tests/` asserts both, so a dashboard-side agent cannot read
+  what the worker wrote without an infrastructure change.
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`

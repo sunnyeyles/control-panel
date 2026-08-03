@@ -49,11 +49,13 @@ travels as JSON in a message and is parsed before the writer sees it — that
 validation is the point of keeping the two agents apart, because data can be
 checked and prose cannot. An empty findings list is a legitimate result.
 
-Findings outlive the run that produced them: `runs.findings` keeps the validated
-record, and the dashboard's Briefings page renders the **Postings** out of it.
-The column is written after the **Brief** exists and never fatally — a run that
-produced a briefing succeeded whatever happened to this record — so a NULL is an
-ordinary state rather than a fault, and every run predating the column is one.
+Findings outlive the run that produced them: `runs.findings` is a nullable JSONB
+column holding the validated record, and the dashboard's Briefings page renders
+the **Postings** out of it. It is written after the **Brief** exists and never
+fatally — a run that produced a brief succeeds whatever happens to this write,
+and a failure only adds a warning to the **Run**. NULL is an ordinary state
+rather than a fault: either a run that failed before the hand-off, or one that
+predates the column.
 
 **Posting**:
 One open job advertisement, with the URL a search actually returned. **Not** a
