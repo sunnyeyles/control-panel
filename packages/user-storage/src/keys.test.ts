@@ -4,6 +4,7 @@ import { InvalidObjectKeyError } from "./errors.ts"
 import {
   buildObjectKey,
   dateSegments,
+  isObjectKeySegment,
   kindPrefix,
   parseObjectKey,
   toGeneratedOn,
@@ -253,5 +254,44 @@ describe("prefixes", () => {
 
   it("validates its segments too", () => {
     expect(() => userPrefix("prod", "../admin")).toThrow(InvalidObjectKeyError)
+  })
+})
+
+/**
+ * The predicate and the key builder must not be able to disagree — the whole
+ * reason the rule is exported at all is so a package minting segment-shaped
+ * identifiers can check its output before a key is ever built from it.
+ */
+describe("isObjectKeySegment", () => {
+  it("agrees with what buildObjectKey accepts", () => {
+    const values = [
+      "a",
+      "1",
+      "user_42",
+      "backend-2026",
+      "2026",
+      "a1b2c3d4e5f60718",
+      "a".repeat(128),
+      "",
+      " ",
+      ".",
+      "..",
+      ".hidden",
+      "alice.",
+      "alice/bob",
+      "alice ",
+      "a".repeat(129),
+    ]
+
+    for (const value of values) {
+      let accepted = true
+      try {
+        buildObjectKey({ ...RESUME, segments: [value] })
+      } catch {
+        accepted = false
+      }
+
+      expect(isObjectKeySegment(value)).toBe(accepted)
+    }
   })
 })

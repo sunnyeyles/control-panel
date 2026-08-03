@@ -19,6 +19,8 @@ export {
   type Posting,
 } from "./findings.ts"
 
+export { postingId } from "./posting-id.ts"
+
 export {
   createJobScout,
   JOB_SCOUT_MAX_LLM_CALLS,

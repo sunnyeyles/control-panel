@@ -51,6 +51,23 @@ const SEGMENT_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9._-]{0,126}[A-Za-z0-9]$|^[A-Za-z0-9]$/
 
 /**
+ * Whether a string may stand as one segment of an object key.
+ *
+ * Exported so a package that *mints* segment-shaped identifiers — the Posting
+ * id in `@workspace/agents` is the first — can assert its output against this
+ * rule instead of restating the pattern. A restated pattern is the drift
+ * described on {@link EXTENSION_SOURCE}, caught late and at the wrong layer:
+ * the id would look fine everywhere except the moment a key is built from it.
+ *
+ * A predicate rather than the regex itself, because the shape is this module's
+ * business and an exported `RegExp` is an invitation to compose one that means
+ * something slightly different.
+ */
+export function isObjectKeySegment(value: string): boolean {
+  return typeof value === "string" && SEGMENT_PATTERN.test(value)
+}
+
+/**
  * The extension half of a stored object's address, including its dot.
  *
  * Exported as the pattern *source* rather than a compiled `RegExp` because the
@@ -222,7 +239,7 @@ function assertExtension(kind: ObjectKind, value: string): string {
 }
 
 function assertSegment(value: string, field: string): string {
-  if (typeof value !== "string" || !SEGMENT_PATTERN.test(value)) {
+  if (!isObjectKeySegment(value)) {
     throw new InvalidObjectKeyError(
       `${field} must be 1-128 characters of A-Z, a-z, 0-9, dot, dash or underscore, starting and ending alphanumeric (got ${JSON.stringify(value)}).`
     )

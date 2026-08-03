@@ -91,14 +91,15 @@ Tests are their own task, and a thin one:
 pnpm test        # turbo test
 ```
 
-**Only five workspaces have tests** — `@workspace/dashboard`,
-`@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools` and
-`@workspace/briefing-worker`. Vitest is a devDependency of those alone; `turbo
-test` is a no-op in the other six. Do not assume a package is covered because
-the command exits 0. Adding tests to another workspace means adding `vitest` to
-it and a `test` script — the `test` task in `turbo.json` is already there.
+**Only six workspaces have tests** — `@workspace/dashboard`,
+`@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools`,
+`@workspace/agents` and `@workspace/briefing-worker`. Vitest is a devDependency
+of those alone; `turbo test` is a no-op in the other five. Do not assume a
+package is covered because the command exits 0. Adding tests to another
+workspace means adding `vitest` to it and a `test` script — the `test` task in
+`turbo.json` is already there.
 
-In the four that emit `dist/` the same arrangement repeats and is deliberate:
+In the five that emit `dist/` the same arrangement repeats and is deliberate:
 `src/**/*.test.ts` is excluded from `tsconfig.json` so tests never reach
 `dist/`, and a `tsconfig.test.json` covers them with `noEmit` because Vitest
 transpiles without typechecking. `typecheck` runs both. The dashboard needs

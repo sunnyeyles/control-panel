@@ -63,6 +63,7 @@ export {
 export {
   buildObjectKey,
   dateSegments,
+  isObjectKeySegment,
   kindPrefix,
   parseObjectKey,
   toGeneratedOn,
