@@ -2,32 +2,33 @@
  * Postgres for scheduling and provenance — jobs, their runs, and pointers to
  * what those runs produced.
  *
- * Compose it once, per invocation, at the composition root:
+ * Compose a client once, at the composition root:
  *
  * ```ts
- * const db = createDb()
+ * const prisma = createPrismaClient()
  * try {
- *   for (const job of await db.jobs.dueJobs()) {
- *     const slot = await db.jobs.claim(job)
- *     if (!slot) continue          // someone else has it — skip entirely
+ *   for (const job of await dueJobs(prisma)) {
+ *     const slot = await claimJob(prisma, job)
+ *     if (!slot) continue
  *     // …run it…
- *     await db.runs.finish(slot.runId)
+ *     await finishRun(prisma, slot.runId)
  *   }
  * } finally {
- *   await db.close()
+ *   await prisma.$disconnect()
  * }
  * ```
  *
- * Everything downstream should take a `JobStore`, `RunStore` or `ArtifactStore`
- * as a parameter. That is what keeps every line of SQL — and the `pg` import —
- * inside this package, which is the whole reason an ORM can still be chosen
- * later without touching a single caller.
+ * Domain helpers (`claimJob`, `createJob`, …) own the concurrency and schedule
+ * invariants. Everything else is ordinary Prisma Client usage against the
+ * generated models.
  *
  * Individual modules are importable directly:
  * `@workspace/db/schedule` gets `computeNextRunAt` without pulling in the
  * driver at all.
  */
-export { createDb, type Db } from "./db.ts"
+export { createPrismaClient, type PrismaClient } from "./client.ts"
+
+export { Prisma } from "./generated/prisma/client.ts"
 
 export {
   readDatabaseConfig,
@@ -37,43 +38,47 @@ export {
   type DatabaseConfig,
 } from "./config.ts"
 
-export { createUserStore, type UserStore } from "./users.ts"
+export { ensureUserForAuth } from "./users.ts"
 
 export {
-  createJobStore,
+  claimJob,
+  createJob,
+  dueJobs,
+  pauseJob,
+  resumeJob,
+  updateJobSchedule,
   type ClaimedSlot,
-  type JobStore,
+  type DueJob,
   type NewJob,
 } from "./jobs.ts"
 
-export { createRunStore, type RunStore } from "./runs.ts"
+export { failRun, finishRun, startAdHocRun } from "./runs.ts"
 
-export { createArtifactStore, type ArtifactStore } from "./artifacts.ts"
+export {
+  artifactsForRun,
+  latestArtifactForJob,
+  recordArtifact,
+} from "./artifacts.ts"
 
 export { computeNextRunAt, isValidSchedule } from "./schedule.ts"
 
-export {
-  runMigrations,
-  type MigrationsResult,
-  type RunMigrationsOptions,
-} from "./migrate.ts"
-
 export type {
   Artifact,
-  DueJob,
   Job,
   JobConfig,
   Run,
   RunFailure,
   RunStatus,
   User,
-} from "./rows.ts"
+} from "./types.ts"
+
+export { asJobConfig, asRunFailure } from "./types.ts"
 
 export {
   DatabaseUnavailableError,
   DbError,
   InvalidScheduleError,
   isDbError,
-  MigrationError,
+  isUniqueViolation,
   type DbErrorCode,
 } from "./errors.ts"

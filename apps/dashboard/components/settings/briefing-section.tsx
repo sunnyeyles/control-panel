@@ -1,7 +1,7 @@
 import { CreateBriefingForm } from "@/components/settings/create-briefing-form"
 import { JobEnabledSwitch } from "@/components/settings/job-enabled-switch"
 import { JobScheduleForm } from "@/components/settings/job-schedule-form"
-import { getDb } from "@/lib/db"
+import { getPrisma } from "@/lib/db"
 import {
   toBriefingSummary,
   type BriefingSummary,
@@ -16,7 +16,10 @@ import { Badge } from "@workspace/ui/components/badge"
  * why that boundary matters.
  */
 export async function BriefingSection({ userId }: { userId: string }) {
-  const jobs = await getDb().jobs.listForUser(userId)
+  const jobs = await getPrisma().job.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  })
   const briefings = jobs.map(toBriefingSummary)
 
   return (

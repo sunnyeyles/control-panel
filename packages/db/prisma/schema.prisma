@@ -1,0 +1,79 @@
+// Application tables only. Neon Auth lives in `neon_auth` and is never modeled
+// here — `users.auth_user_id` is a plain text column on purpose, not an FK.
+//
+// Partial indexes and CHECK constraints that Prisma cannot express live in the
+// initial migration SQL beside this schema. Do not "tidy" them into full
+// unique constraints: ad-hoc runs (`scheduled_for IS NULL`) must stay unlimited.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Better Auth nanoids — text, not uuid. Nullable so unlinked (worker-owned)
+  // users remain legal; UNIQUE still maps one auth identity to at most one row.
+  authUserId String?  @unique @map("auth_user_id")
+
+  jobs Job[]
+
+  @@map("users")
+}
+
+model Job {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  name             String
+  config           Json      @default("{}")
+  scheduleCron     String    @map("schedule_cron")
+  scheduleTimezone String    @default("UTC") @map("schedule_timezone")
+  // NULL means not scheduled (paused or retired). There is no `enabled` column.
+  nextRunAt        DateTime? @map("next_run_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  runs Run[]
+
+  @@unique([userId, name])
+  @@map("jobs")
+}
+
+model Run {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId        String    @map("job_id") @db.Uuid
+  // NULL means ad-hoc. Uniqueness of scheduled slots is a *partial* unique
+  // index in the migration SQL — not a table unique — so unlimited NULLs stay
+  // legal and immune to a later NULLS NOT DISTINCT tidy.
+  scheduledFor DateTime? @map("scheduled_for") @db.Timestamptz(6)
+  // text + CHECK in migration SQL rather than a Postgres enum.
+  status       String
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt   DateTime? @map("finished_at") @db.Timestamptz(6)
+  failure      Json?
+
+  job       Job        @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  artifacts Artifact[]
+
+  @@index([jobId, startedAt(sort: Desc)], map: "runs_job_started_at_idx")
+  @@map("runs")
+}
+
+model Artifact {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId     String   @map("run_id") @db.Uuid
+  // S3 object key. CHECK in migration SQL rejects URL schemes and leading /.
+  objectKey String   @unique @map("object_key")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@index([runId], map: "artifacts_run_id_idx")
+  @@map("artifacts")
+}

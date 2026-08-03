@@ -3,12 +3,7 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
-import type {
-  Artifact,
-  ArtifactStore,
-  ClaimedSlot,
-  DueJob,
-} from "@workspace/db"
+import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
 import type { BriefStore, NewBrief, StoredBrief } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -31,7 +26,7 @@ const SLOT: ClaimedSlot = {
   nextRunAt: new Date("2026-07-29T23:30:00.000Z"),
 }
 
-const JOB: DueJob = {
+const JOB = {
   id: "22222222-2222-4222-8222-222222222222",
   userId: "33333333-3333-4333-8333-333333333333",
   name: "daily job search",
@@ -44,7 +39,7 @@ const JOB: DueJob = {
   nextRunAt: SLOT.scheduledFor,
   createdAt: new Date("2026-07-01T00:00:00.000Z"),
   updatedAt: new Date("2026-07-01T00:00:00.000Z"),
-}
+} as DueJob
 
 const FINDINGS = {
   postings: [
@@ -102,7 +97,7 @@ function writerReturning(markdown: string) {
 }
 
 let briefs: BriefStore
-let artifacts: ArtifactStore
+let recordArtifact: (runId: string, objectKey: string) => Promise<Artifact>
 let puts: NewBrief[]
 let recorded: Array<{ runId: string; objectKey: string }>
 
@@ -134,13 +129,12 @@ beforeEach(() => {
     list: async () => [],
   }
 
-  artifacts = {
-    record: async (runId: string, objectKey: string): Promise<Artifact> => {
-      recorded.push({ runId, objectKey })
-      return { id: "a", runId, objectKey, createdAt: new Date() }
-    },
-    forRun: async () => [],
-    latestForJob: async () => undefined,
+  recordArtifact = async (
+    runId: string,
+    objectKey: string
+  ): Promise<Artifact> => {
+    recorded.push({ runId, objectKey })
+    return { id: "a", runId, objectKey, createdAt: new Date() }
   }
 })
 
@@ -149,7 +143,7 @@ function run(overrides: Partial<Parameters<typeof runBriefing>[0]> = {}) {
     job: JOB,
     slot: SLOT,
     briefs,
-    artifacts,
+    recordArtifact,
     createScout: scoutReturning(JSON.stringify(FINDINGS)),
     createWriter: writerReturning("# Roles for you\n\nOne match."),
     ...overrides,

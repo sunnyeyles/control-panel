@@ -2,7 +2,7 @@ import {
   GetSecretValueCommand,
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager"
-import { createDb } from "@workspace/db"
+import { createPrismaClient } from "@workspace/db"
 import {
   createBriefStore,
   createS3UserObjectStore,
@@ -25,11 +25,12 @@ import { runTick } from "./run-tick.ts"
  * scope the natural cache and holds this to one Secrets Manager call per secret
  * per cold start rather than one per invocation.
  *
- * Note what is deliberately *not* cached this way: the database connection. A
+ * Note what is deliberately *not* cached this way: the database client. A
  * secret is a string and stays valid; a socket does not. The gap between ticks
  * is an hour and Neon autosuspends after five minutes, so a cached connection
  * is dead by the next invocation as the default outcome — which is why
- * `createDb()` is called per invocation below and closed in a `finally`.
+ * `createPrismaClient()` is called per invocation below and disconnected in a
+ * `finally`.
  */
 const loaded = new Set<string>()
 
@@ -123,9 +124,9 @@ async function loadSecrets(): Promise<void> {
 export const handler = async (): Promise<void> => {
   await loadSecrets()
 
-  // One connection per invocation, closed at the end. Not module scope: see the
-  // note above.
-  const db = createDb()
+  // One client per invocation, disconnected at the end. Not module scope: see
+  // the note above.
+  const prisma = createPrismaClient()
 
   // Built here rather than at module scope for the same reason the agents are
   // factories: constructing the store reads `USER_STORAGE_BUCKET_NAME` and
@@ -134,8 +135,8 @@ export const handler = async (): Promise<void> => {
   const briefs = createBriefStore(createS3UserObjectStore())
 
   try {
-    await runTick(db, briefs)
+    await runTick(prisma, briefs)
   } finally {
-    await db.close()
+    await prisma.$disconnect()
   }
 }

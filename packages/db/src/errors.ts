@@ -4,11 +4,9 @@
  * The `code` discriminant is the part callers should branch on. `instanceof`
  * works too, but it breaks the moment two copies of this package end up in a
  * dependency graph, and a bundled worker is exactly where that happens — so the
- * string is the contract and the classes are a convenience. Same arrangement as
- * `@workspace/user-storage`, and for the same reason.
+ * string is the contract and the classes are a convenience.
  */
-export type DbErrorCode =
-  "invalid_schedule" | "migration_failed" | "database_unavailable"
+export type DbErrorCode = "invalid_schedule" | "database_unavailable"
 
 /** Base for everything below. Never thrown directly. */
 export abstract class DbError extends Error {
@@ -23,43 +21,21 @@ export abstract class DbError extends Error {
 /**
  * A cron expression or timezone cannot produce a next occurrence.
  *
- * This is the load-bearing one, because the parse *is* the validation: there is
- * no CHECK constraint on `schedule_cron` and there could not be one — Postgres
- * cannot parse cron without an extension. An expression that reaches the
- * database has already produced a `next_run_at`, so a job cannot be stored with
- * a schedule that will never fire.
+ * The parse *is* the validation: there is no CHECK constraint on
+ * `schedule_cron`. An expression that reaches the database has already produced
+ * a `next_run_at`, so a job cannot be stored with a schedule that will never
+ * fire.
  */
 export class InvalidScheduleError extends DbError {
   readonly code = "invalid_schedule" as const
 }
 
 /**
- * A migration file failed to apply.
- *
- * Its own transaction is already rolled back by the time this is thrown, and
- * the runner stops rather than trying the next file — a schema half-applied in
- * filename order is worse than one that stopped somewhere nameable.
- */
-export class MigrationError extends DbError {
-  readonly code = "migration_failed" as const
-
-  constructor(
-    readonly filename: string,
-    options?: { cause?: unknown }
-  ) {
-    super(
-      `Migration ${filename} failed and was rolled back. Migrations are forward-only, so fix the file or write the next one; nothing after ${filename} was applied.`,
-      options
-    )
-  }
-}
-
-/**
  * The database refused or could not be reached.
  *
- * Wraps connection, permission and transport faults alike. The distinction that
- * matters to a caller is "the data is wrong" versus "the database is", and this
- * is the second one; `cause` carries the driver error for logging.
+ * Wraps connection, permission and transport faults alike. Constraint
+ * violations are not remapped — they keep Prisma's / Postgres's own codes so a
+ * duplicate name can still be recognised as `P2002` / `23505`.
  */
 export class DatabaseUnavailableError extends DbError {
   readonly code = "database_unavailable" as const
@@ -70,10 +46,19 @@ export function isDbError(error: unknown): error is DbError {
   return error instanceof Error && "code" in error && isErrorCode(error.code)
 }
 
+/**
+ * Prisma unique-constraint violations (`P2002`) and raw Postgres `23505`.
+ *
+ * Dashboard create actions branch on this: a duplicate `(user_id, name)` is a
+ * user-facing message, not an opaque digest.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+
+  const code = (error as { code?: unknown }).code
+  return code === "P2002" || code === "23505"
+}
+
 function isErrorCode(value: unknown): value is DbErrorCode {
-  return (
-    value === "invalid_schedule" ||
-    value === "migration_failed" ||
-    value === "database_unavailable"
-  )
+  return value === "invalid_schedule" || value === "database_unavailable"
 }

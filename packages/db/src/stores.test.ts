@@ -1,107 +1,102 @@
 import { randomUUID } from "node:crypto"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 
+import pg from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
-import { createConnection, type Connection } from "./client.ts"
-import type { DatabaseConfig } from "./config.ts"
-import { createDb, type Db } from "./db.ts"
-import { runMigrations } from "./migrate.ts"
-import type { DueJob } from "./rows.ts"
+import {
+  artifactsForRun,
+  claimJob,
+  createJob,
+  createPrismaClient,
+  dueJobs,
+  ensureUserForAuth,
+  failRun,
+  finishRun,
+  latestArtifactForJob,
+  pauseJob,
+  recordArtifact,
+  resumeJob,
+  startAdHocRun,
+  updateJobSchedule,
+  type DueJob,
+  type PrismaClient,
+} from "./index.ts"
 
 /**
  * The half of this package that needs Postgres to be Postgres.
  *
  * Everything asserted below is a property of the database rather than of the
  * code — a partial unique index, a CHECK, an `ON CONFLICT` predicate, a
- * conditional `UPDATE` under concurrency. A fake cannot enforce any of them, so
- * mocking `pg` here would assert only that the code sends the SQL it sends.
+ * conditional `UPDATE` under concurrency. A fake cannot enforce any of them.
  *
  * Skipped when `DATABASE_URL_UNPOOLED` is unset, so `pnpm test` stays runnable
  * with no credentials. In CI a disposable Neon branch supplies it.
  *
- * The direct endpoint, not the pooled one: the migration runner takes a
- * session-level advisory lock, which PgBouncer in transaction mode does not
- * carry across statements.
+ * The direct endpoint, not the pooled one. Deploy uses `prisma migrate deploy`;
+ * this suite applies the same SQL into a throwaway schema via `search_path` so
+ * it cannot touch data it did not write. Prisma Migrate's emptiness check looks
+ * at the whole database, so `migrate deploy` cannot target an isolated schema
+ * beside an existing `public`.
  */
 const CONNECTION_STRING = process.env.DATABASE_URL_UNPOOLED?.trim()
 
-/**
- * Every test runs inside a schema of its own, created here and dropped at the
- * end.
- *
- * Not truncation, and deliberately: whoever runs this locally may well have
- * `DATABASE_URL_UNPOOLED` pointing at a database with data in it, and a test
- * suite that empties tables is one misconfigured variable away from being
- * destructive. A private schema cannot reach anything it did not create.
- */
 const SCHEMA = `db_test_${randomUUID().replaceAll("-", "")}`
+
+const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 
 /**
  * Postgres resolves unqualified names through `search_path`, so pointing it at
- * the throwaway schema is what makes the migration files — which name no schema
+ * the throwaway schema is what makes the migration SQL — which names no schema
  * — land there.
- *
- * Built by hand rather than with `URLSearchParams`, which encodes a space as
- * `+`; the connection-string parser decodes with `decodeURIComponent` and would
- * hand the server a literal plus.
  */
-function withSearchPath(connectionString: string, schema: string): string {
-  const separator = connectionString.includes("?") ? "&" : "?"
-  return `${connectionString}${separator}options=-c%20search_path%3D${schema}`
-}
-
 const describeWithDatabase = CONNECTION_STRING ? describe : describe.skip
 
 describeWithDatabase("against a real database", () => {
-  // Built in `beforeAll`, not here: `describe.skip` still runs this callback to
-  // register the skipped tests, so anything touching the (absent) connection
-  // string at collection time would throw instead of skipping.
-  let config: DatabaseConfig
-  let admin: Connection
-  let db: Db
+  let baseUrl: string
+  let admin: pg.Client
+  let prisma: PrismaClient
   let userId: string
 
   beforeAll(async () => {
-    const base = CONNECTION_STRING as string
-    config = { connectionString: withSearchPath(base, SCHEMA) }
+    baseUrl = CONNECTION_STRING as string
 
-    admin = createConnection({ connectionString: base })
+    admin = new pg.Client({ connectionString: baseUrl })
+    await admin.connect()
     await admin.query(`create schema "${SCHEMA}"`)
 
-    // Acceptance: applies cleanly from an empty database.
-    const first = await runMigrations({ config })
-    expect(first.applied).toContain("0001_init.sql")
-    expect(first.skipped).toEqual([])
+    const sql = await readFile(
+      join(packageRoot, "prisma/migrations/0001_init/migration.sql"),
+      "utf8"
+    )
 
-    // Acceptance: running twice is a no-op.
-    const second = await runMigrations({ config })
-    expect(second.applied).toEqual([])
-    expect(second.skipped).toContain("0001_init.sql")
+    // Pin search_path so unqualified DDL lands in the throwaway schema.
+    const migrator = new pg.Client({ connectionString: baseUrl })
+    await migrator.connect()
+    try {
+      await migrator.query(`SET search_path TO "${SCHEMA}"`)
+      await migrator.query(sql)
+    } finally {
+      await migrator.end()
+    }
 
-    db = createDb(config)
-    userId = (await db.users.create()).id
-  })
+    prisma = createPrismaClient({ connectionString: baseUrl, schema: SCHEMA })
+    const user = await prisma.user.create({ data: {} })
+    userId = user.id
+  }, 120_000)
 
   afterAll(async () => {
-    await db?.close()
+    await prisma?.$disconnect()
     await admin?.query(`drop schema if exists "${SCHEMA}" cascade`)
-    await admin?.close()
+    await admin?.end()
   })
 
-  /**
-   * The slot every fixture job is overdue for.
-   *
-   * Relative to the wall clock rather than a literal date, and that matters: a
-   * hard-coded instant is only in the past until the suite is run on a day that
-   * has caught up with it, and a slot that is not actually overdue makes the
-   * claim's advance a silent no-op — which is a test that passes for the wrong
-   * reason on one day and fails confusingly on another.
-   */
   const OVERDUE_BY_DAYS = 7
 
-  /** A job that is genuinely overdue, which is the state `claim()` expects. */
   async function dueJob(name: string): Promise<DueJob> {
-    const job = await db.jobs.create({
+    const created = await createJob(prisma, {
       userId,
       name,
       scheduleCron: "0 9 * * *",
@@ -111,14 +106,12 @@ describeWithDatabase("against a real database", () => {
 
     const overdue = new Date(Date.now() - OVERDUE_BY_DAYS * 86_400_000)
 
-    // Reach past the store on purpose: nothing in the public surface can put a
-    // job's slot in the past, because nothing legitimately should.
     await admin.query(
       `update "${SCHEMA}".jobs set next_run_at = $2 where id = $1`,
-      [job.id, overdue]
+      [created.id, overdue]
     )
 
-    const due = await db.jobs.get(job.id)
+    const due = await prisma.job.findUnique({ where: { id: created.id } })
     if (!due?.nextRunAt) throw new Error("fixture job is not due")
     if (due.nextRunAt.getTime() >= Date.now()) {
       throw new Error("fixture job's slot is not in the past")
@@ -127,9 +120,8 @@ describeWithDatabase("against a real database", () => {
     return { ...due, nextRunAt: due.nextRunAt }
   }
 
-  /** Claim, and fail the test rather than the next statement if it did not. */
   async function claimOrFail(job: DueJob) {
-    const slot = await db.jobs.claim(job)
+    const slot = await claimJob(prisma, job)
     if (!slot) throw new Error(`claim of ${job.name} returned no slot`)
     return slot
   }
@@ -138,14 +130,15 @@ describeWithDatabase("against a real database", () => {
     it("hands one slot to exactly one of two concurrent claimants", async () => {
       const job = await dueJob("concurrent-claim")
 
-      // Two connections, because two ticks are two processes. One connection
-      // would serialise the transactions and prove nothing about the race.
-      const rival = createDb(config)
+      const rival = createPrismaClient({
+        connectionString: baseUrl,
+        schema: SCHEMA,
+      })
 
       try {
         const [mine, theirs] = await Promise.all([
-          db.jobs.claim(job),
-          rival.jobs.claim(job),
+          claimJob(prisma, job),
+          claimJob(rival, job),
         ])
 
         const winners = [mine, theirs].filter((slot) => slot !== undefined)
@@ -154,22 +147,24 @@ describeWithDatabase("against a real database", () => {
           job.nextRunAt.toISOString()
         )
 
-        // And exactly one run row exists for that occurrence.
-        const runs = await db.runs.recent(job.id)
+        const runs = await prisma.run.findMany({
+          where: { jobId: job.id },
+          orderBy: { startedAt: "desc" },
+        })
         expect(runs).toHaveLength(1)
         expect(runs[0]?.status).toBe("running")
       } finally {
-        await rival.close()
+        await rival.$disconnect()
       }
     })
 
     it("advances next_run_at past the claimed slot", async () => {
       const job = await dueJob("advances-slot")
 
-      const slot = await db.jobs.claim(job)
+      const slot = await claimJob(prisma, job)
       expect(slot).toBeDefined()
 
-      const after = await db.jobs.get(job.id)
+      const after = await prisma.job.findUnique({ where: { id: job.id } })
       expect(after?.nextRunAt?.getTime()).toBe(slot?.nextRunAt.getTime())
       expect(after?.nextRunAt?.getTime()).toBeGreaterThan(
         job.nextRunAt.getTime()
@@ -177,14 +172,7 @@ describeWithDatabase("against a real database", () => {
     })
 
     it("advances the slot even when claimed before it is due", async () => {
-      // `create()` sets `next_run_at` to the next *future* occurrence, so this
-      // job is deliberately not due. `dueJobs()` would never return it, but a
-      // caller can still hand it to `claim()` — and if the advance were
-      // computed only from `now`, the next occurrence after `now` would be this
-      // very slot. The guarded UPDATE would then write the value it matched on,
-      // leaving the job claimed, its slot unmoved, and every later tick turned
-      // away by the unique index. Wedged, and looking due the whole time.
-      const job = await db.jobs.create({
+      const job = await createJob(prisma, {
         userId,
         name: "not-yet-due",
         scheduleCron: "0 9 * * *",
@@ -198,23 +186,22 @@ describeWithDatabase("against a real database", () => {
 
       expect(slot.nextRunAt.getTime()).toBeGreaterThan(job.nextRunAt.getTime())
 
-      const after = await db.jobs.get(job.id)
+      const after = await prisma.job.findUnique({ where: { id: job.id } })
       expect(after?.nextRunAt?.getTime()).toBe(slot.nextRunAt.getTime())
     })
 
     it("refuses a second claim of the same observed slot", async () => {
       const job = await dueJob("second-claim")
 
-      expect(await db.jobs.claim(job)).toBeDefined()
-      // Same stale `job` object, so the guarded UPDATE sees a moved row.
-      expect(await db.jobs.claim(job)).toBeUndefined()
+      expect(await claimJob(prisma, job)).toBeDefined()
+      expect(await claimJob(prisma, job)).toBeUndefined()
     })
 
     it("does not select an unscheduled job", async () => {
       const job = await dueJob("paused-job")
-      await db.jobs.pause(job.id)
+      await pauseJob(prisma, job.id)
 
-      const due = await db.jobs.dueJobs(new Date("2027-01-01T00:00:00.000Z"))
+      const due = await dueJobs(prisma, new Date("2027-01-01T00:00:00.000Z"))
       expect(due.map((row) => row.id)).not.toContain(job.id)
     })
   })
@@ -222,21 +209,18 @@ describeWithDatabase("against a real database", () => {
   describe("ad-hoc runs", () => {
     it("allows any number of them alongside unique scheduled ones", async () => {
       const job = await dueJob("ad-hoc")
-      await db.jobs.claim(job)
+      await claimJob(prisma, job)
 
-      // Postgres treats NULLs as distinct inside a unique index, which is what
-      // the partial index depends on. Three manual runs, no collision.
-      const first = await db.runs.startAdHoc(job.id)
-      const second = await db.runs.startAdHoc(job.id)
-      const third = await db.runs.startAdHoc(job.id)
+      const first = await startAdHocRun(prisma, job.id)
+      const second = await startAdHocRun(prisma, job.id)
+      const third = await startAdHocRun(prisma, job.id)
 
       expect(new Set([first.id, second.id, third.id]).size).toBe(3)
       for (const run of [first, second, third]) {
         expect(run.scheduledFor).toBeNull()
       }
 
-      // The scheduled slot is still unique.
-      expect(await db.jobs.claim(job)).toBeUndefined()
+      expect(await claimJob(prisma, job)).toBeUndefined()
     })
   })
 
@@ -245,14 +229,11 @@ describeWithDatabase("against a real database", () => {
       const job = await dueJob("terminal-run")
       const { runId } = await claimOrFail(job)
 
-      expect(await db.runs.finish(runId)).toBe(true)
+      expect(await finishRun(prisma, runId)).toBe(true)
+      expect(await failRun(prisma, runId, { reason: "too late" })).toBe(false)
+      expect(await finishRun(prisma, runId)).toBe(false)
 
-      // Both return false rather than throwing: a lost race, not an error to
-      // retry. The conditional UPDATE matched no row.
-      expect(await db.runs.fail(runId, { reason: "too late" })).toBe(false)
-      expect(await db.runs.finish(runId)).toBe(false)
-
-      const run = await db.runs.get(runId)
+      const run = await prisma.run.findUnique({ where: { id: runId } })
       expect(run?.status).toBe("succeeded")
       expect(run?.failure).toBeNull()
       expect(run?.finishedAt).not.toBeNull()
@@ -262,9 +243,9 @@ describeWithDatabase("against a real database", () => {
       const job = await dueJob("partial-success")
       const { runId } = await claimOrFail(job)
 
-      await db.runs.finish(runId, { sources: { example: "timed out" } })
+      await finishRun(prisma, runId, { sources: { example: "timed out" } })
 
-      const run = await db.runs.get(runId)
+      const run = await prisma.run.findUnique({ where: { id: runId } })
       expect(run?.status).toBe("succeeded")
       expect(run?.failure).toEqual({ sources: { example: "timed out" } })
     })
@@ -276,10 +257,10 @@ describeWithDatabase("against a real database", () => {
       const { runId } = await claimOrFail(job)
 
       const key = `prod/${userId}/briefs/2026/07/28/morning.md`
-      const artifact = await db.artifacts.record(runId, key)
+      const artifact = await recordArtifact(prisma, runId, key)
 
       expect(artifact.objectKey).toBe(key)
-      expect(await db.artifacts.forRun(runId)).toHaveLength(1)
+      expect(await artifactsForRun(prisma, runId)).toHaveLength(1)
     })
 
     it("rejects a URL", async () => {
@@ -287,7 +268,8 @@ describeWithDatabase("against a real database", () => {
       const { runId } = await claimOrFail(job)
 
       await expect(
-        db.artifacts.record(
+        recordArtifact(
+          prisma,
           runId,
           `https://bucket.s3.amazonaws.com/prod/${userId}/briefs/2026/07/28/morning.md`
         )
@@ -299,7 +281,7 @@ describeWithDatabase("against a real database", () => {
       const { runId } = await claimOrFail(job)
 
       await expect(
-        db.artifacts.record(runId, `/prod/${userId}/briefs/2026/07/28/x.md`)
+        recordArtifact(prisma, runId, `/prod/${userId}/briefs/2026/07/28/x.md`)
       ).rejects.toThrow()
     })
 
@@ -308,26 +290,23 @@ describeWithDatabase("against a real database", () => {
       const { runId } = await claimOrFail(job)
 
       const key = `prod/${userId}/briefs/2026/07/29/morning.md`
-      await db.artifacts.record(runId, key)
+      await recordArtifact(prisma, runId, key)
 
-      await expect(db.artifacts.record(runId, key)).rejects.toThrow()
+      await expect(recordArtifact(prisma, runId, key)).rejects.toThrow()
     })
 
     it("finds the latest artifact of a successful run", async () => {
       const job = await dueJob("artifact-latest")
 
       const older = await claimOrFail(job)
-      await db.artifacts.record(
+      await recordArtifact(
+        prisma,
         older.runId,
         `prod/${userId}/briefs/2026/07/30/a.md`
       )
-      await db.runs.finish(older.runId)
+      await finishRun(prisma, older.runId)
 
-      // Re-read rather than reusing `job`: the first claim advanced the slot,
-      // so the stale object would be turned away by the guarded UPDATE. That
-      // the re-read job is still claimable is itself the assertion that the
-      // claim moved `next_run_at` forward.
-      const refreshed = await db.jobs.get(job.id)
+      const refreshed = await prisma.job.findUnique({ where: { id: job.id } })
       if (!refreshed?.nextRunAt) throw new Error("job lost its slot")
 
       const newer = await claimOrFail({
@@ -335,10 +314,10 @@ describeWithDatabase("against a real database", () => {
         nextRunAt: refreshed.nextRunAt,
       })
       const latestKey = `prod/${userId}/briefs/2026/07/31/b.md`
-      await db.artifacts.record(newer.runId, latestKey)
-      await db.runs.finish(newer.runId)
+      await recordArtifact(prisma, newer.runId, latestKey)
+      await finishRun(prisma, newer.runId)
 
-      expect((await db.artifacts.latestForJob(job.id))?.objectKey).toBe(
+      expect((await latestArtifactForJob(prisma, job.id))?.objectKey).toBe(
         latestKey
       )
     })
@@ -348,23 +327,21 @@ describeWithDatabase("against a real database", () => {
     it("recomputes next_run_at when the cron changes", async () => {
       const job = await dueJob("schedule-edit")
 
-      const edited = await db.jobs.updateSchedule(job.id, {
+      const edited = await updateJobSchedule(prisma, job.id, {
         cron: "0 17 * * *",
         timezone: "UTC",
       })
 
       expect(edited?.scheduleCron).toBe("0 17 * * *")
-      // The old slot is gone, which is the failure this exists to prevent: a
-      // job that keeps firing on the cron it no longer has.
       expect(edited?.nextRunAt?.getTime()).not.toBe(job.nextRunAt.getTime())
       expect(edited?.nextRunAt?.getUTCHours()).toBe(17)
     })
 
     it("leaves a paused job paused", async () => {
       const job = await dueJob("paused-edit")
-      await db.jobs.pause(job.id)
+      await pauseJob(prisma, job.id)
 
-      const edited = await db.jobs.updateSchedule(job.id, {
+      const edited = await updateJobSchedule(prisma, job.id, {
         cron: "0 17 * * *",
       })
 
@@ -376,11 +353,20 @@ describeWithDatabase("against a real database", () => {
       const job = await dueJob("bad-schedule")
 
       await expect(
-        db.jobs.updateSchedule(job.id, { cron: "not a cron" })
+        updateJobSchedule(prisma, job.id, { cron: "not a cron" })
       ).rejects.toThrow()
 
-      const unchanged = await db.jobs.get(job.id)
+      const unchanged = await prisma.job.findUnique({ where: { id: job.id } })
       expect(unchanged?.scheduleCron).toBe("0 9 * * *")
+    })
+
+    it("puts a paused job back on duty at the next occurrence", async () => {
+      const job = await dueJob("resume-job")
+      await pauseJob(prisma, job.id)
+
+      const resumed = await resumeJob(prisma, job.id)
+      expect(resumed?.nextRunAt).not.toBeNull()
+      expect(resumed?.nextRunAt?.getTime()).toBeGreaterThan(Date.now() - 1000)
     })
   })
 
@@ -388,21 +374,22 @@ describeWithDatabase("against a real database", () => {
     it("mints one user for an identity it has never seen", async () => {
       const authUserId = `auth_${randomUUID()}`
 
-      const user = await db.users.ensureForAuthUser(authUserId)
+      const user = await ensureUserForAuth(prisma, authUserId)
 
       expect(user.id).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
       )
-      // The uuid, not the upstream id, is what becomes an S3 key segment.
       expect(user.id).not.toBe(authUserId)
-      expect(await db.users.get(user.id)).toBeDefined()
+      expect(
+        await prisma.user.findUnique({ where: { id: user.id } })
+      ).toBeDefined()
     })
 
     it("returns the same user on every later request", async () => {
       const authUserId = `auth_${randomUUID()}`
 
-      const first = await db.users.ensureForAuthUser(authUserId)
-      const second = await db.users.ensureForAuthUser(authUserId)
+      const first = await ensureUserForAuth(prisma, authUserId)
+      const second = await ensureUserForAuth(prisma, authUserId)
 
       expect(second.id).toBe(first.id)
       expect(second.createdAt.getTime()).toBe(first.createdAt.getTime())
@@ -411,15 +398,15 @@ describeWithDatabase("against a real database", () => {
     it("mints once for two concurrent first requests", async () => {
       const authUserId = `auth_${randomUUID()}`
 
-      // Two connections, because two in-flight requests are two connections.
-      // This is the normal case on first sign-in, not an edge one: the browser
-      // fetches the page and its data at the same moment.
-      const rival = createDb(config)
+      const rival = createPrismaClient({
+        connectionString: baseUrl,
+        schema: SCHEMA,
+      })
 
       try {
         const [mine, theirs] = await Promise.all([
-          db.users.ensureForAuthUser(authUserId),
-          rival.users.ensureForAuthUser(authUserId),
+          ensureUserForAuth(prisma, authUserId),
+          ensureUserForAuth(rival, authUserId),
         ])
 
         expect(theirs.id).toBe(mine.id)
@@ -430,16 +417,13 @@ describeWithDatabase("against a real database", () => {
         )
         expect(rows[0]?.count).toBe("1")
       } finally {
-        await rival.close()
+        await rival.$disconnect()
       }
     })
 
     it("keeps unlinked users legal, and there can be many", async () => {
-      // `userId` from beforeAll is one already. NULLs are distinct under
-      // UNIQUE, which is what lets the worker keep creating owners that never
-      // sign in.
-      await db.users.create()
-      await db.users.create()
+      await prisma.user.create({ data: {} })
+      await prisma.user.create({ data: {} })
 
       const { rows } = await admin.query<{ count: string }>(
         `select count(*)::text as count from "${SCHEMA}".users where auth_user_id is null`
@@ -449,9 +433,9 @@ describeWithDatabase("against a real database", () => {
 
     it("refuses to point two users at one identity", async () => {
       const authUserId = `auth_${randomUUID()}`
-      await db.users.ensureForAuthUser(authUserId)
+      await ensureUserForAuth(prisma, authUserId)
 
-      const other = await db.users.create()
+      const other = await prisma.user.create({ data: {} })
 
       await expect(
         admin.query(
@@ -470,18 +454,20 @@ describeWithDatabase("against a real database", () => {
         admin.query(`delete from "${SCHEMA}".users where id = $1`, [userId])
       ).rejects.toThrow()
 
-      expect(await db.jobs.get(job.id)).toBeDefined()
+      expect(
+        await prisma.job.findUnique({ where: { id: job.id } })
+      ).toBeDefined()
     })
 
     it("refuses two jobs with the same name for one user", async () => {
-      await db.jobs.create({
+      await createJob(prisma, {
         userId,
         name: "duplicate-name",
         scheduleCron: "0 9 * * *",
       })
 
       await expect(
-        db.jobs.create({
+        createJob(prisma, {
           userId,
           name: "duplicate-name",
           scheduleCron: "0 9 * * *",

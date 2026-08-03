@@ -1,6 +1,10 @@
 import type { CurrentUser } from "@/lib/auth/current-user"
-import type { ClaimedSlot, JobStore, NewJob } from "@workspace/db/jobs"
-import type { DueJob, Job } from "@workspace/db/rows"
+import {
+  InvalidScheduleError,
+  type Job,
+  type NewJob,
+  type PrismaClient,
+} from "@workspace/db"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
@@ -29,6 +33,24 @@ const REFUSED: CurrentUser = {
 
 const ANONYMOUS: CurrentUser = { status: "anonymous" }
 
+const mocks = vi.hoisted(() => ({
+  createJob: vi.fn(),
+  pauseJob: vi.fn(),
+  resumeJob: vi.fn(),
+  updateJobSchedule: vi.fn(),
+}))
+
+vi.mock("@workspace/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@workspace/db")>()
+  return {
+    ...actual,
+    createJob: mocks.createJob,
+    pauseJob: mocks.pauseJob,
+    resumeJob: mocks.resumeJob,
+    updateJobSchedule: mocks.updateJobSchedule,
+  }
+})
+
 function job(overrides: Partial<Job> = {}): Job {
   return {
     id: JOB_ID,
@@ -41,11 +63,11 @@ function job(overrides: Partial<Job> = {}): Job {
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
-  }
+  } as Job
 }
 
-/** Records what it was asked to do, and can be told to fail. */
-class SpyJobStore implements JobStore {
+/** Records what the helpers were asked to do, and backs `job.findUnique`. */
+class SpyDb {
   readonly rows = new Map<string, Job>()
   readonly pauses: string[] = []
   readonly resumes: string[] = []
@@ -66,7 +88,6 @@ class SpyJobStore implements JobStore {
     return this
   }
 
-  /** Everything the store was asked to change, so one assertion covers all three. */
   get mutations(): number {
     return (
       this.pauses.length +
@@ -76,84 +97,73 @@ class SpyJobStore implements JobStore {
     )
   }
 
-  async create(newJob: NewJob): Promise<Job> {
-    if (this.createError) throw this.createError
-    this.creates.push(newJob)
+  asPrisma(): PrismaClient {
+    return {
+      job: {
+        findUnique: async ({ where: { id } }: { where: { id: string } }) =>
+          this.rows.get(id) ?? null,
+      },
+    } as unknown as PrismaClient
+  }
 
-    return job({
-      id: JOB_ID,
-      userId: newJob.userId,
-      name: newJob.name,
-      config: newJob.config ?? {},
-      scheduleCron: newJob.scheduleCron,
-      scheduleTimezone: newJob.scheduleTimezone ?? "UTC",
+  installMocks(): void {
+    mocks.pauseJob.mockImplementation(async (_prisma, id: string) => {
+      if (this.pauseError) throw this.pauseError
+      const row = this.rows.get(id)
+      if (!row) return undefined
+      this.pauses.push(id)
+      return { ...row, nextRunAt: null }
     })
-  }
 
-  async get(id: string): Promise<Job | undefined> {
-    return this.rows.get(id)
-  }
+    mocks.resumeJob.mockImplementation(async (_prisma, id: string) => {
+      if (this.resumeError) throw this.resumeError
+      const row = this.rows.get(id)
+      if (!row) return undefined
+      this.resumes.push(id)
+      return { ...row, nextRunAt: NEXT_RUN }
+    })
 
-  async listForUser(userId: string): Promise<Job[]> {
-    return [...this.rows.values()].filter((row) => row.userId === userId)
-  }
+    mocks.updateJobSchedule.mockImplementation(
+      async (
+        _prisma,
+        id: string,
+        schedule: { cron: string; timezone?: string }
+      ) => {
+        if (this.updateError) throw this.updateError
+        const row = this.rows.get(id)
+        if (!row) return undefined
+        this.scheduleUpdates.push({ id, ...schedule })
+        return { ...row, scheduleCron: schedule.cron }
+      }
+    )
 
-  async dueJobs(): Promise<DueJob[]> {
-    throw new Error("not used")
-  }
-
-  async claim(): Promise<ClaimedSlot | undefined> {
-    throw new Error("not used")
-  }
-
-  async updateSchedule(
-    id: string,
-    schedule: { cron: string; timezone?: string }
-  ): Promise<Job | undefined> {
-    if (this.updateError) throw this.updateError
-
-    const row = this.rows.get(id)
-    if (!row) return undefined
-
-    this.scheduleUpdates.push({ id, ...schedule })
-
-    return { ...row, scheduleCron: schedule.cron }
-  }
-
-  async pause(id: string): Promise<Job | undefined> {
-    if (this.pauseError) throw this.pauseError
-
-    const row = this.rows.get(id)
-    if (!row) return undefined
-
-    this.pauses.push(id)
-
-    return { ...row, nextRunAt: null }
-  }
-
-  async resume(id: string): Promise<Job | undefined> {
-    if (this.resumeError) throw this.resumeError
-
-    const row = this.rows.get(id)
-    if (!row) return undefined
-
-    this.resumes.push(id)
-
-    return { ...row, nextRunAt: NEXT_RUN }
+    mocks.createJob.mockImplementation(async (_prisma, newJob: NewJob) => {
+      if (this.createError) throw this.createError
+      this.creates.push(newJob)
+      return job({
+        id: JOB_ID,
+        userId: newJob.userId,
+        name: newJob.name,
+        config: (newJob.config ?? {}) as Job["config"],
+        scheduleCron: newJob.scheduleCron,
+        scheduleTimezone: newJob.scheduleTimezone ?? "UTC",
+      })
+    })
   }
 }
 
-let store: SpyJobStore
+let store: SpyDb
 
 beforeEach(() => {
-  store = new SpyJobStore().seed(job())
+  store = new SpyDb().seed(job())
+  store.installMocks()
   vi.spyOn(console, "error").mockImplementation(() => {})
 })
 
 function actionsFor(user: CurrentUser) {
   return createJobActions({
     getUser: async () => user,
-    getJobs: () => store,
+    getPrisma: () => store.asPrisma(),
     now: () => NOW,
     newResetKey: () => RESET_KEY,
   })
@@ -189,14 +199,10 @@ describe("the gate", () => {
     await actions.updateJobSchedule(IDLE, scheduleForm())
     await actions.createJob(IDLE, createForm())
 
-    // The property that matters more than any message: nothing was written.
     expect(store.mutations).toBe(0)
   })
 
   it("gives a refused caller the identical state an anonymous one gets", async () => {
-    // The non-disclosure property. A different message would confirm to someone
-    // outside AUTH_ALLOWED_EMAILS that their account exists and is merely
-    // unapproved. Easy to regress by improving the copy, invisible in review.
     const anonymous = await actionsFor(ANONYMOUS).setJobEnabled(
       IDLE,
       enableForm(false)
@@ -207,22 +213,16 @@ describe("the gate", () => {
     )
 
     expect(refused).toEqual(anonymous)
-    // Both say the *same* thing, and specifically the shared constant — the
-    // document actions have asserted this since they were written, and the
-    // briefing actions now share the constant with them, so the property is
-    // worth pinning on both sides rather than trusting the import.
     expect(refused).toMatchObject({ message: NOT_AUTHORIZED })
     expect(store.mutations).toBe(0)
   })
 
   it("treats a thrown getUser as unauthorized rather than propagating it", async () => {
-    // `getCurrentUser` touches the database to map an auth id onto a platform
-    // user. A database blip must not become an unauthenticated write.
     const actions = createJobActions({
       getUser: async () => {
         throw new Error("neon is asleep")
       },
-      getJobs: () => store,
+      getPrisma: () => store.asPrisma(),
     })
 
     const result = await actions.setJobEnabled(IDLE, enableForm(false))
@@ -248,8 +248,6 @@ describe("ownership", () => {
       enableForm(false)
     )
 
-    // Distinct messages would turn a form that takes a uuid into an oracle for
-    // whether another user's row exists.
     expect(notMine).toEqual(missing)
     expect(store.mutations).toBe(0)
   })
@@ -303,8 +301,6 @@ describe("setJobEnabled", () => {
   })
 
   it("rejects an `enabled` value that is neither true nor false", async () => {
-    // The switch posts the transition explicitly rather than relying on
-    // checkbox semantics, so an absent or odd value is a bug, not "off".
     const result = await actionsFor(SIGNED_IN).setJobEnabled(
       IDLE,
       form({ jobId: JOB_ID, enabled: "on" })
@@ -328,8 +324,6 @@ describe("setJobEnabled", () => {
 
 describe("updateJobSchedule", () => {
   it("derives the cron from the interval and always stores UTC", async () => {
-    // The client posts an interval, never an expression — so there is no way to
-    // store a schedule the picker could not have produced.
     const result = await actionsFor(SIGNED_IN).updateJobSchedule(
       IDLE,
       scheduleForm()
@@ -367,8 +361,6 @@ describe("updateJobSchedule", () => {
   })
 
   it("says the briefing is still off when rescheduling a paused job", async () => {
-    // `updateSchedule` keeps a paused job paused, so the copy has to say so —
-    // otherwise "Schedule saved" reads as "and it will run".
     store.seed(job({ nextRunAt: null }))
 
     const result = await actionsFor(SIGNED_IN).updateJobSchedule(
@@ -383,12 +375,7 @@ describe("updateJobSchedule", () => {
   })
 
   it("turns an InvalidScheduleError from the store into an error state", async () => {
-    // `updateSchedule` signals failure by throwing, unlike every other method
-    // on the store, which returns `undefined`. Unhandled it would reach the
-    // client as an opaque Next digest.
-    store.updateError = Object.assign(new Error("no next occurrence"), {
-      code: "invalid_schedule",
-    })
+    store.updateError = new InvalidScheduleError("no next occurrence")
 
     const result = await actionsFor(SIGNED_IN).updateJobSchedule(
       IDLE,
@@ -437,8 +424,6 @@ describe("createJob", () => {
   })
 
   it("refuses to create a job with no titles or no locations", async () => {
-    // A job with an unreadable config claims its slot and then fails, so this
-    // is refused up front rather than stored and discovered by the worker.
     const empties: Record<string, string>[] = [
       { titles: "" },
       { locations: "  ,  " },
@@ -467,11 +452,8 @@ describe("createJob", () => {
   })
 
   it("reports a duplicate name instead of leaking a Postgres error", async () => {
-    // `jobs` carries `unique (user_id, name)`, and `client.ts` remaps only
-    // class-08 faults — so 23505 arrives raw and would otherwise reach the
-    // client as an opaque Next digest.
     store.createError = Object.assign(new Error("duplicate key"), {
-      code: "23505",
+      code: "P2002",
     })
 
     const result = await actionsFor(SIGNED_IN).createJob(IDLE, createForm())
@@ -491,9 +473,6 @@ describe("createJob", () => {
 
 describe("the reset key", () => {
   it("carries the previous reset key forward on failure", async () => {
-    // The create form keys its fields on the reset key. Dropping it here would
-    // remount the fields and discard what the user typed, at the exact moment
-    // they are being told to fix it.
     const previous: ActionState = {
       status: "success",
       message: "Created.",

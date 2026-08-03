@@ -93,5 +93,8 @@ terraform.rc
 *.tsbuildinfo
 next-env.d.ts
 
+# Prisma Client is generated on build (`pnpm --filter @workspace/db generate`)
+packages/db/src/generated/
+
 # claude code worktrees (scratch checkouts, never part of the repo)
 .claude/worktrees/

@@ -72,7 +72,7 @@ Neither is in this package either, and confusing them wastes an afternoon.
 | Off                     | Mechanism                                          | Changed by                                                          |
 | ----------------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
 | The tick, for every job | `schedule_enabled` → EventBridge Scheduler `state` | `terraform apply -var="schedule_enabled=false"`, see `DEPLOYING.md` |
-| One job                 | `jobs.next_run_at IS NULL`                         | The dashboard's `/settings`, or `JobStore.pause()`                  |
+| One job                 | `jobs.next_run_at IS NULL`                         | The dashboard's `/settings`, or `pauseJob()`                        |
 
 A job is off when it has no `next_run_at` — there is no `enabled` column, and
 `packages/db/migrations/0001_init.sql` explains why one absence covers both
@@ -101,7 +101,7 @@ cannot become two facts that disagree.
 The **connection** is deliberately not cached that way. A secret is a string and
 stays valid; a socket does not. The gap between ticks is an hour and Neon
 autosuspends after five minutes, so a reused connection is dead by the next
-invocation as the default outcome — hence one `createDb()` per invocation,
+invocation as the default outcome — hence one `createPrismaClient()` per invocation,
 closed in a `finally`.
 
 Migrations do not run here. Every cold start would race every other one for a

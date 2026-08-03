@@ -1,9 +1,16 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
-import { isDbError } from "@workspace/db/errors"
-import type { JobStore } from "@workspace/db/jobs"
-import type { Job } from "@workspace/db/rows"
+import {
+  createJob,
+  isDbError,
+  isUniqueViolation,
+  pauseJob,
+  resumeJob,
+  updateJobSchedule,
+  type Job,
+  type PrismaClient,
+} from "@workspace/db"
 import { z } from "zod"
 
 import {
@@ -20,21 +27,18 @@ import { searchCriteriaSchema } from "./search-criteria"
  * **Nothing in this file imports Next**, which is what lets the authorization
  * branches be tested at all — every one of them turns on who is asking, and a
  * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/settings/actions.ts`. Same shape as
- * `lib/documents/document-actions.ts` and `lib/chat-handler.ts`.
+ * `app/(app)/settings/actions.ts`.
  *
- * On/off is not a column. `jobs.next_run_at IS NULL` means "not scheduled", and
- * `packages/db/migrations/0001_init.sql` says why there is no `enabled` flag to
- * set instead. So "off" is `pause()` and "on" is `resume()`, and the question
- * "is this briefing on?" is `job.nextRunAt !== null` everywhere.
+ * On/off is not a column. `jobs.next_run_at IS NULL` means "not scheduled". So
+ * "off" is `pauseJob()` and "on" is `resumeJob()`, and the question "is this
+ * briefing on?" is `job.nextRunAt !== null` everywhere.
  */
 
 /**
  * One message for "no such job" and "someone else's job".
  *
- * The same conflation `document-actions.ts` makes for `object_not_found` and
- * `object_ownership`, and for the same reason: distinct messages would turn a
- * form that takes a uuid into an oracle for whether another user's row exists.
+ * Distinct messages would turn a form that takes a uuid into an oracle for
+ * whether another user's row exists.
  */
 const NOT_FOUND = "That briefing could not be found."
 
@@ -49,13 +53,13 @@ export interface JobActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
   getUser: () => Promise<CurrentUser>
   /**
-   * The store, resolved per call rather than held.
+   * The client, resolved per call rather than held.
    *
    * Called inside the action bodies, never in the factory, so
    * `createJobActions(...)` at module scope in the wrapper constructs nothing
    * and cannot throw at import time on a missing `DATABASE_URL`.
    */
-  getJobs: () => JobStore
+  getPrisma: () => PrismaClient
   /** Overridden in tests, so an assertion can name the occurrence. */
   now?: () => Date
   /** Overridden in tests, so an assertion can name the reset key. */
@@ -64,8 +68,7 @@ export interface JobActionsDeps {
 
 /**
  * `jobId` always arrives from the client, so it is validated as a uuid before it
- * reaches a query and is never trusted to name an *owner* — see
- * {@link JobActionsDeps} and `requireOwnedJob` below.
+ * reaches a query and is never trusted to name an *owner*.
  */
 const jobIdSchema = z.uuid()
 
@@ -86,9 +89,7 @@ const createSchema = z.object({ name: z.string().trim().min(1).max(80) })
  *
  * The form offers four intervals and nothing else, so an expression is never
  * accepted from the client — it is *derived* here from a value that is either
- * one of four numbers or rejected. That removes the class of failure the old
- * free-text cron field had: there is no way to post a valid-looking expression
- * that means something the UI never showed.
+ * one of four numbers or rejected.
  */
 function readIntervalHours(
   raw: FormDataEntryValue | null
@@ -125,20 +126,19 @@ export function createJobActions(deps: JobActionsDeps) {
 
     if (!parsed.success) return fail(NOT_FOUND)
 
-    const jobs = deps.getJobs()
+    const prisma = deps.getPrisma()
 
-    const job = await requireOwnedJob(jobs, parsed.data.jobId, caller.userId)
+    const job = await requireOwnedJob(prisma, parsed.data.jobId, caller.userId)
     if (!job) return fail(NOT_FOUND)
 
     const enable = parsed.data.enabled === "true"
 
     try {
-      // `resume()` computes the next occurrence from *now*, so turning a
-      // briefing back on never owes the slots it missed while off — a job that
-      // was paused for a week is due once, not seven times.
+      // `resumeJob()` computes the next occurrence from *now*, so turning a
+      // briefing back on never owes the slots it missed while off.
       const updated = enable
-        ? await jobs.resume(job.id, now())
-        : await jobs.pause(job.id)
+        ? await resumeJob(prisma, job.id, now())
+        : await pauseJob(prisma, job.id)
 
       if (!updated) return fail(NOT_FOUND)
     } catch (error) {
@@ -152,7 +152,7 @@ export function createJobActions(deps: JobActionsDeps) {
     }
   }
 
-  async function updateJobSchedule(
+  async function updateJobScheduleAction(
     state: ActionState,
     formData: FormData
   ): Promise<ActionState> {
@@ -167,21 +167,16 @@ export function createJobActions(deps: JobActionsDeps) {
     if (!parsed.success) return fail(NOT_FOUND)
     if (!hours) return fail(INVALID_INTERVAL)
 
-    const jobs = deps.getJobs()
+    const prisma = deps.getPrisma()
 
-    const job = await requireOwnedJob(jobs, parsed.data.jobId, caller.userId)
+    const job = await requireOwnedJob(prisma, parsed.data.jobId, caller.userId)
     if (!job) return fail(NOT_FOUND)
 
     try {
-      // A paused briefing stays paused: `updateSchedule` writes the new
-      // occurrence only when there already was one. Changing the interval must
-      // not be a way to switch a briefing back on by accident.
-      //
-      // The try/catch is still required even though the expression is derived
-      // from a closed set: `updateSchedule` re-parses it and signals failure by
-      // *throwing* `InvalidScheduleError`, unlike every other method here, which
-      // returns `undefined`.
-      const updated = await jobs.updateSchedule(
+      // A paused briefing stays paused: `updateJobSchedule` writes the new
+      // occurrence only when there already was one.
+      const updated = await updateJobSchedule(
+        prisma,
         job.id,
         { cron: toCron(hours), timezone: SCHEDULE_TIMEZONE },
         now()
@@ -202,7 +197,7 @@ export function createJobActions(deps: JobActionsDeps) {
     }
   }
 
-  async function createJob(
+  async function createJobAction(
     state: ActionState,
     formData: FormData
   ): Promise<ActionState> {
@@ -221,9 +216,9 @@ export function createJobActions(deps: JobActionsDeps) {
       locations: formData.get("locations"),
     })
 
-    // Not optional, and not a nicety. The worker's `JobSearchConfigSchema`
-    // requires both, so a job created without them would claim its first slot
-    // and then fail to read its own config — see `search-criteria.ts`.
+    // Not optional: the worker's `JobSearchConfigSchema` requires both, so a
+    // job created without them would claim its first slot and then fail to read
+    // its own config.
     if (!criteria.success) {
       return fail("Add at least one role title and one location.")
     }
@@ -235,12 +230,10 @@ export function createJobActions(deps: JobActionsDeps) {
     let job: Job
 
     try {
-      job = await deps.getJobs().create(
+      job = await createJob(
+        deps.getPrisma(),
         {
-          // The session's userId, never a form field. This is the same rule the
-          // document actions follow, and here it is what makes `jobs.user_id`
-          // — and therefore every S3 key the resulting brief lands under —
-          // impossible to point at someone else.
+          // The session's userId, never a form field.
           userId: caller.userId,
           name,
           config: criteria.data,
@@ -253,8 +246,6 @@ export function createJobActions(deps: JobActionsDeps) {
       return fail(storeMessage("create", error))
     }
 
-    // The new row's id: unique per success by construction, so the create form
-    // can key its fields on it and clear without an effect.
     return {
       status: "success",
       message: `Created “${job.name}”.`,
@@ -262,32 +253,28 @@ export function createJobActions(deps: JobActionsDeps) {
     }
   }
 
-  return { setJobEnabled, updateJobSchedule, createJob }
+  return {
+    setJobEnabled,
+    updateJobSchedule: updateJobScheduleAction,
+    createJob: createJobAction,
+  }
 }
 
 /**
- * The ownership boundary, and the reason it exists at all.
+ * The ownership boundary.
  *
- * `pause`, `resume` and `updateSchedule` take an id and **do not filter by
- * `user_id`** — `JobStore` is not a per-user facade the way `ResumeStore` is,
- * because the worker's tick legitimately operates across every user's jobs. So a
- * `jobId` from a form addresses any row in the table, and the check has to
- * happen here. Every mutating action routes through this; none of them touches
- * the store with a client-supplied id first.
+ * Job helpers take an id and **do not filter by `user_id`** — the worker's tick
+ * legitimately operates across every user's jobs. So a `jobId` from a form
+ * addresses any row in the table, and the check has to happen here.
  *
- * Returns `undefined` for both "no such row" and "not yours", so the two are
- * indistinguishable from outside.
- *
- * At module scope rather than inside the factory: it closes over nothing — all
- * three inputs are parameters — so nesting it only reallocated it per
- * `createJobActions()` call.
+ * Returns `undefined` for both "no such row" and "not yours".
  */
 async function requireOwnedJob(
-  jobs: JobStore,
+  prisma: PrismaClient,
   jobId: string,
   userId: string
 ): Promise<Job | undefined> {
-  const job = await jobs.get(jobId)
+  const job = await prisma.job.findUnique({ where: { id: jobId } })
   if (!job || job.userId !== userId) return undefined
 
   return job
@@ -296,20 +283,9 @@ async function requireOwnedJob(
 /**
  * A store failure as something safe to show.
  *
- * Branches on `code`, never `instanceof`, via `isDbError` — the narrowing helper
- * `packages/db/src/errors.ts` ships for exactly this. Its own `instanceof` test
- * is against the base `Error`, which is the cross-bundle-safe form; what it
- * discriminates on is the `code` string, so an error that crossed a bundler
- * boundary still narrows. Going through it rather than reading `.code` by hand
- * also types the comparison against `DbErrorCode`, so a misspelt code stops
- * compiling instead of silently never matching.
- *
- * `create` gets one extra branch. `jobs` carries `unique (user_id, name)`, and
- * `packages/db/src/client.ts` deliberately remaps only class-08 connection
- * faults — a constraint violation is "a real result, not a transport failure" —
- * so a duplicate name arrives as a raw Postgres error carrying `23505` and never
- * as a `DbError`. Left uncaught it would reach the client as an opaque Next
- * digest.
+ * Branches on `code`, never `instanceof`, via `isDbError`. Unique violations
+ * arrive as Prisma `P2002` (or raw `23505`) and are mapped via
+ * `isUniqueViolation`.
  */
 function storeMessage(operation: "create" | "update", error: unknown): string {
   console.error(`briefings: ${operation} failed`, error)
@@ -321,23 +297,17 @@ function storeMessage(operation: "create" | "update", error: unknown): string {
   if (isDbError(error)) {
     switch (error.code) {
       case "invalid_schedule":
-        // Not reachable from the form, since the expression is derived from a
-        // closed set — but `updateSchedule` and `create` are the two calls that
-        // throw rather than return, so the branch stays rather than becoming an
-        // opaque digest if a future interval is added wrong.
         return INVALID_INTERVAL
 
       case "database_unavailable":
         return "The database is unavailable. Try again in a moment."
+
+      default: {
+        const _exhaustive: never = error.code
+        return _exhaustive
+      }
     }
   }
 
   return "Something went wrong."
-}
-
-/** The one failure `isDbError` cannot cover — see {@link storeMessage}. */
-function isUniqueViolation(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false
-
-  return (error as { code?: unknown }).code === "23505"
 }
