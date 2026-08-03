@@ -1,5 +1,15 @@
-import { listDocuments } from "@/lib/documents/list-documents"
+import {
+  listDocuments,
+  type DocumentSummary,
+} from "@/lib/documents/list-documents"
 import type { ResumeStore } from "@workspace/user-storage"
+
+import {
+  extractProfileText,
+  isReadableProfileExtension,
+  ProfileTextError,
+  type ReadableProfileExtension,
+} from "./profile-text"
 
 /**
  * Finding the candidate's own words to write a letter from.
@@ -9,30 +19,30 @@ import type { ResumeStore } from "@workspace/user-storage"
  *
  * The whole of the "which document is the CV" decision lives here rather than
  * in the action, because it is the part with branches worth naming: a user with
- * no Resume-labelled document and a user whose only Resume is a PDF are told
- * different things, and only one of them has anything to do.
- */
-
-/**
- * The formats this app can turn into text today.
+ * no Resume-labelled document, a user whose only Resume is a `.rtf`, and a user
+ * whose PDF turned out to be a scan are told three different things, and only
+ * some of them have anything to do.
  *
- * ⚠️ **Not a policy choice — a capability statement.** Reading a PDF or a DOCX
- * means a parser, and a parser that silently returns the wrong text would put
- * invented substance into a letter signed by the user. That work is #86, and
- * until it lands refusing is the honest answer. The `letter` CLI restricts
- * itself the same way and says so for the same reason.
- *
- * `resumes` accepts far more than this on upload, deliberately: a user's PDF CV
- * is worth storing whether or not anything can read it yet.
+ * **Which formats can be read is `profile-text.ts`'s answer, not this file's.**
+ * #86 widened that answer from `.md` and `.txt` to PDF and DOCX as well, and
+ * nothing here changed shape to allow it — which was the point of the ticket.
  */
-export const READABLE_PROFILE_EXTENSIONS = [".md", ".txt"] as const
 
 /** Why there is nothing to write a letter from. Each is a distinct thing to say. */
 export type NoBackgroundReason =
   /** Nothing in the shelf is labelled as a resume at all. */
   | "no-resume"
-  /** There is one, but it is a PDF or a DOCX and cannot be read yet. */
+  /**
+   * There is one, but it is a `.doc`, `.odt` or `.rtf` — accepted on upload,
+   * and still without a parser. See `READABLE_PROFILE_EXTENSIONS`.
+   */
   | "unreadable-format"
+  /**
+   * There is one in a format we do read, and reading it failed: a damaged file,
+   * a file whose name lies about its format, or a PDF that is a scan with no
+   * text layer in it at all.
+   */
+  | "extraction-failed"
 
 export type CandidateBackground =
   | {
@@ -68,11 +78,15 @@ export async function loadCandidateBackground(
 
   if (labelled.length === 0) return { ok: false, reason: "no-resume" }
 
-  // `listDocuments` sorts newest first, so the first match is the newest.
-  const readable = labelled.find((document) =>
-    (READABLE_PROFILE_EXTENSIONS as readonly string[]).includes(
-      document.extension
-    )
+  // `listDocuments` sorts newest first, so the first match is the newest. The
+  // predicate is spelled as a type guard so the extension reaches
+  // `extractProfileText` as a `ReadableProfileExtension` rather than a `string`
+  // — that is what makes the exhaustive switch there load-bearing.
+  const readable = labelled.find(
+    (
+      document
+    ): document is DocumentSummary & { extension: ReadableProfileExtension } =>
+      isReadableProfileExtension(document.extension)
   )
 
   if (!readable) return { ok: false, reason: "unreadable-format" }
@@ -86,14 +100,34 @@ export async function loadCandidateBackground(
     extension: readable.extension,
   })
 
+  let background: string
+  try {
+    background = await extractProfileText(
+      readable.extension,
+      fetched.bytes ?? new Uint8Array()
+    )
+  } catch (error) {
+    if (error instanceof ProfileTextError) {
+      // ⚠️ **Not a fallback to the next-newest document.** The user labelled
+      // this one, so a letter written from an older CV would be written from a
+      // document they did not choose, with nothing saying so. Refusing here is
+      // the same rule `assertDraftable` follows one step later.
+      console.error(
+        "cover-letters: could not extract text from",
+        readable.file,
+        error.cause ?? error
+      )
+      return { ok: false, reason: "extraction-failed" }
+    }
+
+    // A storage failure, or something genuinely unexpected. The action turns
+    // this into `storageMessage("read", …)`, which is where it belongs.
+    throw error
+  }
+
   return {
     ok: true,
-    // `fatal: false`, which is the default: a stray byte should degrade one
-    // character rather than fail the draft. These are `.md` and `.txt` files
-    // the user wrote, so a decoding error means a mislabelled file, and the
-    // length check in `assertDraftable` is what catches a document that turned
-    // out to be nothing.
-    background: new TextDecoder().decode(fetched.bytes ?? new Uint8Array()),
+    background,
     displayName: readable.displayName,
   }
 }

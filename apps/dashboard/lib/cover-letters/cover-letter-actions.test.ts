@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises"
+
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { Agent } from "@workspace/agents"
 import type { Findings, Posting } from "@workspace/agents/findings"
@@ -73,6 +75,19 @@ const CV = [
 ].join("\n")
 
 const LETTER = "Dear Hiring Team,\n\nI would like to apply. [start date]"
+
+/**
+ * The same real PDF and DOCX `profile-text.test.ts` uses.
+ *
+ * Read here too rather than stubbed, because the claim these tests make is the
+ * end-to-end one: a user whose CV is a PDF clicks Draft and gets a letter. A
+ * fake extractor would prove the action calls one.
+ */
+async function fixtureBytes(name: string): Promise<Uint8Array> {
+  return new Uint8Array(
+    await readFile(new URL(`./__fixtures__/${name}`, import.meta.url))
+  )
+}
 
 function posting(overrides: Partial<Posting> = {}): Posting {
   return {
@@ -500,11 +515,15 @@ describe("draftCoverLetter", () => {
       expect(subject.writer.prompts).toHaveLength(0)
     })
 
-    it("refuses without calling the model when the only resume is a PDF", async () => {
+    it("refuses without calling the model when the only resume is an .rtf", async () => {
+      // ⚠️ #86 taught this app to read a PDF and a DOCX and **not** `.doc`,
+      // `.odt` or `.rtf` — which `resumes` still accepts on upload. The refusal
+      // therefore still exists and has to name those three rather than the
+      // formats that now work.
       subject = harness({
         resumes: new FakeResumes().add({
           resumeId: "33333333-3333-4333-8333-333333333333",
-          extension: ".pdf",
+          extension: ".rtf",
           documentType: "resume",
         }),
       })
@@ -512,8 +531,130 @@ describe("draftCoverLetter", () => {
       const result = await subject.draft(IDLE, form(VALID))
 
       expect(result.status).toBe("error")
-      expect(result.status === "error" && result.message).toMatch(/PDF|Word/)
+      const message = result.status === "error" ? result.message : ""
+      expect(message).toContain(".rtf")
+      expect(message).not.toContain("PDF and DOCX cannot be read")
       expect(subject.writer.prompts).toHaveLength(0)
+    })
+
+    it("drafts from a real PDF resume", async () => {
+      // The fixture is a PDF a PDF writer produced; `profile-text.test.ts` says
+      // more about why that matters. Here the claim is the end-to-end one #86
+      // makes: a user whose CV is a PDF gets a letter.
+      subject = harness({
+        resumes: new FakeResumes().add({
+          resumeId: "55555555-5555-4555-8555-555555555555",
+          extension: ".pdf",
+          documentType: "resume",
+          originalFilename: "alice-cv.pdf",
+          bytes: await fixtureBytes("alice-cv.pdf"),
+        }),
+      })
+
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("success")
+      // Extracted, not merely fetched: the text of the CV reached the model.
+      expect(subject.writer.prompts[0]).toContain(
+        "monolith to a set of services at Contoso"
+      )
+      expect(subject.objects.keys()).toEqual([EXPECTED_KEY])
+    })
+
+    it("drafts from a real DOCX resume", async () => {
+      subject = harness({
+        resumes: new FakeResumes().add({
+          resumeId: "66666666-6666-4666-8666-666666666666",
+          extension: ".docx",
+          documentType: "resume",
+          originalFilename: "alice-cv.docx",
+          bytes: await fixtureBytes("alice-cv.docx"),
+        }),
+      })
+
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("success")
+      expect(subject.writer.prompts[0]).toContain(
+        "monolith to a set of services at Contoso"
+      )
+      expect(subject.objects.keys()).toEqual([EXPECTED_KEY])
+    })
+
+    it("refuses a corrupt PDF clearly, without crashing and without a letter", async () => {
+      const whole = await fixtureBytes("alice-cv.pdf")
+
+      subject = harness({
+        resumes: new FakeResumes().add({
+          resumeId: "77777777-7777-4777-8777-777777777777",
+          extension: ".pdf",
+          documentType: "resume",
+          originalFilename: "alice-cv.pdf",
+          bytes: whole.slice(0, Math.floor(whole.length / 2)),
+        }),
+      })
+
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("error")
+      expect(result.status === "error" && result.message).toContain(
+        "could not be read"
+      )
+      // Neither a crash nor a letter drafted from nothing.
+      expect(subject.writer.prompts).toHaveLength(0)
+      expect(subject.objects.puts).toHaveLength(0)
+    })
+
+    it("refuses a text file that was renamed .pdf", async () => {
+      subject = harness({
+        resumes: new FakeResumes().add({
+          resumeId: "88888888-8888-4888-8888-888888888888",
+          extension: ".pdf",
+          documentType: "resume",
+          originalFilename: "alice-cv.pdf",
+          bytes: new TextEncoder().encode(CV),
+        }),
+      })
+
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("error")
+      // Emphatically not "here is your letter": the bytes are perfectly good
+      // text, and a parser that shrugged and decoded them would be reading a
+      // format nobody claimed the file was.
+      expect(subject.writer.prompts).toHaveLength(0)
+      expect(subject.objects.puts).toHaveLength(0)
+    })
+
+    it("measures the length bounds on the extracted text, not on the file", async () => {
+      // ⚠️ The fixture is eleven kilobytes of PDF whose text layer is four
+      // words. A bound applied to the bytes would sail past `MIN_BACKGROUND_
+      // CHARS`; applied to what came out of the parser it refuses, which is the
+      // only reading of the bound that means anything now.
+      const bytes = await fixtureBytes("thin-cv.pdf")
+      expect(bytes.byteLength).toBeGreaterThan(1_000)
+
+      subject = harness({
+        resumes: new FakeResumes().add({
+          resumeId: "99999999-9999-4999-8999-999999999999",
+          extension: ".pdf",
+          documentType: "resume",
+          originalFilename: "thin-cv.pdf",
+          bytes,
+        }),
+      })
+
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("error")
+      // `too-short` rather than `extraction-failed`: the parser read the file
+      // perfectly well, there was just almost nothing in it. Naming the
+      // document is what makes the message actionable.
+      expect(result.status === "error" && result.message).toContain(
+        "thin-cv.pdf has too little in it"
+      )
+      expect(subject.writer.prompts).toHaveLength(0)
+      expect(subject.objects.puts).toHaveLength(0)
     })
 
     it("refuses without calling the model when the resume is too thin to write from", async () => {

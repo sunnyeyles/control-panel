@@ -1,7 +1,10 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
-import { loadCandidateBackground } from "@/lib/cover-letters/candidate-background"
+import {
+  loadCandidateBackground,
+  type NoBackgroundReason,
+} from "@/lib/cover-letters/candidate-background"
 import type { Agent } from "@workspace/agents"
 import {
   assertDraftable,
@@ -187,7 +190,9 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     if (!posting) return fail(POSTING_GONE)
 
     // Before the writer is constructed, so a user with nothing to write from
-    // spends nothing.
+    // spends nothing. Since #86 this is also where a PDF or a DOCX is parsed —
+    // still on this side of the model call, which is what keeps the bounds
+    // below applying to the text that was actually extracted.
     let background
     try {
       background = await loadCandidateBackground(
@@ -203,9 +208,10 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
 
     let request: CoverLetterRequest
     try {
-      // Still before the model call: a letter written from too little is not a
-      // thin letter, it is a fabricated one, and every specific in it would be
-      // invented and then attributed to the user.
+      // Still before the model call, and measured on the *extracted* text: a
+      // letter written from too little is not a thin letter, it is a fabricated
+      // one, and every specific in it would be invented and then attributed to
+      // the user.
       assertDraftable({ background: background.background })
 
       request = CoverLetterRequestSchema.parse({
@@ -325,17 +331,30 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
 /**
  * Why there is nothing to write from, as something to act on.
  *
- * Both messages name the formats outright. That is a requirement rather than
- * helpfulness: a user whose CV is a PDF has uploaded the right document and is
- * being refused anyway, and without the sentence the refusal reads as a bug.
+ * Every message names formats outright. That is a requirement rather than
+ * helpfulness: `resumes` accepts more on upload than anything can read, so a
+ * user is being refused a document the app already took, and without the
+ * sentence the refusal reads as a bug.
+ *
+ * ⚠️ **The `.doc`, `.odt` and `.rtf` sentence is not a leftover.** #86 taught
+ * this app to read a PDF and a DOCX, and the "upload it as .md or .txt instead"
+ * line went with it — but only for those two. Those three extensions are still
+ * accepted on upload and still have no parser, so deleting the refusal wholesale
+ * would have replaced an over-broad message with an absent one.
  */
-function describeMissingBackground(reason: "no-resume" | "unreadable-format") {
+function describeMissingBackground(reason: NoBackgroundReason) {
   switch (reason) {
     case "no-resume":
-      return "No resume to write from. Upload your CV under Documents and label it Resume — it has to be a .md or .txt file, because PDF and DOCX cannot be read yet."
+      return "No resume to write from. Upload your CV under Documents and label it Resume — a PDF, a Word .docx, or a .md or .txt file."
 
     case "unreadable-format":
-      return "Your resume is a PDF or a Word file, and reading those is not built yet. Upload the same CV as a .md or .txt file, labelled Resume, and try again."
+      return "Your resume is a .doc, .odt or .rtf file, and reading those is not built yet. Save the same CV as a PDF, a Word .docx, or a .md or .txt file, upload it labelled Resume, and try again."
+
+    case "extraction-failed":
+      // Deliberately silent about which parser failed and why: pdf.js and jszip
+      // both throw about internal structure, and neither sentence helps the
+      // person holding the CV. The detail is in the server log.
+      return "Your resume could not be read. The file may be damaged, or not really the format its name says — and a PDF that is a scan of a printed page has no text in it to extract. Try re-exporting it, or upload the CV as a .md or .txt file."
 
     default: {
       const _exhaustive: never = reason
@@ -344,10 +363,26 @@ function describeMissingBackground(reason: "no-resume" | "unreadable-format") {
   }
 }
 
-/** The three ways a document can be present and still not be writable from. */
+/**
+ * The three ways a document can be present and still not be writable from.
+ *
+ * ⚠️ **These bounds are measured on the *extracted* text, not on the file.** A
+ * 200 KB PDF whose text layer is a name and a phone number is `too-short`, and
+ * an eight-page CV is `too-long` however small the DOCX compresses to. Since
+ * #86 that is the only reading of them that makes sense, and it is why
+ * `loadCandidateBackground` extracts before `assertDraftable` runs rather than
+ * the other way round.
+ */
 function describeUndraftable(error: UndraftableError, displayName: string) {
   switch (error.reason) {
     case "absent":
+      // Since #86 this is reached by a parser that ran fine and found nothing
+      // — most often a PDF that is a scan of a printed page, which has no text
+      // layer to extract — as well as by an empty `.md`. The sentence names the
+      // likely cause, because "no text" about a file the user can plainly read
+      // on screen otherwise reads as a bug.
+      return `No text could be read out of ${displayName}. If it is a scan or a photo of a printed CV there is no text in it to extract — a letter drafted from nothing would invent every specific in it and put them in your name.`
+
     case "too-short":
       return `${displayName} has too little in it to write a letter from. A letter drafted from that would invent its specifics and put them in your name.`
 
