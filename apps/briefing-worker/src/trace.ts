@@ -33,7 +33,7 @@ export type TraceAgent = "scout" | "writer"
  * a reader who has never opened `run-briefing.ts` can still follow a trace.
  */
 export type TraceStep =
-  "config" | "scout" | "handoff" | "writer" | "upload" | "record"
+  "config" | "scout" | "handoff" | "writer" | "upload" | "record" | "findings"
 
 /** One tool call, paired with the result it eventually got. */
 export interface TraceToolCall {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { readFile } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -18,6 +18,7 @@ import {
   latestArtifactForJob,
   pauseJob,
   recordArtifact,
+  recordRunFindings,
   resumeJob,
   startAdHocRun,
   updateJobSchedule,
@@ -67,17 +68,27 @@ describeWithDatabase("against a real database", () => {
     await admin.connect()
     await admin.query(`create schema "${SCHEMA}"`)
 
-    const sql = await readFile(
-      join(packageRoot, "prisma/migrations/0001_init/migration.sql"),
-      "utf8"
-    )
+    // Every migration, in the order `migrate deploy` would apply them — the
+    // directory names sort into that order and are the only thing that
+    // decides it. Reading the directory rather than naming a file is what
+    // keeps this suite from testing a schema two migrations old.
+    const migrations = join(packageRoot, "prisma/migrations")
+    const directories = (await readdir(migrations, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
 
     // Pin search_path so unqualified DDL lands in the throwaway schema.
     const migrator = new pg.Client({ connectionString: baseUrl })
     await migrator.connect()
     try {
       await migrator.query(`SET search_path TO "${SCHEMA}"`)
-      await migrator.query(sql)
+
+      for (const directory of directories) {
+        await migrator.query(
+          await readFile(join(migrations, directory, "migration.sql"), "utf8")
+        )
+      }
     } finally {
       await migrator.end()
     }
@@ -248,6 +259,34 @@ describeWithDatabase("against a real database", () => {
       const run = await prisma.run.findUnique({ where: { id: runId } })
       expect(run?.status).toBe("succeeded")
       expect(run?.failure).toEqual({ sources: { example: "timed out" } })
+    })
+  })
+
+  describe("findings", () => {
+    it("keeps what a run found, and survives the run finishing", async () => {
+      const job = await dueJob("run-findings")
+      const { runId } = await claimOrFail(job)
+
+      const findings = {
+        postings: [
+          { title: "Senior Backend Engineer", url: "https://example.com/1" },
+        ],
+      }
+
+      await recordRunFindings(prisma, runId, findings)
+      await finishRun(prisma, runId)
+
+      const run = await prisma.run.findUnique({ where: { id: runId } })
+      expect(run?.status).toBe("succeeded")
+      expect(run?.findings).toEqual(findings)
+    })
+
+    it("is NULL for a run that never wrote any", async () => {
+      const job = await dueJob("no-findings")
+      const { runId } = await claimOrFail(job)
+
+      const run = await prisma.run.findUnique({ where: { id: runId } })
+      expect(run?.findings).toBeNull()
     })
   })
 

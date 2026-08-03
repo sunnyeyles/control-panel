@@ -3,6 +3,7 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
+import type { Findings } from "@workspace/agents"
 import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
 import type { BriefStore, NewBrief, StoredBrief } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -102,12 +103,15 @@ function writerReturning(markdown: string) {
 
 let briefs: BriefStore
 let recordArtifact: (runId: string, objectKey: string) => Promise<Artifact>
+let recordFindings: (runId: string, findings: Findings) => Promise<void>
 let puts: NewBrief[]
 let recorded: Array<{ runId: string; objectKey: string }>
+let kept: Array<{ runId: string; findings: Findings }>
 
 beforeEach(() => {
   puts = []
   recorded = []
+  kept = []
   streamOptions.length = 0
   // Restored first: spying on an already-spied method hands back the existing
   // spy, whose call log would otherwise accumulate across tests.
@@ -141,6 +145,10 @@ beforeEach(() => {
     recorded.push({ runId, objectKey })
     return { id: "a", runId, objectKey, createdAt: new Date() }
   }
+
+  recordFindings = async (runId: string, findings: Findings): Promise<void> => {
+    kept.push({ runId, findings })
+  }
 })
 
 function run(overrides: Partial<Parameters<typeof runBriefing>[0]> = {}) {
@@ -149,6 +157,7 @@ function run(overrides: Partial<Parameters<typeof runBriefing>[0]> = {}) {
     slot: SLOT,
     briefs,
     recordArtifact,
+    recordFindings,
     createScout: scoutReturning(JSON.stringify(FINDINGS)),
     createWriter: writerReturning("# Roles for you\n\nOne match."),
     ...overrides,
@@ -229,6 +238,65 @@ describe("runBriefing", () => {
     expect(report.outcome).toBe("success")
     expect(report.postings).toBe(0)
     expect(recorded).toHaveLength(1)
+  })
+
+  /**
+   * The findings are the record the brief was written from, and they outlive
+   * the run only if something keeps them. What matters here is the trade: the
+   * brief is the product, so losing the record must cost a warning rather than
+   * the run.
+   */
+  describe("findings", () => {
+    it("keeps the validated findings against the run", async () => {
+      const report = await run()
+
+      expect(kept).toEqual([{ runId: SLOT.runId, findings: FINDINGS }])
+      expect(report.warnings).toBeUndefined()
+    })
+
+    it("succeeds with a warning when they cannot be kept", async () => {
+      const report = await run({
+        recordFindings: async () => {
+          throw new Error("the runs row is gone")
+        },
+      })
+
+      // The brief exists and is recorded, so the run succeeded. The loss is
+      // carried as a structured warning — `runTick` passes exactly this to
+      // `finishRun`, whose row stays `succeeded` with a non-empty `failure`.
+      expect(report.outcome).toBe("success")
+      expect(recorded).toHaveLength(1)
+      expect(report.warnings).toEqual({
+        findings: { message: "the runs row is gone" },
+      })
+    })
+
+    it("reports the failed write as a step that still ended", async () => {
+      const events: TraceEvent[] = []
+
+      await run({
+        trace: (event) => events.push(event),
+        recordFindings: async () => {
+          throw new Error("the runs row is gone")
+        },
+      })
+
+      // A step that swallowed its error and then emitted no `end` would leave
+      // the transcript claiming the run hung on it.
+      expect(
+        events.find(
+          (event) =>
+            event.type === "step" &&
+            event.phase === "end" &&
+            event.step === "findings"
+        )
+      ).toMatchObject({ detail: "not recorded — the runs row is gone" })
+      expect(events.at(-1)).toMatchObject({
+        type: "run",
+        phase: "end",
+        outcome: "success",
+      })
+    })
   })
 
   describe("refuses to produce a brief when", () => {
@@ -359,6 +427,7 @@ describe("runBriefing", () => {
         "writer",
         "upload",
         "record",
+        "findings",
       ])
     })
 

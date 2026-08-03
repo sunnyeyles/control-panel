@@ -13,7 +13,7 @@ config.ts      reads the environment
 schedule.ts    computeNextRunAt — pure, and where the bugs are
 users.ts       ensureUserForAuth
 jobs.ts        create / claim / due / schedule helpers
-runs.ts        finish / fail / startAdHoc
+runs.ts        finish / fail / startAdHoc / recordFindings
 artifacts.ts   record / latest helpers
 client.ts      createPrismaClient() — adapter + pooled URL
 prisma/        schema + Prisma Migrate history
@@ -122,6 +122,12 @@ Postgres:
   against it must repeat `WHERE scheduled_for IS NOT NULL`.
 - **Transitions are enforced by `UPDATE … WHERE status = 'running'`**, not by a
   CHECK — a CHECK cannot see the old row.
+- **`runs.findings` is a payload, and the exception is deliberate.** The rule is
+  that Postgres holds object keys and never payloads; `failure` and
+  `jobs.config` were already JSON, and a Run's findings sit beside them so the
+  record a brief was written from can be read back without cloud credentials.
+  It has no lifecycle rule and will accumulate — known, and accepted because a
+  forward-only migration is easier to add than to withdraw.
 - **`on delete restrict` throughout, never cascade.**
 - **`object_key` holds an S3 key and the CHECK enforces it** — no scheme prefix,
   no leading slash.

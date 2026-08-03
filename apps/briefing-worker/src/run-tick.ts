@@ -4,6 +4,7 @@ import {
   failRun,
   finishRun,
   recordArtifact,
+  recordRunFindings,
   type PrismaClient,
 } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
@@ -102,15 +103,20 @@ export async function runTick(
       // partition day is derived from — not the instant the run finishes, or a
       // 23:30 slot completing after midnight files under a day its run row
       // disagrees with.
-      await runBriefing({
+      const briefing = await runBriefing({
         job,
         slot,
         briefs,
         recordArtifact: (runId, objectKey) =>
           recordArtifact(prisma, runId, objectKey),
+        recordFindings: (runId, findings) =>
+          recordRunFindings(prisma, runId, findings),
       })
 
-      await finishRun(prisma, slot.runId)
+      // Third argument, and usually `undefined`. A run that produced a brief
+      // but could not keep its findings is `succeeded` with a non-empty
+      // `failure` — the rule `packages/db/src/types.ts` states.
+      await finishRun(prisma, slot.runId, briefing.warnings)
       report.succeeded += 1
     } catch (error) {
       // Recorded, then carried. The row makes the failure queryable; the run
