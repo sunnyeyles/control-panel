@@ -108,13 +108,17 @@ flowchart TD
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
-- **Cover letters.** `packages/agents/src/` holds `assistant`, `brief-writer`,
-  `findings`, `job-scout` and `posting-id`, and nothing else. Ticketed as #77
-  with #80–#87 beneath it; `docs/cover-letter-agent-plan.md` is the staged
-  plan. Note the constraint that is invisible from the TypeScript: the
-  dashboard's IAM grant is `prod:resumes` and the worker's is `prod:briefs`,
-  and `infra/aws/tests/` asserts both, so a dashboard-side agent cannot read
-  what the worker wrote without an infrastructure change.
+- **Cover letters, beyond a draft on disk.** The agent and its contract exist —
+  `packages/agents/src/cover-letter.ts` and `cover-letter-writer.ts`, driven by
+  the `letter` CLI in the worker's local harness (#82). What does not exist is
+  everything around them: no letter is stored, no `cover-letters` object kind
+  exists, nothing in the dashboard drafts one, and the only input is a Findings
+  file on disk. Ticketed as #77 with #84–#87 beneath it;
+  `docs/cover-letter-agent-plan.md` is the staged plan. Note the
+  constraint that is invisible from the TypeScript: the dashboard's IAM grant is
+  `prod:resumes` and the worker's is `prod:briefs`, and `infra/aws/tests/`
+  asserts both, so a dashboard-side agent cannot read what the worker wrote
+  without an infrastructure change.
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`

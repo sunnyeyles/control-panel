@@ -74,6 +74,36 @@ found in two Runs gets one id. Its output is a valid object key segment for
 `@workspace/user-storage` unmodified. The normalisation rule is written out in
 `src/posting-id.ts`.
 
+## The cover letter, and why it has no tools
+
+`src/cover-letter.ts` is the contract — `CandidateProfileSchema`,
+`CoverLetterRequestSchema`, `assertDraftable()`, the pure `toCoverLetterPrompt()`
+and the background bounds — and `src/cover-letter-writer.ts` is the agent that
+consumes it. The split is the same one `findings.ts` makes: the contract belongs
+to neither the caller nor the model.
+
+**`tools: []` here is containment, not taste.** The writer holds the candidate's
+CV in its context, and the Posting beside it is attacker-influenced text —
+anyone who can pay to place an advertisement writes it, and `highlights` reaches
+the prompt _verbatim_, so an instruction hidden in a bullet point survives
+copying intact. An agent that can both read a CV and issue an outbound request
+can be induced to put one inside the other. Having no tools is exactly what
+makes copying the advertisement acceptable: injected text can shape the prose of
+a draft the user then reads, and can reach nothing else. `bindTools` is asserted
+to receive `[]` in the test suite, against a fake chat model, so this is checked
+rather than asserted in prose.
+
+**`assertDraftable()` refuses before the model is called**, when the background
+is absent, under `MIN_BACKGROUND_CHARS` or over `MAX_BACKGROUND_CHARS`. It
+refuses rather than truncating: a letter written from half a CV, with nothing
+saying so, reads exactly like one written from all of it. That is the same
+silent-fabrication guard as "a run with no successful search fails", applied to
+a document that asserts things about a person.
+
+**A missing fact is a `[bracketed placeholder]`.** Start date, salary, a named
+recipient — where nobody supplied it, the prompt requires a visible gap. A
+plausible invention attributed to the user is a lie; a gap is a draft.
+
 ## Where this sits
 
 ```
