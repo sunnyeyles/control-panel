@@ -47,8 +47,11 @@ travels as JSON in a message and is parsed before the writer sees it — that
 validation is the point of keeping the two agents apart, because data can be
 checked and prose cannot. An empty findings list is a legitimate result.
 
-Findings exist only for the length of a run. Nothing persists them; the **Brief**
-is the only thing that outlives the process.
+Kept past the run: `runs.findings` is a nullable JSONB column, written after
+the **Brief** exists and never fatally — a run that produced a brief succeeds
+whatever happens to this write, and a failure only adds a warning to the
+**Run**. NULL means either a run that failed before the hand-off, or one that
+predates the column.
 
 **Posting**:
 One open job advertisement, with the URL a search actually returned. **Not** a
