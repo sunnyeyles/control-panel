@@ -4,8 +4,10 @@ The single-user platform this repo is growing toward: a scheduled agent searches
 a job board on the user's behalf and writes up what it found, and the dashboard
 surfaces it. Today the scaffold, the deployed worker, the S3 storage layer, and
 one end-to-end briefing path exist. The dashboard manages **Documents** and
-**Briefings** but surfaces no **Brief** yet — `OVERVIEW.md` §Not built yet is
-the current list.
+**Briefings**, and shows the **Postings** a briefing's latest **Run** found — but
+it surfaces no **Brief** yet, and cannot: the markdown lives under an object-kind
+prefix the app holds no grant over. `OVERVIEW.md` §Not built yet is the current
+list.
 
 ## Language
 
@@ -47,8 +49,11 @@ travels as JSON in a message and is parsed before the writer sees it — that
 validation is the point of keeping the two agents apart, because data can be
 checked and prose cannot. An empty findings list is a legitimate result.
 
-Findings exist only for the length of a run. Nothing persists them; the **Brief**
-is the only thing that outlives the process.
+Findings outlive the run that produced them: `runs.findings` keeps the validated
+record, and the dashboard's Briefings page renders the **Postings** out of it.
+The column is written after the **Brief** exists and never fatally — a run that
+produced a briefing succeeded whatever happened to this record — so a NULL is an
+ordinary state rather than a fault, and every run predating the column is one.
 
 **Posting**:
 One open job advertisement, with the URL a search actually returned. **Not** a

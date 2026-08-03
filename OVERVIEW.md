@@ -88,9 +88,8 @@ flowchart TD
     C --> D[(Neon — search criteria)]
     D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
-    P --> F[Findings that outlive the run]
-    F --> N[Cover letter agent]
-    F --> Q[Dashboard shows what a run found]
+    P --> N[Cover letter agent]
+    P --> Q[A viewer for the brief itself]
 ```
 
 - **Profile extraction.** Upload exists — `/documents` writes to the `resumes`
@@ -105,11 +104,6 @@ flowchart TD
   would most naturally be a `createX()` factory in `packages/agents/src/`,
   reading through `ResumeStore`. Its first half — getting text out of a PDF or a
   DOCX at all — is ticketed as #86.
-- **Findings that outlive the run.** Only the rendered markdown is uploaded, and
-  `artifacts` records one object key for it. The validated `Findings` — the
-  structured postings, with their URLs — are discarded when the process exits, so
-  nothing downstream can address a single **Posting**. Everything below depends
-  on this. Ticketed as #81, with #80 as the contract change it needs.
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
@@ -120,14 +114,17 @@ flowchart TD
   `prod:resumes` and the worker's is `prod:briefs`, and `infra/aws/tests/`
   asserts both, so a dashboard-side agent cannot read what the worker wrote
   without an infrastructure change.
-- **Any dashboard UI for a brief.** `apps/dashboard` has an assistant chat, the
-  documents section, a settings page and the auth pages. Settings manages
-  **briefings** — create one, turn it on or off, change its cadence — over
-  `createJob()`, `pauseJob()`, `resumeJob()` and `updateJobSchedule()`. What is
-  missing is anything that surfaces what a run produced:
-  `latestArtifactForJob()` exists and has no caller outside its own tests,
-  nothing lists runs, and nothing tells the user a brief was written. A run's
-  output is reachable only from S3. Ticketed as #83.
+- **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
+  **Postings** from each briefing's most recent successful **Run**, read out of
+  the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`
+  (#83). What is still missing is the **Brief** — the markdown that run wrote —
+  and that gap is structural rather than merely unbuilt: the dashboard's IAM
+  grant is `prod:resumes` and a brief lives under `prod:briefs`, so the app
+  cannot read one without an infrastructure change. Nothing lists **Runs**
+  either, and `latestArtifactForJob()` still has no caller outside its own tests
+  — the briefings page deliberately does not use it, because it orders on run
+  start _and_ artifact creation and stops being well defined once a run writes
+  more than one artifact.
 
 ## Infrastructure
 

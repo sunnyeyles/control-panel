@@ -2,6 +2,7 @@ import {
   CircleHelpIcon,
   FileTextIcon,
   MessageSquareIcon,
+  NewspaperIcon,
   Settings2Icon,
   type LucideIcon,
 } from "lucide-react"
@@ -29,8 +30,15 @@ export interface NavItem {
   icon: LucideIcon
 }
 
+/**
+ * "Briefings" is the glossary's word for what a user set up and what one
+ * occurrence of it produced — never "Jobs", which in this system means a row in
+ * `jobs` and never an employment opportunity. What the page lists is
+ * **Postings**.
+ */
 export const navMain: readonly NavItem[] = [
   { title: "Assistant", url: "/", icon: MessageSquareIcon },
+  { title: "Briefings", url: "/briefings", icon: NewspaperIcon },
   { title: "Documents", url: "/documents", icon: FileTextIcon },
 ]
 
