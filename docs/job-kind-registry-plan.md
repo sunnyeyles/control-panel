@@ -8,7 +8,7 @@ asks Postgres what is due, and a private per-user S3 bucket for what the runs
 produce. The job-search briefing is one instance of that machinery. The
 repository is called `control-panel` for a reason.
 
-`apps/briefing-worker/src/job-search-config.ts:9-12` states the intended
+`apps/briefing-worker/src/job-search-config.ts:8-10` states the intended
 property:
 
 > Keeping the schema out of the database package is what lets a second kind of
@@ -35,17 +35,18 @@ calls `runBriefing(...)` unconditionally, for every due job, with no branch. Tha
 single line is the entire distance between "a job is due" and "a briefing runs".
 
 **2. A foreign config fails late, not early.** `runBriefing` calls
-`parseJobSearchConfig` as its first step (`run-briefing.ts:200`), which throws on
-anything not job-search shaped (`job-search-config.ts:69-75`). So a job row with
+`parseJobSearchConfig` as its first step (`run-briefing.ts:196`), which throws on
+anything not job-search shaped (`job-search-config.ts:69-73`). So a job row with
 a different config today would be selected by `dueJobs`, have its `next_run_at`
 advanced, get a `running` row inserted by `claimJob`, fail at config parse, be
 marked `failed`, and make the whole tick rethrow (`run-tick.ts:137-143`). It
 burns a slot to discover something knowable before the slot was claimed.
 
 **3. `run-tick.ts` has no test.** The worker's only tests are
-`run-briefing.test.ts` and `search-results.test.ts`. `runTick` takes a concrete
-`PrismaClient`, which is awkward to fake — which is why it has none, and why the
-dispatch decision needs to be testable without one.
+`src/run-briefing.test.ts` and `src/dev/stores.test.ts` — and the second covers
+the local harness, not the pipeline. `runTick` takes a concrete `PrismaClient`,
+which is awkward to fake — which is why it has none, and why the dispatch
+decision needs to be testable without one.
 
 **4. The Errors alarm is daily and latching, not per-invocation.**
 `infra/aws/modules/briefing-worker/monitoring.tf:16-30` sets `period = 86400`
@@ -69,7 +70,7 @@ back-filled — it is the briefing kind, permanently.
 
 The alternative is a real `jobs.kind` column. The schema's own organising rule
 (`0001_init/migration.sql:3-4`) is that pipeline-shaped things live in
-`jobs.config` and anything the platform *queries, filters, sorts or constrains*
+`jobs.config` and anything the platform _queries, filters, sorts or constrains_
 is a real column. Nothing queries or filters on kind: `dueJobs` orders on
 `next_run_at` (`packages/db/src/jobs.ts:72-78`) and the tick runs whatever comes
 back. The worker reads the discriminator once, in memory, having already
@@ -101,11 +102,11 @@ So the registry entry receives a context object assembled once per tick — the
 job, the claimed slot, and the recording callbacks `runTick` already builds
 (`run-tick.ts:110-113`) — and each handler reaches for what it needs. The
 briefing handler is a thin adapter over `runBriefing`, whose own injectable-seam
-shape (`RunBriefingInput`, `run-briefing.ts:90-129`) is already the pattern to
+shape (`RunBriefingInput`, `run-briefing.ts:88-127`) is already the pattern to
 copy: dependencies arrive as fields, not positional arguments, precisely so a
 test can supply a subset.
 
-The open part is how a *future* kind's store reaches it without `runTick`
+The open part is how a _future_ kind's store reaches it without `runTick`
 constructing every store on every tick, most of which no due job will use.
 Construction is not free — `createBriefStore(createS3UserObjectStore())`
 (`apps/briefing-worker/src/index.ts:147`) reads `USER_STORAGE_BUCKET_NAME` and
@@ -127,19 +128,46 @@ Today both would read as the second, because there is only one path.
 The kind lookup happens **before `claimJob`**. An unhandled kind is knowable from
 the row alone, and claiming a slot to discover it advances `next_run_at`, inserts
 a `running` row, and consumes the occurrence — for a job that had no chance of
-running. The tick's existing `skipped` counter (`run-tick.ts:44-46`) is for
-slots another party holds and should not be borrowed for this; an unhandled kind
-is a fault and must be visible as one.
+running. The tick's existing `skipped` counter (`run-tick.ts:45-46`) is for slots
+another party holds and should not be borrowed for this; an unhandled kind is a
+fault and must be visible as one.
 
-Which leaves the question fact 4 forces: this failure recurs every hour forever
-and will latch the Errors alarm, destroying the signal for every other failure.
-The honest options are (a) fail the run and accept the latch, (b) fail the run
-and pause the job, (c) report it distinctly and do not throw. **This plan takes
-(a)**, and records why: (b) is failure quarantine, which is a policy engine with
-its own resume story and is out of scope here; (c) breaks the throw contract that
-`runTick`'s own comment (`run-tick.ts:60-65`) identifies as what the alarm
-depends on. The latch is a real cost, it is written down here, and it is the
-argument for building quarantine next.
+**Not claiming has a consequence worth stating outright: the row never moves.**
+`claimJob`'s guarded `UPDATE` (`packages/db/src/jobs.ts:109-112`) is the only
+thing that advances `next_run_at`. A job skipped ahead of the claim therefore
+keeps the occurrence it already missed, is returned by `dueJobs` on every
+subsequent tick, and — because `dueJobs` orders `next_run_at` ascending
+(`packages/db/src/jobs.ts:72-78`) — sorts steadily earlier in the result, holding
+a place in the fifty-row limit for as long as it exists. Combined with Decision 5
+this means one such row makes **every** invocation of the worker fail, from the
+moment it is written until a human edits it. Other due jobs still run — the tick
+attempts all of them before it rethrows — but the invocation is marked failed
+each hour regardless.
+
+So the cost is larger than the alarm. The honest options are (a) fail the run and
+leave the row alone, (b) fail the run and pause it, (c) report it distinctly and
+do not throw.
+
+**This plan takes (a)**, and the reasoning has to be stated more carefully than
+"quarantine is out of scope", because it is not out of reach: `pauseJob`
+(`packages/db/src/jobs.ts:167`) sets `next_run_at = NULL`, `resumeJob`
+(`jobs.ts:183`) recomputes from now, and `NULL` is already what the schema means
+by paused (`0001_init/migration.sql:32`). Option (b) is one existing call, and it
+would end both the hourly throw and the permanent place in the due list.
+
+What argues against it is visibility, not cost. Nothing in the dashboard renders
+a `runs` row at all — §Deliberately not building says so — so a job auto-paused
+by the worker is a job that stops producing briefs with no surface anywhere
+saying why, and `next_run_at = NULL` is indistinguishable from a pause the user
+performed. Failing loudly every hour is ugly; disappearing quietly is worse, and
+only one of the two is self-correcting once someone looks. Option (c) is refused
+on different grounds: it breaks the throw contract that `runTick`'s own comment
+(`run-tick.ts:60-65`) identifies as what the alarm depends on.
+
+That makes auto-pause the right move **once a run is visible in the UI**, and the
+sequencing is the point: build the runs surface, then quarantine, then revisit
+this. Until then the latched alarm and the recurring failure are accepted, and
+written down here so the next person meets them as a decision rather than a bug.
 
 ### 4. The dashboard writes nothing new
 
@@ -151,8 +179,16 @@ should be made.**
 This matters because `apps/dashboard/lib/jobs/search-criteria.ts:6-25` already
 documents a knowing duplication of part of the worker's schema, and closes with:
 "changing the worker's required fields means changing this file too." Requiring
-an explicit `kind` would make the discriminator a *required* field and drag that
+an explicit `kind` would make the discriminator a _required_ field and drag that
 file — and its warning — into scope for no gain.
+
+It is worth knowing how narrow the write surface actually is. `createJob` is the
+**only** path that writes `config`: `updateJobSchedule` (`jobs.ts:140`),
+`pauseJob` and `resumeJob` touch the cadence and `next_run_at` and nothing else,
+and no action anywhere edits an existing job's config. So a job's kind is fixed
+at creation and cannot drift — which is what makes absent-means-briefing safe to
+rely on rather than merely convenient, and it is also why a future kind arrives
+as a new row rather than as an edit to an old one.
 
 ### 5. `runTick`'s throw contract is untouched
 
@@ -191,8 +227,10 @@ The lookup moves ahead of `claimJob`, and an unhandled kind produces a failure
 whose message names the kind and does not resemble a config-parse failure. Slot
 untouched.
 
-Done when: a test proves an unknown kind fails distinguishably, and proves no
-slot was claimed for it.
+Done when: a test proves an unknown kind fails distinguishably, proves no slot
+was claimed for it, and proves the row's `next_run_at` is unchanged — the last
+being the behaviour Decision 3 accepts deliberately, so it should be asserted
+rather than discovered.
 
 ### Stage 3 — prove the seam with a fake
 
