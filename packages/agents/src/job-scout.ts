@@ -33,6 +33,21 @@ export const JOB_SCOUT_SYSTEM_PROMPT = [
   jobScoutSchemaDescription,
 ].join("\n")
 
+/**
+ * The boards the scout searches, as the tools that search them.
+ *
+ * Exported because the worker has to know which tool results count as evidence
+ * that a live search happened. A list maintained separately over there would
+ * drift the first time a board is added here, and it would drift *silently* —
+ * the worker would under-count rather than fail, which is the failure mode the
+ * search count exists to catch in the first place.
+ *
+ * `extraTools` is deliberately not part of this. A caller appending a tool is
+ * not adding a job board, and nothing a caller passes should be able to satisfy
+ * the worker's "something actually searched" check.
+ */
+export const JOB_SCOUT_SEARCH_TOOLS: readonly AgentTool[] = [seekSearch]
+
 export interface CreateJobScoutOptions extends Omit<
   CreateAgentOptions,
   "tools"
@@ -65,6 +80,6 @@ export function createJobScout(options: CreateJobScoutOptions = {}): Agent {
     ...rest,
     systemPrompt,
     maxLlmCalls,
-    tools: [seekSearch, ...extraTools],
+    tools: [...JOB_SCOUT_SEARCH_TOOLS, ...extraTools],
   })
 }

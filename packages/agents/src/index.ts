@@ -43,6 +43,7 @@ export { postingId } from "./posting-id.ts"
 export {
   createJobScout,
   JOB_SCOUT_MAX_LLM_CALLS,
+  JOB_SCOUT_SEARCH_TOOLS,
   JOB_SCOUT_SYSTEM_PROMPT,
   type CreateJobScoutOptions,
 } from "./job-scout.ts"

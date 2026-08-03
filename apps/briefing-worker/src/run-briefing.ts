@@ -1,10 +1,8 @@
 import {
   AIMessage,
   HumanMessage,
-  ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
-import { seekSearch } from "@workspace/agent-tools/seek-search"
 import {
   createBriefWriter,
   createJobScout,
@@ -17,6 +15,11 @@ import { runWithLangfuseTrace } from "@workspace/langfuse"
 
 import { parseJobSearchConfig, toSearchBrief } from "./job-search-config.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
+import {
+  countBySource,
+  SEARCH_TOOL_NAMES,
+  successfulSearchResults,
+} from "./search-results.ts"
 import { createTracer, type TraceSink } from "./trace.ts"
 
 /**
@@ -35,12 +38,6 @@ import { createTracer, type TraceSink } from "./trace.ts"
  * through; constructing them is `index.ts`'s job.
  */
 
-/**
- * Taken from the tool rather than written out, so renaming the tool cannot
- * leave this looking for a name nothing emits.
- */
-const SEARCH_TOOL_NAME = seekSearch.name
-
 interface RunReportFields {
   event: "briefing-run"
   startedAt: string
@@ -52,6 +49,11 @@ interface RunReportFields {
   llmCalls: number
   /** Searches that actually returned; an error result proves nothing ran. */
   searches: number
+  /**
+   * The same count split by the board it came from, zeroes included — see
+   * `countBySource`, which explains why the zeroes are the point.
+   */
+  searchesBySource: Record<string, number>
 }
 
 /** A run that produced a brief and recorded it. */
@@ -147,6 +149,7 @@ export async function runBriefing(
   // reaching the model" are different problems.
   let llmCalls = 0
   let searches = 0
+  let searchesBySource = countBySource([])
 
   const common = (): RunReportFields => ({
     event: "briefing-run",
@@ -157,6 +160,7 @@ export async function runBriefing(
     scheduledFor: slot.scheduledFor.toISOString(),
     llmCalls,
     searches,
+    searchesBySource,
   })
 
   return runWithLangfuseTrace(
@@ -226,11 +230,12 @@ export async function runBriefing(
         )
 
         llmCalls += scouted.llmCalls
-        const searchResults = successfulToolResults(
+        const searchResults = successfulSearchResults(
           scouted.messages,
-          SEARCH_TOOL_NAME
+          SEARCH_TOOL_NAMES
         )
         searches = searchResults.length
+        searchesBySource = countBySource(searchResults)
 
         const findings = await trace.step(
           "handoff",
@@ -242,7 +247,7 @@ export async function runBriefing(
             // confident brief citing postings nobody can visit.
             if (searches === 0) {
               throw new Error(
-                `The scout completed no successful ${SEARCH_TOOL_NAME} round trip, so nothing it reported came from a live search.`
+                `The scout completed no successful search round trip on any of ${SEARCH_TOOL_NAMES.join(", ")}, so nothing it reported came from a live search.`
               )
             }
 
@@ -255,7 +260,9 @@ export async function runBriefing(
             // would have to appear, byte for byte, in a result that arrived over
             // the network.
             for (const posting of parsed.postings) {
-              if (!searchResults.some((text) => text.includes(posting.url))) {
+              if (
+                !searchResults.some(({ text }) => text.includes(posting.url))
+              ) {
                 throw new Error(
                   `The scout reported a URL no search returned: ${posting.url}. Every posting URL must appear verbatim in a search result.`
                 )
@@ -419,25 +426,6 @@ function toWriterPrompt(findings: ReturnType<typeof parseFindings>): string {
     "",
     JSON.stringify(findings, null, 2),
   ].join("\n")
-}
-
-/**
- * The text of every tool result that actually worked — an error result proves
- * nothing ran. The length is the run report's search count; the texts are what
- * the hand-off checks posting URLs against.
- */
-function successfulToolResults(
-  messages: BaseMessage[],
-  toolName: string
-): string[] {
-  return messages
-    .filter(
-      (message): message is ToolMessage =>
-        ToolMessage.isInstance(message) &&
-        message.name === toolName &&
-        message.status !== "error"
-    )
-    .map((message) => message.text)
 }
 
 /**
