@@ -1,10 +1,13 @@
 import { S3Client } from "@aws-sdk/client-s3"
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider"
 import {
+  createCoverLetterStore,
   createResumeStore,
   createS3UserObjectStore,
   readUserStorageConfig,
+  type CoverLetterStore,
   type ResumeStore,
+  type UserObjectStore,
   type UserStorageConfig,
 } from "@workspace/user-storage"
 
@@ -32,7 +35,9 @@ import {
  * `USER_STORAGE_BUCKET_NAME` surfaces at the first upload, not at build time,
  * so a green build says less about this file than it does about most.
  */
+let objects: UserObjectStore | undefined
 let resumes: ResumeStore | undefined
+let coverLetters: CoverLetterStore | undefined
 
 /**
  * The role the memoized client assumes, or `undefined` for the default chain.
@@ -45,7 +50,49 @@ let resumes: ResumeStore | undefined
  */
 let builtFor: string | undefined
 
+/**
+ * Documents the user uploaded.
+ *
+ * The facade is memoized alongside the client it wraps — building one is a
+ * closure over an interface and costs nothing, but rebuilding it per request
+ * would make "is this the same store" a question with a different answer every
+ * time, which is the sort of thing a future caching layer would get wrong.
+ */
 export function getResumeStore(): ResumeStore {
+  const store = getObjectStore()
+  resumes ??= createResumeStore(store)
+  return resumes
+}
+
+/**
+ * Cover letters this app drafts.
+ *
+ * A second facade over the **same** client and the same credentials — the
+ * dashboard's Vercel role now holds `prod:resumes` and `prod:cover-letters`,
+ * and nothing else. Note what that grant does not include: `prod:briefs`. The
+ * app still cannot read what the worker wrote, which is why `/briefings`
+ * renders the Findings on the Run row rather than the Brief.
+ *
+ * ⚠️ **The grant is Terraform, not TypeScript.** A `cover-letters` kind
+ * declared in `packages/user-storage/src/kinds.ts` without the matching
+ * `object_kinds` entry and role attachment in `infra/aws/` gets no retention
+ * rule and 403s on the first write — surfacing here as nothing more specific
+ * than "Document storage is unavailable".
+ */
+export function getCoverLetterStore(): CoverLetterStore {
+  const store = getObjectStore()
+  coverLetters ??= createCoverLetterStore(store)
+  return coverLetters
+}
+
+/**
+ * The one client both facades share.
+ *
+ * Split out of `getResumeStore` when the second facade arrived: two independent
+ * memos would have meant two `S3Client`s, two connection pools, and two
+ * opportunities for one of them to be left pinned to a stale credential branch.
+ */
+function getObjectStore(): UserObjectStore {
   // ⚠️ **The credential source is recomputed every call; only the client is
   // memoized.**
   //
@@ -61,16 +108,23 @@ export function getResumeStore(): ResumeStore {
   // connection pool is still shared across requests.
   const roleArn = oidcRoleArn()
 
-  if (!resumes || builtFor !== roleArn) {
+  if (!objects || builtFor !== roleArn) {
     const config = readUserStorageConfig()
 
-    resumes = createResumeStore(
-      createS3UserObjectStore({ config, client: createClient(config, roleArn) })
-    )
+    objects = createS3UserObjectStore({
+      config,
+      client: createClient(config, roleArn),
+    })
     builtFor = roleArn
+
+    // The facades close over the client, so a rebuilt client must invalidate
+    // them too — otherwise a role change would swap the credentials underneath
+    // and leave both facades holding the old ones.
+    resumes = undefined
+    coverLetters = undefined
   }
 
-  return resumes
+  return objects
 }
 
 /**

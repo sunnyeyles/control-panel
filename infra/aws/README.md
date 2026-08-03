@@ -71,17 +71,19 @@ flowchart TB
   subgraph bucket["S3 — user storage (private, versioned, encrypted)"]
     briefs["prod/{userId}/briefs/YYYY/MM/DD/{id}.md<br>tag kind=briefs"]
     resumes["prod/{userId}/resumes/{id}.pdf<br>tag kind=resumes"]
+    letters["prod/{userId}/cover-letters/{postingId}.md<br>tag kind=cover-letters"]
   end
 
   pab["Public access block<br>all four flags"]
   own["BucketOwnerEnforced<br>ACLs unrepresentable"]
   tls["Bucket policy<br>deny aws:SecureTransport = false"]
-  lc["Lifecycle — by tag, not prefix<br>briefs expire, resumes never"]
+  lc["Lifecycle — by tag, not prefix<br>briefs expire; resumes and cover letters never"]
 
   worker --- role
   app --- role
   role -->|prod:briefs policy| briefs
   role -->|prod:resumes policy| resumes
+  role -->|prod:cover-letters policy| letters
   pab -.-> bucket
   own -.-> bucket
   tls -.-> bucket
@@ -99,7 +101,7 @@ flowchart TB
 | Versioning                     | an overwrite supersedes and a delete leaves a marker; both are undoable                  |
 | Default encryption             | SSE-S3, or a customer-managed KMS key when `kms_key_arn` is set                          |
 | Bucket policy                  | denies any request where `aws:SecureTransport` is false                                  |
-| Lifecycle **per kind, by tag** | briefs expire after a year; resumes never expire automatically                           |
+| Lifecycle **per kind, by tag** | briefs expire after a year; resumes and cover letters never expire automatically         |
 | IAM per environment            | every kind in that environment — the broad grant                                         |
 | IAM per environment **× kind** | one category only — the narrow grant, and the one to prefer                              |
 
@@ -130,6 +132,12 @@ Splitting by environment means the identity running production cannot name a
 `dev/` key. Splitting by kind means "the scheduled worker can write briefs" and
 "the scheduled worker can delete a user's CV" are not the same grant — which
 matters more now that one of those is a document the user uploaded.
+
+The two workloads' grants are **disjoint**, and that is asserted rather than
+described: the worker holds `prod:briefs`, the dashboard holds `prod:resumes`
+and `prod:cover-letters`, and `tests/vercel_dashboard.tftest.hcl` fails if either
+set widens into the other. The dashboard drafts letters and must not be able to
+forge or delete a briefing.
 
 ```json
 {

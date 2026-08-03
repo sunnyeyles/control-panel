@@ -68,6 +68,16 @@ export type LatestFindings =
   | {
       state: "recorded"
       ranAt: string
+      /**
+       * The Run these Postings were read out of.
+       *
+       * Carried so the Draft button can name it, and for no other reason —
+       * a letter's storage key holds no Run. It travels back through a hidden
+       * form field and is therefore untrusted on the way in: the draft action
+       * loads the Run and its Job and requires the Job's owner to be the
+       * caller. See `lib/cover-letters/cover-letter-actions.ts`.
+       */
+      runId: string
       postings: PostingView[]
       /** The scout's note about the search itself, when it left one. */
       notes?: string
@@ -164,6 +174,7 @@ function toLatestFindings(run: LatestRun | undefined): LatestFindings {
   return {
     state: "recorded",
     ranAt,
+    runId: run.id,
     postings: parsed.data.postings.map((posting) => ({
       id: postingId(posting),
       title: posting.title,

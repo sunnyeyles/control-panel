@@ -1,3 +1,4 @@
+import { DraftCoverLetterButton } from "@/components/briefings/draft-cover-letter-button"
 import type {
   BriefingPostings,
   LatestFindings,
@@ -64,7 +65,14 @@ function BriefingCard({ briefing }: { briefing: BriefingPostings }) {
         <ol className="flex flex-col gap-4">
           {latest.postings.map((posting) => (
             <li key={posting.id}>
-              <PostingCard posting={posting} />
+              {/*
+                The Run id is threaded down rather than looked up in the card:
+                a Posting has no Run of its own, and the letter's storage key
+                holds no Run either. It travels only so the action can be told
+                which Findings to re-read the Posting out of — and it is checked
+                for ownership there, never trusted.
+              */}
+              <PostingCard posting={posting} runId={latest.runId} />
             </li>
           ))}
         </ol>
@@ -103,7 +111,13 @@ function emptyMessage(state: LatestFindings["state"]): string {
   }
 }
 
-function PostingCard({ posting }: { posting: PostingView }) {
+function PostingCard({
+  posting,
+  runId,
+}: {
+  posting: PostingView
+  runId: string
+}) {
   return (
     <article className="flex flex-col gap-2 rounded-lg border p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -147,6 +161,12 @@ function PostingCard({ posting }: { posting: PostingView }) {
       ) : null}
 
       <p className="text-sm text-muted-foreground">{posting.matchReason}</p>
+
+      <DraftCoverLetterButton
+        runId={runId}
+        postingId={posting.id}
+        title={posting.title}
+      />
     </article>
   )
 }

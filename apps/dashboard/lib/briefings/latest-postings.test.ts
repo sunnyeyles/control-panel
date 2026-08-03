@@ -159,6 +159,12 @@ describe("latestPostingsForUser", () => {
     // `finished_at`, formatted in a fixed locale and an explicit zone.
     expect(latest.ranAt).toContain("2 Aug 2026")
     expect(latest.ranAt).toContain("UTC")
+
+    // The Run these Postings came out of, carried so the Draft button can name
+    // it. It is not part of a letter's identity — a letter's key holds the
+    // Posting and nothing else — and it is re-checked for ownership on the way
+    // back in, because it travels through a hidden form field.
+    expect(latest.runId).toBe("run-new")
   })
 
   /**

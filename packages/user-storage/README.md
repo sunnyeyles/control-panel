@@ -1,7 +1,7 @@
 # @workspace/user-storage
 
-Per-user object storage — Markdown briefs the worker generates, documents the
-user uploads. S3 behind an interface.
+Per-user object storage — Markdown briefs the worker generates, cover letters the
+dashboard drafts, documents the user uploads. S3 behind an interface.
 
 ## The seam
 
@@ -11,15 +11,23 @@ keys.ts                build / parse / validate object keys                   no
 errors.ts              the typed error union                                  no AWS import
 config.ts              reads the environment                                  no AWS import
 user-object-store.ts   the UserObjectStore interface                          no AWS import
+metadata.ts            cleaning a value a header can carry                    no AWS import
 brief-store.ts         BriefStore facade                                      no AWS import
+cover-letter-store.ts  CoverLetterStore facade                                no AWS import
 resume-store.ts        ResumeStore facade                                     no AWS import
 s3-user-object-store.ts  createS3UserObjectStore()                            the only AWS import
 ```
 
 One generic core does the S3 work, key validation, ownership checks and error
-mapping. Two thin facades sit on top and know their own kind's key shape and
+mapping. Three thin facades sit on top and know their own kind's key shape and
 file types, so a call site does not have to restate them — and cannot get them
 wrong.
+
+`metadata.ts` is shared by two of them and is not decoration: **S3 user-metadata
+values travel in HTTP headers**, so a value carrying a newline is header
+injection and a non-ASCII one is silently mangled. An uploaded filename and a
+cover letter's provenance are both text from outside, so both go through
+`toMetadataValue`.
 
 Compose once, at the composition root:
 
@@ -27,12 +35,14 @@ Compose once, at the composition root:
 import {
   createS3UserObjectStore,
   createBriefStore,
+  createCoverLetterStore,
   createResumeStore,
 } from "@workspace/user-storage"
 
 const objects = createS3UserObjectStore()
 const briefs = createBriefStore(objects)
 const resumes = createResumeStore(objects)
+const coverLetters = createCoverLetterStore(objects)
 ```
 
 Everything downstream takes the narrow type:
@@ -85,6 +95,7 @@ helpers does not need a bucket to point at. This mirrors `getOpenAIApiKey` in
 {environment}/{userId}/{kind}/…tail.{ext}
 
 prod/alice/briefs/2026/07/28/morning.md
+prod/alice/cover-letters/0f1e2d3c4b5a6978.md
 prod/alice/resumes/backend-2026.pdf
 ```
 
@@ -97,7 +108,10 @@ still narrow to a category: IAM resource ARNs take wildcards, so
 
 The tail differs per kind, which is the whole reason the core is generic.
 Briefs are date-partitioned because they are generated on a schedule; resumes
-are not, because they are uploaded and replaced.
+are not, because they are uploaded and replaced. A cover letter's tail is the
+**Posting** id and nothing else, so the unit of identity is (user, Posting) —
+re-drafting the same advertisement overwrites one object rather than
+accumulating, and the Run that found it lives in metadata instead.
 
 `environment` is **not** part of any ref. It comes from the store's own config,
 so a caller cannot reach into another environment however it is called — the
@@ -110,8 +124,9 @@ with `userId` in the middle there is no prefix meaning "every user's briefs".
 Retention could not differ per kind on prefixes alone.
 
 So every object is **tagged** `kind=<kind>` at write time and the lifecycle
-rules filter on that tag. It is the only reason briefs and resumes can be
-retained differently. Adding a kind to `kinds.ts` without a matching entry in
+rules filter on that tag. It is the only reason briefs, resumes and cover
+letters can be retained differently — briefs expire after a year, the other two
+never do. Adding a kind to `kinds.ts` without a matching entry in
 the Terraform `object_kinds` map leaves it with no retention policy at all.
 
 ## Ownership and validation
@@ -140,10 +155,11 @@ caller.** A caller-supplied content type is a caller-supplied claim; it would
 let a `.pdf` be stored as `text/html`. Each kind declares an allowlist in
 `kinds.ts`, and an extension outside it is rejected before any request is made.
 
-| Kind      | Extensions                           | Disposition  |
-| --------- | ------------------------------------ | ------------ |
-| `briefs`  | `.md`                                | `inline`     |
-| `resumes` | `.pdf .doc .docx .odt .rtf .txt .md` | `attachment` |
+| Kind            | Extensions                           | Disposition  |
+| --------------- | ------------------------------------ | ------------ |
+| `briefs`        | `.md`                                | `inline`     |
+| `cover-letters` | `.md`                                | `inline`     |
+| `resumes`       | `.pdf .doc .docx .odt .rtf .txt .md` | `attachment` |
 
 `attachment` on uploaded documents matters: those bytes arrived from outside,
 and a browser rendering an uploaded file inline on the bucket's origin is the

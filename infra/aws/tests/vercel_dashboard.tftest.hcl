@@ -74,11 +74,24 @@ run "configured" {
     error_message = "The role must carry the workload permissions boundary; iam:CreateRole is conditioned on it."
   }
 
-  # The narrow grant, and only it. The per-environment policy would also cover
-  # briefs.
+  # The narrow grants, and only them. The per-environment policy would also
+  # cover briefs.
+  #
+  # `keys()` returns them sorted, so `cover-letters` leads. Asserting the exact
+  # set rather than membership is the point: a third kind added to
+  # `local.vercel_dashboard_kinds` has to be argued for here, in a test whose
+  # error message says what widening it costs.
   assert {
-    condition     = keys(aws_iam_role_policy_attachment.vercel_dashboard_user_storage) == ["prod:resumes"]
-    error_message = "The dashboard must be attached to exactly the prod:resumes policy; anything broader lets it rewrite generated briefs."
+    condition     = keys(aws_iam_role_policy_attachment.vercel_dashboard_user_storage) == ["prod:cover-letters", "prod:resumes"]
+    error_message = "The dashboard must be attached to exactly the prod:cover-letters and prod:resumes policies; anything broader lets it rewrite generated briefs."
+  }
+
+  # Stated separately from the set above, because this is the property and that
+  # is only today's spelling of it. A grant over `briefs` would let the app that
+  # renders a briefing also author one.
+  assert {
+    condition     = !contains(local.vercel_dashboard_kinds, "briefs")
+    error_message = "The dashboard must hold no grant over briefs; the worker writes those and the app must not be able to forge one."
   }
 
   # The property neither file states on its own: the dashboard cannot forge a

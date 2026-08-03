@@ -1,0 +1,52 @@
+"use server"
+
+import type { ActionState } from "@/lib/actions/action-state"
+import { getCurrentUser } from "@/lib/auth/current-user"
+import { createCoverLetterActions } from "@/lib/cover-letters/cover-letter-actions"
+import { getPrisma } from "@/lib/db"
+import { getCoverLetterStore, getResumeStore } from "@/lib/storage"
+import { refresh } from "next/cache"
+
+/**
+ * The briefings segment's Server Actions.
+ *
+ * Follows the convention `app/(app)/documents/actions.ts` sets, point for
+ * point: `"use server"` at the top of a dedicated file rather than inline,
+ * because every export here is a POST endpoint reachable without going through
+ * the UI and the set of them is a security surface; a thin wrapper over a
+ * `createXActions(deps)` factory in `lib/`, because the injectable seam is what
+ * lets the authorization branches be tested without a live session; and
+ * `refresh()` here rather than in the core, because it needs Next's request
+ * store.
+ *
+ * A `"use server"` file may only export async functions, which is why the state
+ * type crosses as a type-only import.
+ */
+
+const actions = createCoverLetterActions({
+  getUser: getCurrentUser,
+  getPrisma,
+  getResumes: getResumeStore,
+  getCoverLetters: getCoverLetterStore,
+})
+
+/**
+ * `refresh()` after a success, for the same reason the document actions call
+ * it: `/briefings` is `force-dynamic` and `staleTimes.dynamic` lets the client
+ * router reuse the segment for 30 seconds, so without this the page would keep
+ * showing a state that predates the draft.
+ *
+ * It is arguably belt-and-braces today — nothing on the page renders a letter
+ * yet — but the alternative is a call site that has to remember to add it when
+ * something does, and the documents actions had exactly that bug.
+ */
+export async function draftCoverLetterAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await actions.draftCoverLetter(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}

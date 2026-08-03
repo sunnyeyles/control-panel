@@ -56,6 +56,17 @@ variable "object_kinds" {
       noncurrent_version_expiration_days = 30
     }
 
+    # Drafted once, for one advertisement, in the user's own voice — and they
+    # may already have relied on it. Never expired automatically, the same
+    # posture as `resumes` and deliberately **not** the `briefs` one: a brief is
+    # regenerated daily and expiring a year of them is housekeeping, while
+    # deleting a letter is data loss. Superseded drafts are kept a year, which
+    # is what makes re-drafting a Posting non-destructive.
+    cover-letters = {
+      expiration_days                    = null
+      noncurrent_version_expiration_days = 365
+    }
+
     # The user's own upload. Never expired automatically; superseded versions
     # are kept a year so a mistaken re-upload is recoverable.
     resumes = {

@@ -121,24 +121,39 @@ resource "aws_iam_role" "vercel_dashboard" {
   }
 }
 
-# Take the **narrow** grant — the same reasoning as `briefing-worker.tf`, in the
-# other direction. The dashboard handles documents a user uploaded, so it wants
-# `prod:resumes` and not the per-environment policy that would also let it
+# Take the **narrow** grants — the same reasoning as `briefing-worker.tf`, in
+# the other direction. The dashboard handles documents a user uploaded and the
+# cover letters it drafts for them, so it wants `prod:resumes` and
+# `prod:cover-letters` and not the per-environment policy that would also let it
 # rewrite the briefs the worker generates.
 #
-# The two attachments are disjoint by construction, and that disjointness is
-# asserted in `tests/vercel_dashboard.tftest.hcl`: the worker cannot delete
+# **Enumerated rather than pattern-matched.** The filter used to be
+# `endswith(key, ":resumes")`, and widening it to a suffix list would keep the
+# same shape while making it one careless `or` away from covering briefs. A set
+# of kind names, joined to the environment, says exactly which grants this role
+# holds and reads as the list it is.
+#
+# The two roles' attachments are disjoint by construction, and that disjointness
+# is asserted in `tests/vercel_dashboard.tftest.hcl`: the worker cannot delete
 # someone's CV, and the dashboard cannot forge a briefing. Neither property is
 # obvious from either file alone, which is why it is a check rather than a
 # comment.
 #
-# This policy already existed and was attached to nothing — the user-storage
-# module has published it since the bucket was created. Nothing new is authored
-# here; it is only pointed at a principal for the first time.
+# Both policies are published by the user-storage module — `prod:cover-letters`
+# exists as soon as the kind is in `object_kinds`, which is the same edit that
+# gives it a lifecycle rule. Nothing new is authored here; the policies are only
+# pointed at a principal.
+locals {
+  # The kinds the dashboard may touch. `briefs` is deliberately absent: the app
+  # holds no grant over what the worker wrote, which is why /briefings renders
+  # the Findings on the run row rather than the Brief itself.
+  vercel_dashboard_kinds = ["resumes", "cover-letters"]
+}
+
 resource "aws_iam_role_policy_attachment" "vercel_dashboard_user_storage" {
   for_each = local.vercel_dashboard_enabled ? {
     for key, arn in module.user_storage.kind_access_policy_arns :
-    key => arn if endswith(key, ":resumes")
+    key => arn if contains(local.vercel_dashboard_kinds, element(split(":", key), 1))
   } : {}
 
   role       = aws_iam_role.vercel_dashboard[0].name
