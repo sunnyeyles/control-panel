@@ -38,9 +38,16 @@ export type NoBackgroundReason =
    */
   | "unreadable-format"
   /**
-   * There is one in a format we do read, and reading it failed: a damaged file,
-   * a file whose name lies about its format, or a PDF that is a scan with no
-   * text layer in it at all.
+   * There is one in a format we do read, and the parser *threw*: a damaged
+   * file, or a file whose name lies about its format.
+   *
+   * ⚠️ **Not the scanned-PDF case, however much it sounds like one.** A scan
+   * parses perfectly and yields an empty string, so it never arrives here. It
+   * travels on as `background: ""` and `assertDraftable` refuses it as
+   * `absent` — the branch whose message names the scan, and which can name the
+   * document too because by then we know which one it was. Routing an empty
+   * extraction here instead would trade that sentence for a vaguer one; see
+   * "What this deliberately does not do" in `profile-text.ts`.
    */
   | "extraction-failed"
 

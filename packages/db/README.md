@@ -88,16 +88,32 @@ only. Partial indexes and CHECK constraints that Prisma's schema DSL cannot
 express live in the SQL of `prisma/migrations/0001_init/` — do not tidy them
 into full unique constraints.
 
-Generate the client (also part of `build` / `typecheck`):
+Generate the client:
 
 ```bash
 pnpm --filter @workspace/db generate
 ```
 
+**`generate` is a Turborepo task, and `build`, `typecheck`, `test` and `dev` all
+depend on it rather than calling `prisma generate` themselves.** They used to,
+and the result was a race: nothing orders `db#build` against `db#typecheck`, so
+on a tree with no `src/generated/` yet both ran `prisma generate` into the same
+directory at once and one of them died with `EEXIST … mkdir …/prisma/internal`.
+The same collision is what made `turbo test --force` fail with `Cannot find
+module './generated/prisma/client.ts'` — a generate wiping the directory a
+sibling task was reading. One task with `outputs` declared runs once, and
+everything else waits for it.
+
+The cost is that a **direct** `pnpm --filter @workspace/db test` no longer
+generates first, so it fails on a tree that has never been built. Go through
+Turborepo — `pnpm turbo test --filter=@workspace/db` — or run `generate` once by
+hand. This is the same arrangement as every other package here, whose tests need
+`^build` to have run.
+
 ## Tests
 
 ```bash
-pnpm --filter @workspace/db test
+pnpm turbo test --filter=@workspace/db
 ```
 
 Two suites, split by whether the thing under test needs Postgres to _be_

@@ -105,6 +105,13 @@ In the five that emit `dist/` the same arrangement repeats and is deliberate:
 transpiles without typechecking. `typecheck` runs both. The dashboard needs
 neither half — it is `noEmit` already.
 
+**`@workspace/db` generates its Prisma Client through a `generate` Turborepo
+task**, which `build`, `typecheck`, `test` and `dev` all depend on. They used to
+each run `prisma generate` themselves, and racing generates into one directory is
+what made `turbo test --force` fail intermittently. Consequence: run its tests
+through Turborepo, not `pnpm --filter @workspace/db test` — see
+`packages/db/README.md`.
+
 `@workspace/db` splits its suite by whether the thing under test needs Postgres
 to _be_ Postgres. `schedule.test.ts` needs nothing. `stores.test.ts` needs a real
 database and **skips itself when `DATABASE_URL_UNPOOLED` is unset**, so a clean

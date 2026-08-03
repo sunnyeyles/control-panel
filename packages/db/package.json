@@ -23,15 +23,15 @@
   ],
   "scripts": {
     "generate": "prisma generate",
-    "build": "prisma generate && tsc --build",
+    "build": "tsc --build",
     "clean": "rm -rf dist .turbo *.tsbuildinfo src/generated",
-    "dev": "prisma generate && tsc --build --watch",
+    "dev": "tsc --build --watch",
     "lint": "eslint",
     "format": "prisma format && prettier --write \"**/*.ts\" \"prisma.config.ts\"",
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
     "test": "vitest run",
-    "typecheck": "prisma generate && tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

@@ -47,8 +47,8 @@ The split is the point of the design: neither `run-tick.ts` nor
 Everything platform-shaped — the handler signature, fetching secrets, and
 reaching S3 — lives in `index.ts`.
 
-`runTick` takes a `Db` and a `BriefStore` rather than constructing either, for
-the same reason.
+`runTick` takes a `PrismaClient` and a `BriefStore` rather than constructing
+either, for the same reason.
 
 **`jobs.config` is interpreted here, not in `@workspace/db`.** The platform
 stores that column and never reads inside it, so the schema for it lives in
@@ -76,7 +76,7 @@ Neither is in this package either, and confusing them wastes an afternoon.
 | One job                 | `jobs.next_run_at IS NULL`                         | The dashboard's `/settings`, or `pauseJob()`                        |
 
 A job is off when it has no `next_run_at` — there is no `enabled` column, and
-`packages/db/migrations/0001_init.sql` explains why one absence covers both
+`packages/db/prisma/migrations/0001_init/migration.sql` explains why one absence covers both
 paused and retired. `dueJobs()` filters on a partial index over exactly that
 predicate, so a paused job is not merely skipped, it is absent from the index
 the tick reads.
@@ -349,8 +349,8 @@ leaves no row at all.
 retry it, not touch the row. Claiming is at-most-once by design and every
 duplicate occurrence is a paid LLM run.
 
-**`db.close()` is in a `finally`.** Lambda freezes the process rather than
-tearing it down, so a connection left open is one Neon keeps accounting for
+**`prisma.$disconnect()` is in a `finally`.** Lambda freezes the process rather
+than tearing it down, so a connection left open is one Neon keeps accounting for
 while nothing is using it.
 
 **`lambda.zip` is read at Terraform _plan_ time, not apply time.** This package
