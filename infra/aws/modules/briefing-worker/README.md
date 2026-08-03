@@ -6,7 +6,7 @@ and the alarms that notice when it stops.
 ```
 EventBridge Scheduler ──assumes role──► Lambda (nodejs22.x, arm64)
   cron(0 * * * ? *) UTC                   │
-  flexible window OFF                     ├─► Secrets Manager  (all three, at cold start)
+  flexible window OFF                     ├─► Secrets Manager  (all five, at cold start)
   retries = 0                             ├─► CloudWatch Logs  (one tick line, plus one
                                           │                     briefing-run line per job)
                                           └─► OpenAI, Apify, Neon  (no VPC)
@@ -99,19 +99,25 @@ for the next hour.
 
 ## Secrets
 
-Three, all provisioned as empty shells and never written by Terraform:
+Five, all provisioned as empty shells and never written by Terraform:
 
-| Secret                      | Environment variable | Holds                            |
-| --------------------------- | -------------------- | -------------------------------- |
-| `<function>/openai-api-key` | `OPENAI_SECRET_ID`   | the OpenAI API key               |
-| `<function>/database-url`   | `DATABASE_SECRET_ID` | the **pooled** connection string |
-| `<function>/apify-token`    | `APIFY_SECRET_ID`    | the Apify API token              |
+| Secret                           | Environment variable            | Holds                            |
+| -------------------------------- | ------------------------------- | -------------------------------- |
+| `<function>/openai-api-key`      | `OPENAI_SECRET_ID`              | the OpenAI API key               |
+| `<function>/database-url`        | `DATABASE_SECRET_ID`            | the **pooled** connection string |
+| `<function>/apify-token`         | `APIFY_SECRET_ID`               | the Apify API token              |
+| `<function>/langfuse-public-key` | `LANGFUSE_PUBLIC_KEY_SECRET_ID` | the Langfuse project public key  |
+| `<function>/langfuse-secret-key` | `LANGFUSE_SECRET_KEY_SECRET_ID` | the Langfuse project secret key  |
 
 The function gets each secret's **ARN**, never its value. A value passed through
 Terraform appears in plan output, in state, and in the log of whatever ran the
 apply — and a connection string carries a password.
 
-Adding a fourth means a resource here, an environment variable in `main.tf`, a
+`LANGFUSE_BASE_URL` and `LANGFUSE_TRACING_ENVIRONMENT` are non-secret Lambda
+configuration. They default to Langfuse EU Cloud and `production`; configure
+the root's `briefing_worker` object for another region or self-hosted instance.
+
+Adding a sixth means a resource here, an environment variable in `main.tf`, a
 `loadSecret` call in the worker, and a line in `DEPLOYING.md` step 4. Miss the
 last and the shell ships empty, which takes down **every** invocation — the
 worker fetches all of them concurrently at handler init.

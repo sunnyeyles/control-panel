@@ -3,6 +3,7 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
+import type { RunnableConfig } from "@langchain/core/runnables"
 
 import type { TraceAgent, TraceToolCall, Tracer } from "./trace.ts"
 
@@ -32,8 +33,15 @@ import type { TraceAgent, TraceToolCall, Tracer } from "./trace.ts"
 export interface AgentLike {
   stream(
     input: { messages: BaseMessage[] },
-    options: { streamMode: ["updates", "values"] }
+    options: AgentStreamOptions
   ): Promise<AsyncIterable<unknown>>
+}
+
+export type AgentStreamOptions = Pick<
+  RunnableConfig,
+  "callbacks" | "metadata" | "runName" | "tags"
+> & {
+  streamMode: ["updates", "values"]
 }
 
 /** Exactly what `.invoke()` used to return, so call sites did not have to change. */
@@ -58,7 +66,8 @@ export async function runAgent(
   agent: AgentLike,
   agentName: TraceAgent,
   input: { messages: BaseMessage[] },
-  trace: Tracer
+  trace: Tracer,
+  options: Omit<AgentStreamOptions, "streamMode"> = {}
 ): Promise<AgentOutcome> {
   // A tool result names only the call id it answers, so the arguments the model
   // passed live on the AI message one superstep earlier. Correlated here rather
@@ -67,7 +76,10 @@ export async function runAgent(
   const argsByCallId = new Map<string, unknown>()
   let final: AgentOutcome | undefined
 
-  const stream = await agent.stream(input, { streamMode: STREAM_MODES })
+  const stream = await agent.stream(input, {
+    ...options,
+    streamMode: STREAM_MODES,
+  })
 
   for await (const chunk of stream) {
     const parsed = readChunk(chunk)

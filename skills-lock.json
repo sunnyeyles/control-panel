@@ -67,6 +67,12 @@
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "66e8a50c83c3c724fcfe0769701b665c56cec220cc4f49cc1aee8bdfc07de94a"
     },
+    "langfuse": {
+      "source": "langfuse/skills",
+      "sourceType": "github",
+      "skillPath": "skills/langfuse/SKILL.md",
+      "computedHash": "cc4e1ca6858c43b46e13b67aacf919db854db5e71260e509557609a6308af902"
+    },
     "neon": {
       "source": "neondatabase/agent-skills",
       "sourceType": "github",

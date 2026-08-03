@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, getToolName, isToolUIPart } from "ai"
 import { MessageSquareIcon } from "lucide-react"
@@ -56,7 +56,11 @@ export function AgentChat({
   placeholder = "Ask anything…",
   className,
 }: AgentChatProps) {
-  const transport = useMemo(() => new DefaultChatTransport({ api }), [api])
+  const [sessionId] = useState(crypto.randomUUID)
+  const transport = useMemo(
+    () => new DefaultChatTransport({ api, body: { sessionId } }),
+    [api, sessionId]
+  )
   const { messages, sendMessage, status, stop } = useChat({ transport })
 
   const isEmpty = messages.length === 0

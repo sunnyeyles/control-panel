@@ -32,3 +32,22 @@ pnpm typecheck   # tsc --noEmit per workspace
 
 Terraform and database migrations are **not** covered by Turborepo and run on
 their own; `CLAUDE.md` has both incantations.
+
+## Langfuse tracing
+
+The dashboard records each chat turn as `chat-response`; the Lambda records
+each briefing as `generate-briefing`. Both retain full prompts, tool I/O, and
+outputs by design. The adapter behind both is `@workspace/langfuse` — see
+`packages/langfuse/README.md`. Configure each runtime with:
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_TRACING_ENVIRONMENT=production
+LANGCHAIN_CALLBACKS_BACKGROUND=false
+```
+
+Use the base URL for the selected Langfuse cloud region or self-hosted instance.
+Dashboard variables belong in its Vercel environment; the worker fetches its
+keys from AWS Secrets Manager. Do not add keys to committed files.

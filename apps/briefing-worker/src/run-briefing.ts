@@ -12,6 +12,7 @@ import {
 } from "@workspace/agents"
 import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
+import { runWithLangfuseTrace } from "@workspace/langfuse"
 
 import { parseJobSearchConfig, toSearchBrief } from "./job-search-config.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
@@ -138,167 +139,211 @@ export async function runBriefing(
     searches,
   })
 
-  trace({
-    type: "run",
-    phase: "start",
-    jobId: job.id,
-    jobName: job.name,
-    runId: slot.runId,
-    scheduledFor: slot.scheduledFor.toISOString(),
-  })
-
-  try {
-    const config = await trace.step(
-      "config",
-      async () => parseJobSearchConfig(job.config, job.name),
-      (parsed) =>
-        `${plural(parsed.titles.length, "title")}, ${plural(parsed.locations.length, "location")}`
-    )
-
-    const scouted = await trace.step(
-      "scout",
-      async () => {
-        const prompt = toSearchBrief(config, slot.scheduledFor)
-        trace({ type: "prompt", agent: "scout", text: prompt })
-
-        const scout = (input.createScout ?? createJobScout)()
-        return runAgent(
-          scout,
-          "scout",
-          { messages: [new HumanMessage(prompt)] },
-          trace
-        )
+  return runWithLangfuseTrace(
+    {
+      name: "generate-briefing",
+      input: {
+        jobName: job.name,
+        searchCriteria: job.config,
+        scheduledFor: slot.scheduledFor.toISOString(),
       },
-      (result) => plural(result.llmCalls, "model call")
-    )
-
-    llmCalls += scouted.llmCalls
-    const searchResults = successfulToolResults(
-      scouted.messages,
-      SEARCH_TOOL_NAME
-    )
-    searches = searchResults.length
-
-    const findings = await trace.step(
-      "handoff",
-      async () => {
-        const scoutAnswer = finalAnswer(scouted.messages, "scout")
-
-        // No successful search means the findings, however well-formed, came
-        // from the model rather than a live search. Better a failed run than a
-        // confident brief citing postings nobody can visit.
-        if (searches === 0) {
-          throw new Error(
-            `The scout completed no successful ${SEARCH_TOOL_NAME} round trip, so nothing it reported came from a live search.`
-          )
-        }
-
-        const parsed = parseFindings(scoutAnswer)
-
-        // The schema has already said every URL *parses*; this says every URL
-        // was *returned*. Plain substring containment against the raw search
-        // results, because that is the exact claim the prompt makes — copied
-        // verbatim, never assembled — and a fabricated URL that survives it
-        // would have to appear, byte for byte, in a result that arrived over
-        // the network.
-        for (const posting of parsed.postings) {
-          if (!searchResults.some((text) => text.includes(posting.url))) {
-            throw new Error(
-              `The scout reported a URL no search returned: ${posting.url}. Every posting URL must appear verbatim in a search result.`
-            )
-          }
-        }
-
-        trace({ type: "handoff", findings: parsed })
-        return parsed
-      }
-      // No summary: the `handoff` event above already carries the findings, and
-      // a step detail restating the count is the same fact twice.
-    )
-
-    const written = await trace.step(
-      "writer",
-      async () => {
-        const prompt = toWriterPrompt(findings)
-        trace({ type: "prompt", agent: "writer", text: prompt })
-
-        const writer = (input.createWriter ?? createBriefWriter)()
-        return runAgent(
-          writer,
-          "writer",
-          { messages: [new HumanMessage(prompt)] },
-          trace
-        )
+      userId: job.userId,
+      tags: ["briefing", "worker"],
+      traceMetadata: {
+        jobId: job.id,
+        runId: slot.runId,
+        scheduledFor: slot.scheduledFor.toISOString(),
       },
-      (result) => plural(result.llmCalls, "model call")
-    )
-
-    llmCalls += written.llmCalls
-    const markdown = finalAnswer(written.messages, "brief writer").trim()
-
-    if (markdown.length === 0) {
-      throw new Error("The brief writer returned an empty brief.")
-    }
-
-    // `briefId` is the run id, and the occurrence decides the partition day. Two
-    // properties fall out of that. Re-executing a given run writes the same key
-    // rather than a second object; and two runs never collide on
-    // `artifacts.object_key`, which is UNIQUE — a same-day ad-hoc run beside a
-    // scheduled one would otherwise fail on the insert rather than on anything
-    // real.
-    // No summary, for the same reason as the hand-off: the `artifact` event
-    // below states the key and the size, which is all an upload accomplished.
-    const stored = await trace.step("upload", async () => {
-      const result = await briefs.put({
-        userId: job.userId,
-        briefId: slot.runId,
-        occurrence: slot.scheduledFor,
-        generatedAt: new Date(),
-        markdown,
+      metadata: {
+        jobId: job.id,
+        runId: slot.runId,
+        scheduledFor: slot.scheduledFor.toISOString(),
+      },
+    },
+    async (callback) => {
+      trace({
+        type: "run",
+        phase: "start",
+        jobId: job.id,
+        jobName: job.name,
+        runId: slot.runId,
+        scheduledFor: slot.scheduledFor.toISOString(),
       })
 
-      // Inside the step, not after it, so the key is reported as part of the
-      // upload rather than trailing the line that closed it.
-      trace({ type: "artifact", objectKey: result.key, bytes: result.size })
-      return result
-    })
+      try {
+        const config = await trace.step(
+          "config",
+          async () => parseJobSearchConfig(job.config, job.name),
+          (parsed) =>
+            `${plural(parsed.titles.length, "title")}, ${plural(parsed.locations.length, "location")}`
+        )
 
-    // Last, and deliberately so: the row is the claim that a brief exists, so it
-    // is written only once the object does. The reverse order can leave a row
-    // pointing at nothing.
-    await trace.step("record", async () =>
-      recordArtifact(slot.runId, stored.key)
-    )
+        const scouted = await trace.step(
+          "scout",
+          async () => {
+            const prompt = toSearchBrief(config, slot.scheduledFor)
+            trace({ type: "prompt", agent: "scout", text: prompt })
 
-    trace({
-      type: "run",
-      phase: "end",
-      outcome: "success",
-      durationMs: Date.now() - startedAtMs,
-    })
+            const scout = (input.createScout ?? createJobScout)()
+            return runAgent(
+              scout,
+              "scout",
+              { messages: [new HumanMessage(prompt)] },
+              trace,
+              {
+                ...(callback ? { callbacks: [callback] } : {}),
+                metadata: {
+                  agent: "scout",
+                  jobId: job.id,
+                  runId: slot.runId,
+                },
+                runName: "find-postings",
+                tags: ["briefing", "scout"],
+              }
+            )
+          },
+          (result) => plural(result.llmCalls, "model call")
+        )
 
-    return emit({
-      ...common(),
-      outcome: "success",
-      postings: findings.postings.length,
-      markdownBytes: stored.size,
-      objectKey: stored.key,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+        llmCalls += scouted.llmCalls
+        const searchResults = successfulToolResults(
+          scouted.messages,
+          SEARCH_TOOL_NAME
+        )
+        searches = searchResults.length
 
-    trace({
-      type: "run",
-      phase: "end",
-      outcome: "failure",
-      durationMs: Date.now() - startedAtMs,
-      error: message,
-    })
+        const findings = await trace.step(
+          "handoff",
+          async () => {
+            const scoutAnswer = finalAnswer(scouted.messages, "scout")
 
-    emit({ ...common(), outcome: "failure", error: message })
+            // No successful search means the findings, however well-formed, came
+            // from the model rather than a live search. Better a failed run than a
+            // confident brief citing postings nobody can visit.
+            if (searches === 0) {
+              throw new Error(
+                `The scout completed no successful ${SEARCH_TOOL_NAME} round trip, so nothing it reported came from a live search.`
+              )
+            }
 
-    throw error
-  }
+            const parsed = parseFindings(scoutAnswer)
+
+            // The schema has already said every URL *parses*; this says every URL
+            // was *returned*. Plain substring containment against the raw search
+            // results, because that is the exact claim the prompt makes — copied
+            // verbatim, never assembled — and a fabricated URL that survives it
+            // would have to appear, byte for byte, in a result that arrived over
+            // the network.
+            for (const posting of parsed.postings) {
+              if (!searchResults.some((text) => text.includes(posting.url))) {
+                throw new Error(
+                  `The scout reported a URL no search returned: ${posting.url}. Every posting URL must appear verbatim in a search result.`
+                )
+              }
+            }
+
+            trace({ type: "handoff", findings: parsed })
+            return parsed
+          }
+          // No summary: the `handoff` event above already carries the findings, and
+          // a step detail restating the count is the same fact twice.
+        )
+
+        const written = await trace.step(
+          "writer",
+          async () => {
+            const prompt = toWriterPrompt(findings)
+            trace({ type: "prompt", agent: "writer", text: prompt })
+
+            const writer = (input.createWriter ?? createBriefWriter)()
+            return runAgent(
+              writer,
+              "writer",
+              { messages: [new HumanMessage(prompt)] },
+              trace,
+              {
+                ...(callback ? { callbacks: [callback] } : {}),
+                metadata: {
+                  agent: "writer",
+                  jobId: job.id,
+                  runId: slot.runId,
+                },
+                runName: "write-brief",
+                tags: ["briefing", "writer"],
+              }
+            )
+          },
+          (result) => plural(result.llmCalls, "model call")
+        )
+
+        llmCalls += written.llmCalls
+        const markdown = finalAnswer(written.messages, "brief writer").trim()
+
+        if (markdown.length === 0) {
+          throw new Error("The brief writer returned an empty brief.")
+        }
+
+        // `briefId` is the run id, and the occurrence decides the partition day. Two
+        // properties fall out of that. Re-executing a given run writes the same key
+        // rather than a second object; and two runs never collide on
+        // `artifacts.object_key`, which is UNIQUE — a same-day ad-hoc run beside a
+        // scheduled one would otherwise fail on the insert rather than on anything
+        // real.
+        // No summary, for the same reason as the hand-off: the `artifact` event
+        // below states the key and the size, which is all an upload accomplished.
+        const stored = await trace.step("upload", async () => {
+          const result = await briefs.put({
+            userId: job.userId,
+            briefId: slot.runId,
+            occurrence: slot.scheduledFor,
+            generatedAt: new Date(),
+            markdown,
+          })
+
+          // Inside the step, not after it, so the key is reported as part of the
+          // upload rather than trailing the line that closed it.
+          trace({ type: "artifact", objectKey: result.key, bytes: result.size })
+          return result
+        })
+
+        // Last, and deliberately so: the row is the claim that a brief exists, so it
+        // is written only once the object does. The reverse order can leave a row
+        // pointing at nothing.
+        await trace.step("record", async () =>
+          recordArtifact(slot.runId, stored.key)
+        )
+
+        trace({
+          type: "run",
+          phase: "end",
+          outcome: "success",
+          durationMs: Date.now() - startedAtMs,
+        })
+
+        return emit({
+          ...common(),
+          outcome: "success",
+          postings: findings.postings.length,
+          markdownBytes: stored.size,
+          objectKey: stored.key,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+
+        trace({
+          type: "run",
+          phase: "end",
+          outcome: "failure",
+          durationMs: Date.now() - startedAtMs,
+          error: message,
+        })
+
+        emit({ ...common(), outcome: "failure", error: message })
+
+        throw error
+      }
+    }
+  )
 }
 
 function emit<T extends RunReport>(report: T): T {

@@ -22,3 +22,13 @@ output "worker_apify_secret_arn" {
   description = "Set this secret's value by hand; Terraform creates it empty and never writes it. Without it the scout cannot search and every run fails."
   value       = module.briefing_worker.apify_secret_arn
 }
+
+output "worker_langfuse_public_key_secret_arn" {
+  description = "Set this secret's value by hand; Terraform creates it empty and never writes it."
+  value       = module.briefing_worker.langfuse_public_key_secret_arn
+}
+
+output "worker_langfuse_secret_key_secret_arn" {
+  description = "Set this secret's value by hand; Terraform creates it empty and never writes it."
+  value       = module.briefing_worker.langfuse_secret_key_secret_arn
+}

@@ -15,6 +15,12 @@
     "Prisma": {
       "type": "http",
       "url": "https://mcp.prisma.io/mcp"
+    },
+    "langfuse-cloud": {
+      "url": "https://cloud.langfuse.com/api/public/mcp",
+      "headers": {
+        "Authorization": "Basic <base64(LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY)>"
+      }
     }
   }
 }

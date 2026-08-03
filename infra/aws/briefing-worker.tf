@@ -19,8 +19,10 @@ locals {
 module "briefing_worker" {
   source = "./modules/briefing-worker"
 
-  function_name   = var.briefing_worker.function_name
-  lambda_zip_path = local.lambda_zip_path
+  function_name                = var.briefing_worker.function_name
+  langfuse_base_url            = var.briefing_worker.langfuse_base_url
+  langfuse_tracing_environment = var.briefing_worker.langfuse_tracing_environment
+  lambda_zip_path              = local.lambda_zip_path
 
   schedule_enabled = var.schedule_enabled
 

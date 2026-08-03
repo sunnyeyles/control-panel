@@ -136,6 +136,28 @@ variable "user_storage_environment" {
   }
 }
 
+variable "langfuse_base_url" {
+  description = "Langfuse API base URL. Use the regional cloud endpoint or the self-hosted deployment URL; API keys remain Secrets Manager values."
+  type        = string
+  default     = "https://cloud.langfuse.com"
+
+  validation {
+    condition     = startswith(var.langfuse_base_url, "https://")
+    error_message = "langfuse_base_url must use HTTPS."
+  }
+}
+
+variable "langfuse_tracing_environment" {
+  description = "Langfuse environment recorded on worker traces."
+  type        = string
+  default     = "production"
+
+  validation {
+    condition     = length(trimspace(var.langfuse_tracing_environment)) > 0
+    error_message = "langfuse_tracing_environment must not be empty."
+  }
+}
+
 variable "alerts_topic_arn" {
   description = <<-EOT
     SNS topic the failure and missed-run alarms publish to. Owned by the root,
