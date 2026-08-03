@@ -36,13 +36,14 @@ export class InvalidScheduleError extends DbError {
   readonly code = "invalid_schedule" as const
 }
 
-/**
- * Note what is deliberately absent: a `DatabaseUnavailableError`. One existed
- * and was never thrown — connection, permission and transport faults propagate
- * as Prisma's own errors, and constraint violations keep Prisma's / Postgres's
- * codes so a duplicate name can still be recognised as `P2002` / `23505` (see
- * {@link isUniqueViolation}). Add one when something actually raises it.
- */
+// Note what is deliberately absent: a `DatabaseUnavailableError`. One existed
+// and was never thrown — connection, permission and transport faults propagate
+// as Prisma's own errors, and constraint violations keep Prisma's / Postgres's
+// codes so a duplicate name can still be recognised as `P2002` / `23505` (see
+// `isUniqueViolation` below). Add one when something actually raises it.
+//
+// A line comment, not a doc block: TypeScript attaches every leading `/** */` to
+// the next declaration, so this would surface in `isDbError`'s hover text.
 
 /** Narrows an unknown catch binding to this package's errors. */
 export function isDbError(error: unknown): error is DbError {

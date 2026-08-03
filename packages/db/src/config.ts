@@ -35,14 +35,15 @@ export function readDatabaseConfig(
   return { connectionString: required(env, DATABASE_URL) }
 }
 
-/**
- * There is deliberately no `readMigrationConfig()` beside it. Migrations use the
- * direct, unpooled endpoint — the pooled one fronts PgBouncer in transaction
- * mode, which forbids the session-level advisory lock the migration runner takes
- * to keep two concurrent deploys from interleaving — but nothing in this package
- * reads it. `prisma.config.ts` reads {@link DATABASE_URL_UNPOOLED} itself, so a
- * second reader here was a convention with no caller.
- */
+// There is deliberately no `readMigrationConfig()` beside it. Migrations use the
+// direct, unpooled endpoint — the pooled one fronts PgBouncer in transaction
+// mode, which forbids the session-level advisory lock the migration runner takes
+// to keep two concurrent deploys from interleaving — but nothing in this package
+// reads it. `prisma.config.ts` reads `DATABASE_URL_UNPOOLED` itself, so a second
+// reader here was a convention with no caller.
+//
+// A line comment, not a doc block: TypeScript attaches a leading `/** */` to the
+// next declaration, which would make this the hover text for `required()`.
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name]?.trim()

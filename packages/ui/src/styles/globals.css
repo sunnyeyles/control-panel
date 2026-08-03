@@ -43,16 +43,23 @@
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
+  /* The ramp stays unbroken even where nothing uses a step yet. `@theme inline`
+     extends Tailwind's default theme rather than replacing it, so dropping
+     2xl/3xl would not remove `rounded-2xl` — it would silently resolve to
+     Tailwind's stock 1rem, off this scale and with nothing to signal it. */
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 /* Calm OS — the app theme. Neutral and spacious, one iris accent.
 
-   Only the tokens something renders are declared. A chart ramp (--chart-1…5)
+   Only the colors something renders are declared. A chart ramp (--chart-1…5)
    and a warn/ok status pair lived here and were never referenced by any
-   utility class — a palette nothing reads is a palette that silently stops
-   matching the design. Add them back beside the first component that uses
-   them. */
+   utility class — and unlike a radius step, a missing color token has no
+   Tailwind default to fall back on, so the utility simply does not exist. A
+   palette nothing reads is a palette that silently stops matching the design.
+   Add them back beside the first component that uses them. */
 :root {
   --sans: var(--font-hanken);
   --mono: var(--font-plex-mono);
