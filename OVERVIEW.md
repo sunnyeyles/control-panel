@@ -90,7 +90,7 @@ flowchart TD
     D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
     P --> N[Cover letter agent]
-    P --> Q[Dashboard shows what a run found]
+    P --> Q[A viewer for the brief itself]
 ```
 
 - **Profile extraction.** Upload exists — `/documents` writes to the `resumes`
@@ -113,20 +113,23 @@ flowchart TD
   the `letter` CLI in the worker's local harness (#82). What does not exist is
   everything around them: no letter is stored, no `cover-letters` object kind
   exists, nothing in the dashboard drafts one, and the only input is a Findings
-  file on disk. Ticketed as #77 with #83–#87 beneath it;
+  file on disk. Ticketed as #77 with #84–#87 beneath it;
   `docs/cover-letter-agent-plan.md` is the staged plan. Note the
   constraint that is invisible from the TypeScript: the dashboard's IAM grant is
   `prod:resumes` and the worker's is `prod:briefs`, and `infra/aws/tests/`
   asserts both, so a dashboard-side agent cannot read what the worker wrote
   without an infrastructure change.
-- **Any dashboard UI for a brief.** `apps/dashboard` has an assistant chat, the
-  documents section, a settings page and the auth pages. Settings manages
-  **briefings** — create one, turn it on or off, change its cadence — over
-  `createJob()`, `pauseJob()`, `resumeJob()` and `updateJobSchedule()`. What is
-  missing is anything that surfaces what a run produced:
-  `latestArtifactForJob()` exists and has no caller outside its own tests,
-  nothing lists runs, and nothing tells the user a brief was written. A run's
-  output is reachable only from S3. Ticketed as #83.
+- **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
+  **Postings** from each briefing's most recent successful **Run**, read out of
+  the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`
+  (#83). What is still missing is the **Brief** — the markdown that run wrote —
+  and that gap is structural rather than merely unbuilt: the dashboard's IAM
+  grant is `prod:resumes` and a brief lives under `prod:briefs`, so the app
+  cannot read one without an infrastructure change. Nothing lists **Runs**
+  either, and `latestArtifactForJob()` still has no caller outside its own tests
+  — the briefings page deliberately does not use it, because it orders on run
+  start _and_ artifact creation and stops being well defined once a run writes
+  more than one artifact.
 
 ## Infrastructure
 
