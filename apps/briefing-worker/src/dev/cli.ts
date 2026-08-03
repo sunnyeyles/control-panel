@@ -11,7 +11,11 @@ import { createBriefStore } from "@workspace/user-storage"
 import { runBriefing } from "../run-briefing.ts"
 import type { TraceEvent, TraceSink } from "../trace.ts"
 import { createTerminalRenderer } from "./render.ts"
-import { createDirectoryObjectStore, dryRunRecordArtifact } from "./stores.ts"
+import {
+  createDirectoryObjectStore,
+  dryRunRecordArtifact,
+  dryRunRecordFindings,
+} from "./stores.ts"
 
 /**
  * Watch one briefing run happen.
@@ -255,6 +259,7 @@ async function main(): Promise<void> {
       slot,
       briefs: createBriefStore(objects),
       recordArtifact: dryRunRecordArtifact,
+      recordFindings: dryRunRecordFindings,
       trace: createSink(options, traceFile),
     })
   } catch {

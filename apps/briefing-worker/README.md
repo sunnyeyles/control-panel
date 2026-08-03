@@ -15,8 +15,9 @@ A job's own cadence lives in Postgres, as `jobs.schedule_cron` and
 The work a claimed job performs is a **briefing run**: a scout agent searches
 SEEK's live listings for postings matching the criteria in `jobs.config`, a
 writer agent turns those findings into markdown, the worker uploads it to
-private S3 through `@workspace/user-storage`, and records the object key in
-`artifacts`. Live listings rather than web search, deliberately: a search
+private S3 through `@workspace/user-storage`, records the object key in
+`artifacts`, and keeps the findings themselves on the run row. Live listings
+rather than web search, deliberately: a search
 engine's index carries a board's browse pages, not its postings, and the
 posting URLs it does surface are often expired — the live inventory is what
 makes every URL in a brief a page someone can actually open.
@@ -269,7 +270,17 @@ object rather than making a second one, and two runs can never collide on
 `artifacts.object_key`, which is UNIQUE. A 23:30 slot that finishes after
 midnight still files under the day its run row names.
 
-**Nothing catches the throw.** `runBriefing()` emits its one-line report
+**The findings are kept last, and their loss is a warning rather than a
+failure.** `runs.findings` is written after the brief exists and its row is
+recorded, inside a `try`; a failure there puts
+`{ findings: { message } }` on `SuccessReport.warnings`, which `runTick()`
+hands to `finishRun()` as its third argument — `succeeded` with a non-empty
+`failure`, the rule `packages/db/src/types.ts` states. The rule this does _not_
+inherit is "a run with no successful search fails": that one guards against
+silent fabrication, and a run that produced a briefing succeeded whatever
+happened to the accessory record.
+
+**Nothing else catches the throw.** `runBriefing()` emits its one-line report
 and rethrows, `runTick()` records the failure and rethrows after attempting
 every other due job, and the handler lets it through. That throw is what marks
 the invocation failed, which is what produces the `Errors` datapoint the alarm

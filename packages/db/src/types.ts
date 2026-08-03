@@ -23,6 +23,13 @@ export type JobConfig = Record<string, unknown>
 export type RunFailure = Record<string, unknown>
 
 /**
+ * What a run found, as its producer validated it. Opaque here: the platform
+ * stores it beside the run and never reads inside it, exactly as it treats
+ * `config` and `failure`.
+ */
+export type RunFindings = Record<string, unknown>
+
+/**
  * `running` → `succeeded` | `failed`, and both are terminal.
  *
  * "Succeeded with warnings" is `succeeded` with a non-empty `failure`.

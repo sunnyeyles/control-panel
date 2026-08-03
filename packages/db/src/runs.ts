@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from "./generated/prisma/client.ts"
-import type { Run, RunFailure, RunStatus } from "./types.ts"
+import type { Run, RunFailure, RunFindings, RunStatus } from "./types.ts"
 
 type DbClient = PrismaClient | Prisma.TransactionClient
 
@@ -34,6 +34,26 @@ export async function finishRun(
   warnings?: RunFailure
 ): Promise<boolean> {
   return terminate(prisma, runId, "succeeded", warnings)
+}
+
+/**
+ * Keep what a run found, so it outlives the run.
+ *
+ * Not concurrency-sensitive and deliberately unguarded by status: the caller
+ * holds the claim, and this writes an accessory record rather than a
+ * transition. Throws if the run is gone — which the caller is expected to
+ * treat as a warning, not as a reason to fail a run that already produced its
+ * output.
+ */
+export async function recordRunFindings(
+  prisma: DbClient,
+  runId: string,
+  findings: RunFindings
+): Promise<Run> {
+  return prisma.run.update({
+    where: { id: runId },
+    data: { findings: findings as Prisma.InputJsonValue },
+  })
 }
 
 /** Mark a run failed. `false` means it was already terminal. */

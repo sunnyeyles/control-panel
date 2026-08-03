@@ -57,6 +57,11 @@ model Run {
   startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt   DateTime? @map("finished_at") @db.Timestamptz(6)
   failure      Json?
+  // What the scout found, kept so it outlives the run that found it. NULL for
+  // a run that failed before the hand-off, and for every run that predates
+  // this column. Written after the brief exists and never fatally: a run that
+  // produced a briefing succeeded whatever happened to this record.
+  findings     Json?
 
   job       Job        @relation(fields: [jobId], references: [id], onDelete: Restrict)
   artifacts Artifact[]

@@ -52,7 +52,7 @@ export {
   type NewJob,
 } from "./jobs.ts"
 
-export { failRun, finishRun, startAdHocRun } from "./runs.ts"
+export { failRun, finishRun, recordRunFindings, startAdHocRun } from "./runs.ts"
 
 export {
   artifactsForRun,
@@ -68,6 +68,7 @@ export type {
   JobConfig,
   Run,
   RunFailure,
+  RunFindings,
   RunStatus,
   User,
 } from "./types.ts"

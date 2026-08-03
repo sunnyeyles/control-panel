@@ -109,3 +109,12 @@ export async function dryRunRecordArtifact(
     createdAt: new Date(),
   }
 }
+
+/**
+ * A `recordFindings` callback that writes no column.
+ *
+ * Same reason as above — there is no `runs` row to update — and nothing is
+ * lost by it: the trace's `handoff` event already carries the findings
+ * verbatim, and the harness writes that trace to disk beside the brief.
+ */
+export async function dryRunRecordFindings(): Promise<void> {}

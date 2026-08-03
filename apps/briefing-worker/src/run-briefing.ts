@@ -9,8 +9,9 @@ import {
   createBriefWriter,
   createJobScout,
   parseFindings,
+  type Findings,
 } from "@workspace/agents"
-import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
+import type { Artifact, ClaimedSlot, DueJob, RunFailure } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 import { runWithLangfuseTrace } from "@workspace/langfuse"
 
@@ -59,6 +60,15 @@ export interface SuccessReport extends RunReportFields {
   postings: number
   markdownBytes: number
   objectKey: string
+  /**
+   * What went wrong without sinking the run, absent when nothing did.
+   *
+   * `RunFailure` rather than a `string[]`, because that is what the row takes:
+   * `packages/db/src/types.ts` states the rule this implements — *"succeeded
+   * with warnings is `succeeded` with a non-empty `failure`"* — and `runTick`
+   * hands this straight to `finishRun` as its third argument.
+   */
+  warnings?: RunFailure
 }
 
 /** Anything else. `error` carries the diagnostic detail. */
@@ -85,6 +95,16 @@ export interface RunBriefingInput {
    * a whole Prisma client.
    */
   recordArtifact: (runId: string, objectKey: string) => Promise<Artifact>
+  /**
+   * Keep the validated findings against the run, so what the scout found
+   * outlives the run that found it.
+   *
+   * Injected for the same reason `recordArtifact` is: the local harness has no
+   * `runs` row to write to, and a test should not need a Prisma client to
+   * assert that the write happened. Whatever it returns is ignored — the run
+   * needs to know it did not throw and nothing more.
+   */
+  recordFindings: (runId: string, findings: Findings) => Promise<unknown>
   /**
    * Injected in tests, exactly as `chat-handler.ts` injects its agent. Called
    * inside the run, never at module scope: building an agent constructs a model,
@@ -313,6 +333,35 @@ export async function runBriefing(
           recordArtifact(slot.runId, stored.key)
         )
 
+        // After the brief, and never fatal. The rule this does *not* inherit is
+        // "a run with no successful search fails": that one guards against
+        // silent fabrication — a brief citing postings nobody looked up — and
+        // this failure is neither silent nor about the brief. A run that
+        // produced a briefing succeeded, whatever happened to the accessory
+        // record; the warning it carries is what makes the loss queryable.
+        let notRecorded: string | undefined
+
+        await trace.step(
+          "findings",
+          async () => {
+            try {
+              await input.recordFindings(slot.runId, findings)
+            } catch (error) {
+              notRecorded =
+                error instanceof Error ? error.message : String(error)
+            }
+          },
+          () =>
+            notRecorded === undefined
+              ? plural(findings.postings.length, "posting")
+              : `not recorded — ${notRecorded}`
+        )
+
+        const warnings: RunFailure | undefined =
+          notRecorded === undefined
+            ? undefined
+            : { findings: { message: notRecorded } }
+
         trace({
           type: "run",
           phase: "end",
@@ -326,6 +375,7 @@ export async function runBriefing(
           postings: findings.postings.length,
           markdownBytes: stored.size,
           objectKey: stored.key,
+          ...(warnings ? { warnings } : {}),
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
