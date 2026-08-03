@@ -89,7 +89,7 @@ flowchart TD
     C --> D[(Neon — search criteria)]
     D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
-    P --> N[A viewer for a stored cover letter]
+    P --> N[Rendering or editing a stored cover letter]
     P --> Q[A viewer for the brief itself]
 ```
 
@@ -110,14 +110,22 @@ flowchart TD
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
-- **Reading a cover letter back.** Drafting one is built (#84): a Draft button
-  on each **Posting** on `/briefings` runs the **Letter Writer** and stores the
-  result at `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting
-  so a redraft overwrites one object. The letter is written from the newest
-  **Document** labelled `resume`, and since #86 that can be a PDF or a DOCX as
-  well as `.md` or `.txt`. What is still missing is everything around it —
-  nothing lists or renders a stored letter, and nothing can edit one in the app.
-  Ticketed under #77; `docs/cover-letter-agent-plan.md` is the staged plan.
+- **Rendering or editing a cover letter in the app.** Drafting one is built
+  (#84): a Draft button on each **Posting** on `/briefings` runs the **Letter
+  Writer** and stores the result at
+  `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting so a
+  redraft overwrites one object. Seeing and downloading them is built too (#85):
+  `/briefings` lists every stored letter with when it was drafted and which
+  Posting it belongs to — `apps/dashboard/lib/cover-letters/list-cover-letters.ts`,
+  which pays one `HeadObject` per letter because a listing carries no user
+  metadata — a Posting that already has one says so instead of offering a first
+  draft, and `/api/cover-letters/{postingId}` hands the Markdown back as a file.
+  The letter is written from the newest **Document** labelled `resume`, and
+  since #86 that can be a PDF or a DOCX as well as `.md` or `.txt`. What is
+  still missing is everything past that: nothing renders a letter's text in the
+  app, and nothing can edit one, regenerate it with instructions, choose a tone,
+  or send it. Ticketed under #77; `docs/cover-letter-agent-plan.md` is the
+  staged plan.
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`

@@ -1,9 +1,11 @@
+import { CoverLetterDownloadLink } from "@/components/briefings/cover-letter-list"
 import { DraftCoverLetterButton } from "@/components/briefings/draft-cover-letter-button"
 import type {
   BriefingPostings,
   LatestFindings,
   PostingView,
 } from "@/lib/briefings/latest-postings"
+import type { CoverLetterSummary } from "@/lib/cover-letters/list-cover-letters"
 import { Badge } from "@workspace/ui/components/badge"
 
 /**
@@ -20,8 +22,19 @@ import { Badge } from "@workspace/ui/components/badge"
  */
 export function BriefingList({
   briefings,
+  letters,
 }: {
   briefings: readonly BriefingPostings[]
+  /**
+   * The letters this user has already drafted, keyed by Posting id.
+   *
+   * Keyed rather than a list because the question each card asks is "is there
+   * one for *this* Posting", and a linear scan per card would make the page
+   * quadratic in a user's drafting history for no reason. Empty when the letters
+   * could not be read — a storage failure degrades to the pre-#85 behaviour
+   * rather than removing the postings from the page.
+   */
+  letters?: ReadonlyMap<string, CoverLetterSummary>
 }) {
   if (briefings.length === 0) {
     return (
@@ -37,13 +50,23 @@ export function BriefingList({
   return (
     <div className="flex flex-col gap-6">
       {briefings.map((briefing) => (
-        <BriefingCard key={briefing.briefingId} briefing={briefing} />
+        <BriefingCard
+          key={briefing.briefingId}
+          briefing={briefing}
+          letters={letters}
+        />
       ))}
     </div>
   )
 }
 
-function BriefingCard({ briefing }: { briefing: BriefingPostings }) {
+function BriefingCard({
+  briefing,
+  letters,
+}: {
+  briefing: BriefingPostings
+  letters?: ReadonlyMap<string, CoverLetterSummary>
+}) {
   const { latest } = briefing
 
   return (
@@ -72,7 +95,11 @@ function BriefingCard({ briefing }: { briefing: BriefingPostings }) {
                 which Findings to re-read the Posting out of — and it is checked
                 for ownership there, never trusted.
               */}
-              <PostingCard posting={posting} runId={latest.runId} />
+              <PostingCard
+                posting={posting}
+                runId={latest.runId}
+                letter={letters?.get(posting.id)}
+              />
             </li>
           ))}
         </ol>
@@ -114,9 +141,12 @@ function emptyMessage(state: LatestFindings["state"]): string {
 function PostingCard({
   posting,
   runId,
+  letter,
 }: {
   posting: PostingView
   runId: string
+  /** The letter already drafted for this Posting, if there is one. */
+  letter?: CoverLetterSummary
 }) {
   return (
     <article className="flex flex-col gap-2 rounded-lg border p-4">
@@ -162,10 +192,24 @@ function PostingCard({
 
       <p className="text-sm text-muted-foreground">{posting.matchReason}</p>
 
+      {/*
+        A Posting with a letter says so, and offers the letter. Without this the
+        card offers a *first* draft for something already drafted, which is the
+        one thing a user cannot tell from the button alone — and it would take
+        clicking it, and spending a model call, to find out.
+      */}
+      {letter ? (
+        <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
+          <span>Cover letter drafted {letter.draftedAt}.</span>
+          <CoverLetterDownloadLink letter={letter} />
+        </p>
+      ) : null}
+
       <DraftCoverLetterButton
         runId={runId}
         postingId={posting.id}
         title={posting.title}
+        drafted={letter !== undefined}
       />
     </article>
   )

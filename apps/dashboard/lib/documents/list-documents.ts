@@ -1,3 +1,4 @@
+import { settleWithConcurrency } from "@/lib/settle-with-concurrency"
 import type { DocumentType, ResumeStore } from "@workspace/user-storage"
 
 import { formatDocumentFile } from "./document-ref"
@@ -112,46 +113,4 @@ export async function listDocuments(
   return summaries.sort(
     (a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime()
   )
-}
-
-/**
- * `Promise.allSettled`, but with at most `limit` calls in flight.
- *
- * Same contract as `allSettled` — results are positional and a rejection never
- * fails the whole batch — which is what lets the caller keep treating each row
- * independently.
- *
- * The workers share one array iterator rather than slicing the input into
- * chunks. `next()` is synchronous and JavaScript is single-threaded, so no two
- * workers can ever be handed the same entry, and a worker that finishes early
- * immediately takes the next item instead of idling until its chunk-mates are
- * done. Chunking would make the batch as slow as the slowest item in each
- * chunk, which for one slow S3 response is most of the point of bounding it.
- */
-async function settleWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  run: (item: T) => Promise<R>
-): Promise<PromiseSettledResult<R>[]> {
-  const results: PromiseSettledResult<R>[] = new Array(items.length)
-  const queue = items.entries()
-
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      // Nothing thrown escapes the loop body, so the shared iterator is never
-      // closed early out from under the other workers.
-      for (const [index, item] of queue) {
-        try {
-          results[index] = { status: "fulfilled", value: await run(item) }
-        } catch (reason) {
-          results[index] = { status: "rejected", reason }
-        }
-      }
-    }
-  )
-
-  await Promise.all(workers)
-
-  return results
 }
