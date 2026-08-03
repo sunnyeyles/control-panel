@@ -1,10 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 
+import type { Findings } from "@workspace/agents"
 import type { Artifact } from "@workspace/db"
 import {
   buildObjectKey,
   contentTypeFor,
+  dateSegments,
+  toGeneratedOn,
   type FetchedObject,
   type NewObject,
   type ObjectRef,
@@ -110,11 +113,64 @@ export async function dryRunRecordArtifact(
   }
 }
 
+/** A `recordFindings` callback, plus the paths it has written. */
+export interface FindingsFileRecorder {
+  (runId: string, findings: Findings): Promise<void>
+  /** Absolute paths written during this run, in order. */
+  readonly written: string[]
+}
+
+export interface FindingsFileOptions {
+  /** Where the tree is rooted — the same `--out` the brief lands under. */
+  directory: string
+  /** Whose findings these are; the second segment of the key. */
+  userId: string
+  /** The slot the run is for, which decides the partition day. */
+  occurrence: Date
+  /** The leading key segment. `dev`, so nothing can be mistaken for prod. */
+  environment?: string
+}
+
 /**
- * A `recordFindings` callback that writes no column.
+ * A `recordFindings` callback that writes the validated findings to disk,
+ * beside the brief they produced.
  *
- * Same reason as above — there is no `runs` row to update — and nothing is
- * lost by it: the trace's `handoff` event already carries the findings
- * verbatim, and the harness writes that trace to disk beside the brief.
+ * Production keeps them on the `runs` row; a dry run has no row — `runs` is
+ * what `recordFindings` writes to and the harness deliberately creates none —
+ * so the choice is between discarding them and putting them somewhere a person
+ * can open. They are worth keeping: the findings are exactly the input the
+ * `letter` CLI reads, so a `watch` run is what produces real input for it,
+ * with no S3 and no database anywhere in the loop.
+ *
+ * A plain file, not an object. The key is the brief's own — derived through
+ * `buildObjectKey`, so the same segment validation applies — with `.json` in
+ * place of `.md`, which puts the findings literally beside the markdown. It is
+ * *not* an object key that S3 would accept, because there is no `findings`
+ * kind: adding one means adding a lifecycle entry and an IAM grant in
+ * Terraform, which is infrastructure this harness has none of.
  */
-export async function dryRunRecordFindings(): Promise<void> {}
+export function createFindingsFileRecorder(
+  options: FindingsFileOptions
+): FindingsFileRecorder {
+  const root = resolve(options.directory)
+  const environment = options.environment ?? "dev"
+  const written: string[] = []
+
+  const recorder = async (runId: string, findings: Findings): Promise<void> => {
+    const briefKey = buildObjectKey({
+      environment,
+      userId: options.userId,
+      kind: "briefs",
+      segments: [...dateSegments(toGeneratedOn(options.occurrence)), runId],
+      extension: ".md",
+    })
+
+    const path = join(root, `${briefKey.slice(0, -".md".length)}.json`)
+
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(findings, null, 2)}\n`, "utf8")
+    written.push(path)
+  }
+
+  return Object.assign(recorder, { written })
+}

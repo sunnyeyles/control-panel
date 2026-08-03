@@ -40,6 +40,29 @@ something it half-remembers. Not to be confused with the LangGraph runtime in
 `agents-core`.
 _Avoid_: synthesiser, orchestrator
 
+**Cover Letter**:
+A first-person draft for one **Posting**, written in the candidate's voice by
+the **Letter Writer** from that Posting plus the candidate's own background
+text. A draft the user edits, never a submittable letter: where a fact was not
+supplied — a start date, a salary, a named recipient — it carries a literal
+`[bracketed placeholder]`, because a plausible invention attributed to the user
+is a lie.
+
+Today it exists only as an agent and a CLI (`letter`) that writes one to disk.
+Nothing stores one, and no **Document Type** of the same name is involved — that
+label belongs to a letter the _user_ uploaded.
+_Avoid_: application, letter of introduction
+
+**Letter Writer**:
+The agent that drafts a **Cover Letter**. Like the **Brief Writer** it has no
+tools, and here that is containment rather than economy: it holds the
+candidate's background in its context while a Posting's `highlights` — text
+whoever paid for the advertisement wrote — reach its prompt verbatim. An agent
+that could both read a CV and issue a request could be induced to put one inside
+the other. When a page fetcher is eventually added it goes on a different agent
+that never sees the profile.
+_Avoid_: applicant agent, cover-letter bot
+
 **Findings**:
 The scout's output and the writer's input: a validated list of **Postings** plus
 optional notes, defined by `FindingsSchema` in `@workspace/agents`. The hand-off

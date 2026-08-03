@@ -13,8 +13,8 @@ import type { TraceEvent, TraceSink } from "../trace.ts"
 import { createTerminalRenderer } from "./render.ts"
 import {
   createDirectoryObjectStore,
+  createFindingsFileRecorder,
   dryRunRecordArtifact,
-  dryRunRecordFindings,
 } from "./stores.ts"
 
 /**
@@ -49,7 +49,8 @@ Watch one briefing run, step by step.
                     is not claimed, its schedule is not advanced, and no run
                     row is created. Needs DATABASE_URL.
 
-  --out <dir>       Where the brief and the trace land. Default ./.briefings
+  --out <dir>       Where the brief, its findings and the trace land.
+                    Default ./.briefings
   --at <iso>        The slot to run for, which decides the key's partition day.
                     Default now.
   --json            Print the raw trace as JSON lines instead of rendering it.
@@ -59,7 +60,8 @@ Watch one briefing run, step by step.
   --help
 
 Always a dry run. The brief is written to --out, never to S3, and no artifacts
-row is recorded. OPENAI_API_KEY and APIFY_TOKEN must be set; the model and
+row is recorded. The validated findings land beside the brief as JSON, which is
+what \`letter\` reads. OPENAI_API_KEY and APIFY_TOKEN must be set; the model and
 the SEEK search are real.
 `
 
@@ -251,6 +253,11 @@ async function main(): Promise<void> {
   await mkdir(dirname(tracePath), { recursive: true })
 
   const objects = createDirectoryObjectStore({ directory: out })
+  const recordFindings = createFindingsFileRecorder({
+    directory: out,
+    userId: job.userId,
+    occurrence: slot.scheduledFor,
+  })
   const traceFile = createWriteStream(tracePath, { flags: "a" })
 
   try {
@@ -259,7 +266,7 @@ async function main(): Promise<void> {
       slot,
       briefs: createBriefStore(objects),
       recordArtifact: dryRunRecordArtifact,
-      recordFindings: dryRunRecordFindings,
+      recordFindings,
       trace: createSink(options, traceFile),
     })
   } catch {
@@ -273,9 +280,12 @@ async function main(): Promise<void> {
 
     if (!options.json) {
       for (const path of objects.written) {
-        process.stdout.write(`  brief  ${path}\n`)
+        process.stdout.write(`  brief     ${path}\n`)
       }
-      process.stdout.write(`  trace  ${tracePath}\n\n`)
+      for (const path of recordFindings.written) {
+        process.stdout.write(`  findings  ${path}\n`)
+      }
+      process.stdout.write(`  trace     ${tracePath}\n\n`)
     }
   }
 }

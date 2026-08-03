@@ -1,0 +1,31 @@
+{
+  "postings": [
+    {
+      "title": "Senior Backend Engineer",
+      "company": "Morgan McKinley",
+      "location": "Sydney NSW (Hybrid)",
+      "url": "https://www.seek.com.au/job/93431609",
+      "highlights": [
+        "Senior Backend Engineer (Python/AWS) - real-time data product, global clients",
+        "Own async pipelines & AWS infra - queues, workers, full ownership",
+        "Competitive salary, super, equity - hybrid, Sydney CBD"
+      ],
+      "summary": "A senior backend role on a real-time data product with global clients. The listing describes owning the async pipelines and the AWS infrastructure behind them — queues and workers — as well as the serving layer. Listed at $160,000 - $180,000 p.a., full time, hybrid in Sydney CBD.",
+      "matchReason": "Backend engineering in Sydney on Python and AWS, hybrid, at the seniority the criteria ask for."
+    },
+    {
+      "title": "Senior GO Engineer - Backend | EDA",
+      "company": "Pair People Pty Limited",
+      "location": "Sydney NSW (Hybrid)",
+      "url": "https://www.seek.com.au/job/93657219",
+      "highlights": [
+        "Build AI-enabled products using modern Go technologies",
+        "Greenfield engineering with real technical ownership",
+        "Global SaaS platform used by customers worldwide"
+      ],
+      "summary": "Greenfield backend work on an event-driven global SaaS platform, in Go. Listed at $170,000 - $200,000 per year, hybrid in Sydney.",
+      "matchReason": "Senior backend, Sydney, event-driven systems — though the stack is Go rather than Python."
+    }
+  ],
+  "notes": "Transcribed by hand from live seek.com.au search results on 2026-08-03, because APIFY_TOKEN was not available to run the scout. Title, company, location, url and every highlight are copied from the advertisements verbatim; summary and matchReason are written in the scout's voice, from the same teaser text a search returns. Nothing here came from a posting's detail page — seek-search.ts leaves fetchDetails off — so this file is exactly as thin as a real run's findings."
+}

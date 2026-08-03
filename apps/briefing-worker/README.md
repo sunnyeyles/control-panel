@@ -117,6 +117,7 @@ pnpm --filter=@workspace/briefing-worker test             # run logic, fake agen
 pnpm turbo zip --filter=@workspace/briefing-worker        # dist/ -> lambda.zip
 pnpm --filter=@workspace/briefing-worker invoke           # run the handler locally
 pnpm --filter=@workspace/briefing-worker watch            # watch one briefing, step by step
+pnpm --filter=@workspace/briefing-worker letter           # draft a cover letter for one Posting
 ```
 
 Running locally needs no emulator, no AWS credentials and no local host — only
@@ -181,16 +182,23 @@ pnpm --filter=@workspace/briefing-worker watch --config ./fixtures/example-searc
 
 The model and the SEEK search are real, because they are the parts worth
 watching. Everything else is local: the brief lands under `.briefings/` at the
-key S3 would have used, and the trace is kept beside it as JSON lines.
+key S3 would have used, the validated findings land beside it as `.json`, and
+the trace is kept under `traces/` as JSON lines.
 
 ```
 --config <path>  search criteria to run, as a jobs.config payload. No database.
 --job <uuid>     take the criteria from a real job row, read-only. Needs DATABASE_URL.
 --at <iso>       the slot to run for, which decides the key's partition day.
---out <dir>      where the brief and the trace land. Default ./.briefings
+--out <dir>      where the brief, its findings and the trace land. Default ./.briefings
 --json           print the raw trace as JSON lines instead of rendering it.
 --verbose        do not truncate messages or tool results.
 ```
+
+The findings file is a **file, not an object**: it is the brief's own key with
+`.json` in place of `.md`, so it sits literally beside the markdown, but there
+is no `findings` object kind and S3 would not accept the key. Production keeps
+a run's findings on the `runs` row; the harness writes no row, so on disk is the
+only place left — and it is what `letter` below reads.
 
 `--job` reads the row and nothing more. It does not claim it, advance its
 schedule, or create a run — the job stays exactly as due as it was.
@@ -214,6 +222,55 @@ yields the same run one superstep at a time and returns the same final state.
 Nothing under `src/dev/` is reachable from the deployed bundle: `build.mjs`
 takes `src/index.ts` as its only entry point, so the harness cannot ship even by
 accident.
+
+## Drafting a cover letter
+
+`letter` drafts one cover letter for one **Posting**, from a Findings file and a
+document the candidate wrote, and puts it on disk. It exists to answer whether
+such a letter is worth the surface it would need — storage, a dashboard, an
+object kind, an IAM grant — **before** any of that is built. Nothing it touches
+is a step toward that surface: no S3, no database, no migration.
+
+```bash
+export OPENAI_API_KEY=...
+pnpm --filter=@workspace/briefing-worker letter \
+  --findings ./fixtures/example-findings.json --list
+
+pnpm --filter=@workspace/briefing-worker letter \
+  --findings ./fixtures/example-findings.json \
+  --profile ./fixtures/example-profile.md \
+  --posting 1 --name "Alex Rivers"
+```
+
+Point `--findings` at the JSON a `watch` run wrote beside its brief for real
+input; the fixture is a hand-transcribed copy of two live SEEK advertisements,
+for when re-running a search is not worth it. `fixtures/example-profile.md` is
+an **invented** candidate — the roles, the employers and the numbers in it never
+happened, and it is there so the CLI has something to read.
+
+- `--profile` takes `.md` or `.txt` only. A PDF needs a text extractor this does
+  not have, and a parser that quietly returned the wrong text would put invented
+  substance in a letter signed by the user.
+- `--posting` takes the number from `--list`, a posting id, or a distinctive
+  substring. A substring matching two Postings is refused rather than resolved
+  to the first.
+- The letter is printed as well as written, because reading it is the point.
+
+**The writer has no tools, and that is the security property.** It holds the CV
+in its context while the Posting beside it is text anyone who pays for an
+advertisement controls — copied into the prompt verbatim, hidden instructions
+and all. Tool-lessness is what makes copying acceptable. Do not give this agent
+a fetch tool; when a page fetcher exists it goes on a separate agent that never
+sees the profile. See `packages/agents/README.md`.
+
+**It refuses before spending anything.** `assertDraftable()` rejects a profile
+that is absent, under 200 characters or over 20,000 — the last of those rather
+than truncating, because a letter written from half a CV with nothing saying so
+is indistinguishable from one written from all of it. A missing fact — a start
+date, a salary, a recipient's name — comes back as a literal
+`[bracketed placeholder]`, never as a plausible invention.
+
+Letters land under `.letters/`, which is git-ignored.
 
 ## Forcing a run in AWS
 

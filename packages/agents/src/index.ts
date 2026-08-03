@@ -11,6 +11,25 @@ export {
 } from "./brief-writer.ts"
 
 export {
+  assertDraftable,
+  CandidateProfileSchema,
+  CoverLetterRequestSchema,
+  MAX_BACKGROUND_CHARS,
+  MIN_BACKGROUND_CHARS,
+  toCoverLetterPrompt,
+  UndraftableError,
+  type CandidateProfile,
+  type CoverLetterRequest,
+  type UndraftableReason,
+} from "./cover-letter.ts"
+
+export {
+  COVER_LETTER_WRITER_SYSTEM_PROMPT,
+  createCoverLetterWriter,
+  type CreateCoverLetterWriterOptions,
+} from "./cover-letter-writer.ts"
+
+export {
   FindingsSchema,
   jobScoutSchemaDescription,
   parseFindings,

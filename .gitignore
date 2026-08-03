@@ -29,6 +29,11 @@ dist
 # is per-machine and disposable — see apps/briefing-worker/README.md §Watching.
 .briefings/
 
+# briefing-worker local harness output: cover letters drafted by `letter`. A
+# letter is written in a candidate's voice from their own CV, so it is the last
+# thing that should land in a shared repository.
+.letters/
+
 # misc
 .DS_Store
 *.pem
