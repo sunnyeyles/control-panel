@@ -49,6 +49,3 @@ export async function latestArtifactForJob(
 
   return rows[0]
 }
-
-/** Re-export for callers that need the Prisma JSON input type. */
-export type { Prisma }

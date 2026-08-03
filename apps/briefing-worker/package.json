@@ -23,7 +23,6 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1096.0",
     "@langchain/core": "^1.2.3",
-    "@workspace/agent-tools": "workspace:*",
     "@workspace/agents": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/langfuse": "workspace:*",

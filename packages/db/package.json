@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Postgres for scheduling and provenance — jobs, runs, artifacts. Prisma Client plus domain helpers for claim/schedule invariants.",
+  "description": "Postgres for scheduling and provenance \u2014 jobs, runs, artifacts. Prisma Client plus domain helpers for claim/schedule invariants.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -47,7 +47,6 @@
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "prisma": "^7.9.1",
-    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

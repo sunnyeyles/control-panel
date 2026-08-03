@@ -3,11 +3,6 @@ output "bucket_name" {
   value       = aws_s3_bucket.user_storage.bucket
 }
 
-output "bucket_arn" {
-  description = "The bucket ARN, for policies written outside this module."
-  value       = aws_s3_bucket.user_storage.arn
-}
-
 output "bucket_region" {
   description = "Region the bucket was created in. Set this as AWS_REGION where the client cannot infer it."
   value       = aws_s3_bucket.user_storage.region

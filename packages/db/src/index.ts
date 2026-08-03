@@ -32,7 +32,6 @@ export { Prisma } from "./generated/prisma/client.ts"
 
 export {
   readDatabaseConfig,
-  readMigrationConfig,
   DATABASE_URL,
   DATABASE_URL_UNPOOLED,
   type DatabaseConfig,
@@ -73,10 +72,7 @@ export type {
   User,
 } from "./types.ts"
 
-export { asJobConfig, asRunFailure } from "./types.ts"
-
 export {
-  DatabaseUnavailableError,
   DbError,
   InvalidScheduleError,
   isDbError,

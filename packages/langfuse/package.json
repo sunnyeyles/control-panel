@@ -25,7 +25,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@langfuse/core": "5.10.0",
     "@langfuse/langchain": "5.10.0",
     "@langfuse/otel": "5.10.0",
     "@langfuse/tracing": "5.10.0",
