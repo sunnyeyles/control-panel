@@ -8,7 +8,9 @@ variable "briefing_worker" {
   description = "Configuration for the briefing-worker stack. Fields are documented in modules/briefing-worker/variables.tf."
 
   type = object({
-    function_name = optional(string, "briefing-worker")
+    function_name                = optional(string, "briefing-worker")
+    langfuse_base_url            = optional(string, "https://cloud.langfuse.com")
+    langfuse_tracing_environment = optional(string, "production")
 
     # Null means "the package's own build output", resolved against this
     # directory in briefing-worker.tf — a variable default cannot call

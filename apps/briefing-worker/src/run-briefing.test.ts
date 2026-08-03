@@ -7,7 +7,7 @@ import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
 import type { BriefStore, NewBrief, StoredBrief } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { AgentLike } from "./run-agent.ts"
+import type { AgentLike, AgentStreamOptions } from "./run-agent.ts"
 import { runBriefing } from "./run-briefing.ts"
 import type { TraceEvent } from "./trace.ts"
 
@@ -74,17 +74,21 @@ function searchResult(): ToolMessage {
  * shape LangGraph streams, so the correlation of a tool result back to the
  * arguments that asked for it is genuinely exercised here.
  */
+const streamOptions: AgentStreamOptions[] = []
+
 function fakeAgent(messages: BaseMessage[], llmCalls = 2): AgentLike {
   return {
-    stream: async () =>
-      (async function* stream() {
+    stream: async (_input, options) => {
+      streamOptions.push(options)
+      return (async function* stream() {
         for (const message of messages) {
           const node = AIMessage.isInstance(message) ? "model" : "tools"
           yield ["updates", { [node]: { messages: [message] } }]
         }
 
         yield ["values", { messages, llmCalls }]
-      })(),
+      })()
+    },
   }
 }
 
@@ -104,6 +108,7 @@ let recorded: Array<{ runId: string; objectKey: string }>
 beforeEach(() => {
   puts = []
   recorded = []
+  streamOptions.length = 0
   // Restored first: spying on an already-spied method hands back the existing
   // spy, whose call log would otherwise accumulate across tests.
   vi.restoreAllMocks()
@@ -186,6 +191,31 @@ describe("runBriefing", () => {
     })
 
     expect(report.llmCalls).toBe(6)
+  })
+
+  it("names and tags both agent streams for Langfuse", async () => {
+    await run()
+
+    expect(streamOptions).toEqual([
+      expect.objectContaining({
+        metadata: {
+          agent: "scout",
+          jobId: JOB.id,
+          runId: SLOT.runId,
+        },
+        runName: "find-postings",
+        tags: ["briefing", "scout"],
+      }),
+      expect.objectContaining({
+        metadata: {
+          agent: "writer",
+          jobId: JOB.id,
+          runId: SLOT.runId,
+        },
+        runName: "write-brief",
+        tags: ["briefing", "writer"],
+      }),
+    ])
   })
 
   it("treats an honest empty result as a success", async () => {

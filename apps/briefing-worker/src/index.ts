@@ -7,6 +7,7 @@ import {
   createBriefStore,
   createS3UserObjectStore,
 } from "@workspace/user-storage"
+import { initializeLangfuse, shutdownLangfuse } from "@workspace/langfuse"
 
 import { runTick } from "./run-tick.ts"
 
@@ -100,6 +101,16 @@ async function loadSecrets(): Promise<void> {
       "APIFY_SECRET_ID",
       "Neither APIFY_TOKEN nor APIFY_SECRET_ID is set, so there is no way to search SEEK."
     ),
+    loadSecret(
+      "LANGFUSE_PUBLIC_KEY",
+      "LANGFUSE_PUBLIC_KEY_SECRET_ID",
+      "Neither LANGFUSE_PUBLIC_KEY nor LANGFUSE_PUBLIC_KEY_SECRET_ID is set, so Langfuse tracing cannot be configured."
+    ),
+    loadSecret(
+      "LANGFUSE_SECRET_KEY",
+      "LANGFUSE_SECRET_KEY_SECRET_ID",
+      "Neither LANGFUSE_SECRET_KEY nor LANGFUSE_SECRET_KEY_SECRET_ID is set, so Langfuse tracing cannot be configured."
+    ),
   ])
 }
 
@@ -123,6 +134,7 @@ async function loadSecrets(): Promise<void> {
  */
 export const handler = async (): Promise<void> => {
   await loadSecrets()
+  const langfuseEnabled = initializeLangfuse({ exportMode: "immediate" })
 
   // One client per invocation, disconnected at the end. Not module scope: see
   // the note above.
@@ -137,6 +149,9 @@ export const handler = async (): Promise<void> => {
   try {
     await runTick(prisma, briefs)
   } finally {
-    await prisma.$disconnect()
+    await Promise.all([
+      prisma.$disconnect(),
+      ...(langfuseEnabled ? [shutdownLangfuse()] : []),
+    ])
   }
 }

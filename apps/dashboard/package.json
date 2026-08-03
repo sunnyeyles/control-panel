@@ -19,6 +19,7 @@
     "@vercel/oidc-aws-credentials-provider": "^3.3.1",
     "@workspace/agents": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/langfuse": "workspace:*",
     "@workspace/ui": "workspace:*",
     "@workspace/user-storage": "workspace:*",
     "ai": "^7.0.37",

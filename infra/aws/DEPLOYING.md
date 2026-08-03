@@ -42,7 +42,7 @@ No `-var` flags. `alert_email` and the bucket name live in the committed
 `infra/aws/terraform.tfvars`, which Terraform auto-loads — check the bucket name
 in it is right for this account before the first apply.
 
-**4. Set all three secrets by hand.** Terraform creates each one empty and can
+**4. Set all five secrets by hand.** Terraform creates each one empty and can
 never write it — that is deliberate, see `bootstrap/README.md`.
 
 ```bash
@@ -52,14 +52,18 @@ aws secretsmanager put-secret-value \
   --secret-id briefing-worker/database-url --secret-string "postgres://..."
 aws secretsmanager put-secret-value \
   --secret-id briefing-worker/apify-token --secret-string "apify_api_..."
+aws secretsmanager put-secret-value \
+  --secret-id briefing-worker/langfuse-public-key --secret-string "pk-lf-..."
+aws secretsmanager put-secret-value \
+  --secret-id briefing-worker/langfuse-secret-key --secret-string "sk-lf-..."
 ```
 
-**All three, not just the one you changed.** `loadSecrets` fetches them
+**All five, not just the one you changed.** `loadSecrets` fetches them
 concurrently at handler init, so a single empty shell takes down _every_
 invocation — including ticks with nothing due — with
 `ResourceNotFoundException: … staging label: AWSCURRENT`, before `runTick` is
 reached and before any run report can be emitted. The failure names no secret,
-so the first useful question is always "which of the three is empty", not
+so the first useful question is always "which of the five is empty", not
 "what is wrong with the code".
 
 That is a live trap rather than a hypothetical: adding the Tavily secret in a
@@ -105,7 +109,7 @@ Done means all of:
 - [ ] `terraform apply` clean, and a following `plan` reports no changes
 - [ ] both roles carry the boundary:
       `aws iam get-role --role-name briefing-worker-execution --query Role.PermissionsBoundary`
-- [ ] **all three** secrets hold a value — see "Counting secret versions" below
+- [ ] **all five** secrets hold a value — see "Counting secret versions" below
 - [ ] the function carries `USER_STORAGE_BUCKET_NAME` and
       `USER_STORAGE_ENVIRONMENT`:
       `aws lambda get-function-configuration --function-name briefing-worker --query Environment.Variables`
@@ -140,7 +144,7 @@ empty shell sets it too, so a secret with no value at all reads as freshly
 changed.
 
 ```bash
-for s in openai-api-key database-url apify-token; do
+for s in openai-api-key database-url apify-token langfuse-public-key langfuse-secret-key; do
   printf '%-16s ' "$s"
   aws secretsmanager describe-secret --secret-id "briefing-worker/$s" \
     --query 'length(keys(VersionIdsToStages || `{}`))' --output text

@@ -91,3 +91,39 @@ resource "aws_secretsmanager_secret" "apify" {
     prevent_destroy = true
   }
 }
+
+# Langfuse uses a public key to identify the project and a secret key to submit
+# traces. Neither belongs in Lambda configuration, Terraform state, or plans.
+#
+#   aws secretsmanager put-secret-value \
+#     --secret-id briefing-worker/langfuse-public-key \
+#     --secret-string "pk-lf-..."
+#
+#   aws secretsmanager put-secret-value \
+#     --secret-id briefing-worker/langfuse-secret-key \
+#     --secret-string "sk-lf-..."
+resource "aws_secretsmanager_secret" "langfuse_public" {
+  name        = "${var.function_name}/langfuse-public-key"
+  description = "Langfuse public API key for the briefing worker. Set out-of-band; never written by Terraform."
+
+  recovery_window_in_days = 7
+
+  tags = var.tags
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_secretsmanager_secret" "langfuse_secret" {
+  name        = "${var.function_name}/langfuse-secret-key"
+  description = "Langfuse secret API key for the briefing worker. Set out-of-band; never written by Terraform."
+
+  recovery_window_in_days = 7
+
+  tags = var.tags
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

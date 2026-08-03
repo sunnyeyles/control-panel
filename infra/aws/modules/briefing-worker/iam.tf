@@ -43,10 +43,10 @@ resource "aws_iam_role_policy" "logs" {
   policy = data.aws_iam_policy_document.logs.json
 }
 
-# Three secrets, each by ARN. The worker reads the OpenAI key, the connection
-# string and the Apify token, and nothing else — listing them explicitly rather
-# than granting a prefix keeps "what may this function read" answerable from
-# this block alone.
+# Five secrets, each by ARN. The worker reads the OpenAI key, the connection
+# string, the Apify token and Langfuse's two API keys — and nothing else.
+# Listing them explicitly rather than granting a prefix keeps "what may this
+# function read" answerable from this block alone.
 data "aws_iam_policy_document" "read_secrets" {
   statement {
     sid     = "ReadWorkerSecrets"
@@ -55,6 +55,8 @@ data "aws_iam_policy_document" "read_secrets" {
       aws_secretsmanager_secret.openai.arn,
       aws_secretsmanager_secret.database.arn,
       aws_secretsmanager_secret.apify.arn,
+      aws_secretsmanager_secret.langfuse_public.arn,
+      aws_secretsmanager_secret.langfuse_secret.arn,
     ]
   }
 }
