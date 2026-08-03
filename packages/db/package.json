@@ -27,7 +27,7 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo src/generated",
     "dev": "prisma generate && tsc --build --watch",
     "lint": "eslint",
-    "format": "prettier --write \"**/*.{ts,prisma}\" \"prisma.config.ts\"",
+    "format": "prisma format && prettier --write \"**/*.ts\" \"prisma.config.ts\"",
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
     "test": "vitest run",

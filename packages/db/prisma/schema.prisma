@@ -1,9 +1,9 @@
 // Application tables only. Neon Auth lives in `neon_auth` and is never modeled
- // here — `users.auth_user_id` is a plain text column on purpose, not an FK.
- //
- // Partial indexes and CHECK constraints that Prisma cannot express live in the
- // initial migration SQL beside this schema. Do not "tidy" them into full
- // unique constraints: ad-hoc runs (`scheduled_for IS NULL`) must stay unlimited.
+// here — `users.auth_user_id` is a plain text column on purpose, not an FK.
+//
+// Partial indexes and CHECK constraints that Prisma cannot express live in the
+// initial migration SQL beside this schema. Do not "tidy" them into full
+// unique constraints: ad-hoc runs (`scheduled_for IS NULL`) must stay unlimited.
 
 generator client {
   provider = "prisma-client"
