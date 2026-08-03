@@ -56,12 +56,22 @@ const FINDINGS = {
 }
 
 /** A successful search result — what proves the scout actually searched. */
-function searchResult(): ToolMessage {
+function searchResult(name = "seek_search", callId = "call_1"): ToolMessage {
   return new ToolMessage({
     content: "1. Senior Backend Engineer\n   https://example.com/jobs/1",
-    tool_call_id: "call_1",
-    name: "seek_search",
+    tool_call_id: callId,
+    name,
     status: "success",
+  })
+}
+
+/** A search that was called and did not answer. */
+function failedSearch(name = "seek_search", callId = "call_1"): ToolMessage {
+  return new ToolMessage({
+    content: "search failed",
+    tool_call_id: callId,
+    name,
+    status: "error",
   })
 }
 
@@ -313,18 +323,13 @@ describe("runBriefing", () => {
     it("no search actually succeeded", async () => {
       // Well-formed findings that never touched the web — the failure mode the
       // whole search-count check exists to catch.
-      const failedSearch = new ToolMessage({
-        content: "search failed",
-        tool_call_id: "call_1",
-        name: "seek_search",
-        status: "error",
-      })
-
       await expect(
         run({
-          createScout: scoutReturning(JSON.stringify(FINDINGS), [failedSearch]),
+          createScout: scoutReturning(JSON.stringify(FINDINGS), [
+            failedSearch(),
+          ]),
         })
-      ).rejects.toThrow(/no successful seek_search round trip/)
+      ).rejects.toThrow(/no successful search .* on any of seek_search/)
       expect(puts).toHaveLength(0)
     })
 
@@ -395,6 +400,61 @@ describe("runBriefing", () => {
     // A failure report still carries how far the run got.
     expect(failure.searches).toBe(1)
     expect(failure.runId).toBe(SLOT.runId)
+  })
+
+  /**
+   * The wiring only. That a search from a *second* board counts is a property
+   * of the rule rather than of this file, and it is proved in
+   * `search-results.test.ts`, where the tool names can be passed in — only one
+   * board exists to run through `runBriefing` today.
+   */
+  describe("the search count reaching the run report", () => {
+    it("excludes a tool that is not a search tool", async () => {
+      // A clock answering successfully is not evidence that anyone searched,
+      // so widening the gate to a set must not widen it to "any tool the
+      // scout happens to carry".
+      const report = await run({
+        createScout: scoutReturning(JSON.stringify(FINDINGS), [
+          searchResult(),
+          searchResult("get_current_time", "call_2"),
+        ]),
+      })
+
+      expect(report.searches).toBe(1)
+      expect(report.searchesBySource).toEqual({ seek_search: 1 })
+    })
+
+    it("survives a search that failed alongside one that worked", async () => {
+      // Narrower coverage, not a failed run. A board that went quiet belongs
+      // in the findings' notes; it is not grounds for throwing away a brief
+      // built from postings that were genuinely looked up.
+      const report = await run({
+        createScout: scoutReturning(JSON.stringify(FINDINGS), [
+          failedSearch(),
+          searchResult("seek_search", "call_2"),
+        ]),
+      })
+
+      expect(report.outcome).toBe("success")
+      expect(report.searches).toBe(1)
+    })
+
+    it("carries the per-board breakdown onto a failure report", async () => {
+      // A run that searched nothing still has to say so per board — that is
+      // what makes "which board went quiet, and when" a log query.
+      const log = vi.mocked(console.log)
+
+      await expect(
+        run({
+          createScout: scoutReturning(JSON.stringify(FINDINGS), [
+            failedSearch(),
+          ]),
+        })
+      ).rejects.toThrow()
+
+      const failure = JSON.parse(String(log.mock.calls[0]?.[0]))
+      expect(failure.searchesBySource).toEqual({ seek_search: 0 })
+    })
   })
 
   /**
