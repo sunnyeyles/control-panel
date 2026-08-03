@@ -27,5 +27,5 @@
       "matchReason": "Senior backend, Sydney, event-driven systems — though the stack is Go rather than Python."
     }
   ],
-  "notes": "Transcribed by hand from live seek.com.au search results on 2026-08-03, because APIFY_TOKEN was not available to run the scout. Title, company, location, url and every highlight are copied from the advertisements verbatim; summary and matchReason are written in the scout's voice, from the same teaser text a search returns. Nothing here came from a posting's detail page — seek-search.ts leaves fetchDetails off — so this file is exactly as thin as a real run's findings."
+  "notes": "Transcribed by hand from live seek.com.au search results on 2026-08-03, because APIFY_TOKEN was not available to run the scout. Title, company, location, url and every highlight are copied from the advertisements verbatim; summary and matchReason are written in the scout's voice, from the same teaser text a search returns. Nothing here came from a posting's detail page, which is what makes this file worth keeping: since #87 seek-search.ts sets fetchDetails and a real run's findings are no longer this thin, so this is the teaser-only baseline the letter comparison was made against rather than a sample of current output."
 }
