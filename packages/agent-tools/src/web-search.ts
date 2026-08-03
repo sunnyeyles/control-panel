@@ -1,6 +1,12 @@
 import { tool } from "@langchain/core/tools"
 import * as z from "zod"
 
+import {
+  clampResultCount,
+  requireApiCredential,
+  runSearchRequest,
+} from "./search-request.ts"
+
 /**
  * Web search, via Tavily's REST API.
  *
@@ -54,18 +60,15 @@ export interface WebSearchDeps {
 }
 
 /**
- * A function, not a module constant, so importing this file never throws.
- * Mirrors `getOpenAIApiKey()` in `@workspace/agents-core`.
+ * Named here, read inside the call. `requireApiCredential` is what makes
+ * importing this file free — the same rule `getOpenAIApiKey()` follows in
+ * `@workspace/agents-core`.
  */
-function getTavilyApiKey(): string {
-  const apiKey = process.env.TAVILY_API_KEY
-  if (!apiKey) {
-    throw new Error(
-      "TAVILY_API_KEY is not set, so there is no way to search the web."
-    )
-  }
-  return apiKey
-}
+const CREDENTIAL = {
+  service: "Tavily",
+  noun: "API key",
+  variable: "TAVILY_API_KEY",
+} as const
 
 /**
  * One result per stanza, URL on its own line.
@@ -100,71 +103,46 @@ function formatResults(query: string, results: TavilyResult[]): string {
  * tool's schema describes what the *model* passes, and has nowhere to carry a
  * dependency.
  *
- * Two classes of failure, handled differently on purpose. A missing or rejected
- * key is a deployment fault that no amount of rephrasing fixes, so it throws:
- * the registry turns that into an error tool result, and the run fails loudly
- * rather than producing a confident brief built on nothing. Everything else —
- * rate limits, upstream 5xx, a body that will not parse — comes back as a
- * helpful string, matching `get_current_time`'s posture, so one bad search does
- * not sink a run that has other searches to make.
+ * The request envelope and its two-class failure posture live in
+ * `search-request.ts`, shared with `seek-search.ts` rather than copied into it:
+ * a missing or rejected key throws, and everything a model could work around
+ * comes back as a sentence. What stays here is what is actually Tavily's — the
+ * URL, the body's field names, and where the result list sits in the response.
  */
 export async function tavilySearch(
   input: WebSearchInput,
   deps: WebSearchDeps = {}
 ): Promise<string> {
   const { query, maxResults, timeRange, includeDomains } = input
-  const doFetch = deps.fetch ?? globalThis.fetch
-  const apiKey = deps.apiKey ?? getTavilyApiKey()
 
-  const requested = maxResults ?? DEFAULT_MAX_RESULTS
-  const clamped = Math.min(
-    Math.max(Math.trunc(requested), 1),
-    MAX_RESULTS_LIMIT
-  )
+  const outcome = await runSearchRequest<TavilyResult>({
+    url: TAVILY_SEARCH_URL,
+    token:
+      deps.apiKey ??
+      requireApiCredential(CREDENTIAL.variable, "search the web"),
+    body: {
+      query,
+      max_results: clampResultCount(
+        maxResults ?? DEFAULT_MAX_RESULTS,
+        MAX_RESULTS_LIMIT
+      ),
+      search_depth: "basic",
+      ...(timeRange ? { time_range: timeRange } : {}),
+      ...(includeDomains?.length ? { include_domains: includeDomains } : {}),
+    },
+    credential: CREDENTIAL,
+    subject: `The search for "${query}"`,
+    retryWith: "a different query",
+    results: (body) => {
+      const results = (body as TavilyResponse | null)?.results
+      return Array.isArray(results) ? results : undefined
+    },
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+  })
 
-  let response: Response
-  try {
-    response = await doFetch(TAVILY_SEARCH_URL, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        query,
-        max_results: clamped,
-        search_depth: "basic",
-        ...(timeRange ? { time_range: timeRange } : {}),
-        ...(includeDomains?.length ? { include_domains: includeDomains } : {}),
-      }),
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return `The search for "${query}" could not be sent: ${message}. Continue with what you already have.`
-  }
+  if (!outcome.ok) return outcome.message
 
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(
-      `Tavily rejected the API key (HTTP ${response.status}). TAVILY_API_KEY is set but not accepted.`
-    )
-  }
-
-  if (!response.ok) {
-    return `The search for "${query}" failed with HTTP ${response.status}. Try again with a different query, or continue with what you already have.`
-  }
-
-  let body: TavilyResponse
-  try {
-    body = (await response.json()) as TavilyResponse
-  } catch {
-    return `The search for "${query}" returned a response that could not be read. Continue with what you already have.`
-  }
-
-  if (!Array.isArray(body.results)) {
-    return `The search for "${query}" returned no result list. Continue with what you already have.`
-  }
-
-  return formatResults(query, body.results)
+  return formatResults(query, outcome.results)
 }
 
 /**

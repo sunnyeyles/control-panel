@@ -3,7 +3,7 @@ import {
   isPostingId,
 } from "@/lib/cover-letters/cover-letter-ref"
 import {
-  isUserStorageError,
+  isMissingObjectError,
   type CoverLetterStore,
 } from "@workspace/user-storage"
 
@@ -67,15 +67,12 @@ export async function downloadCoverLetter(
   } catch (error) {
     console.error("cover-letters: download failed", error)
 
-    if (isUserStorageError(error)) {
-      if (
-        error.code === "object_not_found" ||
-        error.code === "object_ownership" ||
-        error.code === "invalid_object_key"
-      ) {
-        return { status: "not-found" }
-      }
-    }
+    // The three codes that mean "nothing here you may have" are conflated by
+    // `isMissingObjectError` in `@workspace/user-storage`, which is where the
+    // reasoning lives — it is a rule about what not to reveal, and it was
+    // written out identically here, in the documents route, and in the two
+    // action modules.
+    if (isMissingObjectError(error)) return { status: "not-found" }
 
     return { status: "failed" }
   }

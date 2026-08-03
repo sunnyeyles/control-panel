@@ -86,6 +86,39 @@ export function isUserStorageError(error: unknown): error is UserStorageError {
   return error instanceof Error && "code" in error && isErrorCode(error.code)
 }
 
+/**
+ * Whether a failure means "there is nothing here this caller may have" —
+ * {@link ObjectNotFoundError}, {@link ObjectOwnershipError}, or
+ * {@link InvalidObjectKeyError}.
+ *
+ * **The conflation of those three is the point, and it belongs here rather than
+ * at each call site.** {@link ObjectOwnershipError} exists precisely so a caller
+ * can conflate it with a not-found deliberately, and the download paths must:
+ * distinguishing them turns a route into an oracle for whether another user's
+ * object id is real. `invalid_object_key` joins them for a different reason — a
+ * key the store will not address is one that cannot name an object, which from
+ * the caller's side is indistinguishable from an object that is not there, and
+ * answering "the server broke" would report a malformed URL as a fault and fill
+ * the log with alarms anyone can trigger from the address bar.
+ *
+ * That reasoning was written out three times, once per call site, as the same
+ * three-code disjunction. Three copies of a rule about *what not to reveal* is
+ * how one of them comes to reveal it.
+ *
+ * ⚠️ **Not for the `storage_unavailable` case.** That one is the store being
+ * wrong rather than the object, and a caller that folds it in here reports a
+ * broken IAM attachment as a 404 — which looks like a user error and hides the
+ * only symptom the real fault has.
+ */
+export function isMissingObjectError(error: unknown): boolean {
+  return (
+    isUserStorageError(error) &&
+    (error.code === "object_not_found" ||
+      error.code === "object_ownership" ||
+      error.code === "invalid_object_key")
+  )
+}
+
 function isErrorCode(value: unknown): value is UserStorageErrorCode {
   return (
     value === "invalid_object_key" ||

@@ -1,5 +1,6 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
+import { storageMessage } from "@/lib/actions/storage-message"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   loadCandidateBackground,
@@ -19,11 +20,7 @@ import { FindingsSchema, type Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
 import type { PrismaClient } from "@workspace/db"
 import { createLangfuseCallback } from "@workspace/langfuse"
-import {
-  isUserStorageError,
-  type CoverLetterStore,
-  type ResumeStore,
-} from "@workspace/user-storage"
+import type { CoverLetterStore, ResumeStore } from "@workspace/user-storage"
 import { z } from "zod"
 
 /**
@@ -195,7 +192,9 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         deps.getResumes()
       )
     } catch (error) {
-      return fail(storageMessage("read", error))
+      return fail(
+        storageMessage({ domain: "cover-letters", operation: "read", error })
+      )
     }
 
     if (!background.ok)
@@ -251,7 +250,16 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         },
       })
     } catch (error) {
-      return fail(storageMessage("write", error))
+      // No `invalidKey`: nothing on this path can produce an unaddressable key
+      // that `draftSchema` did not already refuse, so the case has no sentence
+      // of its own and falls to the unexplained-failure wording.
+      //
+      // A persistent `storage_unavailable` here is the IAM attachment —
+      // `prod:cover-letters` is a grant that has to be applied, not only
+      // declared — and the user is told only that storage is unavailable.
+      return fail(
+        storageMessage({ domain: "cover-letters", operation: "write", error })
+      )
     }
 
     return {
@@ -388,35 +396,5 @@ function describeUndraftable(error: UndraftableError, displayName: string) {
       const _exhaustive: never = error.reason
       return _exhaustive
     }
-  }
-}
-
-/**
- * A storage failure as something safe to show.
- *
- * Branches on `code`, never `instanceof`, for the reason `errors.ts` states: an
- * error crossing a bundler or package boundary can fail a prototype check while
- * carrying a perfectly good discriminant. Detail goes to the server log alone.
- */
-function storageMessage(operation: "read" | "write", error: unknown): string {
-  console.error(`cover-letters: ${operation} failed`, error)
-
-  if (!isUserStorageError(error)) return "Something went wrong."
-
-  switch (error.code) {
-    case "object_not_found":
-    case "object_ownership":
-      // Conflated, as everywhere else here: splitting them would say whether an
-      // object exists to someone who may not read it.
-      return "That document no longer exists."
-
-    case "storage_unavailable":
-      // Where `AccessDenied` lands. If this appears consistently after a
-      // deploy, the cause is the IAM attachment — `prod:cover-letters` is a
-      // grant that has to be applied, not only declared.
-      return "Document storage is unavailable. Try again in a moment."
-
-    default:
-      return "Something went wrong."
   }
 }

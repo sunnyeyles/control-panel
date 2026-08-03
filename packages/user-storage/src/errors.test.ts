@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   InvalidObjectKeyError,
+  isMissingObjectError,
   isUserStorageError,
   ObjectNotFoundError,
   ObjectOwnershipError,
@@ -51,6 +52,49 @@ describe("isUserStorageError", () => {
 
     expect(fromAnotherCopy instanceof ObjectNotFoundError).toBe(false)
     expect(isUserStorageError(fromAnotherCopy)).toBe(true)
+  })
+})
+
+/**
+ * The download paths answer 404 for all three of these and 500 for the fourth,
+ * so which side of the line each code falls on is the whole behaviour. It is
+ * asserted here rather than left to the two routes that used to spell the
+ * disjunction out themselves.
+ */
+describe("isMissingObjectError", () => {
+  it("covers the three codes that mean 'nothing here you may have'", () => {
+    expect(isMissingObjectError(new ObjectNotFoundError("k"))).toBe(true)
+    expect(isMissingObjectError(new ObjectOwnershipError("k", "a", "b"))).toBe(
+      true
+    )
+    expect(isMissingObjectError(new InvalidObjectKeyError("bad"))).toBe(true)
+  })
+
+  /**
+   * The one that must stay out. Folding it in would report a broken IAM
+   * attachment as a 404 — a user error, and the only symptom the real fault
+   * has.
+   */
+  it("excludes a store that is unavailable", () => {
+    expect(isMissingObjectError(new StorageUnavailableError("down"))).toBe(
+      false
+    )
+  })
+
+  it("rejects anything that is not this package's error", () => {
+    expect(isMissingObjectError(new Error("nope"))).toBe(false)
+    expect(isMissingObjectError(undefined)).toBe(false)
+    expect(isMissingObjectError({ code: "object_not_found" })).toBe(false)
+  })
+
+  /** By code, not by prototype — same reason `isUserStorageError` is. */
+  it("recognises an error from another copy of this package", () => {
+    const fromAnotherCopy = Object.assign(new Error("not found"), {
+      code: "object_ownership",
+    })
+
+    expect(fromAnotherCopy instanceof ObjectOwnershipError).toBe(false)
+    expect(isMissingObjectError(fromAnotherCopy)).toBe(true)
   })
 })
 

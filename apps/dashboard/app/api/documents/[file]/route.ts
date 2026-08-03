@@ -6,7 +6,7 @@ import {
   parseDocumentFile,
 } from "@/lib/documents/document-ref"
 import { getResumeStore } from "@/lib/storage"
-import { isUserStorageError } from "@workspace/user-storage"
+import { isMissingObjectError } from "@workspace/user-storage"
 
 /**
  * Download one document.
@@ -66,28 +66,13 @@ export async function GET(
   } catch (error) {
     console.error("documents: download failed", error)
 
-    if (isUserStorageError(error)) {
-      // `object_not_found` and `object_ownership` both answer 404 with the same
-      // body. Distinguishing them would turn this route into an oracle for
-      // whether another user's document id exists — which is exactly what
-      // `errors.ts` warns about, and the reason the store bothers to have two
-      // error types rather than the caller having two responses.
-      //
-      // `invalid_object_key` joins them, for a different reason: a key the
-      // store will not address is one that cannot name an object, which from
-      // the caller's side is indistinguishable from an object that is not
-      // there. `parseDocumentFile` should already have caught every such id, so
-      // this is the second line rather than the first — but answering 500 would
-      // report a malformed request as a server fault and fill the log with
-      // alarms anyone can trigger from the address bar.
-      if (
-        error.code === "object_not_found" ||
-        error.code === "object_ownership" ||
-        error.code === "invalid_object_key"
-      ) {
-        return notFound()
-      }
-    }
+    // `object_not_found`, `object_ownership` and `invalid_object_key` all
+    // answer 404 with the same body. Why those three are one answer is argued
+    // at `isMissingObjectError` in `@workspace/user-storage` — briefly: telling
+    // them apart would turn this route into an oracle for whether another
+    // user's document id exists. `parseDocumentFile` should already have caught
+    // every unaddressable id, so this is the second line rather than the first.
+    if (isMissingObjectError(error)) return notFound()
 
     return Response.json({ error: "Download failed" }, { status: 500 })
   }

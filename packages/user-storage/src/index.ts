@@ -67,6 +67,7 @@ export { readUserStorageConfig, type UserStorageConfig } from "./config.ts"
 
 export {
   InvalidObjectKeyError,
+  isMissingObjectError,
   isUserStorageError,
   ObjectNotFoundError,
   ObjectOwnershipError,

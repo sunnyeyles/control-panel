@@ -1,6 +1,12 @@
 import { tool } from "@langchain/core/tools"
 import * as z from "zod"
 
+import {
+  clampResultCount,
+  requireApiCredential,
+  runSearchRequest,
+} from "./search-request.ts"
+
 /**
  * SEEK job search, via Apify's `unfenced-group/seek-com-au-scraper` actor.
  *
@@ -113,18 +119,14 @@ export interface SeekSearchDeps {
 }
 
 /**
- * A function, not a module constant, so importing this file never throws.
- * Mirrors `getTavilyApiKey()` in `web-search.ts`.
+ * Named here, read inside the call — `requireApiCredential` is what keeps
+ * importing this file free, exactly as `web-search.ts` names its own.
  */
-function getApifyToken(): string {
-  const apiToken = process.env.APIFY_TOKEN
-  if (!apiToken) {
-    throw new Error(
-      "APIFY_TOKEN is not set, so there is no way to search SEEK."
-    )
-  }
-  return apiToken
-}
+const CREDENTIAL = {
+  service: "Apify",
+  noun: "API token",
+  variable: "APIFY_TOKEN",
+} as const
 
 /**
  * The advertisement's own description, bounded and labelled.
@@ -209,90 +211,61 @@ function formatResults(query: string, jobs: SeekJob[]): string {
  * tool's schema describes what the *model* passes, and has nowhere to carry a
  * dependency.
  *
- * Failure posture copied from `tavilySearch`, including the split: a missing
- * or rejected token is a deployment fault no rephrasing fixes, so it throws
- * and the run fails loudly. Everything else — a failed actor run (the
- * synchronous endpoint reports one as an error status), rate limits, a body
- * that will not parse — comes back as a helpful string, so one bad search
- * does not sink a run that has other searches to make.
+ * The request envelope and its two-class failure posture live in
+ * `search-request.ts`, shared with `web-search.ts` rather than copied from it —
+ * a missing or rejected token throws, and everything a model could work around
+ * (a failed actor run, which the synchronous endpoint reports as an error
+ * status, rate limits, a body that will not parse) comes back as a sentence.
+ * What stays here is what is actually Apify's: the endpoint, the actor's input
+ * fields, and the bare-array response shape.
  */
 export async function apifySeekSearch(
   input: SeekSearchInput,
   deps: SeekSearchDeps = {}
 ): Promise<string> {
   const { query, location, maxResults, daysOld, workType } = input
-  const doFetch = deps.fetch ?? globalThis.fetch
-  const apiToken = deps.apiToken ?? getApifyToken()
 
-  const requested = maxResults ?? DEFAULT_MAX_RESULTS
-  const clamped = Math.min(
-    Math.max(Math.trunc(requested), 1),
-    MAX_RESULTS_LIMIT
-  )
+  const outcome = await runSearchRequest<SeekJob>({
+    url: `${APIFY_RUN_SYNC_URL}?timeout=${RUN_TIMEOUT_SECONDS}`,
+    token:
+      deps.apiToken ?? requireApiCredential(CREDENTIAL.variable, "search SEEK"),
+    // `fetchDetails` is on, and the comment it replaces claimed it would
+    // triple the scrape time. Measured, it does not: over six paired runs of
+    // the same 20-result Sydney search on 2026-08-03, off averaged 10.3s and
+    // on averaged 10.2s — 0.99x, with the two spreads (9.2–11.6s and
+    // 9.4–10.6s) overlapping completely. The actor fetches every description
+    // in one batched GraphQL call, so what dominates a run is the container
+    // start, not the number of pages. That leaves no scrape budget to weigh
+    // against the benefit, and the benefit is the point: without this flag the
+    // actor returns `descriptionMarkdown: null`, and a teaser plus three
+    // bullets is all a posting carries.
+    //
+    // What it does cost is context — ~79 KB of description across 20 results,
+    // which `MAX_DESCRIPTION_CHARS` bounds per posting.
+    body: {
+      searchQuery: query,
+      location: location ?? "All Australia",
+      country: "AU",
+      fetchDetails: true,
+      maxItems: clampResultCount(
+        maxResults ?? DEFAULT_MAX_RESULTS,
+        MAX_RESULTS_LIMIT
+      ),
+      daysOld: daysOld ?? DEFAULT_DAYS_OLD,
+      sortMode: "ListedDate",
+      ...(workType ? { workType } : {}),
+    },
+    credential: CREDENTIAL,
+    subject: `The SEEK search for "${query}"`,
+    retryWith: "different criteria",
+    // The synchronous endpoint returns the dataset items as a bare array.
+    results: (body) => (Array.isArray(body) ? (body as SeekJob[]) : undefined),
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+  })
 
-  let response: Response
-  try {
-    response = await doFetch(
-      `${APIFY_RUN_SYNC_URL}?timeout=${RUN_TIMEOUT_SECONDS}`,
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${apiToken}`,
-          "content-type": "application/json",
-        },
-        // `fetchDetails` is on, and the comment it replaces claimed it would
-        // triple the scrape time. Measured, it does not: over six paired runs
-        // of the same 20-result Sydney search on 2026-08-03, off averaged
-        // 10.3s and on averaged 10.2s — 0.99x, with the two spreads (9.2–11.6s
-        // and 9.4–10.6s) overlapping completely. The actor fetches every
-        // description in one batched GraphQL call, so what dominates a run is
-        // the container start, not the number of pages. That leaves no scrape
-        // budget to weigh against the benefit, and the benefit is the point:
-        // without this flag the actor returns `descriptionMarkdown: null`, and
-        // a teaser plus three bullets is all a posting carries.
-        //
-        // What it does cost is context — ~79 KB of description across 20
-        // results, which `MAX_DESCRIPTION_CHARS` bounds per posting.
-        body: JSON.stringify({
-          searchQuery: query,
-          location: location ?? "All Australia",
-          country: "AU",
-          fetchDetails: true,
-          maxItems: clamped,
-          daysOld: daysOld ?? DEFAULT_DAYS_OLD,
-          sortMode: "ListedDate",
-          ...(workType ? { workType } : {}),
-        }),
-      }
-    )
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return `The SEEK search for "${query}" could not be sent: ${message}. Continue with what you already have.`
-  }
+  if (!outcome.ok) return outcome.message
 
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(
-      `Apify rejected the API token (HTTP ${response.status}). APIFY_TOKEN is set but not accepted.`
-    )
-  }
-
-  if (!response.ok) {
-    return `The SEEK search for "${query}" failed with HTTP ${response.status}. Try again with different criteria, or continue with what you already have.`
-  }
-
-  let body: unknown
-  try {
-    body = await response.json()
-  } catch {
-    return `The SEEK search for "${query}" returned a response that could not be read. Continue with what you already have.`
-  }
-
-  // The synchronous endpoint returns the dataset items as a bare array.
-  if (!Array.isArray(body)) {
-    return `The SEEK search for "${query}" returned no result list. Continue with what you already have.`
-  }
-
-  return formatResults(query, body as SeekJob[])
+  return formatResults(query, outcome.results)
 }
 
 /**
