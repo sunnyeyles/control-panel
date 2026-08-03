@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/current-user"
 import type { Agent } from "@workspace/agents"
 import { createAssistant } from "@workspace/agents/assistant"
+import { createLangfuseCallback } from "@workspace/langfuse"
 import {
   createUIMessageStreamResponse,
   safeValidateUIMessages,
@@ -22,7 +23,10 @@ export const CHAT_STREAM_MODE: ["values", "messages"] = ["values", "messages"]
 
 const STREAM_ERROR_TEXT = "Something went wrong while running the agent."
 
-const requestBodySchema = z.object({ messages: z.array(z.unknown()) })
+const requestBodySchema = z.object({
+  messages: z.array(z.unknown()),
+  sessionId: z.string().uuid().optional(),
+})
 
 export interface ChatHandlerDeps {
   /** Agent factory — the seam a test fake plugs into. Defaults to createAssistant. */
@@ -102,9 +106,27 @@ export function createChatHandler(
     let stream
     try {
       const agent = createAgent()
+      const sessionId = parsed.data.sessionId ?? crypto.randomUUID()
+      const callback = createLangfuseCallback({
+        userId: caller.userId,
+        sessionId,
+        tags: ["dashboard", "chat"],
+        traceMetadata: {
+          feature: "chat",
+          route: "/api/chat",
+        },
+      })
       stream = await agent.stream(
         { messages: await toBaseMessages(validated.data) },
-        { streamMode: CHAT_STREAM_MODE }
+        {
+          streamMode: CHAT_STREAM_MODE,
+          runName: "chat-response",
+          metadata: {
+            langfuseUserId: caller.userId,
+            langfuseSessionId: sessionId,
+          },
+          ...(callback ? { callbacks: [callback] } : {}),
+        }
       )
     } catch (error) {
       console.error("chat: failed to start agent run", error)

@@ -5,8 +5,9 @@ locals {
   # line here rather than an edit inside the resource block, which keeps the
   # diff of "the worker learned about a new thing" small and obvious.
   #
-  # OPENAI_API_KEY, DATABASE_URL and APIFY_TOKEN are deliberately absent: all
-  # three values are fetched from Secrets Manager at cold start. Putting any of
+  # OPENAI_API_KEY, DATABASE_URL, APIFY_TOKEN and the Langfuse keys are
+  # deliberately absent: all values are fetched from Secrets Manager at cold
+  # start. Putting any of
   # them here would place a secret in plan output, in state, and in the
   # console's function configuration page.
   #
@@ -15,12 +16,17 @@ locals {
   # because the Lambda runtime sets it, which keeps the region the function runs
   # in and the region it writes to from being two facts that can disagree.
   environment = {
-    OPENAI_SECRET_ID   = aws_secretsmanager_secret.openai.arn
-    DATABASE_SECRET_ID = aws_secretsmanager_secret.database.arn
-    APIFY_SECRET_ID    = aws_secretsmanager_secret.apify.arn
+    OPENAI_SECRET_ID              = aws_secretsmanager_secret.openai.arn
+    DATABASE_SECRET_ID            = aws_secretsmanager_secret.database.arn
+    APIFY_SECRET_ID               = aws_secretsmanager_secret.apify.arn
+    LANGFUSE_PUBLIC_KEY_SECRET_ID = aws_secretsmanager_secret.langfuse_public.arn
+    LANGFUSE_SECRET_KEY_SECRET_ID = aws_secretsmanager_secret.langfuse_secret.arn
 
-    USER_STORAGE_BUCKET_NAME = var.user_storage_bucket_name
-    USER_STORAGE_ENVIRONMENT = var.user_storage_environment
+    LANGCHAIN_CALLBACKS_BACKGROUND = "false"
+    LANGFUSE_BASE_URL              = var.langfuse_base_url
+    LANGFUSE_TRACING_ENVIRONMENT   = var.langfuse_tracing_environment
+    USER_STORAGE_BUCKET_NAME       = var.user_storage_bucket_name
+    USER_STORAGE_ENVIRONMENT       = var.user_storage_environment
   }
 }
 

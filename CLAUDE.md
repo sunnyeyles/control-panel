@@ -10,14 +10,6 @@ This repo runs Next.js **16.2.6**, which has breaking changes relative to most t
 
 All commands run from the repo root; Turborepo fans them out to workspaces.
 
-```bash
-pnpm dev         # next dev for apps/dashboard (persistent, uncached)
-pnpm build       # turbo build
-pnpm lint        # eslint per workspace
-pnpm typecheck   # tsc --noEmit per workspace
-pnpm format      # prettier --write per workspace (writes, does not check)
-```
-
 Scope to one workspace with a Turborepo filter — **use the package name, not the directory name**:
 
 ```bash
@@ -102,7 +94,7 @@ pnpm test        # turbo test
 **Only five workspaces have tests** — `@workspace/dashboard`,
 `@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools` and
 `@workspace/briefing-worker`. Vitest is a devDependency of those alone; `turbo
-test` is a no-op in the other five. Do not assume a package is covered because
+test` is a no-op in the other six. Do not assume a package is covered because
 the command exits 0. Adding tests to another workspace means adding `vitest` to
 it and a `test` script — the `test` task in `turbo.json` is already there.
 
@@ -117,21 +109,6 @@ to _be_ Postgres. `schedule.test.ts` needs nothing. `stores.test.ts` needs a rea
 database and **skips itself when `DATABASE_URL_UNPOOLED` is unset**, so a clean
 `pnpm test` locally does not mean the claim race, the CHECK constraints, or the
 partial unique index were exercised — only CI, with a database, exercises those.
-
-## Layout
-
-| Path                         | Package name                   | Role                                                                |
-| ---------------------------- | ------------------------------ | ------------------------------------------------------------------- |
-| `apps/dashboard`             | `@workspace/dashboard`         | Next.js 16 App Router, React 19.2.                                  |
-| `apps/briefing-worker`       | `@workspace/briefing-worker`   | AWS Lambda, hourly tick. Bundled by esbuild, deployed by Terraform. |
-| `packages/agents`            | `@workspace/agents`            | Named agents — a prompt plus a tool set. One per module.            |
-| `packages/agent-tools`       | `@workspace/agent-tools`       | The shared tool catalog. One tool per module.                       |
-| `packages/agents-core`       | `@workspace/agents-core`       | LangGraph runtime: graph, state, model, tool registry.              |
-| `packages/db`                | `@workspace/db`                | Postgres: jobs, runs, artifacts. The only place SQL lives.          |
-| `packages/user-storage`      | `@workspace/user-storage`      | S3 storage for per-user data, behind an interface.                  |
-| `packages/ui`                | `@workspace/ui`                | Shared components, the Tailwind stylesheet, and `cn()`.             |
-| `packages/eslint-config`     | `@workspace/eslint-config`     | Flat configs: `base`, `next-js`, `react-internal`.                  |
-| `packages/typescript-config` | `@workspace/typescript-config` | `base.json`, `nextjs.json`, `react-library.json`.                   |
 
 ## Architecture
 
@@ -156,35 +133,9 @@ partial unique index were exercised — only CI, with a database, exercises thos
 - **Agents are exported as `createX()` factories, never as instances.** Building one constructs a model, which reads `OPENAI_API_KEY` and throws without it; a module-level instance would move that failure to import time and break any consumer that merely imports the module.
 - **Prefer per-tool imports over `allTools`.** A model picks worse as the tool list grows, so give an agent the tools its job needs.
 
-**`@workspace/user-storage` hides the AWS SDK behind one module.** `s3-user-object-store.ts` is the only file _in that package_ that imports `@aws-sdk/client-s3`, and `apps/dashboard/lib/storage.ts` is the only file outside it — it constructs an `S3Client` in order to attach Vercel's OIDC credential provider, and passes it in through the store's `client?: S3Client` option. That option exists for exactly this. **Do not add a `credentials` option to the package**; its own comment explains why ("Note what is _not_ here: any way to pass credentials"), and a package that accepts a credential is a package someone eventually hard-codes a key into. Everything else depends on the `UserObjectStore` interface — or, better, on the narrow `BriefStore` / `ResumeStore` facades over it, which know their kind's key shape and file types so a call site cannot get them wrong. Call `createS3UserObjectStore()` only at a composition root: same `createX()` factory rule as the agents, and for the same reason — constructing one reads configuration, so a module-level instance would move that failure to import time.
+**Tracing is a fourth package, deliberately outside that stack.** `@workspace/langfuse` owns the Langfuse OpenTelemetry adapter — `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse` — and the entry points are what import it: `apps/dashboard/instrumentation-node.ts` and `apps/briefing-worker/src/index.ts`. Nothing in the agent stack depends on it, and it depends on nothing in the agent stack, so `@langfuse/*` and `@opentelemetry/*` stay out of the runtime and a consumer that wants untraced agents simply never calls it. Its only tie to LangChain is the `CallbackHandler` type from `@langfuse/langchain`, which every caller passes through `config.callbacks`. Missing keys make all four functions no-ops rather than errors — see `packages/langfuse/README.md`.
 
-Three things about that package are load-bearing and easy to undo by accident:
-
-- **Object keys are `{environment}/{userId}/{kind}/…tail.{ext}`, and `userId` sits above `kind` deliberately** — erasing a user is then one prefix, not one per kind. The segment validation in `keys.ts` is the ownership boundary, not a tidiness rule: an unvalidated `userId` of `../someone-else` addresses another user's prefix.
-- **Retention is driven by an object _tag_, not a key prefix.** S3 lifecycle filters take no wildcards, so with `userId` in the middle there is no prefix meaning "every user's briefs". Every object is tagged `kind=<kind>` at write time and the Terraform lifecycle rules filter on that — which is why the IAM policies must grant `s3:PutObjectTagging`, and why a kind added to `kinds.ts` without a matching `object_kinds` entry in Terraform silently gets no retention at all.
-- **Content types are derived from the extension, never accepted from the caller,** against a per-kind allowlist in `kinds.ts`. A caller-supplied media type would let a `.pdf` be stored as `text/html`. Uploaded kinds are also stored `Content-Disposition: attachment`.
-
-**The gate is two layers, and neither is sufficient alone.** `apps/dashboard/proxy.ts` — `proxy.ts`, not `middleware.ts`; Next 16 renamed the convention — matches everything except static assets, so a route added later is closed by default. The authoritative check is separate: pages call `getCurrentUser()` themselves, and `lib/chat-handler.ts` returns its own 401 before it parses a body. That duplication is deliberate. The proxy is a routing concern, and the chat route spends the OpenAI budget, so it must not be reachable because a matcher pattern was wrong.
-
-**`app/(app)/layout.tsx` also calls `getCurrentUser()`, and that call is for the sidebar — not for the gate.** A layout does not re-render on navigation, so its check is not re-run when someone moves between routes; Next's own authentication guide warns about exactly this and prescribes the split used here — fetch the user in the layout to display it, keep the authorization check in each page. **Every page under the group therefore calls `requirePageUser()` (`lib/auth/require-page-user.ts`) itself, and deleting that call because "the layout already checks" reopens the hole.** The helper is only the three redirect lines that every page had copied verbatim; it is not a shared check performed once — each page still runs it, on every render. A new page under `app/(app)/` that does not call it is ungated no matter what the layout does. The duplicate call costs nothing: `getCurrentUser` is wrapped in React's `cache()`, so the layout and the page share one session lookup and one identity upsert per request. `cache()` and not a module-level memo — the scope has to be one request, or one person's identity is served to the next.
-
-**For a Server Action the proxy is not a second layer at all — it is barely a first one.** `auth.middleware()` in `@neondatabase/auth@0.4.2-beta` cannot evaluate a non-GET request (its session fast path is guarded by `method === "GET"`), so `proxy.ts` degrades every POST to checking that _some_ session-cookie substring is present. A forged cookie gets past it. The check inside the action is therefore the only real one, which is why `lib/documents/document-actions.ts` calls `getUser()` before it touches the body. Next's own docs say the same thing independently: a Server Function is reachable by direct POST, not only through the UI.
-
-**Server Actions follow a fixed shape, set by `app/(app)/documents/actions.ts`.** `"use server"` at the top of a dedicated `app/<segment>/actions.ts`, never inline — the set of exported actions is a security surface and belongs in one auditable place. That file is a thin wrapper; the logic lives in a `createXActions(deps)` factory under `lib/`, matching `lib/chat-handler.ts`, because the injectable seam is what lets the authorization branches be tested without a live session. **Nothing under `lib/documents/` imports Next**, which is what makes `pnpm turbo test --filter=@workspace/dashboard` able to cover them at all. Actions take `(state, formData)`, return a serializable discriminated union, and never throw for an expected failure. Cache invalidation is `refresh()` from `next/cache` — Server-Action-only in Next 16 — and stays in the wrapper, because it needs a request store.
-
-Three things here are easy to undo by accident:
-
-- **The proxy converts its redirect to a 401 under `/api/`.** The SDK only knows how to redirect to a login page, which for an API route means a `fetch` caller receives an HTML page with a success status and cannot tell it was refused. Removing that conversion also stops the chat route's own 401 from ever running, because the request no longer reaches it.
-- **The SDK's skip list is hardcoded** — `/api/auth`, `/auth/callback`, `/auth/sign-in`, `/auth/sign-up` are ungated no matter what `config.matcher` says, and nothing in this repo can extend or override it. It is also why `/auth/sign-up` would be public if anyone built it.
-- **`users.id` is the platform identity; the Neon Auth id is only a mapping.** `lib/auth/current-user.ts` returns the uuid from `users`, never `session.user.id`. That uuid is what `jobs.user_id` references and what becomes the `userId` segment of every S3 key, where `assertSegment()` in `@workspace/user-storage` treats it as the ownership boundary. `UserStore.ensureForAuthUser()` is a single idempotent upsert, so it is safe on every request and self-heals — there is no transaction to coordinate with, because Neon has already created the account by the time our code runs.
-
-**The app shell lives in `app/(app)/layout.tsx`, and navigation speed is why.** `SidebarProvider`, `AppSidebar` and `SiteHeader` belong to that one layout; `/`, `/documents` and `/settings` sit under the group and render only a `<main>`. A route group rather than the root layout, because `/auth/sign-in` and `/auth/refused` must render without a sidebar — the parentheses keep the URLs unchanged.
-
-Each page used to render the shell itself. That put it inside the segment being swapped, so every navigation tore the sidebar down, re-rendered it on the server and remounted it; hoisting it buys Next's guarantee that layouts "preserve state, remain interactive, and do not rerender" on navigation. Three consequences, each easy to undo:
-
-- **`app/(app)/loading.tsx` is load-bearing, not decoration.** Every page here is `force-dynamic`, and per `next/dist/docs/01-app/02-guides/prefetching.md` a dynamic page is not prefetched _at all_ without a `loading.js`, and its client cache TTL is off. Deleting it silently restores the original symptom: a click that blocks on a full server render while the previous page stays on screen. Keep it shape-agnostic — one file covers a chat, a document list and a settings panel.
-- **`SiteHeader` reads `usePathname` and takes no `title` prop.** It has to: it now sits in a layout that does not re-render, so a title threaded down from the page would be captured once and be wrong for every route after the first. Titles come from `lib/nav.ts`, which is also what the sidebar renders, so the heading and the nav item cannot drift.
-- **`staleTimes.dynamic` in `next.config.ts` is safe only because the document actions call `refresh()`.** The default is 0 — no client caching at all — which made every revisit a fresh server render. Raising it lets a segment be reused for 30s; the `refresh()` after an upload or delete is what stops a stale list outliving a change the user just made.
+**Two packages carry their own `CLAUDE.md`, and it loads only when you work under them** — `apps/dashboard/CLAUDE.md` (the auth gate, Server Action shape, app shell) and `packages/user-storage/CLAUDE.md` (the AWS SDK boundary, key shape, retention tags). Read the relevant one before changing either.
 
 **Tailwind v4, single stylesheet, owned by the UI package.** There is no `tailwind.config.*` anywhere — v4 configures itself from CSS. The one source of truth is `packages/ui/src/styles/globals.css`; the app imports it as `@workspace/ui/globals.css` in `app/layout.tsx`. The app's `postcss.config.mjs` is a one-line re-export of the UI package's. Theme tokens, base colors, and animations belong in that stylesheet, not in the app.
 
@@ -200,7 +151,7 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 ## Conventions
 
-**Prettier owns formatting** (`.prettierrc`): no semicolons, double quotes, 2-space tabs, 80-column width, ES5 trailing commas, LF. `prettier-plugin-tailwindcss` sorts classes and is pointed at `packages/ui/src/styles/globals.css` via `tailwindStylesheet`; it also sorts inside `cn()` and `cva()` calls. Match this style when editing — some checked-in files predate it and are not formatted.
+**Prettier owns formatting** (`.prettierrc`). Match this style when editing — some checked-in files predate it and are not formatted.
 
 **`.npmrc` pins `symlink=true`, and that line is load-bearing.** pnpm can be configured globally with `symlink=false` (this machine is), which downloads packages into `node_modules/.pnpm` but creates no `node_modules` links — so every `workspace:*` dependency becomes unresolvable by both Node and `tsc`, and `pnpm install` still exits 0. The repo-level setting overrides that. If a workspace import suddenly reports `Cannot find module '@workspace/…'`, check this before anything else. It is deliberately the only line in the file: the linker mode itself is left to whatever the machine prefers.
 
@@ -210,7 +161,7 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 **In the packages that emit `dist/`, relative imports carry a `.ts` extension and the compiler rewrites it.** Write `import { computeNextRunAt } from "./schedule.ts"` — the extension of the file that actually exists. `rewriteRelativeImportExtensions` in the base config turns that into `./schedule.js` on emit, so `dist/` stays valid Node ESM under NodeNext; the emitted JS is unchanged from when sources spelled `.js` by hand. It also implies `allowImportingTsExtensions`, which is why that flag can coexist with emit at all — on its own it requires `noEmit`.
 
-This rule is scoped to the NodeNext workspaces: `db`, `user-storage`, `agents`, `agents-core`, `agent-tools`, `briefing-worker`. `@workspace/ui` and `apps/dashboard` override to `Bundler` resolution, where nothing is rewritten and relative imports stay extensionless — `packages/ui/src/components/ai-elements/tool.tsx` importing `"./code-block"` is correct, not a straggler.
+This rule is scoped to the NodeNext workspaces: `db`, `user-storage`, `agents`, `agents-core`, `agent-tools`, `langfuse`, `briefing-worker`. `@workspace/ui` and `apps/dashboard` override to `Bundler` resolution, where nothing is rewritten and relative imports stay extensionless — `packages/ui/src/components/ai-elements/tool.tsx` importing `"./code-block"` is correct, not a straggler.
 
 Two things here look wrong and are not:
 

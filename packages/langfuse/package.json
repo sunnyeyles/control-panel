@@ -1,0 +1,42 @@
+{
+  "name": "@workspace/langfuse",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Langfuse OpenTelemetry adapter for agent runs: init, per-run callbacks, root traces, shutdown.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "dev": "tsc --build --watch",
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@langfuse/core": "5.10.0",
+    "@langfuse/langchain": "5.10.0",
+    "@langfuse/otel": "5.10.0",
+    "@langfuse/tracing": "5.10.0",
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/sdk-trace-node": "2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9",
+    "typescript": "^5"
+  }
+}

@@ -125,6 +125,9 @@ the values the function would otherwise fetch, plus the two storage variables:
 export OPENAI_API_KEY=...
 export DATABASE_URL=...                  # the pooled endpoint
 export APIFY_TOKEN=...
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+export LANGFUSE_BASE_URL=https://cloud.langfuse.com
 export USER_STORAGE_BUCKET_NAME=...
 export USER_STORAGE_ENVIRONMENT=prod
 export AWS_REGION=ap-southeast-2
@@ -137,6 +140,15 @@ variable is already set, so the Secrets Manager call never happens. It is also
 the escape hatch if Secrets Manager is unreachable but the values are known.
 Writing to S3 is the one step that does need real credentials, since the upload
 is a real upload.
+
+### Langfuse traces
+
+The Lambda records each briefing as one `generate-briefing` trace. It retains
+the search criteria, agent prompts and outputs, tool I/O, and generated brief;
+use a Langfuse project whose retention and access controls permit that content.
+`LANGFUSE_BASE_URL` defaults to the EU cloud endpoint in Terraform; set
+`briefing_worker.langfuse_base_url` for a different Langfuse region or a
+self-hosted instance.
 
 Every invocation prints one JSON `tick` line — `due`, `claimed`, `skipped`,
 `succeeded`, `failed` — and one `briefing-run` line per job that was actually

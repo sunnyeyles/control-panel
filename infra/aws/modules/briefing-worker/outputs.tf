@@ -40,6 +40,16 @@ output "apify_secret_arn" {
   value       = aws_secretsmanager_secret.apify.arn
 }
 
+output "langfuse_public_key_secret_arn" {
+  description = "ARN of the empty Langfuse public-key secret. Set its value out-of-band; Terraform never writes it."
+  value       = aws_secretsmanager_secret.langfuse_public.arn
+}
+
+output "langfuse_secret_key_secret_arn" {
+  description = "ARN of the empty Langfuse secret-key secret. Set its value out-of-band; Terraform never writes it."
+  value       = aws_secretsmanager_secret.langfuse_secret.arn
+}
+
 output "database_secret_arn" {
   description = <<-EOT
     ARN of the (empty) Postgres connection-string secret. Set its value
