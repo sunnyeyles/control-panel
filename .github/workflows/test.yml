@@ -1,0 +1,105 @@
+name: Test
+
+# Unfiltered, unlike `deploy-infra.yml`. That workflow is path-scoped because it
+# only ever concerns the worker and the infrastructure; this one covers six
+# workspaces whose dependencies cross every package boundary in the repo, so a
+# change to `@workspace/ui` can break a dashboard test and a change to
+# `packages/db` can break the worker's. Deciding by path which of those to skip
+# is guessing at Turborepo's dependency graph in YAML, and Turborepo already
+# answers it correctly and for free — an untouched package is a cache hit.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# `cancel-in-progress: true`, the opposite of the deploy workflow's setting.
+# There the queued run deploys real infrastructure and must not be interrupted;
+# here a superseded commit's results are simply of no interest.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # ⚠️ **The database is the whole reason this job is not three lines.**
+    #
+    # `packages/db/src/stores.test.ts` skips itself when `DATABASE_URL_UNPOOLED`
+    # is unset, and skipping is *green*: without a database `turbo test` exits 0
+    # having silently not run 26 tests — the claim race, the CHECK constraints,
+    # the partial unique index. Those assert properties of Postgres rather than
+    # of our code, so nothing else in the suite covers them and a fake cannot.
+    #
+    # A service container rather than the disposable Neon branch the suite's own
+    # docstring imagines: the migrations need no extension and no Neon feature
+    # (`gen_random_uuid()` has been built in since Postgres 13), so stock
+    # Postgres exercises every one of those properties — and it needs no secret,
+    # which means it also runs on a fork's pull request.
+    services:
+      postgres:
+        # Track whatever Neon is running, so a constraint that behaves
+        # differently across major versions is caught here rather than in prod.
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Without this the job races the container: `pnpm install` is slow
+        # enough to hide it most of the time, which is the worst failure rate to
+        # have.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # The direct endpoint by name, because that is the variable the suite
+      # reads. There is no pooled endpoint here and no PgBouncer to avoid — the
+      # name is about which variable the code looks at, not about topology.
+      #
+      # No `sslmode`: node-pg defaults to a plaintext connection and the
+      # container serves one, on a port published only to this job's network.
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches engines.node in the worker and the nodejs22.x runtime.
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The guard against this job going green for the wrong reason. If the
+      # variable above is ever emptied — a typo, a refactor, a merge — the suite
+      # does not fail, it *skips*, and the only visible difference is a test
+      # count nobody reads. Asserting the variable is enough on its own: when it
+      # is set the suite runs, and an unreachable database then fails rather
+      # than skips.
+      - name: Check the database suite will not skip
+        run: |
+          if [ -z "${DATABASE_URL_UNPOOLED:-}" ]; then
+            echo "::error::DATABASE_URL_UNPOOLED is empty, so stores.test.ts"
+            echo "would skip its 26 tests and this job would still pass."
+            exit 1
+          fi
+          pg_isready -d "$DATABASE_URL_UNPOOLED"
+
+      # `turbo test` and not `vitest` directly: `test` dependsOn `^build` and
+      # `generate`, which is what compiles the packages consumed as `dist/` and
+      # what produces the Prisma Client exactly once. Only six workspaces have a
+      # `test` script; the rest are a no-op here by design.
+      - name: Test
+        run: pnpm turbo test
