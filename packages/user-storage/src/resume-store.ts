@@ -1,5 +1,6 @@
 import { InvalidObjectKeyError } from "./errors.ts"
 import { extensionsFor } from "./kinds.ts"
+import { toMetadataValue } from "./metadata.ts"
 import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
 
 const KIND = "resumes" as const
@@ -240,18 +241,25 @@ function documentTypeMetadata(
  * a newline is header injection and a non-ASCII one is silently mangled.
  * Strip it to something a header can carry, and keep only the basename so a
  * path never survives into the record.
+ *
+ * The stripping itself is {@link toMetadataValue}, shared with the cover-letter
+ * store rather than restated — the rule is about what a header can carry, which
+ * has nothing to do with filenames. What stays here is the part that *is* about
+ * filenames: taking the basename, and treating "nothing survived" as an error
+ * rather than an absence. A document with no name is a row of raw uuid, and the
+ * user has a file in front of them to rename.
  */
 function cleanFilename(filename: string | undefined): Record<string, string> {
   if (!filename) return {}
 
   const basename = filename.split(/[/\\]/).pop() ?? ""
-  const safe = basename.replace(/[^\x20-\x7E]/g, "").slice(0, 255)
+  const safe = toMetadataValue(basename)
 
-  if (!safe.trim()) {
+  if (!safe) {
     throw new InvalidObjectKeyError(
       `originalFilename ${JSON.stringify(filename)} has no representable characters.`
     )
   }
 
-  return { [ORIGINAL_FILENAME]: safe.trim() }
+  return { [ORIGINAL_FILENAME]: safe }
 }

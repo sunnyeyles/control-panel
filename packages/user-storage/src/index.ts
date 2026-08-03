@@ -37,6 +37,21 @@ export {
 } from "./brief-store.ts"
 
 export {
+  createCoverLetterStore,
+  type CoverLetterProvenance,
+  type CoverLetterRef,
+  type CoverLetterStore,
+  type NewCoverLetter,
+  type StoredCoverLetter,
+} from "./cover-letter-store.ts"
+
+export {
+  MAX_METADATA_VALUE_CHARS,
+  toMetadataRecord,
+  toMetadataValue,
+} from "./metadata.ts"
+
+export {
   acceptedResumeExtensions,
   createResumeStore,
   DOCUMENT_TYPES,

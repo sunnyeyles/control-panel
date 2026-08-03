@@ -50,9 +50,24 @@ supplied — a start date, a salary, a named recipient — it carries a literal
 `[bracketed placeholder]`, because a plausible invention attributed to the user
 is a lie.
 
-Today it exists only as an agent and a CLI (`letter`) that writes one to disk.
-Nothing stores one, and no **Document Type** of the same name is involved — that
-label belongs to a letter the _user_ uploaded.
+Stored under its own object kind, `cover-letters`, at
+`{environment}/{userId}/cover-letters/{postingId}.md` — **keyed on the Posting,
+not on the Run**, so re-drafting the same advertisement overwrites one object and
+the previous draft survives as a non-current version. Two Runs a week apart that
+find the same advertisement agree on the id because `postingId()` derives it from
+the URL. Retention is the `resumes` posture, never expiring: the text is the
+user's own voice and they may already have relied on it.
+
+It gets **no database row**. `artifacts.run_id` is `NOT NULL` and references
+`runs`, and drafting is not an execution of a briefing job — minting an ad-hoc
+**Run** per click would put rows that are not briefings into a job's history. The
+precedent is the **Document**, which has no row for the same reason. Provenance
+— the Run, the title, the company, the URL — rides in object metadata instead.
+
+Drafted from the dashboard by a button on each **Posting** on `/briefings`; the
+`letter` CLI still writes one to disk from a Findings file. No **Document Type**
+of the same name is involved — that label belongs to a letter the _user_
+uploaded.
 _Avoid_: application, letter of introduction
 
 **Letter Writer**:

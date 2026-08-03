@@ -67,6 +67,19 @@ run "defaults" {
     error_message = "resumes must have no expiration block at all, not a long one."
   }
 
+  # Same guarantee for a drafted cover letter, and for a different reason than
+  # the one above. A letter is written once, in the user's own voice, for one
+  # advertisement they may already have relied on — expiring it is data loss,
+  # not housekeeping, so this kind must not pick up the `briefs` posture by
+  # being copied from the wrong neighbour.
+  assert {
+    condition = length([
+      for rule in aws_s3_bucket_lifecycle_configuration.user_storage.rule :
+      rule if rule.id == "retain-cover-letters" && length(rule.expiration) > 0
+    ]) == 0
+    error_message = "cover-letters must have no expiration block at all; a drafted letter is the user's own text, not regenerated output."
+  }
+
   # One narrow policy per (environment, kind). This is what lets the worker be
   # granted briefs without also being granted a user's CV.
   assert {

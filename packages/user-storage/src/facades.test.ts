@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import { createBriefStore } from "./brief-store.ts"
+import { createCoverLetterStore } from "./cover-letter-store.ts"
 import { InvalidObjectKeyError } from "./errors.ts"
 import {
   acceptedResumeExtensions,
@@ -247,6 +248,145 @@ describe("BriefStore", () => {
         briefId: "morning",
       })
     ).rejects.toThrow(InvalidObjectKeyError)
+  })
+})
+
+describe("CoverLetterStore", () => {
+  const DRAFTED_AT = new Date("2026-08-03T04:15:00.000Z")
+  const POSTING_ID = "0f1e2d3c4b5a6978"
+
+  it("keys flat on the Posting id, with no Run and no date in it", async () => {
+    const letters = createCoverLetterStore(objects)
+
+    await letters.put({
+      userId: "alice",
+      postingId: POSTING_ID,
+      markdown: "Dear Hiring Team",
+      draftedAt: DRAFTED_AT,
+      provenance: { runId: "run-1" },
+    })
+
+    const [put] = objects.puts
+    expect(put?.kind).toBe("cover-letters")
+    expect(put?.segments).toEqual([POSTING_ID])
+    expect(put?.extension).toBe(".md")
+  })
+
+  it("overwrites one object when the same Posting is redrafted", async () => {
+    const letters = createCoverLetterStore(objects)
+
+    // The whole reason the Run is not in the key: two clicks a week apart find
+    // the same advertisement, and the second must supersede the first rather
+    // than orphan it.
+    const first = await letters.put({
+      userId: "alice",
+      postingId: POSTING_ID,
+      markdown: "First draft",
+      draftedAt: DRAFTED_AT,
+      provenance: { runId: "run-1" },
+    })
+
+    const second = await letters.put({
+      userId: "alice",
+      postingId: POSTING_ID,
+      markdown: "Second draft",
+      draftedAt: new Date("2026-08-10T04:15:00.000Z"),
+      provenance: { runId: "run-2" },
+    })
+
+    expect(second.key).toBe(first.key)
+    expect(await letters.list("alice")).toHaveLength(1)
+    expect(
+      (await letters.get({ userId: "alice", postingId: POSTING_ID })).markdown
+    ).toBe("Second draft")
+  })
+
+  it("round-trips the markdown and the drafting instant", async () => {
+    const letters = createCoverLetterStore(objects)
+    const markdown = "Dear Hiring Team — café 日本語 🎉\n\n[start date]"
+
+    await letters.put({
+      userId: "alice",
+      postingId: POSTING_ID,
+      markdown,
+      draftedAt: DRAFTED_AT,
+    })
+
+    const read = await letters.get({ userId: "alice", postingId: POSTING_ID })
+
+    expect(read.markdown).toBe(markdown)
+    expect(read.draftedAt.toISOString()).toBe(DRAFTED_AT.toISOString())
+  })
+
+  describe("provenance metadata", () => {
+    it("carries the Run and the Posting rather than putting them in the key", async () => {
+      const letters = createCoverLetterStore(objects)
+
+      await letters.put({
+        userId: "alice",
+        postingId: POSTING_ID,
+        markdown: "x",
+        draftedAt: DRAFTED_AT,
+        provenance: {
+          runId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          title: "Backend Engineer",
+          company: "Acme",
+          url: "https://www.seek.com.au/job/1",
+        },
+      })
+
+      expect(objects.puts[0]?.metadata).toEqual({
+        "drafted-at": DRAFTED_AT.toISOString(),
+        "run-id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "posting-title": "Backend Engineer",
+        "posting-company": "Acme",
+        "posting-url": "https://www.seek.com.au/job/1",
+      })
+      expect(objects.puts[0]?.segments).toEqual([POSTING_ID])
+    })
+
+    it("strips characters an HTTP header cannot carry", async () => {
+      const letters = createCoverLetterStore(objects)
+
+      // ⚠️ Not a formality. Title and company are text the scout transcribed
+      // out of an advertisement someone else wrote, and S3 user metadata
+      // travels in HTTP headers — a newline here is header injection.
+      await letters.put({
+        userId: "alice",
+        postingId: POSTING_ID,
+        markdown: "x",
+        draftedAt: DRAFTED_AT,
+        provenance: {
+          title: "Senior Engineer\r\nX-Injected: yes",
+          company: "Café Ünicode — Pty Ltd",
+        },
+      })
+
+      const metadata = objects.puts[0]?.metadata ?? {}
+      expect(metadata["posting-title"]).toBe("Senior EngineerX-Injected: yes")
+      expect(metadata["posting-title"]).not.toContain("\r")
+      expect(metadata["posting-title"]).not.toContain("\n")
+      expect(metadata["posting-company"]).toBe("Caf nicode  Pty Ltd")
+    })
+
+    it("drops a value with nothing representable left rather than writing a blank", async () => {
+      const letters = createCoverLetterStore(objects)
+
+      // Unlike a filename, which is raised on: a letter whose company name is
+      // entirely non-ASCII is still a letter, and an empty metadata field
+      // would claim the company is blank rather than unknown.
+      await letters.put({
+        userId: "alice",
+        postingId: POSTING_ID,
+        markdown: "x",
+        draftedAt: DRAFTED_AT,
+        provenance: { company: "日本語" },
+      })
+
+      expect(objects.puts[0]?.metadata).toEqual({
+        "drafted-at": DRAFTED_AT.toISOString(),
+      })
+    })
   })
 })
 

@@ -22,6 +22,31 @@ export const OBJECT_KINDS = {
   },
 
   /**
+   * Cover letters drafted for one Posting, in the user's own voice.
+   *
+   * Markdown and nothing else, like briefs: this is text the application just
+   * produced, not an upload, so there is exactly one file type to accept.
+   *
+   * `inline` for the same reason briefs are — nothing is served from the
+   * bucket's origin, and the app fetches this and renders it. The stored-XSS
+   * argument that makes `resumes` an `attachment` does not apply, because these
+   * bytes did not arrive from outside.
+   *
+   * ⚠️ **Retention is deliberately the resumes posture, not the briefs one.**
+   * A brief is regenerated every day and expiring a year of them is
+   * housekeeping; a letter is written once, in the user's voice, for one
+   * advertisement they may already have relied on. Deleting it is data loss.
+   * The `object_kinds` entry in `infra/aws/modules/user-storage/variables.tf`
+   * therefore sets `expiration_days = null`.
+   */
+  "cover-letters": {
+    contentTypes: {
+      ".md": "text/markdown; charset=utf-8",
+    },
+    disposition: "inline",
+  },
+
+  /**
    * Documents the user uploaded themselves — CVs and the like.
    *
    * `attachment` matters here in a way it does not for briefs. These bytes

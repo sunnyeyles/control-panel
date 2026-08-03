@@ -14,20 +14,20 @@ employment opportunity, which is a **Posting**. To a user a job is a
 
 ## Where it lives
 
-| Stage                                        | Owner                                                                                                          |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Dashboard — chat, documents, briefings       | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                              |
-| Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                        |
-| One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                     |
-| What `jobs.config` means                     | `apps/briefing-worker/src/job-search-config.ts`                                                                |
-| Scout and brief-writer agents                | `packages/agents/src/` — one `createX()` factory per module                                                    |
-| The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                              |
-| The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                              |
-| Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                    |
-| Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                  |
-| S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts`, never import the AWS SDK elsewhere |
-| Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                  |
-| EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                  |
+| Stage                                        | Owner                                                                                                                                    |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard — chat, documents, briefings       | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                                                        |
+| Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                                                  |
+| One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                               |
+| What `jobs.config` means                     | `apps/briefing-worker/src/job-search-config.ts`                                                                                          |
+| Scout and brief-writer agents                | `packages/agents/src/` — one `createX()` factory per module                                                                              |
+| The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                        |
+| The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                        |
+| Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                              |
+| Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                                            |
+| S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts` / `cover-letter-store.ts`, never import the AWS SDK elsewhere |
+| Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                            |
+| EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                            |
 
 **The tool catalog is three modules and there is no fetch tool.**
 `seek-search.ts` queries SEEK's live inventory through an Apify actor,
@@ -89,17 +89,18 @@ flowchart TD
     C --> D[(Neon — search criteria)]
     D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
-    P --> N[Cover letter agent]
+    P --> N[A viewer for a stored cover letter]
     P --> Q[A viewer for the brief itself]
 ```
 
 - **Profile extraction.** Upload exists — `/documents` writes to the `resumes`
   object kind through a Server Action, and lists, downloads and deletes what is
-  there. What does not exist is anything that _reads_ a stored document: the only
-  calls into `ResumeStore` are `list()` and `head()` for the listing, and `get()`
-  in the download route, which hands the bytes straight to the browser. No agent
-  imports the store, nothing parses a PDF or a DOCX, and no Postgres row points
-  at an upload — `artifacts.run_id` is `NOT NULL` and references `runs`, so there
+  there. One thing now _reads_ a stored document —
+  `apps/dashboard/lib/cover-letters/candidate-background.ts` fetches the newest
+  document labelled `resume` and decodes it as UTF-8 for the **Letter Writer** —
+  but only for `.md` and `.txt`, because nothing parses a PDF or a DOCX. That is
+  the gap: extraction proper. No Postgres row points at an upload either —
+  `artifacts.run_id` is `NOT NULL` and references `runs`, so there
   is no row shape for one. Search criteria are still typed in by hand, now
   through the settings form rather than into the column directly. Extraction
   would most naturally be a `createX()` factory in `packages/agents/src/`,
@@ -108,24 +109,27 @@ flowchart TD
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
-- **Cover letters, beyond a draft on disk.** The agent and its contract exist —
-  `packages/agents/src/cover-letter.ts` and `cover-letter-writer.ts`, driven by
-  the `letter` CLI in the worker's local harness (#82). What does not exist is
-  everything around them: no letter is stored, no `cover-letters` object kind
-  exists, nothing in the dashboard drafts one, and the only input is a Findings
-  file on disk. Ticketed as #77 with #84–#87 beneath it;
-  `docs/cover-letter-agent-plan.md` is the staged plan. Note the
-  constraint that is invisible from the TypeScript: the dashboard's IAM grant is
-  `prod:resumes` and the worker's is `prod:briefs`, and `infra/aws/tests/`
-  asserts both, so a dashboard-side agent cannot read what the worker wrote
-  without an infrastructure change.
+- **Reading a cover letter back, and reading a CV that is not text.** Drafting
+  one is built (#84): a Draft button on each **Posting** on `/briefings` runs
+  the **Letter Writer** and stores the result at
+  `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting so a
+  redraft overwrites one object. What is still missing is everything around it —
+  nothing lists or renders a stored letter, and nothing can edit one in the app.
+  The input is also narrower than it looks: the letter is written from the
+  newest **Document** labelled `resume`, and only `.md` and `.txt` can be turned
+  into text, so a PDF CV uploads fine and is refused at drafting time. That half
+  is #86. Ticketed under #77; `docs/cover-letter-agent-plan.md` is the staged
+  plan.
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`
   (#83). What is still missing is the **Brief** — the markdown that run wrote —
   and that gap is structural rather than merely unbuilt: the dashboard's IAM
-  grant is `prod:resumes` and a brief lives under `prod:briefs`, so the app
-  cannot read one without an infrastructure change. Nothing lists **Runs**
+  grants are `prod:resumes` and `prod:cover-letters`, and a brief lives under
+  `prod:briefs`, so the app cannot read one without an infrastructure change.
+  Widening the grant for cover letters (#84) deliberately did not widen it here
+  — `tests/vercel_dashboard.tftest.hcl` asserts the exact key set, and that the
+  dashboard's and the worker's grants stay disjoint. Nothing lists **Runs**
   either, and `latestArtifactForJob()` still has no caller outside its own tests
   — the briefings page deliberately does not use it, because it orders on run
   start _and_ artifact creation and stops being well defined once a run writes
@@ -138,17 +142,19 @@ flowchart TD
 - The scheduled worker runs on AWS Lambda, triggered hourly by EventBridge
   Scheduler. The tick is the same for every job, so a job's own cadence is a row
   in Postgres rather than anything in Terraform.
-- S3 privately stores generated markdown briefs and uploaded documents. IAM is
-  least-privilege and bounded by a permissions boundary; grants are per
-  environment and kind, so the worker holds `prod:briefs` and the dashboard's
-  Vercel OIDC role holds `prod:resumes`, and the two are disjoint.
+- S3 privately stores generated markdown briefs, uploaded documents and drafted
+  cover letters. IAM is least-privilege and bounded by a permissions boundary;
+  grants are per environment and kind, so the worker holds `prod:briefs` and the
+  dashboard's Vercel OIDC role holds `prod:resumes` and `prod:cover-letters`,
+  and the two roles' grants are disjoint — the dashboard cannot forge or delete
+  a briefing.
 - Secrets are AWS Secrets Manager shells whose values are set by hand —
   Terraform provisions containers it can never read.
 - All AWS infrastructure is Terraform under `infra/aws/`, which Turborepo does
   not cover. CloudWatch provides logs, metrics and failure alarms.
 - Langfuse receives one trace per agent run when its keys are present:
-  `generate-briefing` from the worker, `chat-response` from the dashboard. Both
-  retain full prompts, tool I/O and outputs by design.
+  `generate-briefing` from the worker, `chat-response` and `cover-letter` from
+  the dashboard. All retain full prompts, tool I/O and outputs by design.
 
 ## Design requirements
 

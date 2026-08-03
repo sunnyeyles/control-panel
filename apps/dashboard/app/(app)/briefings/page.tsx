@@ -60,6 +60,34 @@ export default async function BriefingsPage() {
             schedules and search criteria in Settings.
           </p>
 
+          {/*
+            Two things the ticket requires be said outright rather than left to
+            be discovered, and both are said once here rather than on every
+            card:
+
+            - A drafted letter is a **first draft to edit**. Bracketed
+              placeholders are visible in the output by design — the writer is
+              instructed to leave one wherever a fact nobody supplied would
+              otherwise be invented and attributed to the user.
+            - **Only .md and .txt CVs can be read.** A PDF or DOCX uploads and
+              stores fine and cannot be turned into text yet (#86), so a user
+              whose CV is a PDF is refused for a reason that has nothing to do
+              with their document being wrong.
+          */}
+          <p className="text-sm text-muted-foreground">
+            Drafting a cover letter gives you a{" "}
+            <strong className="font-medium text-foreground">
+              first draft to edit, not a letter to send
+            </strong>
+            . Anything nobody supplied — a start date, a named recipient — is
+            left as a visible [bracketed placeholder] rather than invented. It
+            is written from the newest document you have labelled{" "}
+            <em>Resume</em> under Documents, and only{" "}
+            <code className="text-foreground">.md</code> and{" "}
+            <code className="text-foreground">.txt</code> files can be read so
+            far — PDF and Word documents can be stored but not yet read.
+          </p>
+
           {loadFailed ? (
             <Alert variant="destructive">
               <AlertDescription>
