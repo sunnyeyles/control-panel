@@ -5,7 +5,7 @@ job-search brief.
 
 Each run: read the criteria → query SEEK's live listings for matching postings →
 validate the findings → compose markdown → upload to private S3 → record the
-object key in Neon.
+object key and the findings in Neon.
 
 Vocabulary is in `CONTEXT.md`, and it is worth reading first — in particular
 **Job** means "a row in `jobs`, a thing that runs on a cadence" and never an
@@ -73,6 +73,7 @@ flowchart TD
     Z --> U[Upload to private S3]
     U --> V[(S3 bucket — markdown briefs)]
     V --> W[Record object key in artifacts]
+    W --> K[Keep findings on the run row]
     F --> CW[CloudWatch logs & metrics]
     F -.->|optional, keys permitting| LF[Langfuse trace: generate-briefing]
 ```
@@ -88,9 +89,8 @@ flowchart TD
     C --> D[(Neon — search criteria)]
     D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
-    P --> F[Findings that outlive the run]
-    F --> N[Cover letter agent]
-    F --> Q[Dashboard shows what a run found]
+    P --> N[Cover letter agent]
+    P --> Q[Dashboard shows what a run found]
 ```
 
 - **Profile extraction.** Upload exists — `/documents` writes to the `resumes`
@@ -105,11 +105,6 @@ flowchart TD
   would most naturally be a `createX()` factory in `packages/agents/src/`,
   reading through `ResumeStore`. Its first half — getting text out of a PDF or a
   DOCX at all — is ticketed as #86.
-- **Findings that outlive the run.** Only the rendered markdown is uploaded, and
-  `artifacts` records one object key for it. The validated `Findings` — the
-  structured postings, with their URLs — are discarded when the process exits, so
-  nothing downstream can address a single **Posting**. Everything below depends
-  on this. Ticketed as #81, with #80 as the contract change it needs.
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
