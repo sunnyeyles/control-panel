@@ -8,3 +8,6 @@ allowBuilds:
   msw: false
   # Fetches/links the platform-native binary the bundler actually runs.
   esbuild: true
+  # Prisma CLI and engines download platform binaries on install.
+  prisma: true
+  "@prisma/engines": true

@@ -1,7 +1,8 @@
 import { cache } from "react"
 
 import { auth } from "@/lib/auth/server"
-import { getDb } from "@/lib/db"
+import { getPrisma } from "@/lib/db"
+import { ensureUserForAuth } from "@workspace/db"
 
 /**
  * The one place a Neon Auth session becomes a platform user.
@@ -82,7 +83,7 @@ export const getCurrentUser = cache(
 
     // Idempotent by construction, so this is safe to run on every request and
     // self-heals if a previous attempt failed after the account existed upstream.
-    const platformUser = await getDb().users.ensureForAuthUser(user.id)
+    const platformUser = await ensureUserForAuth(getPrisma(), user.id)
 
     return {
       status: "ok",

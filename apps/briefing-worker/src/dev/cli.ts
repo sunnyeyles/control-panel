@@ -4,17 +4,14 @@ import { mkdir, readFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { createDb } from "@workspace/db"
+import { createPrismaClient } from "@workspace/db"
 import type { ClaimedSlot, DueJob, JobConfig } from "@workspace/db"
 import { createBriefStore } from "@workspace/user-storage"
 
 import { runBriefing } from "../run-briefing.ts"
 import type { TraceEvent, TraceSink } from "../trace.ts"
 import { createTerminalRenderer } from "./render.ts"
-import {
-  createDirectoryObjectStore,
-  createDryRunArtifactStore,
-} from "./stores.ts"
+import { createDirectoryObjectStore, dryRunRecordArtifact } from "./stores.ts"
 
 /**
  * Watch one briefing run happen.
@@ -171,17 +168,19 @@ async function resolveJob(options: Options): Promise<DueJob> {
   }
 
   requireEnv("DATABASE_URL")
-  const db = createDb()
+  const prisma = createPrismaClient()
 
   try {
-    const job = await db.jobs.get(options.job ?? "")
+    const job = await prisma.job.findUnique({
+      where: { id: options.job ?? "" },
+    })
     if (!job) throw new Error(`No job with id ${options.job}.`)
 
     // Read-only, and the job's own `next_run_at` is deliberately ignored: the
     // harness runs the slot you asked for, not the one the tick would claim.
     return { ...job, nextRunAt: scheduledFor }
   } finally {
-    await db.close()
+    await prisma.$disconnect()
   }
 }
 
@@ -248,7 +247,6 @@ async function main(): Promise<void> {
   await mkdir(dirname(tracePath), { recursive: true })
 
   const objects = createDirectoryObjectStore({ directory: out })
-  const artifacts = createDryRunArtifactStore()
   const traceFile = createWriteStream(tracePath, { flags: "a" })
 
   try {
@@ -256,7 +254,7 @@ async function main(): Promise<void> {
       job,
       slot,
       briefs: createBriefStore(objects),
-      artifacts,
+      recordArtifact: dryRunRecordArtifact,
       trace: createSink(options, traceFile),
     })
   } catch {

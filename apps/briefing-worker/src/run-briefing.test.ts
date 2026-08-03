@@ -3,12 +3,7 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
-import type {
-  Artifact,
-  ArtifactStore,
-  ClaimedSlot,
-  DueJob,
-} from "@workspace/db"
+import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
 import type { BriefStore, NewBrief, StoredBrief } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -102,7 +97,7 @@ function writerReturning(markdown: string) {
 }
 
 let briefs: BriefStore
-let artifacts: ArtifactStore
+let recordArtifact: (runId: string, objectKey: string) => Promise<Artifact>
 let puts: NewBrief[]
 let recorded: Array<{ runId: string; objectKey: string }>
 
@@ -134,13 +129,12 @@ beforeEach(() => {
     list: async () => [],
   }
 
-  artifacts = {
-    record: async (runId: string, objectKey: string): Promise<Artifact> => {
-      recorded.push({ runId, objectKey })
-      return { id: "a", runId, objectKey, createdAt: new Date() }
-    },
-    forRun: async () => [],
-    latestForJob: async () => undefined,
+  recordArtifact = async (
+    runId: string,
+    objectKey: string
+  ): Promise<Artifact> => {
+    recorded.push({ runId, objectKey })
+    return { id: "a", runId, objectKey, createdAt: new Date() }
   }
 })
 
@@ -149,7 +143,7 @@ function run(overrides: Partial<Parameters<typeof runBriefing>[0]> = {}) {
     job: JOB,
     slot: SLOT,
     briefs,
-    artifacts,
+    recordArtifact,
     createScout: scoutReturning(JSON.stringify(FINDINGS)),
     createWriter: writerReturning("# Roles for you\n\nOne match."),
     ...overrides,

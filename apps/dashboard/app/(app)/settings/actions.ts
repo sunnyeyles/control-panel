@@ -1,7 +1,7 @@
 "use server"
 
 import { getCurrentUser } from "@/lib/auth/current-user"
-import { getDb } from "@/lib/db"
+import { getPrisma } from "@/lib/db"
 import type { ActionState } from "@/lib/actions/action-state"
 import { createJobActions } from "@/lib/jobs/job-actions"
 import { refresh } from "next/cache"
@@ -25,9 +25,9 @@ import { refresh } from "next/cache"
  */
 const actions = createJobActions({
   getUser: getCurrentUser,
-  // Resolved per call, inside the action bodies. `getDb()` is memoized, so this
-  // is one connection per server instance rather than one per action.
-  getJobs: () => getDb().jobs,
+  // Resolved per call, inside the action bodies. `getPrisma()` is memoized, so
+  // this is one client per server instance rather than one per action.
+  getPrisma,
 })
 
 export async function setJobEnabledAction(

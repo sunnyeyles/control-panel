@@ -10,7 +10,7 @@ import {
   createJobScout,
   parseFindings,
 } from "@workspace/agents"
-import type { ArtifactStore, ClaimedSlot, DueJob } from "@workspace/db"
+import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
 import { parseJobSearchConfig, toSearchBrief } from "./job-search-config.ts"
@@ -78,7 +78,12 @@ export interface RunBriefingInput {
   job: DueJob
   slot: ClaimedSlot
   briefs: BriefStore
-  artifacts: ArtifactStore
+  /**
+   * Record the uploaded object against the run. Injected so tests (and the
+   * local dry-run harness) can skip the real `artifacts` table without mocking
+   * a whole Prisma client.
+   */
+  recordArtifact: (runId: string, objectKey: string) => Promise<Artifact>
   /**
    * Injected in tests, exactly as `chat-handler.ts` injects its agent. Called
    * inside the run, never at module scope: building an agent constructs a model,
@@ -111,7 +116,7 @@ export interface RunBriefingInput {
 export async function runBriefing(
   input: RunBriefingInput
 ): Promise<SuccessReport> {
-  const { job, slot, briefs, artifacts } = input
+  const { job, slot, briefs, recordArtifact } = input
   const startedAtMs = Date.now()
   const startedAt = new Date(startedAtMs).toISOString()
   const trace = createTracer(input.trace)
@@ -262,7 +267,7 @@ export async function runBriefing(
     // is written only once the object does. The reverse order can leave a row
     // pointing at nothing.
     await trace.step("record", async () =>
-      artifacts.record(slot.runId, stored.key)
+      recordArtifact(slot.runId, stored.key)
     )
 
     trace({

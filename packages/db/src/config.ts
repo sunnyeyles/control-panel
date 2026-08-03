@@ -2,6 +2,13 @@
 export interface DatabaseConfig {
   /** A libpq connection URI. Carries the password, so never log it. */
   connectionString: string
+  /**
+   * Optional Postgres schema for `search_path`.
+   *
+   * Used by the integration suite to pin a throwaway schema. Production
+   * callers leave this unset and use the connection's default (`public`).
+   */
+  schema?: string
 }
 
 /**

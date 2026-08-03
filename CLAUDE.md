@@ -36,12 +36,10 @@ Database migrations are also outside Turborepo, and are run by hand:
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
 ```
 
-**`DATABASE_URL_UNPOOLED`, not `DATABASE_URL`** — the runner takes a
-session-level advisory lock, and the pooled endpoint runs PgBouncer in
-transaction mode, which does not carry one across statements. Through the
-pooler the lock appears to be taken while holding nothing. Migrations are
-forward-only; there are no down migrations. The runner executes TypeScript
-source through `tsx`, so it needs no prior build. See `packages/db/README.md`.
+That runs Prisma Migrate (`prisma migrate deploy`) against the direct Neon
+endpoint. **`DATABASE_URL_UNPOOLED`, not `DATABASE_URL`** — the pooled endpoint
+runs PgBouncer in transaction mode, which is the wrong endpoint for migrate.
+Migrations are forward-only. See `packages/db/README.md`.
 
 Authentication is Neon Auth (Managed Better Auth), configured from the Neon CLI
 rather than from anything in this repo. The workspace is linked to a project and

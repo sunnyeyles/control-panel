@@ -1,4 +1,4 @@
-import type { Job } from "@workspace/db/rows"
+import type { Job } from "@workspace/db"
 
 import { describeInterval, fromCron, type IntervalHours } from "./interval"
 
@@ -21,8 +21,8 @@ export interface BriefingSummary {
   /**
    * `jobs.next_run_at IS NOT NULL`, and there is nothing else to read.
    *
-   * The schema has no `enabled` column on purpose — `0001_init.sql` says one
-   * column carries both "when next" and "whether at all".
+   * The schema has no `enabled` column on purpose — one column carries both
+   * "when next" and "whether at all".
    */
   enabled: boolean
   /**
@@ -68,9 +68,9 @@ export function toBriefingSummary(job: Job): BriefingSummary {
  * platform decides, which is neither stable across deploys nor the user's.
  *
  * The `try` is not defensive padding. `Intl` throws a `RangeError` on a zone it
- * does not recognise, and while `create()` and `updateSchedule()` both validate,
- * a row inserted by hand in psql has been through neither — and an unrecognised
- * zone should not take down the whole settings page.
+ * does not recognise, and while `createJob()` and `updateJobSchedule()` both
+ * validate, a row inserted by hand in psql has been through neither — and an
+ * unrecognised zone should not take down the whole settings page.
  */
 function formatInZone(date: Date, timeZone: string): string {
   try {

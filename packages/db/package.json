@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Postgres for scheduling and provenance — jobs, runs, artifacts. Narrow facades over pg, and the only place SQL lives.",
+  "description": "Postgres for scheduling and provenance — jobs, runs, artifacts. Prisma Client plus domain helpers for claim/schedule invariants.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -19,28 +19,34 @@
   },
   "files": [
     "dist",
-    "migrations"
+    "prisma"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "rm -rf dist .turbo *.tsbuildinfo",
-    "dev": "tsc --build --watch",
+    "generate": "prisma generate",
+    "build": "prisma generate && tsc --build",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo src/generated",
+    "dev": "prisma generate && tsc --build --watch",
     "lint": "eslint",
-    "format": "prettier --write \"**/*.ts\"",
-    "migrate": "tsx ./src/migrate-cli.ts",
+    "format": "prettier --write \"**/*.{ts,prisma}\" \"prisma.config.ts\"",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "prisma generate && tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "cron-parser": "^5.4.0",
     "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "@types/pg": "^8.15.5",
+    "@types/pg": "^8.20.0",
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
+    "prisma": "^7.9.1",
     "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.10"

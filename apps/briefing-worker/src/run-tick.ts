@@ -1,4 +1,11 @@
-import type { Db } from "@workspace/db"
+import {
+  claimJob,
+  dueJobs,
+  failRun,
+  finishRun,
+  recordArtifact,
+  type PrismaClient,
+} from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
 import { runBriefing } from "./run-briefing.ts"
@@ -13,9 +20,9 @@ import { runBriefing } from "./run-briefing.ts"
  * Terraform is the tick itself, which is now the same for every job and so has
  * nothing left to drift.
  *
- * Platform-independent on purpose, like `run-briefing.ts`: it takes a `Db` and
- * a `BriefStore` rather than making either, so everything AWS-shaped stays in
- * `index.ts`.
+ * Platform-independent on purpose, like `run-briefing.ts`: it takes a Prisma
+ * client and a `BriefStore` rather than making either, so everything AWS-shaped
+ * stays in `index.ts`.
  */
 
 /**
@@ -56,7 +63,7 @@ export interface TickReport {
  * first — one failing job must not stop the others from running.
  */
 export async function runTick(
-  db: Db,
+  prisma: PrismaClient,
   briefs: BriefStore,
   now: Date = new Date()
 ): Promise<TickReport> {
@@ -73,11 +80,11 @@ export async function runTick(
   }
 
   const failures: unknown[] = []
-  const due = await db.jobs.dueJobs(now)
+  const due = await dueJobs(prisma, now)
   report.due = due.length
 
   for (const job of due) {
-    const slot = await db.jobs.claim(job)
+    const slot = await claimJob(prisma, job)
 
     // Another party holds this slot — an overlapping tick, a manual invoke, an
     // operator resetting `next_run_at` by hand. Skip the job entirely: do not
@@ -95,21 +102,23 @@ export async function runTick(
       // partition day is derived from — not the instant the run finishes, or a
       // 23:30 slot completing after midnight files under a day its run row
       // disagrees with.
-      await runBriefing({ job, slot, briefs, artifacts: db.artifacts })
+      await runBriefing({
+        job,
+        slot,
+        briefs,
+        recordArtifact: (runId, objectKey) =>
+          recordArtifact(prisma, runId, objectKey),
+      })
 
-      await db.runs.finish(slot.runId)
+      await finishRun(prisma, slot.runId)
       report.succeeded += 1
     } catch (error) {
       // Recorded, then carried. The row makes the failure queryable; the run
       // report `runBriefing` already emitted keeps the diagnostics, and remains
       // the only record if a run dies before it can write at all.
-      await db.runs
-        .fail(slot.runId, {
-          message: error instanceof Error ? error.message : String(error),
-        })
-        // A failed run whose failure could not be recorded is still a failed
-        // run. Losing the original error to a second one would be worse.
-        .catch(() => undefined)
+      await failRun(prisma, slot.runId, {
+        message: error instanceof Error ? error.message : String(error),
+      }).catch(() => undefined)
 
       report.failed += 1
       failures.push(error)

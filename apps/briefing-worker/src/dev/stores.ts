@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 
-import type { Artifact, ArtifactStore } from "@workspace/db"
+import type { Artifact } from "@workspace/db"
 import {
   buildObjectKey,
   contentTypeFor,
@@ -19,12 +19,7 @@ import {
  * a `BriefStore`. The harness then composes the *real* `createBriefStore()` on
  * top, so the key derivation, the extension allowlist and the ownership checks
  * in `@workspace/user-storage` are the production ones — the only thing
- * replaced is the S3 call itself. A hand-written fake `BriefStore` would agree
- * with production right up until one of those rules changed.
- *
- * The consequence worth stating: the harness needs no AWS credentials, no
- * bucket, and no network. Watching a run work should not require permission to
- * write to production storage.
+ * replaced is the S3 call itself.
  */
 
 export interface DirectoryObjectStore extends UserObjectStore {
@@ -41,10 +36,6 @@ export interface DirectoryStoreOptions {
 
 /**
  * A {@link UserObjectStore} that writes the object key as a path on disk.
- *
- * The key is built by the real `buildObjectKey`, so what lands on disk is
- * exactly the layout S3 would hold — `dev/{userId}/briefs/2026/07/28/{runId}.md`
- * — and a brief can be opened in an editor without anything to unpack it.
  */
 export function createDirectoryObjectStore(
   options: DirectoryStoreOptions
@@ -84,10 +75,6 @@ export function createDirectoryObjectStore(
         kind: object.kind,
         segments: object.segments,
         extension: object.extension,
-        // Derived from the extension, exactly as the S3 store derives it — a
-        // caller-supplied media type is a caller-supplied claim. `undefined` is
-        // unreachable here: `buildObjectKey` above already rejected any
-        // extension off the kind's allowlist.
         contentType:
           contentTypeFor(object.kind, object.extension) ??
           "application/octet-stream",
@@ -105,33 +92,20 @@ export function createDirectoryObjectStore(
 }
 
 /**
- * An {@link ArtifactStore} that writes no row.
+ * A `recordArtifact` callback that writes no row.
  *
  * A dry run has no `runs` row to reference — `artifacts.run_id` is `NOT NULL`
  * and the foreign key is `on delete restrict` — so there is no honest row to
- * write. Returning a plausible `Artifact` keeps the run on its real code path,
- * including the ordering rule that the object is written before the row.
- *
- * It keeps no record of the calls, because the trace already is one: the
- * `artifact` event carries the key and the size at the moment the object landed.
+ * write. Returning a plausible `Artifact` keeps the run on its real code path.
  */
-export function createDryRunArtifactStore(): ArtifactStore {
+export async function dryRunRecordArtifact(
+  runId: string,
+  objectKey: string
+): Promise<Artifact> {
   return {
-    async record(runId: string, objectKey: string): Promise<Artifact> {
-      return {
-        id: "00000000-0000-4000-8000-000000000000",
-        runId,
-        objectKey,
-        createdAt: new Date(),
-      }
-    },
-
-    async forRun(): Promise<Artifact[]> {
-      return []
-    },
-
-    async latestForJob(): Promise<Artifact | undefined> {
-      return undefined
-    },
+    id: "00000000-0000-4000-8000-000000000000",
+    runId,
+    objectKey,
+    createdAt: new Date(),
   }
 }
