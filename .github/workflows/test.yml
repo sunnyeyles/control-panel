@@ -47,7 +47,16 @@ jobs:
         # differently across major versions is caught here rather than in prod.
         image: postgres:17-alpine
         env:
-          POSTGRES_PASSWORD: postgres
+          # `trust` rather than a password, and the reason is not convenience.
+          # A `POSTGRES_PASSWORD` here would put a `postgres://user:pass@…`
+          # string in the repository, which is credential-shaped whatever it
+          # actually guards — GitGuardian failed this pull request over exactly
+          # that, correctly, since a scanner cannot tell a throwaway container
+          # from production by looking. Nothing is weakened: the container is
+          # created per job, published only to that job's network, and destroyed
+          # with it. The alternative was suppressing the scanner, which trades a
+          # real detection for an ignore rule someone has to keep honest.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         # Without this the job races the container: `pnpm install` is slow
@@ -64,9 +73,10 @@ jobs:
       # reads. There is no pooled endpoint here and no PgBouncer to avoid — the
       # name is about which variable the code looks at, not about topology.
       #
-      # No `sslmode`: node-pg defaults to a plaintext connection and the
-      # container serves one, on a port published only to this job's network.
-      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@localhost:5432/postgres
+      # No password, because the container above authenticates with `trust`;
+      # no `sslmode`, because node-pg defaults to a plaintext connection and
+      # the container serves one on a port published only to this job.
+      DATABASE_URL_UNPOOLED: postgresql://postgres@localhost:5432/postgres
 
     steps:
       - uses: actions/checkout@v4
