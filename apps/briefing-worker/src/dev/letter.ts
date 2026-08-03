@@ -46,7 +46,7 @@ Draft a cover letter for one Posting.
   --findings <path>  A Findings JSON file — what \`watch\` writes beside the
                      brief, or fixtures/example-findings.json.
   --profile <path>   The candidate's own words, as .md or .txt. Nothing here
-                     reads a PDF.
+                     reads a PDF; the dashboard does.
   --posting <sel>    Which Posting: a 1-based number from --list, a posting id,
                      or a distinctive substring of the title, company or URL.
   --name <name>      The candidate's name, if the letter should use it. Left
@@ -60,7 +60,16 @@ The letter is the deliverable, so it is printed as well as written. One model
 call, no tools, no network beyond the model: OPENAI_API_KEY must be set.
 `
 
-/** The formats a profile may arrive in. A PDF parser is a later ticket. */
+/**
+ * The formats a profile may arrive in.
+ *
+ * Narrower than the app's, deliberately. The dashboard reads a PDF and a DOCX
+ * since #86, through `apps/dashboard/lib/cover-letters/profile-text.ts`; this is
+ * a dev harness under `dev/` that exists to make one model call from a file on
+ * disk, and adding `unpdf` and `mammoth` to the worker to save a `--profile`
+ * flag pointing at a `.md` is not a trade worth making. Anyone who wants a
+ * letter from a PDF has the app.
+ */
 const PROFILE_EXTENSIONS = new Set([".md", ".txt"])
 
 interface Options {
@@ -144,9 +153,8 @@ async function readFindings(path: string): Promise<Findings> {
 /**
  * The candidate's own words, verbatim.
  *
- * Restricted to `.md` and `.txt` on purpose: reading a PDF means a parser
- * dependency, and a parser that silently returns the wrong text would put
- * invented substance in a letter signed by the user. Refusing is the honest v1.
+ * Restricted to `.md` and `.txt` on purpose — see {@link PROFILE_EXTENSIONS}.
+ * The parser dependency lives in the dashboard, which is where the feature is.
  */
 async function readProfile(path: string): Promise<string> {
   const full = resolve(path)

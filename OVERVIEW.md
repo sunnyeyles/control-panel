@@ -97,29 +97,27 @@ flowchart TD
   object kind through a Server Action, and lists, downloads and deletes what is
   there. One thing now _reads_ a stored document —
   `apps/dashboard/lib/cover-letters/candidate-background.ts` fetches the newest
-  document labelled `resume` and decodes it as UTF-8 for the **Letter Writer** —
-  but only for `.md` and `.txt`, because nothing parses a PDF or a DOCX. That is
-  the gap: extraction proper. No Postgres row points at an upload either —
-  `artifacts.run_id` is `NOT NULL` and references `runs`, so there
-  is no row shape for one. Search criteria are still typed in by hand, now
-  through the settings form rather than into the column directly. Extraction
-  would most naturally be a `createX()` factory in `packages/agents/src/`,
-  reading through `ResumeStore`. Its first half — getting text out of a PDF or a
-  DOCX at all — is ticketed as #86.
+  document labelled `resume` and turns it into text for the **Letter Writer**,
+  through `profile-text.ts` (#86) — `.md`, `.txt`, PDF via `unpdf` and DOCX via
+  `mammoth`. `.doc`, `.odt` and `.rtf` still upload and still have no parser,
+  and are refused by name. That is getting the _text_ out; what is still the gap
+  is extraction proper — turning that text into search criteria. No Postgres row
+  points at an upload either — `artifacts.run_id` is `NOT NULL` and references
+  `runs`, so there is no row shape for one. Search criteria are still typed in
+  by hand, now through the settings form rather than into the column directly.
+  Extraction would most naturally be a `createX()` factory in
+  `packages/agents/src/`, reading through `ResumeStore`.
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
-- **Reading a cover letter back, and reading a CV that is not text.** Drafting
-  one is built (#84): a Draft button on each **Posting** on `/briefings` runs
-  the **Letter Writer** and stores the result at
-  `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting so a
-  redraft overwrites one object. What is still missing is everything around it —
+- **Reading a cover letter back.** Drafting one is built (#84): a Draft button
+  on each **Posting** on `/briefings` runs the **Letter Writer** and stores the
+  result at `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting
+  so a redraft overwrites one object. The letter is written from the newest
+  **Document** labelled `resume`, and since #86 that can be a PDF or a DOCX as
+  well as `.md` or `.txt`. What is still missing is everything around it —
   nothing lists or renders a stored letter, and nothing can edit one in the app.
-  The input is also narrower than it looks: the letter is written from the
-  newest **Document** labelled `resume`, and only `.md` and `.txt` can be turned
-  into text, so a PDF CV uploads fine and is refused at drafting time. That half
-  is #86. Ticketed under #77; `docs/cover-letter-agent-plan.md` is the staged
-  plan.
+  Ticketed under #77; `docs/cover-letter-agent-plan.md` is the staged plan.
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`
