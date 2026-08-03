@@ -26,11 +26,22 @@ export function DraftCoverLetterButton({
   runId,
   postingId,
   title,
+  drafted = false,
 }: {
   runId: string
   postingId: string
   /** Only for the accessible label, so several buttons on a page differ. */
   title: string
+  /**
+   * Whether a letter for this Posting already exists.
+   *
+   * The label only — it changes nothing the action does, which already
+   * supersedes the stored letter on every draft because the key holds no time.
+   * A button that says "Draft cover letter" beside a letter drafted last week
+   * offers a first draft for something already drafted, and the user would have
+   * to click it, and spend a model call, to discover otherwise.
+   */
+  drafted?: boolean
 }) {
   const [state, formAction, pending] = useActionState(
     draftCoverLetterAction,
@@ -52,9 +63,13 @@ export function DraftCoverLetterButton({
           pending={pending}
           variant="outline"
           size="sm"
-          label="Draft cover letter"
+          label={drafted ? "Replace this draft" : "Draft cover letter"}
           pendingLabel="Drafting…"
-          aria-label={`Draft a cover letter for ${title}`}
+          aria-label={
+            drafted
+              ? `Replace the drafted cover letter for ${title}`
+              : `Draft a cover letter for ${title}`
+          }
         />
       </div>
 

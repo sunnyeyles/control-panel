@@ -2,6 +2,7 @@ import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import { loadCandidateBackground } from "@/lib/cover-letters/candidate-background"
+import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
 import type { Agent } from "@workspace/agents"
 import {
   assertDraftable,
@@ -78,19 +79,13 @@ const POSTING_GONE =
   "That posting is no longer in this briefing's latest run. Refresh the page and try again."
 
 /**
- * The shape `postingId()` produces: sixteen lowercase hex characters.
+ * The Posting id shape, from `cover-letter-ref.ts`.
  *
- * Restated here rather than exported from `@workspace/agents`, because what is
- * being enforced is *the shape of a value arriving from a form* and not the
- * function's contract — the two agree today and the check must fail closed
- * whatever the function does tomorrow. It is deliberately tighter than the
- * key-segment rule for the same reason `document-ref.ts` pins the uuid shape:
- * every value that passes here is a legal key segment by construction, so a
- * malformed one is refused where the wording fits rather than deep in the
- * store.
+ * It lived here until the download route needed the same rule; the reasoning
+ * for why it is restated at all rather than exported from `@workspace/agents`
+ * moved with it. One copy, because it is what makes every value reaching the
+ * store a legal key segment by construction.
  */
-const POSTING_ID_PATTERN = /^[0-9a-f]{16}$/
-
 const draftSchema = z.object({
   runId: z.uuid(),
   postingId: z.string().regex(POSTING_ID_PATTERN),

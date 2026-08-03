@@ -1,22 +1,32 @@
 import { BriefingList } from "@/components/briefings/briefing-list"
+import { CoverLetterList } from "@/components/briefings/cover-letter-list"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import {
   latestPostingsForUser,
   type BriefingPostings,
 } from "@/lib/briefings/latest-postings"
+import {
+  listCoverLetters,
+  type CoverLetterSummary,
+} from "@/lib/cover-letters/list-cover-letters"
 import { getPrisma } from "@/lib/db"
+import { getCoverLetterStore } from "@/lib/storage"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
 
 /**
- * One database round trip, over a pooled Neon endpoint that a cold serverless
- * instance has to connect to first. Well under the documents page's 30 — there
- * is no upload here — and well above a healthy read, so a slow connection is
- * answered rather than cut off.
+ * One database round trip over a pooled Neon endpoint that a cold serverless
+ * instance has to connect to first, plus a listing of this user's cover letters
+ * and one `HeadObject` per letter — see `lib/cover-letters/list-cover-letters.ts`
+ * for why that N+1 is the right shape and why it is bounded.
+ *
+ * Raised from 15 when the letters arrived. The S3 work is bounded but not
+ * constant, and a page that renders postings correctly and then dies partway
+ * through the letters is worse than a slow one.
  */
-export const maxDuration = 15
+export const maxDuration = 30
 
 /**
  * What the briefings found.
@@ -28,8 +38,9 @@ export const maxDuration = 15
  * `lib/auth/require-page-user.ts`.
  *
  * The guard establishes who is asking. It does **not** scope rows — that is
- * `where: { userId }` inside `latestPostingsForUser`, which is where the
- * user-isolation test points.
+ * `where: { userId }` inside `latestPostingsForUser`, and the session's
+ * `userId` passed to `listCoverLetters`, which is where the two user-isolation
+ * tests point. Neither identifier is ever read from the URL or a form.
  */
 export default async function BriefingsPage() {
   const user = await requirePageUser()
@@ -45,6 +56,28 @@ export default async function BriefingsPage() {
     console.error("briefings: could not load", error)
     loadFailed = true
   }
+
+  // ⚠️ **Loaded separately, and failing separately.** The two sources are
+  // Postgres and S3, and the dashboard's `prod:cover-letters` grant is a
+  // Terraform apply away from the code that needs it — so "letters unreadable"
+  // is a state this page will genuinely be in, and it must not take the
+  // postings down with it.
+  let letters: CoverLetterSummary[] = []
+  let lettersFailed = false
+
+  try {
+    letters = await listCoverLetters(user.userId, getCoverLetterStore())
+  } catch (error) {
+    console.error("cover-letters: could not list", error)
+    lettersFailed = true
+  }
+
+  // Keyed so each Posting card can ask about itself without scanning. Built
+  // here rather than in the component because it is derived from data the page
+  // already holds, and a component that builds it would rebuild it per render.
+  const lettersByPosting = new Map(
+    letters.map((letter) => [letter.postingId, letter])
+  )
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -95,7 +128,27 @@ export default async function BriefingsPage() {
               </AlertDescription>
             </Alert>
           ) : (
-            <BriefingList briefings={briefings} />
+            <BriefingList briefings={briefings} letters={lettersByPosting} />
+          )}
+        </section>
+
+        <section className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="font-medium">Your cover letters</h2>
+            <p className="text-sm text-muted-foreground">
+              Every letter you have drafted, newest first. Drafting again for
+              the same posting replaces the letter here.
+            </p>
+          </div>
+
+          {lettersFailed ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                Your cover letters could not be loaded. Try again in a moment.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <CoverLetterList letters={letters} />
           )}
         </section>
       </div>
