@@ -50,6 +50,30 @@ export function createScheduler(): Agent {
 Give an agent the tools its job needs rather than the whole catalog — a model
 picks worse as the list grows.
 
+## The Posting contract
+
+`src/findings.ts` holds the schema the scout produces and the writer consumes,
+and it is a single source in a strict sense: `jobScoutSchemaDescription` renders
+that same schema — descriptions and all — into the scout's system prompt. Adding
+a field to `PostingSchema` is therefore the whole change. The scout starts
+asking for it with no prompt edit, and `parseFindings` starts accepting it.
+
+Two field-level rules the schema exists to hold:
+
+- **`url` and `highlights` are copied, never composed.** A URL the scout
+  assembled is a fabrication; a bullet point it summarised rather than
+  reproduced is the same fabrication in different clothes. `highlights` is
+  optional so that omitting it stays the honest answer — and so every Findings
+  record written before the field existed still parses.
+- **`summary` and `matchReason` are composed**, and nothing derived from a
+  Posting should be built out of them.
+
+`postingId(posting)` is what "derived from a copied field" buys: a stable
+16-character hex id hashed from the normalised `url`, so the same advertisement
+found in two Runs gets one id. Its output is a valid object key segment for
+`@workspace/user-storage` unmodified. The normalisation rule is written out in
+`src/posting-id.ts`.
+
 ## Where this sits
 
 ```
@@ -67,4 +91,10 @@ own tools and prompt should take `@workspace/agents-core` directly instead.
 ```bash
 pnpm turbo build --filter=@workspace/agents
 pnpm turbo dev --filter=@workspace/agents   # tsc --build --watch
+pnpm turbo test --filter=@workspace/agents
 ```
+
+Tests sit beside the code as `src/**/*.test.ts`, excluded from `tsconfig.json`
+so they never reach `dist/` and covered by `tsconfig.test.json` instead —
+`typecheck` runs both. The suite covers the contract, not the models: nothing in
+it needs `OPENAI_API_KEY`.

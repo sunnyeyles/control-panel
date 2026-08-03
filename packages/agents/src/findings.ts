@@ -35,6 +35,12 @@ export const PostingSchema = z.object({
     .describe(
       "When the role was posted, if the page states it. Omit rather than estimate."
     ),
+  highlights: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Bullet points from the listing itself — responsibilities, requirements, benefits — each reproduced word for word as the advertisement wrote it. Copy them or omit the field entirely; never compose, summarise, condense or paraphrase one. A line you wrote rather than copied is a fabrication, exactly as an assembled URL is."
+    ),
   summary: z
     .string()
     .describe("Two or three sentences on what the role involves."),

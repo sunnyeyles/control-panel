@@ -188,6 +188,13 @@ export function createTerminalRenderer(options: RenderOptions = {}): TraceSink {
             `    ${c.dim(`${index + 1}.`)} ${posting.title} ${c.dim(`— ${posting.company} (${posting.location})`)}`
           )
           line(`       ${c.dim(posting.url)}`)
+          // Printed because they are the one part of a posting a person can
+          // check against the advertisement itself: a highlight that is not
+          // word for word on the page is the scout composing rather than
+          // copying, and this is where that shows up.
+          for (const highlight of posting.highlights ?? []) {
+            line(`       ${c.dim(`• ${highlight}`)}`)
+          }
         })
         if (event.findings.notes) block(event.findings.notes, "    ")
         return
