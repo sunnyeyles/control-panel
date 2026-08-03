@@ -26,7 +26,7 @@ const SLOT: ClaimedSlot = {
   nextRunAt: new Date("2026-07-29T23:30:00.000Z"),
 }
 
-const JOB: DueJob = {
+const JOB = {
   id: "22222222-2222-4222-8222-222222222222",
   userId: "33333333-3333-4333-8333-333333333333",
   name: "daily job search",
@@ -39,7 +39,7 @@ const JOB: DueJob = {
   nextRunAt: SLOT.scheduledFor,
   createdAt: new Date("2026-07-01T00:00:00.000Z"),
   updatedAt: new Date("2026-07-01T00:00:00.000Z"),
-}
+} as DueJob
 
 const FINDINGS = {
   postings: [

@@ -144,7 +144,7 @@ class SpyDb {
         id: JOB_ID,
         userId: newJob.userId,
         name: newJob.name,
-        config: newJob.config ?? {},
+        config: (newJob.config ?? {}) as Job["config"],
         scheduleCron: newJob.scheduleCron,
         scheduleTimezone: newJob.scheduleTimezone ?? "UTC",
       })

@@ -164,7 +164,7 @@ async function resolveJob(options: Options): Promise<DueJob> {
       nextRunAt: scheduledFor,
       createdAt: new Date(),
       updatedAt: new Date(),
-    }
+    } as DueJob
   }
 
   requireEnv("DATABASE_URL")
