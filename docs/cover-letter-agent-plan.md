@@ -115,9 +115,9 @@ Why not the alternatives:
   prompt injection from a page the model then acts on), and it must not live on
   the agent that holds the candidate's CV — see decision 2. Staged to §Stage 4,
   and #74 lowered its priority: the cheap 80% is `highlights`, and after that
-  the next increment is Apify's own `fetchDetails` flag — deliberately off in
-  `seek-search.ts` because detail pages triple the scrape time — not a fetcher
-  this repo has to write and defend.
+  the next increment is Apify's own `fetchDetails` flag — since #87 on in
+  `seek-search.ts`, at a measured 0.99x the scrape time it was assumed to
+  triple — not a fetcher this repo has to write and defend.
 - **A user-typed profile field** would need a config-update function, which does
   not exist — `@workspace/db` exports `createJob`, `dueJobs`, `claimJob`,
   `updateJobSchedule`, `pauseJob` and `resumeJob`, and `jobs.config` is written
@@ -536,13 +536,14 @@ be 4.2 is now split, and its cheap half comes first.
 
 1. **Wider profile formats** — PDF/DOCX text extraction, a parser dependency in
    the dashboard. Removes the `.md`/`.txt` restriction, changes no interface.
-2. **`fetchDetails` on the SEEK actor** — `seek-search.ts` deliberately leaves it
-   off, commented "the teaser and bullet points carry enough for a two-sentence
-   summary, and detail pages triple the scrape time". If the letters want the
-   real requirements section, this is a one-flag change against a source that is
-   already trusted, already rate-limited and already inside the tool's own
-   schema. It costs scrape time, not a new security surface. **Try this before
-   writing a fetcher.**
+2. **`fetchDetails` on the SEEK actor** — ~~deliberately off~~ **done in #87.**
+   The flag was off, commented "the teaser and bullet points carry enough for a
+   two-sentence summary, and detail pages triple the scrape time". Measured, it
+   does not: six paired 20-result runs put it at 0.99x, because the actor
+   fetches every description in one batched call and what dominates a run is
+   the container start. The advertisement's own requirements section now
+   reaches the scout, and `MAX_DESCRIPTION_CHARS` bounds what it costs in
+   context rather than in time.
 3. **A posting-reader agent** — only if 2 is insufficient. A new
    `packages/agent-tools/src/fetch-page.ts` (scheme allowlist, redirect and size
    limits, no private address ranges) and a
@@ -638,24 +639,19 @@ End to end, in order:
 **That a letter written from a SEEK teaser plus the candidate's CV is worth the
 surface built around it.**
 
-The candidate half is solid — it is the user's own text. The Posting half is
-still the weak one, but it is weak differently than when this plan was written.
-The agent no longer reasons only from two sentences another model wrote: with
-`highlights` it sees the advertisement's own bullet points, verbatim. What it
-still does not see is the full requirements section, because SEEK's search
-results carry the teaser and `seek-search.ts` leaves `fetchDetails` off. So the
-open question is no longer "can it say anything specific about the role" — it
-can — but "is teaser-level specificity enough to beat a generic letter".
+The candidate half is solid — it is the user's own text. The Posting half was
+the weak one, and #82 confirmed it: the letter was specific about the candidate
+and generic about the role, because three teaser bullets were all there was.
 
-The fallback got cheaper too. If the letters read thin, the next move is
-Stage 4.2 — one flag on an actor already in the codebase — and only after that a
-posting reader. The downside scenario that used to justify reordering the whole
-plan now costs a scrape-time increase.
+#87 answered that. `fetchDetails` is on, the advertisement's own requirements
+section reaches the scout, and the same synthetic CV against the same live
+posting now produces a letter that names the overlap between the candidate's
+stack and the requirements list rather than restating the teaser back at the
+employer. Both halves are now real text somebody wrote — the candidate's, and
+the advertiser's.
 
-Stage 1 is still scoped to answer this before anything is built around it: it is
-zero-infra, zero-storage, zero-migration, and it produces a real letter from real
-data. If the output at the end of Stage 1 is not convincing, try `fetchDetails`
-and re-run Stage 1 before building Stage 2.
+The posting reader stays unbuilt and stays the last resort. What would justify
+it is a source that gives less than SEEK's detail pages do, not this one.
 
 ---
 
