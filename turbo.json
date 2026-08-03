@@ -26,8 +26,11 @@
   ],
   "globalPassThroughEnv": ["VERCEL_OIDC_TOKEN", "NO_COLOR"],
   "tasks": {
+    "generate": {
+      "outputs": ["src/generated/**"]
+    },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "generate"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
@@ -38,17 +41,17 @@
       "dependsOn": ["^format"]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build", "generate"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build", "generate"]
     },
     "zip": {
       "dependsOn": ["build"],
       "outputs": ["lambda.zip"]
     },
     "dev": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "generate"],
       "cache": false,
       "persistent": true
     }

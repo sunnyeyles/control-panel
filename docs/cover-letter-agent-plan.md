@@ -1,5 +1,28 @@
 # Cover Letter Agent — staged plan
 
+> ## ⚠️ Shipped. Read this as history, not as a description of the code.
+>
+> Every stage below became a ticket (#80–#88 under #77) and all nine are merged
+> as of 2026-08-03. **The present tense throughout is the present tense of the
+> plan's writing, and several of its statements of current fact are now false**
+> — most importantly §Decision 1's `keys(...) == ["prod:resumes"]`, which is
+> exactly the assertion #84 changed to `["prod:cover-letters", "prod:resumes"]`.
+> Where the plan says "becomes" it is still a good guide to why; where it says
+> "is", check the code.
+>
+> Two places where the plan was overtaken rather than merely completed:
+>
+> - **Findings are persisted in Postgres, not S3.** #81 added `runs.findings`
+>   as nullable JSONB written after the Brief exists, and its loss is a warning
+>   rather than a failure. The S3-vs-Postgres weighing below reached the other
+>   answer on the evidence it had.
+> - **The findings warning is a `RunFailure` object, not a string.** #81 spells
+>   it `{ findings: { message } }` to match the existing `{ sources: … }`
+>   precedent, where the plan specified a plain string.
+>
+> `OVERVIEW.md` §Not built yet is the live register of what remains; `CONTEXT.md`
+> is the live glossary. Both were restored, as §Context below anticipated.
+
 > **Revised against `main` at `b511e6c`.** The plan was written before three
 > merges landed — #73 (Server Action scaffolding deduped), #74 (the scout
 > searches SEEK instead of the web) and #76 (`@workspace/db` ported to Prisma,
