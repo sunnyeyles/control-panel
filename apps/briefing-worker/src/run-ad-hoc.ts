@@ -3,6 +3,7 @@ import {
   failRun,
   finishRun,
   recordArtifact,
+  recordPostings,
   recordRunFindings,
   type PrismaClient,
 } from "@workspace/db"
@@ -138,10 +139,23 @@ export async function runAdHocBriefing(
         recordArtifact(prisma, runId, objectKey),
       recordFindings: (runId, findings) =>
         recordRunFindings(prisma, runId, findings),
+      // A run someone asked for finds the same advertisements a scheduled one
+      // does, so it feeds the same cumulative record. `claimed.startedAt` is
+      // this run's occurrence — the row's own value, which the object key also
+      // partitions on — rather than `now`, so what a run says it saw and when
+      // it says it saw it come from one place.
+      recordPostings: (runId, postings) =>
+        recordPostings(prisma, {
+          userId: job.userId,
+          runId,
+          seenAt: claimed.startedAt,
+          postings,
+        }),
     })
 
     // Third argument, usually `undefined`. A run that produced a brief but could
-    // not keep its findings is `succeeded` with a non-empty `failure` — the rule
+    // not keep its findings, or could not add what it found to the cumulative
+    // record, is `succeeded` with a non-empty `failure` — the rule
     // `packages/db/src/types.ts` states.
     await finishRun(prisma, request.runId, briefing.warnings)
     return report("succeeded")

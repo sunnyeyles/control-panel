@@ -9,11 +9,12 @@ import {
   parseFindings,
   type Findings,
 } from "@workspace/agents"
-import type { Artifact, Job, RunFailure } from "@workspace/db"
+import type { Artifact, Job, NewPosting, RunFailure } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 import { runWithLangfuseTrace } from "@workspace/langfuse"
 
 import { parseJobSearchConfig, toSearchBrief } from "./job-search-config.ts"
+import { toNewPostings } from "./postings.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
 import {
   countBySource,
@@ -158,6 +159,24 @@ export interface RunBriefingInput {
    * needs to know it did not throw and nothing more.
    */
   recordFindings: (runId: string, findings: Findings) => Promise<unknown>
+  /**
+   * Add what the scout found to the cumulative record of Postings, so a Posting
+   * outlives both the run that found it and the findings the next run
+   * overwrites.
+   *
+   * Injected for the same reason `recordFindings` is: the local harness has no
+   * `runs` row for `postings.first_seen_run_id` to reference, and a test should
+   * not need a Prisma client to assert that the write happened. Whatever it
+   * returns is ignored — the run needs to know it did not throw and nothing
+   * more.
+   *
+   * It takes rows rather than `Findings` because the translation between the
+   * two packages is pure and belongs on this side of the seam
+   * (`toNewPostings`); what is injected is the write alone, exactly as
+   * `recordArtifact` takes a key rather than a `StoredBrief`. The caller
+   * supplies the sighting time it wraps this in — the *slot*, not the clock.
+   */
+  recordPostings: (runId: string, postings: NewPosting[]) => Promise<unknown>
   /**
    * Injected in tests, exactly as `chat-handler.ts` injects its agent. Called
    * inside the run, never at module scope: building an agent constructs a model,
@@ -398,7 +417,7 @@ export async function runBriefing(
         // this failure is neither silent nor about the brief. A run that
         // produced a briefing succeeded, whatever happened to the accessory
         // record; the warning it carries is what makes the loss queryable.
-        let notRecorded: string | undefined
+        let findingsNotRecorded: string | undefined
 
         await trace.step(
           "findings",
@@ -406,20 +425,56 @@ export async function runBriefing(
             try {
               await input.recordFindings(slot.runId, findings)
             } catch (error) {
-              notRecorded =
+              findingsNotRecorded =
                 error instanceof Error ? error.message : String(error)
             }
           },
           () =>
-            notRecorded === undefined
+            findingsNotRecorded === undefined
               ? plural(findings.postings.length, "posting")
-              : `not recorded — ${notRecorded}`
+              : `not recorded — ${findingsNotRecorded}`
         )
 
+        // The same trade, one step later and for a different record. The
+        // findings are what *this* run reported and the next run overwrites;
+        // this is the cumulative one, which a Posting — and the status a person
+        // set on it — outlives every individual run through. Losing it is
+        // likewise a warning: the brief is the product, and a run that produced
+        // one succeeded whatever happened to the accessory record.
+        const postings = toNewPostings(findings)
+        let postingsNotRecorded: string | undefined
+
+        await trace.step(
+          "postings",
+          async () => {
+            try {
+              await input.recordPostings(slot.runId, postings)
+            } catch (error) {
+              postingsNotRecorded =
+                error instanceof Error ? error.message : String(error)
+            }
+          },
+          () =>
+            postingsNotRecorded === undefined
+              ? plural(postings.length, "posting")
+              : `not recorded — ${postingsNotRecorded}`
+        )
+
+        // One object holding whichever of the two went wrong, so a run that
+        // lost both says so once rather than picking a winner. Absent entirely
+        // when nothing did, because `finishRun` reads an empty `failure` as a
+        // run with warnings.
         const warnings: RunFailure | undefined =
-          notRecorded === undefined
+          findingsNotRecorded === undefined && postingsNotRecorded === undefined
             ? undefined
-            : { findings: { message: notRecorded } }
+            : {
+                ...(findingsNotRecorded === undefined
+                  ? {}
+                  : { findings: { message: findingsNotRecorded } }),
+                ...(postingsNotRecorded === undefined
+                  ? {}
+                  : { postings: { message: postingsNotRecorded } }),
+              }
 
         trace({
           type: "run",

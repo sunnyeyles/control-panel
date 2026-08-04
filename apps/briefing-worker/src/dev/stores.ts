@@ -113,6 +113,21 @@ export async function dryRunRecordArtifact(
   }
 }
 
+/**
+ * A `recordPostings` callback that records nothing at all.
+ *
+ * Two reasons, and the second is the interesting one. A dry run has no `runs`
+ * row for `postings.first_seen_run_id` to reference, exactly as
+ * {@link dryRunRecordArtifact} has none for `artifacts.run_id`. And the
+ * findings JSON this harness already writes *is* the postings — the same
+ * validated objects, before the projection `toNewPostings` applies — so a
+ * second copy beside it would be the same data under a different name.
+ *
+ * Takes no arguments on purpose: it drives nothing, so it asks for nothing, and
+ * it still satisfies the seam structurally.
+ */
+export async function dryRunRecordPostings(): Promise<void> {}
+
 /** A `recordFindings` callback, plus the paths it has written. */
 export interface FindingsFileRecorder {
   (runId: string, findings: Findings): Promise<void>

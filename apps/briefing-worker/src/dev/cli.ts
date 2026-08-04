@@ -15,6 +15,7 @@ import {
   createDirectoryObjectStore,
   createFindingsFileRecorder,
   dryRunRecordArtifact,
+  dryRunRecordPostings,
 } from "./stores.ts"
 
 /**
@@ -267,6 +268,7 @@ async function main(): Promise<void> {
       briefs: createBriefStore(objects),
       recordArtifact: dryRunRecordArtifact,
       recordFindings,
+      recordPostings: dryRunRecordPostings,
       trace: createSink(options, traceFile),
     })
   } catch {

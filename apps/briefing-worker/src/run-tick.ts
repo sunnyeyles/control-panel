@@ -4,6 +4,7 @@ import {
   failRun,
   finishRun,
   recordArtifact,
+  recordPostings,
   recordRunFindings,
   type PrismaClient,
 } from "@workspace/db"
@@ -111,11 +112,24 @@ export async function runTick(
           recordArtifact(prisma, runId, objectKey),
         recordFindings: (runId, findings) =>
           recordRunFindings(prisma, runId, findings),
+        // The cumulative record, which every Posting outlives its run through.
+        // `seenAt` is `slot.scheduledFor` for the same reason the object key
+        // partitions on it: a 23:30 slot that finishes after midnight must not
+        // claim it found something the following day. The clock says when the
+        // work happened; the slot says which occurrence it was.
+        recordPostings: (runId, postings) =>
+          recordPostings(prisma, {
+            userId: job.userId,
+            runId,
+            seenAt: slot.scheduledFor,
+            postings,
+          }),
       })
 
       // Third argument, and usually `undefined`. A run that produced a brief
-      // but could not keep its findings is `succeeded` with a non-empty
-      // `failure` — the rule `packages/db/src/types.ts` states.
+      // but could not keep its findings, or could not add what it found to the
+      // cumulative record, is `succeeded` with a non-empty `failure` — the rule
+      // `packages/db/src/types.ts` states.
       await finishRun(prisma, slot.runId, briefing.warnings)
       report.succeeded += 1
     } catch (error) {
