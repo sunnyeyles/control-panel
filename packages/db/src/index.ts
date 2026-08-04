@@ -40,6 +40,11 @@ export {
 export { ensureUserForAuth } from "./users.ts"
 
 export {
+  coverLetterInstructions,
+  saveCoverLetterInstructions,
+} from "./cover-letter-instructions.ts"
+
+export {
   claimJob,
   createJob,
   dueJobs,
@@ -73,6 +78,7 @@ export { computeNextRunAt, isValidSchedule } from "./schedule.ts"
 
 export type {
   Artifact,
+  CoverLetterInstructions,
   Job,
   JobConfig,
   Run,

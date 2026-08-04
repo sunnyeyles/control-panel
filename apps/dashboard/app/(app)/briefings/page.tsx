@@ -18,6 +18,7 @@ import {
 import { getPrisma } from "@/lib/db"
 import { getCoverLetterStore } from "@/lib/storage"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import Link from "next/link"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
@@ -171,6 +172,23 @@ export default async function BriefingsPage() {
             <p className="text-sm text-muted-foreground">
               Every letter you have drafted, newest first. Drafting again for
               the same posting replaces the letter here.
+            </p>
+            {/*
+              The knob is on another page, and nothing else would say it exists
+              — the Draft button is here and what it obeys is set in Settings,
+              so a user who never visits Settings would assume the writer cannot
+              be told anything.
+            */}
+            <p className="text-sm text-muted-foreground">
+              How these are written — tone, wording, an example letter to
+              imitate — is set under{" "}
+              <Link
+                href="/settings"
+                className="underline underline-offset-4 hover:no-underline"
+              >
+                Settings
+              </Link>
+              .
             </p>
           </div>
 

@@ -8,7 +8,7 @@ import { postingId } from "@workspace/agents/posting-id"
  * stay on the barrel — they are erased.
  */
 import { computeNextRunAt } from "@workspace/db/schedule"
-import type { Job, Run } from "@workspace/db/types"
+import type { CoverLetterInstructions, Job, Run } from "@workspace/db/types"
 import { contentTypeFor } from "@workspace/user-storage/kinds"
 import type { NewCoverLetter, NewResume } from "@workspace/user-storage"
 
@@ -193,6 +193,30 @@ export function devAdHocFindings(): { postings: Posting[]; notes: string } {
 }
 
 /**
+ * Both fields populated, because an empty row proves nothing the missing row
+ * does not already prove.
+ *
+ * ⚠️ **The example letter claims an employer the CV does not mention —
+ * Brightwater Systems — and a team of eleven.** That is the whole point of it:
+ * it makes the acceptance criterion the split fields exist for checkable by
+ * hand under the flag. Draft a letter and neither "Brightwater" nor the team
+ * size may appear in it, because {@link DEV_CV_MARKDOWN} is the only source of
+ * fact about this candidate. The instructions are checkable the same way by
+ * eye: no letter may contain "passionate", and every one must end "Kind
+ * regards".
+ */
+export function devCoverLetterInstructions(): CoverLetterInstructions[] {
+  return [
+    {
+      userId: DEV_USER_ID,
+      instructions: DEV_INSTRUCTIONS,
+      exampleLetter: DEV_EXAMPLE_LETTER,
+      updatedAt: SEEDED_AT,
+    },
+  ]
+}
+
+/**
  * Documents as they arrive at `ResumeStore.put()`. Only `.md` and `.txt` can be
  * read back as text, so the Markdown CV is what makes drafting work end to end;
  * the PDF is here because its refusal has a UI.
@@ -279,6 +303,30 @@ a long-standing class of silent under-charges.
 ## Skills
 
 TypeScript, Go, Postgres, Terraform, AWS.
+`
+
+/** One banned word and one exact sign-off — both visible at a glance in a draft. */
+const DEV_INSTRUCTIONS = `Never use the word "passionate". Say what I actually did instead.
+Keep it to three paragraphs or fewer, and no bullet points.
+Sign off with "Kind regards", never "Sincerely" or "Yours faithfully".
+`
+
+/**
+ * A style reference carrying facts that are not the candidate's: Brightwater
+ * Systems employs nobody in {@link DEV_CV_MARKDOWN}, and no team of eleven
+ * appears there either.
+ */
+const DEV_EXAMPLE_LETTER = `Dear Hiring Team,
+
+When I joined Brightwater Systems their fulfilment platform was losing one
+order in every two hundred. I led a team of eleven through the rebuild, and we
+closed the year at one in forty thousand.
+
+I write plainly, I would rather show a number than an adjective, and I would
+like to do that work here.
+
+Kind regards,
+Dev User
 `
 
 const DEV_LETTER_MARKDOWN = `# Senior Backend Engineer — Meridian Freight

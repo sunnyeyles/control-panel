@@ -41,6 +41,54 @@ export const MIN_BACKGROUND_CHARS = 200
  */
 export const MAX_BACKGROUND_CHARS = 20_000
 
+/**
+ * How much the candidate may write about *how* to write their letters.
+ *
+ * Two thousand characters is a page of rules — far more than "never use the
+ * word 'passionate', sign off Kind regards" needs, and short of the length at
+ * which a rule list stops being a rule list and starts being a second prompt
+ * competing with the writer's own. Over it, refuse: the same argument as
+ * {@link MAX_BACKGROUND_CHARS}, and sharper here, because a truncated rule list
+ * silently drops whichever rules the user typed last while every letter still
+ * comes back looking obedient.
+ */
+export const MAX_INSTRUCTIONS_CHARS = 2_000
+
+/**
+ * The example letter gets a larger cap than the instructions, deliberately.
+ *
+ * A letter is prose and a rule list is not: 6,000 characters is a long cover
+ * letter with room for a covering note around it, where the same allowance
+ * spent on rules would be pathological. Over it, refuse rather than truncate —
+ * half an example letter is a style reference with its ending cut off, and the
+ * model has no way to know the register it is imitating was never finished.
+ */
+export const MAX_EXAMPLE_LETTER_CHARS = 6_000
+
+/**
+ * What the candidate saved about how their letters should read.
+ *
+ * Both fields are optional and empty is the ordinary state for each — a user
+ * who never opens Settings composes to the writer's prompt untouched.
+ *
+ * They are two fields rather than one blob because they are fenced differently,
+ * and that fencing is a correctness property rather than presentation. An
+ * example letter is full of claims about somebody; in one undifferentiated blob
+ * the model cannot tell a style reference from a source of facts, and lifts
+ * those claims into a letter sent in the candidate's name.
+ *
+ * **The bounds above are not enforced here or anywhere in this package.** They
+ * are enforced at save time in the dashboard, loudly, with a message naming the
+ * count and the limit — so the person who can fix it is told what to fix.
+ * `coverLetterSystemPrompt` never truncates: a prompt quietly built from the
+ * first half of an example letter is indistinguishable from one built from all
+ * of it, which is the exact silent failure the caps exist to prevent.
+ */
+export interface LetterInstructions {
+  instructions?: string
+  exampleLetter?: string
+}
+
 export const CandidateProfileSchema = z.object({
   name: z
     .string()

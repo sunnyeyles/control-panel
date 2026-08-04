@@ -80,6 +80,34 @@ the other. When a page fetcher is eventually added it goes on a different agent
 that never sees the profile.
 _Avoid_: applicant agent, cover-letter bot
 
+**Letter Instructions**:
+What the user tells the **Letter Writer** about how they want their letters
+written — held per **User** in `cover_letter_instructions`, edited from
+`/settings`, and applied to every **Cover Letter** they draft. Two fields, and
+the split is a correctness decision rather than a tidy one: free-text
+**instructions** ("never use the word 'passionate'", "sign off Kind regards"),
+and an optional **example letter** the user pastes or pulls from a **Document**.
+
+They _extend_ the writer's system prompt and never replace it. They may change
+tone, length, structure, salutation, emphasis and vocabulary. They may not
+license a claim the candidate's background text does not support, and may not
+remove a `[bracketed placeholder]` — those clauses sit above the user's text and
+win where the two conflict.
+
+The example letter is a **style reference and never a source of facts**. A
+sample letter is full of claims — "I led a team of eight" — and the writer's
+governing property is that every claim about the candidate traces to their own
+background text. Keeping the example in its own fenced section is what lets the
+prompt say _imitate its voice, take no fact from it_; one undifferentiated field
+structurally could not, and the model would lift claims out of the sample into a
+letter sent in the user's name.
+
+A failed read fails the draft. Drafting without them produces a letter that
+looks perfect and quietly ignores every rule the user set, which is the same
+silent-failure shape a run with no successful search refuses.
+_Avoid_: prompt, custom prompt, system prompt (which is the writer's own, the
+thing these extend), tone settings
+
 **Findings**:
 The scout's output and the writer's input: a validated list of **Postings** plus
 optional notes, defined by `FindingsSchema` in `@workspace/agents`. The hand-off

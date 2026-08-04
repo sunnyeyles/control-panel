@@ -1,5 +1,6 @@
 import type {
   Artifact as PrismaArtifact,
+  CoverLetterInstructions as PrismaCoverLetterInstructions,
   Job as PrismaJob,
   Run as PrismaRun,
   User as PrismaUser,
@@ -39,3 +40,4 @@ export type User = PrismaUser
 export type Job = PrismaJob
 export type Run = PrismaRun
 export type Artifact = PrismaArtifact
+export type CoverLetterInstructions = PrismaCoverLetterInstructions

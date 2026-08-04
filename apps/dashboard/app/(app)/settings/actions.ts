@@ -3,7 +3,9 @@
 import { getCurrentUser } from "@/lib/auth/current-user"
 import { getPrisma } from "@/lib/db"
 import type { ActionState } from "@/lib/actions/action-state"
+import { createLetterInstructionsActions } from "@/lib/cover-letters/letter-instructions-actions"
 import { createJobActions } from "@/lib/jobs/job-actions"
+import { getResumeStore } from "@/lib/storage"
 import { refresh } from "next/cache"
 
 /**
@@ -58,6 +60,51 @@ export async function createJobAction(
 ): Promise<ActionState> {
   const result = await actions.createJob(state, formData)
 
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * The cover-letter settings, over the same seam and on the same page.
+ *
+ * `getResumeStore` is here for the import path alone — it reads the document
+ * being copied from — and is resolved per call inside the action bodies for the
+ * reason `getPrisma` is: this factory runs at module scope, and constructing an
+ * `S3Client` there would read configuration at import time.
+ */
+const letterInstructions = createLetterInstructionsActions({
+  getUser: getCurrentUser,
+  getPrisma,
+  getResumes: getResumeStore,
+})
+
+export async function saveLetterInstructionsAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await letterInstructions.saveLetterInstructions(
+    state,
+    formData
+  )
+
+  // Mandatory here rather than merely tidy: the section renders the saved text
+  // as a `defaultValue`, so without this `staleTimes.dynamic: 30` serves the
+  // pre-save text back the next time the user visits the page — and it looks
+  // exactly like a save that silently did not happen.
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+export async function importExampleLetterAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await letterInstructions.importExampleLetter(state, formData)
+
+  // Same reason, and more visibly: an import whose text does not appear in the
+  // box it just filled reads as an import that failed.
   if (result.status === "success") refresh()
 
   return result

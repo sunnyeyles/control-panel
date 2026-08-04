@@ -136,11 +136,16 @@ flowchart TD
   metadata — a Posting that already has one says so instead of offering a first
   draft, and `/api/cover-letters/{postingId}` hands the Markdown back as a file.
   The letter is written from the newest **Document** labelled `resume`, and
-  since #86 that can be a PDF or a DOCX as well as `.md` or `.txt`. What is
-  still missing is everything past that: nothing renders a letter's text in the
-  app, and nothing can edit one, regenerate it with instructions, choose a tone,
-  or send it. Ticketed under #77; `docs/cover-letter-agent-plan.md` is the
-  staged plan.
+  since #86 that can be a PDF or a DOCX as well as `.md` or `.txt`. Telling the
+  writer how to write is built too: **Letter Instructions** are a per-user row
+  in `cover_letter_instructions`, edited from `/settings`, composed onto the
+  writer's system prompt by `coverLetterSystemPrompt()` and applied to every
+  draft — free-text rules, plus an optional example letter that is fenced as a
+  style reference and never as a source of facts. So tone, wording and structure
+  are settable, and redrafting a Posting applies them. What is still missing is
+  everything past that: nothing renders a letter's text in the app, and nothing
+  can edit one or send it. Ticketed under #77;
+  `docs/cover-letter-agent-plan.md` is the staged plan.
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`
