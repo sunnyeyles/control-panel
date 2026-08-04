@@ -1,7 +1,12 @@
-import type { ClaimedSlot, DueJob, JobConfig, RunFailure } from "@workspace/db"
+import type {
+  Artifact,
+  ClaimedSlot,
+  DueJob,
+  JobConfig,
+  RunFailure,
+  RunFindings,
+} from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
-
-import type { RunBriefingInput } from "./run-briefing.ts"
 
 /**
  * What runs a job, decided from the job's own config.
@@ -42,21 +47,29 @@ export interface JobHandlerContext {
    */
   slot: ClaimedSlot
   /**
-   * Asked for, not handed over. Constructing the real store reads
-   * `USER_STORAGE_BUCKET_NAME` and `USER_STORAGE_ENVIRONMENT` and throws
-   * without them, so a kind that writes no brief must not be made to pay for
-   * one — and a function is what lets the tick build stores per kind, on
-   * demand, without every handler's context changing on the day it does. Today
-   * it closes over the one store `index.ts` already built.
+   * Asked for, not handed over, so that a kind writing no brief never names a
+   * `BriefStore` at all — which is the property that lets the tick build stores
+   * per kind, on demand, without every handler's context changing on the day it
+   * does.
+   *
+   * What it does *not* buy yet: `index.ts` still constructs the one store
+   * unconditionally, so the worker pays for it whether or not a due job wants
+   * it. Per-kind construction is deliberately unbuilt; this shape is only what
+   * keeps it possible.
    */
   briefs: () => BriefStore
   /**
-   * The two writes a run makes against its own row. Typed from `runBriefing`,
-   * which already injects them so that a test need not have a Prisma client to
-   * assert the write happened.
+   * The two writes a run makes against its own row, stated from the platform's
+   * own nouns rather than from the briefing's — `artifacts` and `runs` belong
+   * to every kind, and a dispatcher that typed them through one registered kind
+   * would break on the day that kind was renamed.
+   *
+   * Bound callables rather than a client, for the reason `runBriefing` already
+   * injects them: a test should not need a Prisma client to assert the write
+   * happened.
    */
-  recordArtifact: RunBriefingInput["recordArtifact"]
-  recordFindings: RunBriefingInput["recordFindings"]
+  recordArtifact: (runId: string, objectKey: string) => Promise<Artifact>
+  recordFindings: (runId: string, findings: RunFindings) => Promise<unknown>
 }
 
 /**
@@ -74,36 +87,29 @@ export type JobHandler = (
 export type JobKindRegistry = Readonly<Record<string, JobHandler>>
 
 /**
- * The discriminator a config declares, with an absent one normalised.
+ * What a config dispatches to, and the discriminator it dispatched on.
  *
- * Its own function because whoever finds no handler has to *name* the offending
+ * Both, from one reading. Whoever finds no handler has to *name* the offending
  * kind — in the error it throws and in the line it logs — and a caller that
  * re-derived it would be free to derive it differently, which is how the two
  * readings of `kind: null` this file exists to keep apart would drift back
- * together. Returns `unknown` rather than `string` on purpose: a JSONB row is
- * free to hold `42` there, and the value that is wrong is the value worth
- * reporting.
+ * together.
  */
-export function resolveJobKind(config: unknown): unknown {
-  // `unknown`, and narrowed here rather than declared away at the boundary —
-  // the register `parseJobSearchConfig` already sets. `jobs.config` is JSONB
-  // and `@workspace/db` narrows nothing, so a row is free to hold a scalar or
-  // a JSON `null` there; a cast asserting otherwise would be the one claim
-  // this file cannot afford to get wrong. Anything that is not an object has
-  // no `kind` at all, and so means the briefing — which is what it means
-  // today.
-  const declared =
-    typeof config === "object" && config !== null
-      ? (config as JobConfig).kind
-      : undefined
-
-  // `=== undefined`, never `??`: the nullish fallback would fold `kind: null`
-  // back into absence, which is the one reading this must not have.
-  return declared === undefined ? BRIEFING_KIND : declared
+export interface JobKindLookup {
+  /**
+   * The discriminator as the row holds it, with an absent one normalised to
+   * {@link BRIEFING_KIND}. `unknown` rather than `string` on purpose: a JSONB
+   * row is free to hold `42` there, and the value that is wrong is the value
+   * worth reporting.
+   */
+  kind: unknown
+  /** `undefined` when nothing is registered under {@link JobKindLookup.kind}. */
+  handler: JobHandler | undefined
 }
 
 /**
- * Which handler a config asks for, or `undefined` for a kind nothing handles.
+ * Which handler a config asks for, and the kind it asked under — the handler
+ * `undefined` when nothing handles that kind.
  *
  * Pure, and deliberately so: what a config dispatches to is knowable from the
  * row alone, so deciding it needs no database, no claimed slot and no context —
@@ -123,13 +129,31 @@ export function resolveJobKind(config: unknown): unknown {
 export function lookUpJobKind(
   registry: JobKindRegistry,
   config: unknown
-): JobHandler | undefined {
-  const kind = resolveJobKind(config)
+): JobKindLookup {
+  // `unknown`, and narrowed here rather than declared away at the boundary —
+  // the register `parseJobSearchConfig` already sets. `jobs.config` is JSONB
+  // and `@workspace/db` narrows nothing, so a row is free to hold a scalar or
+  // a JSON `null` there; a cast asserting otherwise would be the one claim
+  // this file cannot afford to get wrong. Anything that is not an object has
+  // no `kind` at all, and so means the briefing — which is what it means
+  // today.
+  const declared =
+    typeof config === "object" && config !== null
+      ? (config as JobConfig).kind
+      : undefined
 
-  if (typeof kind !== "string" || kind.length === 0) return undefined
+  // `=== undefined`, never `??`: the nullish fallback would fold `kind: null`
+  // back into absence, which is the one reading this must not have.
+  const kind = declared === undefined ? BRIEFING_KIND : declared
+
+  if (typeof kind !== "string" || kind.length === 0)
+    return { kind, handler: undefined }
 
   // `hasOwn` rather than a bare index: `kind: "toString"` would otherwise find
   // an `Object.prototype` member, which the tick would then call as a handler
   // and record the job as having succeeded.
-  return Object.hasOwn(registry, kind) ? registry[kind] : undefined
+  return {
+    kind,
+    handler: Object.hasOwn(registry, kind) ? registry[kind] : undefined,
+  }
 }

@@ -171,11 +171,21 @@ function settle(runId: string, status: RunStatus) {
   if (run) run.status = status
 }
 
+/**
+ * A tick over the fake database, with the calls a test cares about swapped in.
+ *
+ * `db` is partial *here* and whole at the seam: the merge happens against a
+ * complete fake, so a test names only the call its assertions are about and
+ * still cannot leave one bound to a real client by forgetting it.
+ */
 function tick({
   db,
   handler = recordRun,
   ...overrides
-}: Partial<RunTickInput> & { handler?: JobHandler } = {}) {
+}: Omit<Partial<RunTickInput>, "db"> & {
+  db?: Partial<TickDatabase>
+  handler?: JobHandler
+} = {}) {
   return runTick({
     prisma: NO_PRISMA,
     briefs: NO_BRIEFS,
@@ -274,8 +284,7 @@ describe("runTick", () => {
 
     // `due: 0` on stdout is how silence is told apart from breakage: a tick
     // that found nothing still says so.
-    const line = vi.mocked(console.log).mock.calls[0]?.[0]
-    expect(JSON.parse(String(line))).toMatchObject({ event: "tick", due: 0 })
+    expect(tickLine()).toMatchObject({ event: "tick", due: 0 })
   })
 
   it("hands the handler one context, not a parameter list", async () => {
@@ -551,7 +560,7 @@ describe("runTick, with a second kind registered", () => {
 
   const kinds = { [BRIEFING_KIND]: recordRun, [PROBE_KIND]: probeHandler }
 
-  function probeTick(overrides: Partial<RunTickInput> = {}) {
+  function probeTick(overrides: Parameters<typeof tick>[0] = {}) {
     return tick({ briefs: HOSTILE_BRIEFS, kinds, ...overrides })
   }
 

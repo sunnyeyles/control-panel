@@ -15,10 +15,9 @@ import type { BriefStore } from "@workspace/user-storage"
 import { jobKinds } from "./job-kind-registry.ts"
 import {
   lookUpJobKind,
-  resolveJobKind,
+  type JobHandlerContext,
   type JobKindRegistry,
 } from "./job-kinds.ts"
-import type { RunBriefingInput } from "./run-briefing.ts"
 
 /**
  * The worker is no longer "the thing that runs at 09:00". It is "the thing that
@@ -114,12 +113,12 @@ export interface TickDatabase {
   finishRun: (runId: string, warnings?: RunFailure) => Promise<unknown>
   failRun: (runId: string, failure: RunFailure) => Promise<unknown>
   /**
-   * The two the tick never calls itself. They are the writes a run makes, and
-   * they are already injected into `runBriefing` for this same reason, so the
-   * types are taken from there rather than restated.
+   * The two the tick never calls itself — it hands them to the handler, which
+   * is where they are described. Stated once, in `JobHandlerContext`, so the
+   * port and the context cannot drift apart.
    */
-  recordArtifact: RunBriefingInput["recordArtifact"]
-  recordFindings: RunBriefingInput["recordFindings"]
+  recordArtifact: JobHandlerContext["recordArtifact"]
+  recordFindings: JobHandlerContext["recordFindings"]
 }
 
 export interface RunTickInput {
@@ -127,11 +126,12 @@ export interface RunTickInput {
   briefs: BriefStore
   now?: Date
   /**
-   * Overridable one call at a time: anything left out falls back to the real
-   * operation bound to `prisma`, so production supplies nothing and a test
-   * supplies only the calls its assertions are about.
+   * The whole port or none of it. A partial override would leave the calls it
+   * left out bound to the real `prisma`, so a fake that forgot one would reach
+   * Postgres from a test that believed it had replaced the database — the one
+   * failure this seam exists to make impossible. Production supplies nothing.
    */
-  db?: Partial<TickDatabase>
+  db?: TickDatabase
   /**
    * What runs each kind of job. Optional, defaulting to the real registry, for
    * the reason `createScout` is optional on a run: dispatch can then be
@@ -163,7 +163,7 @@ export interface RunTickInput {
  */
 export async function runTick(input: RunTickInput): Promise<TickReport> {
   const { prisma, briefs, now = new Date() } = input
-  const db = { ...databaseFor(prisma), ...input.db }
+  const db = input.db ?? databaseFor(prisma)
   const kinds = input.kinds ?? jobKinds
 
   const startedAtMs = Date.now()
@@ -184,7 +184,7 @@ export async function runTick(input: RunTickInput): Promise<TickReport> {
   report.due = due.length
 
   for (const job of due) {
-    const handler = lookUpJobKind(kinds, job.config)
+    const { kind, handler } = lookUpJobKind(kinds, job.config)
 
     // Ahead of the claim, and that is the whole point of it being here: an
     // unhandled kind is knowable from the row alone, so claiming first would
@@ -200,7 +200,6 @@ export async function runTick(input: RunTickInput): Promise<TickReport> {
     // surface anywhere saying why. Failing loudly is ugly; disappearing quietly
     // is worse, and only one of the two corrects itself once someone looks.
     if (!handler) {
-      const kind = resolveJobKind(job.config)
       report.unhandled += 1
 
       // Not "a config this worker cannot read" — that message belongs to a
