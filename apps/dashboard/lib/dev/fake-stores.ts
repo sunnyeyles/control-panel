@@ -13,33 +13,20 @@ import {
 
 /**
  * S3, for `DEV_AUTH_BYPASS=1` only — the two facades the dashboard uses, backed
- * by a `Map` each.
+ * by a `Map` each. Faked at the facade rather than at `UserObjectStore` below
+ * it, so key building and `assertSegment()` keep their single implementation.
  *
- * These implement the facade interfaces rather than `UserObjectStore`, which is
- * the layer below them. Faking the object store instead would mean
- * reimplementing key building and the ownership assertion in `assertSegment()`
- * — the part of `@workspace/user-storage` most worth not having a second
- * version of. The facades are the seam `lib/storage.ts` already hands out, so
- * they are the seam to stand in for.
- *
- * ⚠️ **`list()` deliberately returns less than `head()` does.** The real stores
- * cannot do otherwise — ListObjectsV2 returns no user metadata at all, so a
- * listed resume has no `originalFilename` and no `documentType`, and a listed
- * letter has an empty `provenance`. A fake that supplied them would make the
- * `head()`-per-item loops in `lib/documents/list-documents.ts` and
- * `lib/cover-letters/list-cover-letters.ts` look like something to delete,
- * right up until the deletion reached production and every row lost its name.
+ * ⚠️ **`list()` deliberately returns less than `head()` does**, because
+ * ListObjectsV2 returns no user metadata — a listed resume has no
+ * `originalFilename`, a listed letter an empty `provenance`. Supplying them
+ * would make the `head()`-per-item loops in `list-documents.ts` and
+ * `list-cover-letters.ts` look deletable.
  */
 
 /**
- * Not a real S3 key.
- *
- * The real one is built by `buildObjectKey()` and carries the configured
- * environment prefix, which is read from `USER_STORAGE_BUCKET_NAME` and
- * friends — the variables this mode exists to not need. The key is only ever
- * logged from here, never parsed, so a recognisably fake one is the honest
- * choice: seeing `dev-fixture/` in a log should say immediately that no bucket
- * was involved.
+ * Not a real S3 key — `buildObjectKey()` needs the storage config this mode
+ * exists to not need. Only ever logged, never parsed, so `dev-fixture/` in a log
+ * says plainly that no bucket was involved.
  */
 function devKey(kind: string, userId: string, name: string): string {
   return `dev-fixture/${kind}/${userId}/${name}`
@@ -88,8 +75,7 @@ export function createDevResumeStore(): ResumeStore {
     },
 
     async delete(ref: ResumeRef): Promise<void> {
-      // Idempotent, like a DELETE against S3: removing what is already gone is
-      // not an error, and the delete action depends on that.
+      // Idempotent, like S3: removing what is gone is not an error.
       stored.delete(refKey(ref))
     },
 
@@ -172,9 +158,8 @@ function refKey(ref: ResumeRef | CoverLetterRef): string {
 }
 
 /**
- * The same error the real store raises for a missing object, so the call sites
- * that narrow with `isUserStorageError` take the branch they were written for
- * rather than falling through to "something went wrong".
+ * The real store's error, so call sites narrowing with `isUserStorageError` take
+ * the branch they were written for.
  */
 function mustGet<T>(
   stored: Map<string, T>,
@@ -186,13 +171,9 @@ function mustGet<T>(
 }
 
 /**
- * The stored record minus the payload, which is what `put`, `head` and `list`
- * all return — the bytes and the markdown travel only on a `get`.
- *
- * One per store rather than one generic `omit`: the field being dropped is the
- * only difference, and naming it in the signature is what makes the return type
- * come out as the interface's own `StoredResume` / `StoredCoverLetter` without a
- * cast.
+ * The record minus its payload — what `put`, `head` and `list` return; bytes and
+ * markdown travel only on a `get`. Two functions rather than one generic `omit`
+ * so each return type lands as the interface's own, uncast.
  */
 function withoutBytes(
   resume: StoredResume & { bytes: Uint8Array }

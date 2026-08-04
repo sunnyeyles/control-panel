@@ -64,9 +64,8 @@ let builtFor: string | undefined
  * time, which is the sort of thing a future caching layer would get wrong.
  */
 export function getResumeStore(): ResumeStore {
-  // Before `getObjectStore()`, which reads `readUserStorageConfig()` and
-  // constructs an `S3Client` — the two things this mode exists to not need. See
-  // `lib/dev/fake-stores.ts`.
+  // Before `getObjectStore()` reads the storage config and builds an
+  // `S3Client` — the two things this mode exists to not need.
   if (devMockEnabled()) {
     resumes ??= createDevResumeStore()
     return resumes

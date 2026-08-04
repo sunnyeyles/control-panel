@@ -9,14 +9,10 @@ import { pauseJob, resumeJob, updateJobSchedule } from "@workspace/db"
 import { describe, expect, it } from "vitest"
 
 /**
- * Driven through the real consumers rather than through raw Prisma calls.
- *
- * `latestPostingsForUser`, `pauseJob`, `resumeJob` and `updateJobSchedule` are
- * what actually talk to this fake in the running app, and they are where its
- * contract lives — `updateJobSchedule` in particular reaches it through
- * `$executeRaw`, which no hand-written query in a test would have exercised.
- * Asserting against them is what makes this a test of "does the dev environment
- * work" instead of a test of the fake agreeing with itself.
+ * Driven through the real consumers, not raw Prisma calls: they are what talks
+ * to this fake in the running app, and `updateJobSchedule` in particular reaches
+ * it through `$executeRaw`. Otherwise this would only test the fake agreeing
+ * with itself.
  */
 
 describe("the DEV_AUTH_BYPASS fake database", () => {
@@ -79,11 +75,7 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
     ).toBeUndefined()
   })
 
-  /**
-   * `updateJobSchedule` is raw SQL, and this is the assertion that the fake's
-   * positional match still lines up with the statement in
-   * `packages/db/src/jobs.ts`. It fails loudly if that statement changes.
-   */
+  /** Fails loudly if the raw statement in packages/db/src/jobs.ts changes. */
   it("writes a new schedule through $executeRaw", async () => {
     const prisma = createDevPrisma()
 
@@ -95,10 +87,7 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
     expect(updated?.scheduleCron).toBe("0 */3 * * *")
   })
 
-  /**
-   * The `CASE` in that statement, reproduced: rescheduling a paused briefing
-   * must not quietly put it back on duty.
-   */
+  /** The `CASE`: rescheduling a paused briefing must not put it back on duty. */
   it("leaves a paused briefing paused when its schedule changes", async () => {
     const prisma = createDevPrisma()
 

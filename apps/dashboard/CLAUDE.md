@@ -20,23 +20,20 @@ Three things here are easy to undo by accident:
 
 ## `DEV_AUTH_BYPASS=1` — the one thing that turns the gate off
 
-**Set it in `apps/dashboard/.env.local` and `next dev` serves every page as a fixed fake user, from fixtures.** It exists because editing a component otherwise costs an OAuth round trip against the current Neon branch's auth server, and because what renders then depends on whatever happens to be in that branch's database. Under the flag the app runs with **no `DATABASE_URL`, no AWS credentials and no `NEON_*` variables at all** — verified by starting it with all of them unset.
+**Set it in `apps/dashboard/.env.local` and `next dev` serves every page as a fixed fake user, from fixtures** — no `DATABASE_URL`, no AWS credentials, no `NEON_*`. It exists because editing a component otherwise costs an OAuth round trip, and what renders then depends on whatever is in that Neon branch.
 
-`lib/dev/mode.ts` is the only module that reads the variable, and **it throws when the flag is set and `NODE_ENV` is `production`.** Failing closed here means refusing to serve, not quietly returning `false`: a deployment that carries this variable must stop rather than come up healthy with no authentication. **It fires during `next build`, not at the first request.** `app/api/auth/[...path]/route.ts` re-exports the auth handlers, so page-data collection evaluates `lib/auth/server.ts` at module scope and that module calls the guard — with `NODE_ENV` set to `production` for the whole build. A production build carrying the flag therefore cannot be produced at all, which is a better place to fail than a deployment that builds cleanly and refuses its first request. The local cost, worth knowing before it surprises someone: with `DEV_AUTH_BYPASS=1` in `.env.local`, `pnpm build` fails until it is removed. `next dev` is unaffected.
+`lib/dev/mode.ts` is the only module that reads the variable, and **it throws when the flag is set under `NODE_ENV=production`** rather than quietly returning `false`. That fires during `next build`, not at the first request — `app/api/auth/[...path]/route.ts` makes page-data collection evaluate `lib/auth/server.ts` at module scope — so such a build cannot be produced at all. Local cost: `pnpm build` fails while the flag is in `.env.local`.
 
-Five call sites branch on `devMockEnabled()`, each at the top of an accessor that already existed:
+Five accessors branch on `devMockEnabled()`, each before reading any configuration:
 
-- **`lib/auth/current-user.ts`** returns the fixed `DEV_USER` before `auth.getSession()`. This is the one that matters — pages, Server Actions, both API routes and `lib/chat-handler.ts` all establish who is asking through this function, so **nothing else needs an auth branch of its own**, and adding one would be a second thing to keep true.
-- **`lib/db.ts`** and **`lib/storage.ts`** hand out `lib/dev/fake-prisma.ts` and `lib/dev/fake-stores.ts` instead of a Prisma client and an `S3Client`, memoized through the same variables, so a briefing paused on `/settings` still reads as paused on `/briefings`.
-- **`lib/auth/server.ts`** takes placeholder config, which is the only reason the app can boot with `NEON_AUTH_BASE_URL` unset — the instance is built at module scope, so `required()` would otherwise throw before any bypass ran. Safe because nothing calls it: the proxy and `getCurrentUser()` both return first.
-- **`proxy.ts`** returns `NextResponse.next()`. Needed _as well as_ the one in `getCurrentUser()`, not instead of it — `gate` resolves its own session and would redirect every GET to `/auth/sign-in` before a page ever ran.
+- **`lib/auth/current-user.ts`** returns the fixed `DEV_USER`. The one that matters — every page, action and API route asks through it, so **nothing else needs an auth branch**.
+- **`lib/db.ts`** and **`lib/storage.ts`** hand out `lib/dev/fake-prisma.ts` and `lib/dev/fake-stores.ts`, memoized through the same variables so a briefing paused on `/settings` reads as paused on `/briefings`.
+- **`lib/auth/server.ts`** takes placeholder config — the only reason the app boots with `NEON_AUTH_BASE_URL` unset, since the instance is built at module scope. Nothing calls it.
+- **`proxy.ts`** returns `NextResponse.next()`. Needed _as well as_ the `getCurrentUser()` branch: `gate` resolves its own session and would redirect every GET first.
 
-Two things about the fixtures are deliberate and worth not "fixing":
+Two things not to "fix": the fake Prisma **throws by name on unimplemented queries** instead of answering `undefined`, and implements `$executeRaw` because `updateJobSchedule()` is raw SQL matched by position (`fake-prisma.test.ts` catches that statement changing). And **`list()` in the fake stores returns less than `head()`**, as the real ones must — supplying the metadata would make the deliberate `head()`-per-item loops look deletable.
 
-- **The fake Prisma throws by name on any query it does not implement**, rather than answering `undefined` three frames from where it would fail. Adding a query to the dashboard therefore fails here with the fix in the message. It also implements `$executeRaw`, because `updateJobSchedule()` in `packages/db/src/jobs.ts` is raw SQL and matches its four values by position — `lib/dev/fake-prisma.test.ts` is what catches that statement changing.
-- **`list()` in the fake stores returns less than `head()` does**, exactly as the real ones must: ListObjectsV2 returns no user metadata, so a listed document has no `originalFilename`. A fake that supplied it would make the deliberate `head()`-per-item loops in `lib/documents/list-documents.ts` and `lib/cover-letters/list-cover-letters.ts` look like something to delete.
-
-**`/api/chat` still calls OpenAI.** The gate opens, but `createAssistant()` needs `OPENAI_API_KEY`, so the chat on `/` answers for real or fails. Everything else is offline. The seam for faking it later is already there — `ChatHandlerDeps.createAgent`.
+**`/api/chat` still calls OpenAI**; everything else is offline. The seam to fake it is `ChatHandlerDeps.createAgent`.
 
 **The app shell lives in `app/(app)/layout.tsx`, and navigation speed is why.** `SidebarProvider`, `AppSidebar` and `SiteHeader` belong to that one layout; `/`, `/documents` and `/settings` sit under the group and render only a `<main>`. A route group rather than the root layout, because `/auth/sign-in` and `/auth/refused` must render without a sidebar — the parentheses keep the URLs unchanged.
 

@@ -75,20 +75,13 @@ function isAllowed(email: string): boolean {
 export const getCurrentUser = cache(
   async function getCurrentUser(): Promise<CurrentUser> {
     /**
-     * ⚠️ **The one way past everything below, and it is why this function is
-     * the only place the branch appears.**
+     * ⚠️ **The one way past everything below.** Every page, Server Action and
+     * API route establishes who is asking through this function, so opening it
+     * opens the app — and nothing downstream needs a branch of its own.
      *
-     * Pages, Server Actions, both API routes and `lib/chat-handler.ts` all
-     * establish who is asking through this function, so opening it opens the
-     * app — and, just as importantly, nothing else needs an auth branch of its
-     * own. A second one somewhere downstream would be a second thing to keep
-     * true.
-     *
-     * Returning before `auth.getSession()` is deliberate: it skips the session
-     * lookup, the `AUTH_ALLOWED_EMAILS` check and the `ensureUserForAuth`
-     * upsert together, which is what lets the app run with no `NEON_*`
-     * variables and no database. See `lib/dev/mode.ts` for why this cannot be
-     * on in production.
+     * Returning before `auth.getSession()` skips the session lookup, the
+     * allowlist and the `ensureUserForAuth` upsert together, which is what lets
+     * the app run with no `NEON_*` variables and no database.
      */
     if (devMockEnabled()) return DEV_USER
 

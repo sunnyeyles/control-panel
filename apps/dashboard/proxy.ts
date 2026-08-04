@@ -89,14 +89,9 @@ export default async function proxy(
   request: NextRequest
 ): Promise<NextResponse> {
   /**
-   * `DEV_AUTH_BYPASS=1` — the first layer stands down, and the second one is
-   * already standing down in `lib/auth/current-user.ts`.
-   *
-   * It has to be here as well as there. `gate` is `auth.middleware()`, which
-   * resolves a session of its own and would redirect every GET to
-   * `/auth/sign-in` before a page ever ran — so leaving this out would make the
-   * bypass in `getCurrentUser()` unreachable for exactly the requests it exists
-   * to serve.
+   * `DEV_AUTH_BYPASS=1`. Needed here as well as in `getCurrentUser()`: `gate`
+   * resolves its own session and would redirect every GET to `/auth/sign-in`
+   * before a page ran, making that bypass unreachable.
    */
   if (devMockEnabled()) return NextResponse.next()
 

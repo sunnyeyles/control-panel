@@ -3,26 +3,19 @@ import type { Job, PrismaClient, Run } from "@workspace/db"
 
 /**
  * Postgres, for `DEV_AUTH_BYPASS=1` only — an in-memory stand-in that honours
- * the queries this app actually makes and refuses every other one by name.
+ * the queries this app makes and refuses every other one by name.
  *
- * **It filters and orders for real rather than returning canned rows.** A fake
- * that ignored `where` would still make the pages look right, and would quietly
- * stop the user-scoping in `latest-postings.ts` and `job-actions.ts` from being
- * visible while someone edits around it. The same reasoning is written out at
- * `lib/briefings/latest-postings.test.ts`, whose `FakeDb` this follows.
+ * **It filters and orders for real rather than returning canned rows**, so the
+ * user-scoping in `latest-postings.ts` and `job-actions.ts` stays visible to
+ * anyone editing around it. Follows the `FakeDb` in
+ * `lib/briefings/latest-postings.test.ts`.
  *
- * **Writes are kept, and only for the life of the process.** Pausing a briefing
- * or saving a new interval has to survive the redirect that follows it, or the
- * form appears not to work; it does not have to survive a restart, and a
- * restart putting the fixtures back is the useful behaviour rather than a
- * limitation.
+ * **Writes survive the process, not a restart.** A pause has to outlive the
+ * redirect after it or the form looks broken; a restart restoring the fixtures
+ * is the useful behaviour.
  *
- * ⚠️ **Unsupported calls throw.** Prisma's client is a `Proxy` over the whole
- * schema, so a fake that answered anything would answer `artifact.findMany()`
- * with `undefined` and surface as a null dereference three frames away. Every
- * model and method not implemented below raises an error that names what was
- * asked for, so adding a query to the dashboard fails here, loudly, with the
- * fix in the message.
+ * ⚠️ **Unsupported calls throw** rather than answering `undefined` and
+ * surfacing as a null dereference three frames away. See {@link guard}.
  */
 export function createDevPrisma(): PrismaClient {
   const db = new DevDb()
@@ -40,10 +33,9 @@ export function createDevPrisma(): PrismaClient {
       findUnique: async (query: ById) => db.findRun(query.where.id),
     },
     /**
-     * Unreachable under the flag — `getCurrentUser()` returns the fixed dev
-     * user before it can call `ensureUserForAuth`. Implemented anyway so that
-     * if that branch is ever moved, this fails as a wrong answer rather than as
-     * "user.upsert is not a function", which reads like a Prisma problem.
+     * Unreachable — `getCurrentUser()` returns before `ensureUserForAuth`.
+     * Present so that moving that branch fails here, named, rather than as
+     * "upsert is not a function".
      */
     user: {
       upsert: async () => {
@@ -85,14 +77,11 @@ class DevDb {
   private nextId = 1
 
   /**
-   * Both shapes the dashboard asks for, discriminated by `select.runs` rather
-   * than by a flag from the caller — the callers are `latest-postings.ts` and
-   * `briefing-section.tsx`, neither of which knows it is talking to a fake.
+   * Both shapes the dashboard asks for, discriminated by `select.runs` — the
+   * callers do not know they are talking to a fake.
    *
-   * `orderBy` is not read: every call site here orders by `createdAt`
-   * descending, so that is simply what is applied. A caller wanting another
-   * order would silently get this one, which is the one piece of this fake that
-   * lies rather than throwing — cheap to fix if a second order ever appears.
+   * `orderBy` is not read; every call site wants `createdAt` descending. The one
+   * place this fake lies rather than throwing — cheap to fix if that changes.
    */
   findManyJobs(query: FindManyJobs): unknown[] {
     const mine = this.jobs
@@ -126,11 +115,9 @@ class DevDb {
   }
 
   /**
-   * Returned with its `job` relation attached, because the only caller selects
-   * it — `cover-letter-actions.ts` loads the owning Job to compare its
-   * `userId` to the caller's, deliberately rather than folding the check into
-   * the query. Dropping the relation here would make that comparison read
-   * `undefined.userId`.
+   * With its `job` relation attached: `cover-letter-actions.ts` compares the
+   * owning Job's `userId` to the caller's, so dropping it would make that
+   * comparison read `undefined.userId`.
    */
   findRun(id: string): (Run & { job: { userId: string } }) | null {
     const run = this.runs.find((candidate) => candidate.id === id)
@@ -168,15 +155,12 @@ class DevDb {
   }
 
   /**
-   * ⚠️ **`updateJobSchedule()` is raw SQL, not `job.update`,** because it needs
-   * a `CASE` to leave a paused briefing paused. So the schedule form reaches
-   * this method rather than {@link updateJob}, and the four interpolated values
-   * are matched by position.
+   * ⚠️ **`updateJobSchedule()` is raw SQL, not `job.update`** — it needs a
+   * `CASE` to leave a paused briefing paused — so the schedule form lands here
+   * and its four values are matched by position.
    *
-   * That coupling is checked rather than assumed: the statement must still be
-   * an `UPDATE jobs` carrying exactly four values, and anything else throws
-   * naming the file to look at. Positional matching is fragile — being loud
-   * about it is what makes it survivable.
+   * Fragile, so it is checked rather than assumed: anything that is not an
+   * `UPDATE jobs` with four values throws, naming the file to look at.
    */
   executeRaw(strings: TemplateStringsArray, values: unknown[]): number {
     const sql = strings.join("?")
@@ -231,12 +215,8 @@ class DevPrismaError extends Error {
 }
 
 /**
- * Names the missing query instead of returning `undefined` for it.
- *
- * Symbols and the handful of names a promise or a logger reaches for are let
- * through as `undefined` — `await client.job.findMany()` inspects `.then` on
- * the result, and a proxy that threw on that would break every supported call
- * on its way to succeeding.
+ * Let through as `undefined`: `await` inspects `.then`, and throwing on that
+ * would break every supported call on its way to succeeding.
  */
 const PASS_THROUGH = new Set([
   "then",
@@ -250,11 +230,8 @@ const PASS_THROUGH = new Set([
 ])
 
 /**
- * Applied to the models as well as the client, because the gap it closes is one
- * level down: `prisma.job` exists, and without this `prisma.job.deleteMany`
- * would be `undefined` — a missing *method* on a model present is the likelier
- * mistake by far, since the four models here already cover the schema the
- * dashboard touches.
+ * Applied to the models as well as the client: `prisma.job` exists, so the
+ * likelier mistake is a missing *method* on a model that is present.
  */
 function guard(
   target: Record<string, unknown>,

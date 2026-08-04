@@ -2,21 +2,10 @@ import type { CurrentUser } from "@/lib/auth/current-user"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
 /**
- * ⚠️ **Subpaths, not the package barrels, and this file is why the rule exists.**
- *
- * `lib/auth/current-user.ts` imports `DEV_USER` from here, and that module runs
- * on every gated page and Server Action — so whatever this file reaches, the
- * production request path reaches too, even though `devMockEnabled()` is always
- * false there. `@workspace/user-storage`'s barrel re-exports
- * `createS3UserObjectStore`, which imports `@aws-sdk/client-s3`; `@workspace/db`'s
- * re-exports `createPrismaClient`, which imports `@prisma/adapter-pg` and `pg`.
- * Reaching them through the barrel would put both on the graph of a module that
- * had no business touching either, purely to read a fixture.
- *
- * Both packages say so themselves — "`@workspace/db/schedule` gets
- * `computeNextRunAt` without pulling in the driver at all" is in `db`'s own
- * index docstring. Type-only imports below stay on the barrel — those are
- * erased at compile time and reach nothing at runtime.
+ * ⚠️ **Value imports use subpaths, not the barrels.** `current-user.ts` imports
+ * `DEV_USER` from here and runs on every request, so the barrels would put
+ * `@aws-sdk/client-s3` and `pg` on the production graph for a fixture. Types may
+ * stay on the barrel — they are erased.
  */
 import { computeNextRunAt } from "@workspace/db/schedule"
 import type { Job, Run } from "@workspace/db/types"
@@ -24,35 +13,17 @@ import { contentTypeFor } from "@workspace/user-storage/kinds"
 import type { NewCoverLetter, NewResume } from "@workspace/user-storage"
 
 /**
- * The world `DEV_AUTH_BYPASS=1` renders — one user, two briefings, what they
- * found, and some documents.
+ * The world `DEV_AUTH_BYPASS=1` renders.
  *
- * Chosen to exercise the branches a component actually has rather than to look
- * plausible in a screenshot. Each choice below is there because some `?:` in the
- * UI is otherwise never taken locally, and an unrendered branch is one nobody
- * notices they broke:
+ * Picked to exercise branches, not to look plausible: one briefing paused
+ * (`nextRunAt: null` is the only thing that makes `enabled` false), one on a
+ * cron the picker cannot express (draws the "set outside the app" warning), one
+ * posting with no `postedAt` and one with no `highlights`, and one cover letter
+ * matching a posting plus one orphan. A fixture where every field is present
+ * proves nothing about the optional ones.
  *
- * - **Two briefings, one paused.** `nextRunAt: null` is the only thing that
- *   makes `BriefingSummary.enabled` false, so it is what draws the "Off" badge,
- *   the absent "Next run" line, and the switch in its other position.
- * - **One briefing with a cron the picker cannot express.** `0 3 1 1 *` is a
- *   real expression out of this database — `fromCron` returns undefined for it,
- *   which is what surfaces the "This schedule was set outside the app" warning
- *   in `components/settings/briefing-section.tsx`.
- * - **Postings missing their optional fields.** One has no `postedAt` and one no
- *   `highlights`, because `PostingView` treats both as optional and a fixture
- *   where every field is present never proves it.
- * - **A cover letter whose `postingId` matches a posting, and one that does
- *   not.** The first draws the drafted state on a Posting card; the orphan is
- *   the ordinary case of a letter whose Run has since been superseded, and it
- *   still has to render in the letters list on its own.
- *
- * Dates are fixed constants so a render is the same on Tuesday as on Friday —
- * with one exception, `nextRunAt`, which is computed from the cron at seed time
- * by the real `computeNextRunAt`. A hard-coded next run is a next run in the
- * past, which reads as a bug rather than as a fixture, and computing it here is
- * also what makes the value match what `resumeJob()` writes when the switch is
- * toggled.
+ * Dates are fixed so renders are deterministic, except `nextRunAt` — see
+ * {@link devJobs}.
  */
 
 /** Fixed so every id derived from it — S3 keys included — is stable. */
@@ -64,13 +35,8 @@ const RAN_AT = new Date("2026-08-03T09:00:00.000Z")
 /**
  * The session every request gets under the flag.
  *
- * `status: "ok"` and nothing else: the `anonymous` and `refused` states have
- * their own pages, and a dev environment that could land on either would be
- * asking the developer to sign in — which is the thing this exists to avoid.
- *
- * `userId` is a `users.id`-shaped uuid, not a Neon Auth id, because that is the
- * distinction every consumer downstream depends on — it becomes the `userId`
- * segment of every S3 key the fake stores build, exactly as the real one does.
+ * `userId` is a `users.id`-shaped uuid, never a Neon Auth id — it becomes the
+ * `userId` segment of every S3 key, exactly as the real one does.
  */
 export const DEV_USER: CurrentUser = {
   status: "ok",
@@ -81,7 +47,7 @@ export const DEV_USER: CurrentUser = {
 
 const DAILY_CRON = "0 0 * * *"
 
-/** Deliberately unexpressible by the interval picker. See the note above. */
+/** Deliberately unexpressible by the interval picker. */
 const HAND_WRITTEN_CRON = "0 3 1 1 *"
 
 export const DEV_JOB_ACTIVE_ID = "3f8d1b2a-0000-4000-8000-0000000000a1"
@@ -91,11 +57,9 @@ const DEV_RUN_ACTIVE_ID = "3f8d1b2a-0000-4000-8000-0000000000b1"
 const DEV_RUN_PAUSED_ID = "3f8d1b2a-0000-4000-8000-0000000000b2"
 
 /**
- * Typed as `Posting` rather than left to inference, which does two things at
- * once: it checks these against the schema the scout actually emits, and it
- * keeps them assignable to `Prisma.JsonValue`. An `as const` here would make
- * every array `readonly`, and a readonly array is not JSON as far as Prisma's
- * types are concerned.
+ * Typed as `Posting`, not inferred: it checks these against the scout's schema,
+ * and an `as const` would make the arrays `readonly` — which Prisma's
+ * `JsonValue` rejects.
  */
 const MERIDIAN: Posting = {
   title: "Senior Backend Engineer",
@@ -141,21 +105,17 @@ const CORVUS: Posting = {
 }
 
 /**
- * The Posting the seeded cover letter was drafted for.
- *
- * Derived with the real `postingId()` rather than written out, so the letter and
- * the Posting cannot drift apart — the match is what draws the drafted state on
- * the card, and a hand-copied id would silently stop matching the first time a
- * field above was edited.
+ * Derived rather than written out, so the letter and the Posting cannot drift —
+ * the match is what draws the drafted state on the card.
  */
 const DEV_DRAFTED_POSTING_ID = postingId(MERIDIAN)
 
 /**
- * Fresh rows on every call.
+ * Fresh rows per call: the fake Prisma mutates what it is seeded with, so a
+ * shared array would leak one seed's edits into the next.
  *
- * The fake Prisma mutates what it is seeded with — pausing a briefing writes
- * `nextRunAt: null` onto the row — so handing out a shared array would let one
- * dev server's edits leak into the next seed within the same process.
+ * `nextRunAt` is computed rather than fixed — a hard-coded one is a next run in
+ * the past, and computing it matches what `resumeJob()` writes on toggle.
  */
 export function devJobs(): Job[] {
   return [
@@ -217,12 +177,9 @@ export function devRuns(): Run[] {
 }
 
 /**
- * Documents, as they would arrive at `ResumeStore.put()`.
- *
- * Only `.md` and `.txt` can be read back as text today, so the Markdown CV is
- * the one that makes "Draft a cover letter" work end to end; the PDF is here
- * because a user whose CV is a PDF is refused for a reason that has nothing to
- * do with their document being wrong, and that refusal has a UI.
+ * Documents as they arrive at `ResumeStore.put()`. Only `.md` and `.txt` can be
+ * read back as text, so the Markdown CV is what makes drafting work end to end;
+ * the PDF is here because its refusal has a UI.
  */
 export function devResumes(): NewResume[] {
   return [
@@ -238,8 +195,7 @@ export function devResumes(): NewResume[] {
       userId: DEV_USER_ID,
       resumeId: "3f8d1b2a-0000-4000-8000-0000000000c2",
       extension: ".pdf",
-      // Not a real PDF. Nothing in the dashboard parses it — `unpdf` is only
-      // reached by the cover-letter path, which this fixture is not for.
+      // Not a real PDF; nothing renders its contents.
       bytes: encode("%PDF-1.4 dev fixture, not a real document"),
       originalFilename: "dev-user-cv.pdf",
       documentType: "resume",
@@ -249,8 +205,7 @@ export function devResumes(): NewResume[] {
       resumeId: "3f8d1b2a-0000-4000-8000-0000000000c3",
       extension: ".txt",
       bytes: encode("Referees available on request.\n"),
-      // No `documentType`: written before document types existed, which is a
-      // real state in the bucket and renders without a type badge.
+      // No `documentType`: a real state in the bucket, renders without a badge.
       originalFilename: "referees.txt",
     },
   ]
@@ -271,8 +226,7 @@ export function devCoverLetters(): NewCoverLetter[] {
       },
     },
     {
-      // The orphan: drafted for a Posting no current Run still lists. It has to
-      // render in the letters list on its own, with no card to attach to.
+      // The orphan: no current Run lists it, so it renders with no card.
       userId: DEV_USER_ID,
       postingId: "dev-fixture-superseded-posting",
       markdown:
