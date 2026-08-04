@@ -27,7 +27,7 @@ import type { Job, PrismaClient, Run } from "@workspace/db"
 export function createDevPrisma(): PrismaClient {
   const db = new DevDb()
 
-  return wrap({
+  return guard({
     job: {
       findMany: async (query: FindManyJobs) => db.findManyJobs(query),
       findUnique: async (query: ById) => db.findJob(query.where.id),
@@ -57,7 +57,7 @@ export function createDevPrisma(): PrismaClient {
       db.executeRaw(strings, values),
     $connect: async () => {},
     $disconnect: async () => {},
-  })
+  }) as unknown as PrismaClient
 }
 
 /** `{ where: { id } }`, which is how every single-row lookup here is addressed. */
@@ -249,10 +249,6 @@ const PASS_THROUGH = new Set([
   "$transaction",
 ])
 
-function wrap(client: Record<string, unknown>): PrismaClient {
-  return guard(client, "prisma") as unknown as PrismaClient
-}
-
 /**
  * Applied to the models as well as the client, because the gap it closes is one
  * level down: `prisma.job` exists, and without this `prisma.job.deleteMany`
@@ -260,7 +256,10 @@ function wrap(client: Record<string, unknown>): PrismaClient {
  * mistake by far, since the four models here already cover the schema the
  * dashboard touches.
  */
-function guard(target: Record<string, unknown>, path: string): object {
+function guard(
+  target: Record<string, unknown>,
+  path: string = "prisma"
+): object {
   const guarded: Record<string, unknown> = {}
 
   for (const [key, value] of Object.entries(target)) {

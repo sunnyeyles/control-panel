@@ -35,8 +35,8 @@ function required(name: string): string {
 }
 
 /**
- * Placeholders for `DEV_AUTH_BYPASS=1`, and the only reason that mode can run
- * with no `NEON_*` variables at all.
+ * The placeholder branch is what lets `DEV_AUTH_BYPASS=1` run with no `NEON_*`
+ * variables at all.
  *
  * The instance is built at module scope — Next's file conventions require it,
  * as the comment above explains — so `required()` would throw at server boot,
@@ -46,22 +46,16 @@ function required(name: string): string {
  * `auth.getSession()`. The one surface still wired to it,
  * `app/api/auth/[...path]/route.ts`, is only reached by a sign-in attempt,
  * which under this flag is a thing nobody needs to make.
- *
- * The URL is `.invalid` (RFC 2606, reserved as never-resolvable) so that if
- * this is ever reached the failure is an immediate DNS error naming a domain
- * that is obviously not a real auth server.
  */
-const DEV_PLACEHOLDER = {
-  baseUrl: "https://dev-auth-bypass.invalid",
-  // 32+ characters, which the SDK enforces at construction.
-  secret: "dev-auth-bypass-placeholder-secret-not-a-real-key",
-}
-
 export const auth = createNeonAuth(
   devMockEnabled()
     ? {
-        baseUrl: DEV_PLACEHOLDER.baseUrl,
-        cookies: { secret: DEV_PLACEHOLDER.secret },
+        // `.invalid` is RFC 2606, reserved as never-resolvable, so reaching this
+        // fails as an immediate DNS error naming a domain that is obviously not
+        // an auth server.
+        baseUrl: "https://dev-auth-bypass.invalid",
+        // 32+ characters, which the SDK enforces at construction.
+        cookies: { secret: "dev-auth-bypass-placeholder-not-a-real-key" },
       }
     : {
         baseUrl: required("NEON_AUTH_BASE_URL"),

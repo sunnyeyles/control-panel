@@ -131,9 +131,7 @@ export function createDevCoverLetterStore(): CoverLetterStore {
     // A redraft supersedes rather than accumulates — same address, one object.
     stored.set(refKey(letter), record)
 
-    const { markdown, ...withoutMarkdown } = record
-    void markdown
-    return withoutMarkdown
+    return withoutMarkdown(record)
   }
 
   for (const letter of devCoverLetters()) void put(letter)
@@ -146,9 +144,7 @@ export function createDevCoverLetterStore(): CoverLetterStore {
     },
 
     async head(ref: CoverLetterRef): Promise<StoredCoverLetter> {
-      const { markdown, ...rest } = mustGet(stored, ref)
-      void markdown
-      return rest
+      return withoutMarkdown(mustGet(stored, ref))
     },
 
     async delete(ref: CoverLetterRef): Promise<void> {
@@ -156,16 +152,14 @@ export function createDevCoverLetterStore(): CoverLetterStore {
     },
 
     async list(userId: string): Promise<StoredCoverLetter[]> {
-      return [...stored.values()]
-        .filter((letter) => letter.userId === userId)
-        .sort((a, b) => b.draftedAt.getTime() - a.draftedAt.getTime())
-        .map((letter) => {
-          const { markdown, ...listed } = letter
-          void markdown
-          // Empty rather than absent, matching `toStoredCoverLetter` — the
-          // field is not optional, and a listing has nothing to put in it.
-          return { ...listed, provenance: {} }
-        })
+      return (
+        [...stored.values()]
+          .filter((letter) => letter.userId === userId)
+          .sort((a, b) => b.draftedAt.getTime() - a.draftedAt.getTime())
+          // Empty provenance rather than absent, matching `toStoredCoverLetter` —
+          // the field is not optional, and a listing has nothing to put in it.
+          .map((letter) => ({ ...withoutMarkdown(letter), provenance: {} }))
+      )
     },
   }
 }
@@ -191,10 +185,27 @@ function mustGet<T>(
   return found
 }
 
+/**
+ * The stored record minus the payload, which is what `put`, `head` and `list`
+ * all return — the bytes and the markdown travel only on a `get`.
+ *
+ * One per store rather than one generic `omit`: the field being dropped is the
+ * only difference, and naming it in the signature is what makes the return type
+ * come out as the interface's own `StoredResume` / `StoredCoverLetter` without a
+ * cast.
+ */
 function withoutBytes(
   resume: StoredResume & { bytes: Uint8Array }
 ): StoredResume {
   const { bytes, ...rest } = resume
   void bytes
+  return rest
+}
+
+function withoutMarkdown(
+  letter: StoredCoverLetter & { markdown: string }
+): StoredCoverLetter {
+  const { markdown, ...rest } = letter
+  void markdown
   return rest
 }

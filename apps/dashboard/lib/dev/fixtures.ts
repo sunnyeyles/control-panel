@@ -1,12 +1,27 @@
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
-import { computeNextRunAt, type Job, type Run } from "@workspace/db"
-import {
-  contentTypeFor,
-  type NewCoverLetter,
-  type NewResume,
-} from "@workspace/user-storage"
+/**
+ * ⚠️ **Subpaths, not the package barrels, and this file is why the rule exists.**
+ *
+ * `lib/auth/current-user.ts` imports `DEV_USER` from here, and that module runs
+ * on every gated page and Server Action — so whatever this file reaches, the
+ * production request path reaches too, even though `devMockEnabled()` is always
+ * false there. `@workspace/user-storage`'s barrel re-exports
+ * `createS3UserObjectStore`, which imports `@aws-sdk/client-s3`; `@workspace/db`'s
+ * re-exports `createPrismaClient`, which imports `@prisma/adapter-pg` and `pg`.
+ * Reaching them through the barrel would put both on the graph of a module that
+ * had no business touching either, purely to read a fixture.
+ *
+ * Both packages say so themselves — "`@workspace/db/schedule` gets
+ * `computeNextRunAt` without pulling in the driver at all" is in `db`'s own
+ * index docstring. Type-only imports below stay on the barrel — those are
+ * erased at compile time and reach nothing at runtime.
+ */
+import { computeNextRunAt } from "@workspace/db/schedule"
+import type { Job, Run } from "@workspace/db/types"
+import { contentTypeFor } from "@workspace/user-storage/kinds"
+import type { NewCoverLetter, NewResume } from "@workspace/user-storage"
 
 /**
  * The world `DEV_AUTH_BYPASS=1` renders — one user, two briefings, what they
@@ -133,7 +148,7 @@ const CORVUS: Posting = {
  * the card, and a hand-copied id would silently stop matching the first time a
  * field above was edited.
  */
-export const DEV_DRAFTED_POSTING_ID = postingId(MERIDIAN)
+const DEV_DRAFTED_POSTING_ID = postingId(MERIDIAN)
 
 /**
  * Fresh rows on every call.
