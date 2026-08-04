@@ -110,7 +110,7 @@ deliberately never set — reasoning-capable models reject any non-default value
 
 ## 3. Agents and their tools
 
-Four agents. What separates them is mostly which tools they carry, and **tool
+Five agents. What separates them is mostly which tools they carry, and **tool
 scope here is a containment boundary rather than a tuning knob.**
 
 ```mermaid
@@ -119,6 +119,7 @@ flowchart LR
         SCOUT["createJobScout<br/>the Scout"]
         BW["createBriefWriter<br/>the Brief Writer"]
         CLW["createCoverLetterWriter<br/>the Letter Writer"]
+        PE["createProfileExtractor<br/>the Profile Extractor"]
         ASST["createAssistant"]
     end
 
@@ -135,6 +136,7 @@ flowchart LR
     ASST --> TIME
     BW --> NONE
     CLW --> NONE
+    PE --> NONE
 
     SEEK --> APIFY["Apify actor<br/>unfenced-group/seek-com-au-scraper<br/>APIFY_TOKEN"]
     APIFY --> LIVE["seek.com.au live inventory"]
@@ -147,26 +149,43 @@ flowchart LR
 | `createJobScout`          | `[seekSearch]`            | Read-only **by construction**. With no tool that writes anything, "the Scout returns data and performs no side effects" is structural rather than a prompt rule someone can talk it out of |
 | `createBriefWriter`       | `[]`                      | Cannot search, so it cannot quietly supplement thin Findings with something half-remembered; cannot write, so uploading stays with the worker                                              |
 | `createCoverLetterWriter` | `[]`                      | Prompt-injection containment — see below                                                                                                                                                   |
+| `createProfileExtractor`  | `[]`                      | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                     |
 | `createAssistant`         | `allTools` + `extraTools` | The one genuinely general-purpose agent                                                                                                                                                    |
 
-### Why the Letter Writer has no tools
+### Why the Letter Writer and the Profile Extractor have no tools
 
-The strongest case in the stack, and worth stating plainly. That agent holds the
-candidate's CV in its context, and the Posting sitting beside it is
-attacker-influenced text — anyone who can pay to place an advertisement writes
-it, and its highlights reach the prompt **verbatim** rather than laundered
-through a paraphrase, so an instruction hidden in a bullet point survives intact.
+The strongest case in the stack, and it is one argument covering two agents.
+Both hold the candidate's CV in their context, and **an agent that can both read
+a CV and issue an outbound request can be induced to put one inside the other.**
+Neither needs to look anything up to do its job, so neither is given the means
+to.
 
-An agent that can both read a CV and issue an outbound request can be induced to
-put one inside the other. Having no tools is exactly what makes copying the
-advertisement acceptable: injected text can shape the prose of a draft the user
-then reads and edits, and can reach nothing else. The prompt also tells the model
-to treat posting text as quoted material, but the containment is the empty tool
-list, and it is asserted structurally in `cover-letter-writer.test.ts` rather
-than left to a comment.
+**The Letter Writer** has attacker-influenced text sitting beside the CV. The
+Posting is written by anyone who can pay to place an advertisement, and its
+highlights reach the prompt **verbatim** rather than laundered through a
+paraphrase, so an instruction hidden in a bullet point survives intact. Having no
+tools is exactly what makes copying the advertisement acceptable: injected text
+can shape the prose of a draft the user then reads and edits, and can reach
+nothing else.
+
+**The Profile Extractor** has no second document at all — it has the CV, whole
+and verbatim, including whatever address, phone number and employment history it
+carries. That is the strongest version of the same case rather than a weaker one:
+the uploaded file _is_ the injection surface, it arrives from outside the system,
+nothing sanitises it, and a closed signup is no help, because a person can be
+handed a document as easily as they can write one. So the document with the most
+to leak is read by the agent with no way to leak it, and what comes back is a
+JSON object the user reviews in a form before anything is saved.
+
+Both prompts also tell the model to treat the outside text as quoted material,
+and `toProfilePrompt()` fences the CV in the same idiom — but a fence is a label,
+not a boundary, and nothing stops a document from writing one of its own. The
+containment is the empty tool list, and both are asserted structurally, in
+`cover-letter-writer.test.ts` and `profile-extractor.test.ts`, rather than left
+to a comment.
 
 When a page fetcher eventually exists it belongs on a separate agent that never
-sees the profile, handing this one validated data.
+sees the profile, handing them validated data.
 
 ### The same idea one level down
 
@@ -193,7 +212,7 @@ no-side-effects property structural at the tool layer too.
 
 ## 4. Who invokes what
 
-Three entry points. They differ in how they import, how they call, and what they
+Four entry points. They differ in how they import, how they call, and what they
 persist.
 
 ```mermaid
@@ -214,6 +233,14 @@ flowchart TD
         L4 --> L5["CoverLetterStore.put<br/>S3 only, no database row"]
     end
 
+    subgraph criteria ["Search criteria — dashboard"]
+        direction TB
+        S1["Suggest from my resume"] --> S2["Server Action"]
+        S2 --> S3["suggest-criteria-actions.ts<br/>auth, loadCandidateBackground, assertDraftable"]
+        S3 --> S4["createProfileExtractor → .invoke()"]
+        S4 --> S5["parseSearchCriteria<br/>back to the form, nothing persisted"]
+    end
+
     subgraph brief ["Briefing — worker"]
         direction TB
         B1["EventBridge Tick, hourly"] --> B2["run-tick.ts<br/>dueJobs → claimJob"]
@@ -226,14 +253,23 @@ flowchart TD
 ```
 
 **Chat** streams, because the assistant has tools and the interesting part is
-watching it work. **The cover letter uses `.invoke()`, not `.stream()`** — with
-no tools the graph is just `START → model → END`, so there is nothing to watch.
-**The worker is the only place two agents run in sequence**, scout then writer,
-with a validation step between them.
+watching it work. **The cover letter and the criteria suggestion use `.invoke()`,
+not `.stream()`** — with no tools the graph is just `START → model → END`, so
+there is nothing to watch. **The worker is the only place two agents run in
+sequence**, scout then writer, with a validation step between them.
+
+**The criteria suggestion is the only entry point that persists nothing**, and
+that is the feature rather than an omission. It answers into the new-briefing
+form; the user edits what came back and `jobs.config` is written by the ordinary
+create action if they press Create. So there is nothing to invalidate and the
+action calls no `refresh()` — and a suggestion someone abandons leaves no trace
+anywhere. It reuses `loadCandidateBackground()` and `assertDraftable` from the
+cover-letter path rather than growing a document picker, so "which document is my
+resume" answers the same in both places.
 
 Import style differs by app and both are correct: the dashboard uses wildcard
-subpaths (`@workspace/agents/cover-letter-writer`), the worker uses the root
-barrel.
+subpaths (`@workspace/agents/cover-letter-writer`,
+`@workspace/agents/profile-extractor`), the worker uses the root barrel.
 
 Two invariants the worker enforces, both of which exist because a plausible
 fabrication is worse than an empty result:
@@ -269,6 +305,7 @@ flowchart TD
         R1 --> R3["write-brief"]
         CB --> CB1["chat-response"]
         CB --> CB2["cover-letter"]
+        CB --> CB3["search-criteria"]
     end
 
     subgraph sink ["The worker's own trace sink"]
@@ -290,7 +327,14 @@ that can afford to batch. The worker calls `shutdownLangfuse()` in a `finally`
 beside `prisma.$disconnect()` to flush what is queued.
 
 The briefing Run is wrapped so the Scout and the Brief Writer nest under a single
-`generate-briefing` root rather than arriving as two unrelated traces.
+`generate-briefing` root rather than arriving as two unrelated traces. The three
+dashboard traces need no such root: each is one agent answering one request.
+
+**Two of those traces carry the candidate's CV**, `cover-letter` and
+`search-criteria`, and Langfuse retains full prompts by design. Whether that text
+leaves the machine is decided entirely by whether the two keys are set — which is
+the one place the no-op default is a privacy property and not merely a
+convenience.
 
 The trace sink is held to the same standard from the other direction: it is
 synchronous and returns nothing, because a sink that could be awaited is a sink
@@ -302,9 +346,9 @@ down with it.
 
 ## Where things live
 
-| Package                | Holds                                                                                                                                                      |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, plus `findings` (the `FindingsSchema` contract between Scout and Writer) and `posting-id` |
-| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                |
-| `packages/agent-tools` | `seek-search.ts`, `web-search.ts`, `time.ts`, and `index.ts` with `allTools`                                                                               |
-| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                 |
+| Package                | Holds                                                                                                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `profile-extractor`, plus the two schema contracts — `findings` (Scout → Brief Writer) and `criteria` (Profile Extractor → whoever stores them) — and `cover-letter` and `posting-id` |
+| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                            |
+| `packages/agent-tools` | `seek-search.ts`, `web-search.ts`, `time.ts`, and `index.ts` with `allTools`                                                                                                                                                                           |
+| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                             |

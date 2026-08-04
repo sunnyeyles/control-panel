@@ -406,6 +406,46 @@ describe("createJob", () => {
     })
   })
 
+  it("stores the keywords when the optional field was filled in", async () => {
+    const result = await actionsFor(SIGNED_IN).createJob(
+      IDLE,
+      createForm({ keywords: " TypeScript, Postgres ,AWS " })
+    )
+
+    // Valid titles and locations are still the only thing the create turns on —
+    // keywords ride along and never gate it.
+    expect(result.status).toBe("success")
+    expect(store.creates[0]?.config).toEqual({
+      titles: ["senior backend engineer", "staff engineer"],
+      locations: ["Sydney", "Remote (Australia)"],
+      keywords: ["TypeScript", "Postgres", "AWS"],
+    })
+  })
+
+  it("omits keywords from the config entirely rather than storing an empty list", async () => {
+    // `keywords: []` would parse for the worker, so this is about what the row
+    // claims: an absent field and an empty one must not both mean "none", and a
+    // stored `[]` reads as a choice the user made.
+    await actionsFor(SIGNED_IN).createJob(
+      IDLE,
+      createForm({ keywords: "  , " })
+    )
+
+    expect(store.creates).toHaveLength(1)
+    const config = store.creates[0]?.config ?? {}
+
+    expect("keywords" in config).toBe(false)
+  })
+
+  it("creates normally when keywords are missing, because they are optional", async () => {
+    // The guard rail on the message above: only titles and locations may ever
+    // be the reason a create fails.
+    const result = await actionsFor(SIGNED_IN).createJob(IDLE, createForm())
+
+    expect(result.status).toBe("success")
+    expect(store.creates).toHaveLength(1)
+  })
+
   it("derives the cron from the interval and always stores UTC", async () => {
     await actionsFor(SIGNED_IN).createJob(IDLE, createForm({ hours: "12" }))
 

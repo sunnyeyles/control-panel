@@ -138,9 +138,49 @@ preferred boards, a cap on how many postings a brief carries. Held in
 The platform stores that column and never reads inside it, so the meaning lives
 with whatever runs the job.
 
-Titles and locations are required and are what the settings form collects;
-everything else is optional and reaches a row only by hand. The seam a resume
-extractor would eventually write to.
+Titles and locations are required, and with **keywords** — optional to the
+worker, collected anyway — they are what the new-briefing form takes; exclusions,
+preferred boards and the cap reach a row only by hand. Naming no keywords leaves
+the field _absent_ from `config` rather than present and empty, so "never said"
+stays distinguishable from "said none".
+
+The **Profile Extractor** proposes all three, and proposes them **into the
+form**. It writes nothing: a suggestion is a value the fields render, and the row
+is still written by the user pressing Create. That is what makes "the user saw
+these before they were saved" a property of the path rather than a promise the
+interface makes — there is no write on it to review after.
+
+**Profile Extractor**:
+The agent that reads the candidate's CV and proposes **Search Criteria** out of
+it — titles and keywords from what the document actually claims, and a location
+only where the CV states one. Where it does not, `locations` comes back empty and
+`notes` says why: a city inferred from a university or an employer's head office
+is an invented fact about where someone will work, and unlike a bad sentence in a
+draft it is saved once and then searched every day, arriving as thin briefs that
+look like a quiet market.
+
+Its answer is validated by `SearchCriteriaSchema` before anything renders it,
+standing between the extractor and the form exactly as **Findings** stand between
+the **Scout** and the **Brief Writer**. Reading a CV is the one step in the
+pipeline with nothing to check against — no URL to click, no advertisement to
+re-fetch — so the shape of the answer is the only thing that can be verified, and
+a parse that fails refuses rather than degrades.
+
+Like the **Brief Writer** and the **Letter Writer** it has no tools, and this is
+the strongest case for that in the repo: it holds one uploaded document verbatim,
+including whatever address, phone number and employment history it carries, and
+the uploaded file is itself the injection surface — nothing sanitises it, and a
+closed **Allowlist** does not help, since a user can be handed a document as
+easily as they can write one. Having nowhere to send it is what makes reading it
+verbatim acceptable; injected text can shape a JSON object the user then reviews,
+and can reach nothing else.
+
+Run from **Suggest from my resume** on the new-briefing form on `/settings`, over
+the newest **Document** labelled Resume — the same `loadCandidateBackground` a
+**Cover Letter** draft reads, so no field of the request picks the document. It
+persists nothing; see **Search Criteria**.
+_Avoid_: resume parser (which is the text extraction that happens before this
+agent is built), CV reader, profile agent
 
 **Job**:
 A thing to run on a cadence, and a row in `jobs` — the Prisma model is `Job`.
@@ -284,9 +324,12 @@ Two independent mechanisms produce one, and they do not feed each other:
   events `runBriefing` emits into an optional sink. Production passes none, and a
   run with no sink emits nothing and behaves identically; the local `watch`
   harness passes one and renders it.
-- **Langfuse** receives a trace per agent run over OpenTelemetry —
-  `generate-briefing` from the worker, `chat-response` from the dashboard —
-  through `@workspace/langfuse`. Missing keys make it a no-op rather than an
-  error, so this too is a thing a runtime opts into.
+- **Langfuse** receives a trace per agent invocation over OpenTelemetry —
+  `generate-briefing` from the worker, `chat-response`, `cover-letter` and
+  `search-criteria` from the dashboard — through `@workspace/langfuse`. Only the
+  first is a **Run**; the other three are things a person clicked, and no `runs`
+  row is minted for any of them, so the trace is the only place their prompt
+  survives. Missing keys make it a no-op rather than an error, so this too is a
+  thing a runtime opts into.
 
 _Avoid_: log, debug output, history

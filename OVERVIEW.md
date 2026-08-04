@@ -21,8 +21,10 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                               |
 | One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                               |
 | What `jobs.config` means                     | `apps/briefing-worker/src/job-search-config.ts`                                                                                          |
-| Scout and brief-writer agents                | `packages/agents/src/` — one `createX()` factory per module                                                                              |
+| The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                              |
 | The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                        |
+| The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                        |
+| Proposing criteria from a resume             | `apps/dashboard/lib/jobs/suggest-criteria-actions.ts`, reading through `apps/dashboard/lib/cover-letters/candidate-background.ts`        |
 | The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                        |
 | Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                              |
 | Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                                            |
@@ -96,32 +98,57 @@ flowchart TD
 ## Not built yet
 
 The pipeline above runs end to end. These are the parts of the intended product
-that do not exist, and none of them is implied by the code today:
+that do not exist, and nothing in the code today implies them. One entry has
+since gone half-built rather than leaving the list, so **a solid edge below is a
+path that exists and a dotted one is still the gap**:
 
 ```mermaid
 flowchart TD
-    B[Document in S3] --> C[Profile extraction]
-    C --> D[(Neon — search criteria)]
-    D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
+    B[Document in S3] --> C[Profile extractor]
+    C --> F[New-briefing form — proposed, then edited]
+    F --> D[(Neon — jobs.config)]
+    B -.->|missing: nothing turns a document into<br/>criteria with nobody watching| D
+    D --> P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
     P --> N[Rendering or editing a stored cover letter]
     P --> Q[A viewer for the brief itself]
 ```
 
-- **Profile extraction.** Upload exists — `/documents` writes to the `resumes`
-  object kind through a Server Action, and lists, downloads and deletes what is
-  there. One thing now _reads_ a stored document —
+- **Profile extraction — half closed, and it is worth being exact about which
+  half.** Upload was always there: `/documents` writes to the `resumes` object
+  kind through a Server Action, and lists, downloads and deletes what is there.
+  Reading a stored document came next —
   `apps/dashboard/lib/cover-letters/candidate-background.ts` fetches the newest
   document labelled `resume` and turns it into text for the **Letter Writer**,
   through `profile-text.ts` (#86) — `.md`, `.txt`, PDF via `unpdf` and DOCX via
   `mammoth`. `.doc`, `.odt` and `.rtf` still upload and still have no parser,
-  and are refused by name. That is getting the _text_ out; what is still the gap
-  is extraction proper — turning that text into search criteria. No Postgres row
-  points at an upload either — `artifacts.run_id` is `NOT NULL` and references
-  `runs`, so there is no row shape for one. Search criteria are still typed in
-  by hand, now through the settings form rather than into the column directly.
-  Extraction would most naturally be a `createX()` factory in
-  `packages/agents/src/`, reading through `ResumeStore`.
+  and are refused by name.
+
+  Extraction proper now exists on top of that. The **Profile Extractor**
+  (`packages/agents/src/profile-extractor.ts`) reads that text and proposes
+  **Search Criteria** — titles and keywords from what the CV actually names, and
+  a location only when the CV states one, otherwise an empty list and a sentence
+  in `notes` saying so. `packages/agents/src/criteria.ts` is what makes the
+  answer checkable: `SearchCriteriaSchema` both renders into the prompt and
+  validates what comes back, so reading a CV — the one step with no source to
+  re-fetch and nothing to check a claim against — is verified on shape at least.
+  `apps/dashboard/lib/jobs/suggest-criteria-actions.ts` is the Server Action
+  behind **Suggest from my resume** on the new-briefing form. It reuses
+  `loadCandidateBackground()` and its bounds check rather than adding a document
+  picker, deliberately: "which document is my resume" has to mean one thing
+  across the app, or a **Cover Letter** and a **Briefing** end up drawn from
+  different files with nothing saying so.
+
+  What is _not_ built is anything that closes the loop without a person in it.
+  The extractor **proposes**: the criteria arrive in the form's fields, the user
+  edits them, and `jobs.config` is written by the ordinary create action when
+  they press Create. The suggestion itself persists nothing — which is why the
+  action calls no `refresh()`, having invalidated nothing — so a suggestion
+  someone abandons leaves no trace anywhere. Nor does any Postgres row point at
+  an upload: `artifacts.run_id` is `NOT NULL` and references `runs`, so there is
+  still no row shape for one, and nothing records which **Document** a briefing's
+  criteria came out of.
+
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
@@ -184,8 +211,10 @@ flowchart TD
 - All AWS infrastructure is Terraform under `infra/aws/`, which Turborepo does
   not cover. CloudWatch provides logs, metrics and failure alarms.
 - Langfuse receives one trace per agent run when its keys are present:
-  `generate-briefing` from the worker, `chat-response` and `cover-letter` from
-  the dashboard. All retain full prompts, tool I/O and outputs by design.
+  `generate-briefing` from the worker, and `chat-response`, `cover-letter` and
+  `search-criteria` from the dashboard. All retain full prompts, tool I/O and
+  outputs by design — which for the last two means the candidate's CV, so the
+  keys are what decides whether it leaves the machine.
 
 ## Design requirements
 

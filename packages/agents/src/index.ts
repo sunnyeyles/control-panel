@@ -30,6 +30,13 @@ export {
 } from "./cover-letter-writer.ts"
 
 export {
+  criteriaSchemaDescription,
+  parseSearchCriteria,
+  SearchCriteriaSchema,
+  type SearchCriteria,
+} from "./criteria.ts"
+
+export {
   FindingsSchema,
   jobScoutSchemaDescription,
   parseFindings,
@@ -39,6 +46,13 @@ export {
 } from "./findings.ts"
 
 export { postingId } from "./posting-id.ts"
+
+export {
+  createProfileExtractor,
+  PROFILE_EXTRACTOR_SYSTEM_PROMPT,
+  toProfilePrompt,
+  type CreateProfileExtractorOptions,
+} from "./profile-extractor.ts"
 
 export {
   createJobScout,

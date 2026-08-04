@@ -20,7 +20,7 @@ import {
   type IntervalHours,
 } from "./interval"
 import { requireOwnedJob } from "./owned-job"
-import { searchCriteriaSchema } from "./search-criteria"
+import { MAX_CRITERIA_ITEMS, searchCriteriaSchema } from "./search-criteria"
 
 /**
  * The briefing actions, as plain functions over injected dependencies.
@@ -215,18 +215,61 @@ export function createJobActions(deps: JobActionsDeps) {
     const criteria = searchCriteriaSchema.safeParse({
       titles: formData.get("titles"),
       locations: formData.get("locations"),
+      // Posted by the form as `""` when the user typed nothing, and absent
+      // entirely — so `null` — when this action is called by something older
+      // than the field. Both mean "none"; neither is a failure. See
+      // `optionalCriteriaList` in ./search-criteria.
+      keywords: formData.get("keywords"),
     })
 
     // Not optional: the worker's `JobSearchConfigSchema` requires both, so a
     // job created without them would claim its first slot and then fail to read
     // its own config.
+    //
+    // ⚠️ **Keywords can reach here too, despite being optional**, and answering
+    // that with the sentence below would be a message about the wrong field.
+    // Optional means "may be empty", not "unbounded": `optionalCriteriaList`
+    // still caps the list, and the case that hits the cap is not a typist — it
+    // is **Suggest from my resume** on a CV that names more technologies than
+    // the cap allows, which fills the box and then fails on a submit the user
+    // has no reason to connect to it. So the failing field is named, and the
+    // two sentences say different things to do.
     if (!criteria.success) {
-      return fail("Add at least one role title and one location.")
+      const keywordsRejected = criteria.error.issues.some(
+        (issue) => issue.path[0] === "keywords"
+      )
+
+      return fail(
+        keywordsRejected
+          ? `That is more than ${MAX_CRITERIA_ITEMS} keywords. Keep the list to the technologies that matter most for the roles you want — a longer one does not search harder.`
+          : "Add at least one role title and one location."
+      )
     }
 
     if (!hours) return fail(INVALID_INTERVAL)
 
     const { name } = parsed.data
+
+    /**
+     * No keywords means the field is *absent* from `config`, not present and
+     * empty.
+     *
+     * The worker accepts `keywords: []` happily, so this is not about
+     * validation. It is about what the row says: an absent field and an empty
+     * one should not both have to mean "none", and a stored `[]` reads as a
+     * choice the user made — someone (or something) having decided this
+     * briefing should match on no technologies in particular. Leaving the key
+     * out keeps "never said" distinguishable from "said none", which is the
+     * only form the question can be asked in later.
+     */
+    const { keywords, ...requiredCriteria } = criteria.data
+
+    // `?.` rather than `.length > 0` so this holds whether the schema hands
+    // back `[]` or nothing at all for an unfilled field — the branch is about
+    // "did the user name any keywords", and both spellings of "no" take it.
+    const config = keywords?.length
+      ? { ...requiredCriteria, keywords }
+      : requiredCriteria
 
     let job: Job
 
@@ -237,7 +280,7 @@ export function createJobActions(deps: JobActionsDeps) {
           // The session's userId, never a form field.
           userId: caller.userId,
           name,
-          config: criteria.data,
+          config,
           scheduleCron: toCron(hours),
           scheduleTimezone: SCHEDULE_TIMEZONE,
         },
