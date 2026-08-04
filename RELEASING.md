@@ -127,8 +127,14 @@ terraform -chdir=infra/aws apply -var="schedule_enabled=false"
 
 ## 4. The other two deploy surfaces
 
-**The database.** Migrations are outside Turborepo and run by hand, against the
-direct endpoint:
+**The database.** Nothing to do: `.github/workflows/migrate.yml` applies
+migrations on every push to `main`, and confirms afterwards that production is
+level with the repo. It is unfiltered by path on purpose — `migrate deploy`
+against an up-to-date database is a no-op, while a path filter that fails to
+match is how production silently falls behind.
+
+To apply by hand anyway — a failed run, or a database the workflow does not
+know about — use the direct endpoint:
 
 ```bash
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
@@ -136,6 +142,11 @@ DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
 
 `DATABASE_URL_UNPOOLED`, not `DATABASE_URL` — the pooled endpoint runs PgBouncer
 in transaction mode, which is the wrong endpoint for migrate. Forward-only.
+
+The workflow needs one secret, `NEON_API_KEY`; the project id is committed in
+the workflow because it identifies a project rather than granting access to one.
+Prior to 2026-08-05 this step was manual, was missed twice, and put `/settings`
+into a 500 on a `cover_letter_instructions` table that only ever existed in git.
 
 **The dashboard.** Vercel deploys it from git on its own; nothing here is needed
 unless its environment changed. If it did, set the value in the project's

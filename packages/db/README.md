@@ -81,12 +81,25 @@ socket is dead by the next invocation as the default outcome.
 
 ## Migrations
 
+**CI applies these** — `.github/workflows/migrate.yml`, on every push to `main`,
+plus the PR's own Neon preview branch and a check that fails a PR when
+production is behind what is already merged. Adding a migration means committing
+it; there is no manual step to remember afterwards.
+
+By hand, when the workflow could not do it:
+
 ```bash
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
 ```
 
 That runs `prisma migrate deploy` against the schema under `prisma/`. Forward-
-only. Partial indexes and CHECK constraints that Prisma's schema DSL cannot
+only.
+
+Note what `stores.test.ts` does and does not tell you: it replays every
+migration into a throwaway schema, so a green suite means the SQL is valid and
+correctly ordered. It says nothing about whether any deployed database has run
+it — a from-scratch schema has no history to drift from. That gap is the
+workflow's job, not this suite's. Partial indexes and CHECK constraints that Prisma's schema DSL cannot
 express live in the SQL of `prisma/migrations/0001_init/` — do not tidy them
 into full unique constraints.
 
