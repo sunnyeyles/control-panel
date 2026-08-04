@@ -23,6 +23,7 @@ model User {
 
   jobs                    Job[]
   coverLetterInstructions CoverLetterInstructions?
+  postings                Posting[]
 
   @@map("users")
 }
@@ -90,6 +91,10 @@ model Run {
 
   job       Job        @relation(fields: [jobId], references: [id], onDelete: Restrict)
   artifacts Artifact[]
+  // Two relations to the same model, so each needs a name. Provenance only:
+  // neither is part of a Posting's identity.
+  firstSeen Posting[]  @relation("PostingFirstSeenRun")
+  lastSeen  Posting[]  @relation("PostingLastSeenRun")
 
   @@index([jobId, startedAt(sort: Desc)], map: "runs_job_started_at_idx")
   @@map("runs")
@@ -106,4 +111,39 @@ model Artifact {
 
   @@index([runId], map: "artifacts_run_id_idx")
   @@map("artifacts")
+}
+
+model Posting {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  // The *derived* Posting id — `postingId()` from `@workspace/agents` — and not
+  // this row's `id`. It is also an S3 key segment, so a CHECK in the migration
+  // SQL pins it to sixteen lowercase hex characters.
+  postingId       String    @map("posting_id")
+  title           String
+  company         String
+  location        String
+  url             String
+  // The validated Posting as its producer wrote it, opaque here exactly as
+  // `runs.findings` and `jobs.config` are. The four columns above are the
+  // projection this table sorts and displays on.
+  payload         Json
+  // text + CHECK in migration SQL rather than a Postgres enum, as `runs.status`
+  // is. The only column in this schema a person writes, which is why
+  // `recordPostings` leaves it out of its `DO UPDATE SET` list.
+  status          String    @default("new")
+  // NULL means nobody has ever moved it off `new`.
+  statusChangedAt DateTime? @map("status_changed_at") @db.Timestamptz(6)
+  firstSeenAt     DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt      DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  firstSeenRunId  String    @map("first_seen_run_id") @db.Uuid
+  lastSeenRunId   String    @map("last_seen_run_id") @db.Uuid
+
+  user         User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  firstSeenRun Run  @relation("PostingFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: Restrict)
+  lastSeenRun  Run  @relation("PostingLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, postingId], map: "postings_user_id_posting_id_key")
+  @@index([userId, lastSeenAt(sort: Desc), postingId(sort: Desc)], map: "postings_user_last_seen_idx")
+  @@map("postings")
 }
