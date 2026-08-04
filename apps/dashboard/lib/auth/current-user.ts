@@ -2,6 +2,8 @@ import { cache } from "react"
 
 import { auth } from "@/lib/auth/server"
 import { getPrisma } from "@/lib/db"
+import { DEV_USER } from "@/lib/dev/fixtures"
+import { devMockEnabled } from "@/lib/dev/mode"
 import { ensureUserForAuth } from "@workspace/db"
 
 /**
@@ -72,6 +74,24 @@ function isAllowed(email: string): boolean {
  */
 export const getCurrentUser = cache(
   async function getCurrentUser(): Promise<CurrentUser> {
+    /**
+     * ⚠️ **The one way past everything below, and it is why this function is
+     * the only place the branch appears.**
+     *
+     * Pages, Server Actions, both API routes and `lib/chat-handler.ts` all
+     * establish who is asking through this function, so opening it opens the
+     * app — and, just as importantly, nothing else needs an auth branch of its
+     * own. A second one somewhere downstream would be a second thing to keep
+     * true.
+     *
+     * Returning before `auth.getSession()` is deliberate: it skips the session
+     * lookup, the `AUTH_ALLOWED_EMAILS` check and the `ensureUserForAuth`
+     * upsert together, which is what lets the app run with no `NEON_*`
+     * variables and no database. See `lib/dev/mode.ts` for why this cannot be
+     * on in production.
+     */
+    if (devMockEnabled()) return DEV_USER
+
     const { data: session } = await auth.getSession()
 
     const user = session?.user

@@ -22,7 +22,9 @@
     "AWS_ROLE_ARN",
     "NEON_AUTH_BASE_URL",
     "NEON_AUTH_COOKIE_SECRET",
-    "AUTH_ALLOWED_EMAILS"
+    "AUTH_ALLOWED_EMAILS",
+    "DEV_AUTH_BYPASS",
+    "NODE_ENV"
   ],
   "globalPassThroughEnv": ["VERCEL_OIDC_TOKEN", "NO_COLOR"],
   "tasks": {

@@ -1,4 +1,9 @@
 import { S3Client } from "@aws-sdk/client-s3"
+import {
+  createDevCoverLetterStore,
+  createDevResumeStore,
+} from "@/lib/dev/fake-stores"
+import { devMockEnabled } from "@/lib/dev/mode"
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider"
 import {
   createCoverLetterStore,
@@ -59,6 +64,14 @@ let builtFor: string | undefined
  * time, which is the sort of thing a future caching layer would get wrong.
  */
 export function getResumeStore(): ResumeStore {
+  // Before `getObjectStore()`, which reads `readUserStorageConfig()` and
+  // constructs an `S3Client` — the two things this mode exists to not need. See
+  // `lib/dev/fake-stores.ts`.
+  if (devMockEnabled()) {
+    resumes ??= createDevResumeStore()
+    return resumes
+  }
+
   const store = getObjectStore()
   resumes ??= createResumeStore(store)
   return resumes
@@ -80,6 +93,11 @@ export function getResumeStore(): ResumeStore {
  * than "Document storage is unavailable".
  */
 export function getCoverLetterStore(): CoverLetterStore {
+  if (devMockEnabled()) {
+    coverLetters ??= createDevCoverLetterStore()
+    return coverLetters
+  }
+
   const store = getObjectStore()
   coverLetters ??= createCoverLetterStore(store)
   return coverLetters
