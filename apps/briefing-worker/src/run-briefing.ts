@@ -9,7 +9,7 @@ import {
   parseFindings,
   type Findings,
 } from "@workspace/agents"
-import type { Artifact, ClaimedSlot, DueJob, RunFailure } from "@workspace/db"
+import type { Artifact, Job, RunFailure } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 import { runWithLangfuseTrace } from "@workspace/langfuse"
 
@@ -44,7 +44,22 @@ interface RunReportFields {
   durationMs: number
   jobId: string
   runId: string
-  /** The slot this brief is for — not when the run happened to execute. */
+  /**
+   * How this run was asked for.
+   *
+   * Worth a field of its own because {@link RunReportFields.scheduledFor} stops
+   * distinguishing them: an ad-hoc run has no occurrence and files under the
+   * instant it was triggered, so the two are indistinguishable in the logs
+   * without this. "Every run at 09:00 fails" and "every run a person starts
+   * fails" are different diagnoses.
+   */
+  trigger: RunTrigger
+  /**
+   * The slot this brief is for — not when the run happened to execute.
+   *
+   * For a `manual` run there is no slot; this carries the instant the run was
+   * requested, which is what the object key partitions on. See `NewBrief`.
+   */
   scheduledFor: string
   llmCalls: number
   /** Searches that actually returned; an error result proves nothing ran. */
@@ -87,10 +102,46 @@ export interface FailureReport extends RunReportFields {
  */
 export type RunReport = SuccessReport | FailureReport
 
+/**
+ * Whether the tick asked for this run, or a person did.
+ *
+ * `schedule` is `runTick` working through what `dueJobs` returned; `manual` is
+ * someone pressing the button in the dashboard. The pipeline itself is
+ * identical either way — this changes reporting and nothing else.
+ */
+export type RunTrigger = "schedule" | "manual"
+
+/**
+ * What a run needs to know about the occurrence it is filling.
+ *
+ * Structurally a subset of `ClaimedSlot`, which satisfies it, so `runTick`
+ * passes its claim through unchanged. Stated as its own shape because an ad-hoc
+ * run has no slot to claim and therefore no `nextRunAt` to report — requiring
+ * one would mean inventing a value, and an invented field in a type is a lie
+ * the compiler helps tell. Same reasoning as {@link AgentLike}: ask for what
+ * you drive.
+ */
+export interface RunOccurrence {
+  runId: string
+  /**
+   * The instant this brief is filed under — a claimed slot for a scheduled run,
+   * the moment it was requested for an ad-hoc one.
+   */
+  scheduledFor: Date
+}
+
 export interface RunBriefingInput {
-  job: DueJob
-  slot: ClaimedSlot
+  /**
+   * `Job` rather than `DueJob`: this function reads `id`, `name`, `config` and
+   * `userId` and never `nextRunAt`, so the narrowing belongs to the tick that
+   * selected the row and not here. An ad-hoc run of a paused briefing has no
+   * `nextRunAt` at all and is still a legitimate run.
+   */
+  job: Job
+  slot: RunOccurrence
   briefs: BriefStore
+  /** Reported, never acted on. Defaults to `schedule`. */
+  trigger?: RunTrigger
   /**
    * Record the uploaded object against the run. Injected so tests (and the
    * local dry-run harness) can skip the real `artifacts` table without mocking
@@ -157,6 +208,7 @@ export async function runBriefing(
     durationMs: Date.now() - startedAtMs,
     jobId: job.id,
     runId: slot.runId,
+    trigger: input.trigger ?? "schedule",
     scheduledFor: slot.scheduledFor.toISOString(),
     llmCalls,
     searches,

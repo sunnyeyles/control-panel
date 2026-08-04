@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
   artifactsForRun,
+  claimAdHocRun,
   claimJob,
   createJob,
   createPrismaClient,
@@ -16,10 +17,12 @@ import {
   failRun,
   finishRun,
   latestArtifactForJob,
+  latestRunPerJob,
   pauseJob,
   recordArtifact,
   recordRunFindings,
   resumeJob,
+  runningRunForJob,
   startAdHocRun,
   updateJobSchedule,
   type DueJob,
@@ -232,6 +235,83 @@ describeWithDatabase("against a real database", () => {
       }
 
       expect(await claimJob(prisma, job)).toBeUndefined()
+    })
+
+    it("claims one exactly once, whatever the delivery count", async () => {
+      const job = await dueJob("ad-hoc-claim")
+      const run = await startAdHocRun(prisma, job.id)
+
+      const first = await claimAdHocRun(prisma, run.id)
+      const second = await claimAdHocRun(prisma, run.id)
+
+      expect(first).toMatchObject({ jobId: job.id })
+      expect(first?.startedAt.getTime()).toBe(run.startedAt.getTime())
+      expect(second).toBeUndefined()
+
+      const claimed = await prisma.run.findUnique({ where: { id: run.id } })
+      expect(claimed?.claimedAt).not.toBeNull()
+    })
+
+    it("refuses to claim a run that is already terminal", async () => {
+      const job = await dueJob("ad-hoc-terminal")
+      const run = await startAdHocRun(prisma, job.id)
+
+      expect(await finishRun(prisma, run.id)).toBe(true)
+      expect(await claimAdHocRun(prisma, run.id)).toBeUndefined()
+    })
+
+    it("refuses to claim a scheduled run, which the slot already protects", async () => {
+      const job = await dueJob("ad-hoc-not-scheduled")
+      const { runId } = await claimOrFail(job)
+
+      expect(await claimAdHocRun(prisma, runId)).toBeUndefined()
+    })
+
+    it("does not advance the schedule", async () => {
+      const job = await dueJob("ad-hoc-no-slot")
+      const before = await prisma.job.findUnique({ where: { id: job.id } })
+
+      const run = await startAdHocRun(prisma, job.id)
+      await claimAdHocRun(prisma, run.id)
+
+      const after = await prisma.job.findUnique({ where: { id: job.id } })
+      expect(after?.nextRunAt?.getTime()).toBe(before?.nextRunAt?.getTime())
+    })
+  })
+
+  describe("reading runs back", () => {
+    it("returns the newest run of each job and nobody else's", async () => {
+      const mine = await dueJob("latest-mine")
+      const older = await startAdHocRun(prisma, mine.id)
+      await finishRun(prisma, older.id)
+      const newest = await startAdHocRun(prisma, mine.id)
+
+      const summaries = await latestRunPerJob(prisma, userId)
+      const forJob = summaries.filter((row) => row.jobId === mine.id)
+
+      expect(forJob).toHaveLength(1)
+      expect(forJob[0]?.id).toBe(newest.id)
+      expect(forJob[0]?.status).toBe("running")
+      expect(forJob[0]?.scheduledFor).toBeNull()
+
+      const stranger = await ensureUserForAuth(prisma, randomUUID())
+      expect(await latestRunPerJob(prisma, stranger.id)).toEqual([])
+    })
+
+    it("finds a run still going, and ignores one that started too long ago", async () => {
+      const job = await dueJob("in-flight")
+      const run = await startAdHocRun(prisma, job.id)
+
+      const wellBefore = new Date(run.startedAt.getTime() - 60_000)
+      const wellAfter = new Date(run.startedAt.getTime() + 60_000)
+
+      expect(await runningRunForJob(prisma, job.id, wellBefore)).toMatchObject({
+        id: run.id,
+      })
+      expect(await runningRunForJob(prisma, job.id, wellAfter)).toBeUndefined()
+
+      await finishRun(prisma, run.id)
+      expect(await runningRunForJob(prisma, job.id, wellBefore)).toBeUndefined()
     })
   })
 

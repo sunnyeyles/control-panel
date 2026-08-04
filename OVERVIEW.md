@@ -18,6 +18,7 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Dashboard — chat, documents, briefings       | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                                                        |
 | Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                                                  |
+| A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                               |
 | One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                               |
 | What `jobs.config` means                     | `apps/briefing-worker/src/job-search-config.ts`                                                                                          |
 | Scout and brief-writer agents                | `packages/agents/src/` — one `createX()` factory per module                                                                              |
@@ -45,6 +46,18 @@ is `get_current_time` and `web_search` — `seekSearch` is deliberately not in i
 - **Runs are idempotent.** `briefId` is the run id and the key partitions on the
   occurrence, so re-executing a run overwrites one object rather than making a
   second. Claiming is at-most-once; every duplicate occurrence is a paid run.
+- **Two ways in, one pipeline, two claims.** The hourly tick claims a _slot_
+  (`claimJob`, guarded by the partial unique index on
+  `(job_id, scheduled_for)`); a run someone triggers claims the _row_
+  (`claimAdHocRun`, guarded by `runs.claimed_at`). Both are at-most-once and
+  neither is optional — the trigger is an asynchronous Lambda invocation, which
+  AWS delivers at least once. A triggered run takes no slot and leaves
+  `next_run_at` alone.
+- **A failed tick throws; a failed triggered run does not.** The tick's throw is
+  what produces the `Errors` datapoint its alarm watches, and that alarm is
+  daily and latching. A run a person started reports itself on its `runs` row
+  and in the UI, so routing it into the alarm as well would spend the only
+  signal that says _the schedule is broken_.
 - **The scout returns data, not side effects.** No writes, no uploads, no DB
   calls inside it. It carries one tool, so this is structural.
 - **URLs are copied, never composed.** Every posting must carry a URL a search
@@ -64,6 +77,8 @@ is `get_current_time` and `web_search` — `seekSearch` is deliberately not in i
 ```mermaid
 flowchart TD
     E[EventBridge Scheduler — hourly tick] --> F[AWS Lambda briefing worker]
+    B2[Dashboard — Run now] -->|insert ad-hoc runs row| D
+    B2 -->|async invoke, names the run| F
     F --> D[(Neon Postgres — jobs, runs, via Prisma)]
     D -->|due job + criteria| G[Scout agent]
     G --> T[seek_search tool → Apify SEEK actor]
@@ -139,7 +154,12 @@ flowchart TD
   either, and `latestArtifactForJob()` still has no caller outside its own tests
   — the briefings page deliberately does not use it, because it orders on run
   start _and_ artifact creation and stops being well defined once a run writes
-  more than one artifact.
+  more than one artifact. What _does_ read a **Run** now is the briefings page's
+  status line: `apps/dashboard/lib/briefing-runs/run-activity.ts` shows each
+  briefing's most recent Run whatever became of it — running, failed, or too
+  long in `running` to still be believed — which is what the **Run now** button
+  needs to be watchable. That is a status line, not a history: nothing lists
+  more than one Run per briefing, and nothing can cancel one.
 
 ## Infrastructure
 
@@ -171,8 +191,12 @@ flowchart TD
   S3 SDK — `packages/user-storage/src/s3-user-object-store.ts`, and
   `apps/dashboard/lib/storage.ts`, which exists only to attach Vercel's OIDC
   credential provider through the store's `client` seam. The package deliberately
-  accepts no credentials. In the worker, `index.ts` is the only file that knows
-  it runs on Lambda.
+  accepts no credentials. One further file imports the **Lambda** SDK —
+  `apps/dashboard/lib/briefing-runs/invoke-worker.ts` — for the same reason and
+  behind the same kind of seam: it exposes a `BriefingInvoker` interface, so the
+  action that triggers a run never sees a client. In the worker, `index.ts` is
+  the only file that knows it runs on Lambda, and it is where the invocation
+  payload is read.
 - Preserve source URLs for traceability.
 - Never make the bucket or the briefs public, and never store a public URL as the
   file reference; the object key is the persistent reference.
