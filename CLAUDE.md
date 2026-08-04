@@ -91,19 +91,29 @@ Tests are their own task, and a thin one:
 pnpm test        # turbo test
 ```
 
-**Only six workspaces have tests** — `@workspace/dashboard`,
+**Only seven workspaces have tests** — `@workspace/dashboard`,
 `@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools`,
-`@workspace/agents` and `@workspace/briefing-worker`. Vitest is a devDependency
-of those alone; `turbo test` is a no-op in the other five. Do not assume a
-package is covered because the command exits 0. Adding tests to another
+`@workspace/agents`, `@workspace/briefing-worker` and `@workspace/ui`. Vitest is
+a devDependency of those alone; `turbo test` is a no-op in the other four. Do not
+assume a package is covered because the command exits 0. Adding tests to another
 workspace means adding `vitest` to it and a `test` script — the `test` task in
 `turbo.json` is already there.
 
 In the five that emit `dist/` the same arrangement repeats and is deliberate:
 `src/**/*.test.ts` is excluded from `tsconfig.json` so tests never reach
 `dist/`, and a `tsconfig.test.json` covers them with `noEmit` because Vitest
-transpiles without typechecking. `typecheck` runs both. The dashboard needs
-neither half — it is `noEmit` already.
+transpiles without typechecking. `typecheck` runs both. The dashboard and
+`@workspace/ui` need neither half — both are `noEmit` already.
+
+**`@workspace/ui` is tested only under `src/lib/`, and that boundary is the
+point.** Everything under `src/components/` is React over a DOM, which would
+mean a browser environment and — for the editor — ProseMirror. What is covered
+is string-to-string logic deliberately moved out of a component so it could be
+reached without any of that: `src/lib/markdown.ts` pins the markdown dialect the
+rich-text editor round-trips through, because on Turndown's defaults an
+_untouched_ save rewrote every bullet, emphasis and rule in the document. That
+is a data-fidelity property, not a rendering one, so it belongs in a test rather
+than in a comment.
 
 **`@workspace/db` generates its Prisma Client through a `generate` Turborepo
 task**, which `build`, `typecheck`, `test` and `dev` all depend on. They used to

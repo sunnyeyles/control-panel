@@ -4,10 +4,12 @@ import * as React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
-import { marked } from "marked"
-import TurndownService from "turndown"
 
 import { cn } from "@workspace/ui/lib/utils"
+import {
+  createMarkdownSerializer,
+  markdownToHtml,
+} from "@workspace/ui/lib/markdown"
 import { exportMarkdownToPdf } from "@workspace/ui/lib/pdf-export"
 import { Button } from "@workspace/ui/components/button"
 import {
@@ -63,10 +65,6 @@ export interface FileEditorDialogProps {
   className?: string
 }
 
-function markdownToHtml(markdown: string): string {
-  return marked.parse(markdown, { async: false })
-}
-
 function FileEditorDialog({
   files,
   onFilesChange,
@@ -87,11 +85,7 @@ function FileEditorDialog({
   const isOpen = open ?? internalOpen
   const currentFiles = onFilesChange ? files : internalFiles
 
-  const turndown = useMemo(
-    () =>
-      new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" }),
-    []
-  )
+  const turndown = useMemo(() => createMarkdownSerializer(), [])
 
   const activeFile =
     currentFiles.find((file) => file.id === activeId) ?? currentFiles[0]

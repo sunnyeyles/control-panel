@@ -1090,9 +1090,10 @@ describe("saveCoverLetter", () => {
         extension: ".md",
       })
 
-      // Turndown emits CRLF and the writer emits LF. Left alone, the same
-      // letter would have different bytes depending on which last touched it,
-      // and saving an unedited letter would rewrite every line.
+      // ⚠️ This asserts the *direct-POST* path, not anything a user can do.
+      // ProseMirror normalizes CRLF while parsing the clipboard and Turndown
+      // emits LF (pinned in the UI package's `markdown.test.ts`), so the editor
+      // cannot send CRLF — a hand-made FormData against the action can.
       expect(stored.text()).toBe("Dear Team,\n\nI would like to apply.")
     })
 

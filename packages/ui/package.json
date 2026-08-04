@@ -6,6 +6,7 @@
   "scripts": {
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -47,7 +48,8 @@
     "eslint": "^9",
     "shadcn": "^4.15.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   },
   "exports": {
     "./globals.css": "./src/styles/globals.css",

@@ -42,12 +42,21 @@ const SAVE_FAILED =
  * changes nothing on screen: same id, no reload. Opening only once the bytes are
  * in hand means the editor always mounts over a complete file.
  *
- * **`session` keys the dialog for the same reason**, one step later. A second
- * open re-fetches, and the re-fetched letter has the same id as the first — so
- * without a remount the effect would again decline to re-run and the editor
- * would show the previous visit's text rather than what is stored. Incrementing
- * the key per open makes each visit a fresh editing session over freshly
- * fetched bytes, which is exactly what it is.
+ * **`session` rides in the file's id for the same reason**, one step later. A
+ * second open re-fetches, and on a bare `postingId` the re-fetched letter would
+ * carry the same id as the first — so the effect would again decline to re-run
+ * and the editor would show the previous visit's text rather than what is
+ * stored. Suffixing the id makes every visit a new file as far as the editor is
+ * concerned, which is what a fresh editing session over freshly fetched bytes
+ * actually is.
+ *
+ * ⚠️ **The id, deliberately, rather than a `key` on the dialog.** Remounting
+ * would re-run the effect just as well, but it also destroys and rebuilds the
+ * trigger in the same commit that opens the dialog — and Radix records the
+ * element to restore focus to at mount time. The button the user just pressed
+ * would already be detached, so closing would drop focus to `<body>` and a
+ * keyboard user would lose their place on the page. Nothing downstream reads
+ * the id: {@link handleSave} sends the `postingId` prop.
  *
  * Refetching every time rather than caching follows from the same idea: the
  * stored letter is the thing being edited, and a cached copy would show the user
@@ -100,10 +109,16 @@ export function EditCoverLetterButton({
         return
       }
 
+      const visit = session + 1
+
       setFiles([
-        { id: postingId, name: filename, content: await response.text() },
+        {
+          id: `${postingId}#${visit}`,
+          name: filename,
+          content: await response.text(),
+        },
       ])
-      setSession((previous) => previous + 1)
+      setSession(visit)
       setOpen(true)
     } catch (error) {
       // A dropped connection or an aborted request. Nothing the user can act on
@@ -163,7 +178,6 @@ export function EditCoverLetterButton({
   return (
     <div className="flex flex-col gap-2">
       <FileEditorDialog
-        key={session}
         files={files}
         onFilesChange={setFiles}
         open={open}

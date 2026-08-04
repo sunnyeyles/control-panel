@@ -82,8 +82,8 @@ export function getDevCoverLetterStore(): CoverLetterStore {
 }
 
 // Not exported: the only correct way to reach these is through the memoized
-// getters below. A second `createX()` call is a second `Map`, which is exactly
-// the bug the getters exist to prevent.
+// getters above. A second `createX()` call is a second `Map`, which is exactly
+// the bug those getters exist to prevent.
 function createDevResumeStore(): ResumeStore {
   const stored = new Map<string, StoredResume & { bytes: Uint8Array }>()
 

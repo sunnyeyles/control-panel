@@ -405,10 +405,24 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     // Normalized before it is measured and before it is stored. Two separate
     // reasons:
     //
-    // `\r\n` because Turndown emits CRLF and the writer emits LF, so without
-    // this the same letter has different bytes depending on whether a model or
-    // a person last touched it — and every save of an unedited letter would be
-    // a diff. The store is told `text/markdown`, and this keeps that one thing.
+    // ⚠️ **`\r\n` is for the POST, not for the editor — nothing the UI does can
+    // produce it.** ProseMirror normalizes `\r\n` to `\n` as it parses the
+    // clipboard, so a letter pasted out of a Windows editor is already LF before
+    // it is a document; Turndown then emits LF, which
+    // `packages/ui/src/lib/markdown.test.ts` pins. Both halves of the only path
+    // a user has are covered, and this line is unreachable through it.
+    //
+    // It stays because a Server Action is reachable by direct POST with a
+    // FormData nobody typed — see `apps/dashboard/CLAUDE.md` — and the store is
+    // told `text/markdown`. Cheaper to normalize than to reason about later.
+    // Do not read it as evidence the editor emits CRLF; two comments here have
+    // now claimed a source for it that does not hold.
+    //
+    // ⚠️ **Line endings are the only normalization this side does, and the
+    // larger half is not here.** Whether an *unedited* save is a no-op depends
+    // on the markdown dialect the editor round-trips through, which is fixed in
+    // `createMarkdownSerializer()` and asserted there. This action cannot check
+    // it: by the time the bytes arrive they are already serialized.
     //
     // `trim()` because a letter that is only whitespace is an empty one however
     // much of it there is, and Turndown leaves a trailing newline on nearly

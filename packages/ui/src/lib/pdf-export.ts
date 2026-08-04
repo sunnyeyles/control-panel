@@ -24,6 +24,14 @@ interface InlineRun {
   code: boolean
 }
 
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+}
+
 /** Flatten marked inline tokens into style runs. */
 function flattenInline(
   tokens: Token[] | undefined,
@@ -77,15 +85,17 @@ function flattenInline(
         }
     }
   }
-  // Unescape HTML entities marked leaves in text tokens
+  // Unescape the entities marked leaves in text tokens.
+  //
+  // One pass rather than five chained replaces: `&amp;lt;` is an author who
+  // wrote a literal `&lt;`, and unescaping `&amp;` first would hand `&lt;` to
+  // the next replace, which would turn it into `<`.
   return runs.map((r) => ({
     ...r,
-    text: r.text
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'"),
+    text: r.text.replace(
+      /&(amp|lt|gt|quot|#39);/g,
+      (match, entity: string) => ENTITIES[entity] ?? match
+    ),
   }))
 }
 
