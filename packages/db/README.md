@@ -12,6 +12,8 @@ errors.ts      the typed error union
 config.ts      reads the environment
 schedule.ts    computeNextRunAt — pure, and where the bugs are
 users.ts       ensureUserForAuth
+cover-letter-instructions.ts
+               read / upsert one user's letter-writing preferences
 jobs.ts        create / claim / due / schedule helpers
 runs.ts        finish / fail / startAdHoc / recordFindings
 artifacts.ts   record / latest helpers
@@ -144,7 +146,19 @@ Postgres:
   record a brief was written from can be read back without cloud credentials.
   It has no lifecycle rule and will accumulate — known, and accepted because a
   forward-only migration is easier to add than to withdraw.
-- **`on delete restrict` throughout, never cascade.**
+- **`on delete restrict` everywhere provenance is involved**, and
+  `cover_letter_instructions` is the single exception.
+- **`cover_letter_instructions` cascades from `users`, and only it does.** The
+  rule elsewhere is restrict, because deleting a user who owns jobs — or a job
+  with runs — should fail loudly rather than silently erase provenance. This row
+  records no such thing: it is a preference with no independent existence, and
+  restricting on it would make a user undeletable for the sake of a settings
+  row. Any new table gets `restrict` unless it can make the same argument.
+  Its two text columns default to `''` rather than being nullable, so "nothing
+  set" has one representation. They stay two columns rather than one because
+  the prompt built from them fences each differently — rules are followed, an
+  example letter is imitated and never mined for facts — and one column could
+  not express that distinction.
 - **`object_key` holds an S3 key and the CHECK enforces it** — no scheme prefix,
   no leading slash.
 - **`auth_user_id` is text, nullable, unique, and not an FK to `neon_auth`.**

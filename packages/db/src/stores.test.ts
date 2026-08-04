@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   artifactsForRun,
   claimJob,
+  coverLetterInstructions,
   createJob,
   createPrismaClient,
   dueJobs,
@@ -20,6 +21,7 @@ import {
   recordArtifact,
   recordRunFindings,
   resumeJob,
+  saveCoverLetterInstructions,
   startAdHocRun,
   updateJobSchedule,
   type DueJob,
@@ -482,6 +484,103 @@ describeWithDatabase("against a real database", () => {
           [authUserId, other.id]
         )
       ).rejects.toThrow()
+    })
+  })
+
+  describe("cover letter instructions", () => {
+    it("reads nothing for a user who has never saved any", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      expect(await coverLetterInstructions(prisma, fresh.id)).toBeUndefined()
+    })
+
+    it("creates the row on the first save", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      const saved = await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: 'Never use the word "passionate".',
+        exampleLetter: "Dear Hiring Team,",
+      })
+
+      expect(saved.userId).toBe(fresh.id)
+      expect(await coverLetterInstructions(prisma, fresh.id)).toEqual(saved)
+    })
+
+    it("updates the row on a second save rather than adding one", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "Australian spelling.",
+        exampleLetter: "",
+      })
+      await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: 'Sign off "Kind regards".',
+        exampleLetter: "Dear Hiring Team,",
+      })
+
+      const row = await coverLetterInstructions(prisma, fresh.id)
+      expect(row?.instructions).toBe('Sign off "Kind regards".')
+      expect(row?.exampleLetter).toBe("Dear Hiring Team,")
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".cover_letter_instructions where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.count).toBe("1")
+    })
+
+    it("moves updated_at forward on the second save", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      const first = await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "Open with why the role.",
+        exampleLetter: "",
+      })
+      const second = await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "Open with why the company.",
+        exampleLetter: "",
+      })
+
+      expect(second.updatedAt.getTime()).toBeGreaterThan(
+        first.updatedAt.getTime()
+      )
+    })
+
+    it("stores empty strings rather than nulls when nothing is set", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "",
+        exampleLetter: "",
+      })
+
+      const row = await coverLetterInstructions(prisma, fresh.id)
+      expect(row?.instructions).toBe("")
+      expect(row?.exampleLetter).toBe("")
+
+      const { rows } = await admin.query<{
+        instructions: string | null
+        example_letter: string | null
+      }>(
+        `select instructions, example_letter from "${SCHEMA}".cover_letter_instructions where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.instructions).toBe("")
+      expect(rows[0]?.example_letter).toBe("")
+    })
+
+    it("goes with the user, which is the whole point of the cascade", async () => {
+      const doomed = await prisma.user.create({ data: {} })
+      await saveCoverLetterInstructions(prisma, doomed.id, {
+        instructions: "Delete me with my user.",
+        exampleLetter: "",
+      })
+
+      await admin.query(`delete from "${SCHEMA}".users where id = $1`, [
+        doomed.id,
+      ])
+
+      expect(await coverLetterInstructions(prisma, doomed.id)).toBeUndefined()
     })
   })
 

@@ -11,16 +11,20 @@ export {
   CandidateProfileSchema,
   CoverLetterRequestSchema,
   MAX_BACKGROUND_CHARS,
+  MAX_EXAMPLE_LETTER_CHARS,
+  MAX_INSTRUCTIONS_CHARS,
   MIN_BACKGROUND_CHARS,
   toCoverLetterPrompt,
   UndraftableError,
   type CandidateProfile,
   type CoverLetterRequest,
+  type LetterInstructions,
   type UndraftableReason,
 } from "./cover-letter.ts"
 
 export {
   COVER_LETTER_WRITER_SYSTEM_PROMPT,
+  coverLetterSystemPrompt,
   createCoverLetterWriter,
   type CreateCoverLetterWriterOptions,
 } from "./cover-letter-writer.ts"

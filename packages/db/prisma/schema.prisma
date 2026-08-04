@@ -21,9 +21,28 @@ model User {
   // users remain legal; UNIQUE still maps one auth identity to at most one row.
   authUserId String?  @unique @map("auth_user_id")
 
-  jobs Job[]
+  jobs                    Job[]
+  coverLetterInstructions CoverLetterInstructions?
 
   @@map("users")
+}
+
+model CoverLetterInstructions {
+  userId        String   @id @map("user_id") @db.Uuid
+  instructions  String   @default("")
+  // A letter the candidate wants imitated. Held apart from `instructions`
+  // rather than concatenated into it, because the prompt has to fence the two
+  // differently: rules are followed, an example is a style reference and never
+  // a source of facts.
+  exampleLetter String   @default("") @map("example_letter")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // The one deliberate cascade. This row is a preference with no independent
+  // existence, not a record that something happened, so `Restrict` would make a
+  // user undeletable for the sake of a settings row. Everywhere else restricts.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("cover_letter_instructions")
 }
 
 model Job {

@@ -2,6 +2,11 @@ import { readFile } from "node:fs/promises"
 
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { Agent } from "@workspace/agents"
+import type { LetterInstructions } from "@workspace/agents/cover-letter"
+import {
+  COVER_LETTER_WRITER_SYSTEM_PROMPT,
+  coverLetterSystemPrompt,
+} from "@workspace/agents/cover-letter-writer"
 import type { Findings, Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
 import type { PrismaClient } from "@workspace/db"
@@ -260,6 +265,16 @@ class FakeResumes implements ResumeStore {
 class FakeWriter {
   readonly prompts: string[] = []
   readonly configs: unknown[] = []
+  /**
+   * What `coverLetterSystemPrompt` composed for each draft.
+   *
+   * The system prompt never reaches `invoke()` — the real agent bakes it in at
+   * construction — so recording the extras alone would only prove the read
+   * happened. The harness composes with the same function the production
+   * default uses, which makes these assertions about the text the model would
+   * actually have been given.
+   */
+  readonly systemPrompts: string[] = []
   reply = LETTER
 
   async invoke(
@@ -282,14 +297,48 @@ class FakeWriter {
 class FakeDb {
   readonly runs = new Map<string, { jobUserId: string; findings: unknown }>()
   readonly writes: string[] = []
+  /** Who the saved instructions were read for. Empty means never read. */
+  readonly instructionReads: string[] = []
+
+  /** The saved row, or `undefined` for a user who never opened Settings. */
+  instructions: { instructions: string; exampleLetter: string } | undefined
+  /** Set to make the read throw, which must fail the draft rather than skip it. */
+  instructionsError: unknown
 
   seedRun(id: string, jobUserId: string, recorded: unknown): this {
     this.runs.set(id, { jobUserId, findings: recorded })
     return this
   }
 
+  seedInstructions(values: {
+    instructions: string
+    exampleLetter: string
+  }): this {
+    this.instructions = values
+    return this
+  }
+
   asPrisma(): PrismaClient {
     return {
+      // Backs the real `coverLetterInstructions` helper from `@workspace/db`,
+      // rather than mocking the helper itself: the shape of the row it returns
+      // is what the action turns into extras, and a stub over the helper would
+      // agree with whatever the test author remembered that shape to be.
+      coverLetterInstructions: {
+        findUnique: async ({ where }: { where: { userId: string } }) => {
+          if (this.instructionsError) throw this.instructionsError
+
+          this.instructionReads.push(where.userId)
+
+          if (!this.instructions) return null
+
+          return {
+            userId: where.userId,
+            ...this.instructions,
+            updatedAt: NOW,
+          }
+        },
+      },
       run: {
         findUnique: async ({ where }: { where: { id: string } }) => {
           const found = this.runs.get(where.id)
@@ -326,6 +375,8 @@ interface Harness {
   resumes: FakeResumes
   writer: FakeWriter
   db: FakeDb
+  /** The prompt the writer was built with for the first draft. */
+  systemPrompt: () => string
 }
 
 function harness(
@@ -352,12 +403,26 @@ function harness(
     getPrisma: () => db.asPrisma(),
     getResumes: () => resumes,
     getCoverLetters: () => createCoverLetterStore(objects),
-    createWriter: () => writer.asAgent(),
+    // The production default is
+    // `createCoverLetterWriter({ systemPrompt: coverLetterSystemPrompt(extras) })`,
+    // and the composition is mirrored here so the assertions below are about
+    // the prompt the model would have been built with.
+    createWriter: (extras: LetterInstructions) => {
+      writer.systemPrompts.push(coverLetterSystemPrompt(extras))
+      return writer.asAgent()
+    },
     now: () => NOW,
     newResetKey: () => RESET_KEY,
   })
 
-  return { draft: actions.draftCoverLetter, objects, resumes, writer, db }
+  return {
+    draft: actions.draftCoverLetter,
+    objects,
+    resumes,
+    writer,
+    db,
+    systemPrompt: () => writer.systemPrompts[0] ?? "",
+  }
 }
 
 function form(fields: Record<string, string>): FormData {
@@ -734,6 +799,58 @@ describe("draftCoverLetter", () => {
       await subject.draft(IDLE, form(VALID))
 
       expect(subject.db.writes).toEqual([])
+    })
+  })
+
+  describe("the candidate's saved instructions", () => {
+    it("composes the saved instructions and example into the writer's system prompt", async () => {
+      subject.db.seedInstructions({
+        instructions:
+          'Never use the word "passionate". Sign off "Kind regards".',
+        exampleLetter: "Dear Hiring Team,\n\nI read the advertisement twice.",
+      })
+
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("success")
+      expect(subject.db.instructionReads).toEqual([USER_ID])
+
+      // Not merely "the read happened": the saved text is in the prompt the
+      // writer was built with, verbatim and under its own heading. A read whose
+      // result went nowhere would pass an assertion on the read alone.
+      const prompt = subject.systemPrompt()
+      expect(prompt).toContain('Never use the word "passionate"')
+      expect(prompt).toContain("I read the advertisement twice.")
+      expect(prompt).toContain("An example letter the candidate chose")
+      // And it extends rather than replaces — the built-in rules are still all
+      // there, ahead of it.
+      expect(prompt.startsWith(COVER_LETTER_WRITER_SYSTEM_PROMPT)).toBe(true)
+    })
+
+    it("drafts with the unmodified prompt for a user who has saved nothing", async () => {
+      // The ordinary case, not an edge one: nobody has instructions until they
+      // open Settings, and the letters they got before this feature existed
+      // must be the letters they keep getting.
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("success")
+      expect(subject.db.instructionReads).toEqual([USER_ID])
+      expect(subject.systemPrompt()).toBe(COVER_LETTER_WRITER_SYSTEM_PROMPT)
+    })
+
+    it("fails the draft when the instructions cannot be read, rather than drafting without them", async () => {
+      // ⚠️ The point of the ticket's "a failed read fails the draft" clause.
+      // Drafting anyway would produce a letter that looks perfect and ignores
+      // every rule the user set, with nothing anywhere saying so — the same
+      // silent failure `assertDraftable` exists to prevent.
+      subject.db.instructionsError = new Error("neon is asleep")
+
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("error")
+      // Not a model call, and not a stored letter.
+      expect(subject.writer.prompts).toHaveLength(0)
+      expect(subject.objects.puts).toHaveLength(0)
     })
   })
 

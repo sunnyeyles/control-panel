@@ -1,5 +1,14 @@
-import { devJobs, devRuns } from "@/lib/dev/fixtures"
-import type { Job, PrismaClient, Run } from "@workspace/db"
+import {
+  devCoverLetterInstructions,
+  devJobs,
+  devRuns,
+} from "@/lib/dev/fixtures"
+import type {
+  CoverLetterInstructions,
+  Job,
+  PrismaClient,
+  Run,
+} from "@workspace/db"
 
 /**
  * Postgres, for `DEV_AUTH_BYPASS=1` only — an in-memory stand-in that honours
@@ -31,6 +40,12 @@ export function createDevPrisma(): PrismaClient {
     },
     run: {
       findUnique: async (query: ById) => db.findRun(query.where.id),
+    },
+    coverLetterInstructions: {
+      findUnique: async (query: ByUserId) =>
+        db.findCoverLetterInstructions(query.where.userId),
+      upsert: async (query: UpsertCoverLetterInstructions) =>
+        db.upsertCoverLetterInstructions(query),
     },
     /**
      * Unreachable — `getCurrentUser()` returns before `ensureUserForAuth`.
@@ -68,12 +83,34 @@ interface FindManyJobs {
   }
 }
 
+/** How the one row-per-user table is addressed: its owner *is* its primary key. */
+interface ByUserId {
+  where: { userId: string }
+}
+
+/**
+ * Both columns are `@default("")` in the schema, so either half of the upsert
+ * may leave either field out and get the empty string — matched here rather
+ * than assumed, since a `create` that omitted one would otherwise write
+ * `undefined` into a column typed `string`.
+ */
+type CoverLetterInstructionsValues = Partial<
+  Pick<CoverLetterInstructions, "instructions" | "exampleLetter">
+>
+
+interface UpsertCoverLetterInstructions extends ByUserId {
+  create: { userId: string } & CoverLetterInstructionsValues
+  update: CoverLetterInstructionsValues
+}
+
 type JobCreateData = Omit<Job, "id" | "createdAt" | "updatedAt">
 
 /** The rows, and the only place under the flag that holds any state. */
 class DevDb {
   private readonly jobs: Job[] = devJobs()
   private readonly runs: Run[] = devRuns()
+  private readonly coverLetterInstructions: CoverLetterInstructions[] =
+    devCoverLetterInstructions()
   private nextId = 1
 
   /**
@@ -152,6 +189,42 @@ class DevDb {
 
     Object.assign(job, data, { updatedAt: new Date() })
     return job
+  }
+
+  /**
+   * `null`, not an empty row, for a user who has never saved: the caller draws
+   * a distinction between "no preference was ever expressed" and "it was, and
+   * it is empty", and answering `{ instructions: "" }` here would erase it.
+   */
+  findCoverLetterInstructions(userId: string): CoverLetterInstructions | null {
+    return (
+      this.coverLetterInstructions.find((row) => row.userId === userId) ?? null
+    )
+  }
+
+  /**
+   * Create and update in the one call, as Prisma does — and the created row
+   * lives in the same array as the fixture, so the save survives the redirect
+   * after it and a restart puts the fixture back.
+   */
+  upsertCoverLetterInstructions(
+    query: UpsertCoverLetterInstructions
+  ): CoverLetterInstructions {
+    const { userId } = query.where
+    const existing = this.findCoverLetterInstructions(userId)
+    const written = existing ? query.update : query.create
+
+    const row: CoverLetterInstructions = {
+      userId,
+      instructions: written.instructions ?? existing?.instructions ?? "",
+      exampleLetter: written.exampleLetter ?? existing?.exampleLetter ?? "",
+      updatedAt: new Date(),
+    }
+
+    if (existing) return Object.assign(existing, row)
+
+    this.coverLetterInstructions.push(row)
+    return row
   }
 
   /**
