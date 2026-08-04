@@ -56,7 +56,12 @@ export function AgentChat({
   placeholder = "Ask anything…",
   className,
 }: AgentChatProps) {
-  const [sessionId] = useState(crypto.randomUUID)
+  // Wrapped in an arrow rather than passed as `useState(crypto.randomUUID)`.
+  // React treats a function argument as a lazy initializer and calls it bare,
+  // which detaches the method from `crypto`; `randomUUID` is native and rejects
+  // a `this` that is not a `Crypto`, throwing "Illegal invocation" and taking
+  // the whole page down with it — there is no error boundary above this.
+  const [sessionId] = useState(() => crypto.randomUUID())
   const transport = useMemo(
     () => new DefaultChatTransport({ api, body: { sessionId } }),
     [api, sessionId]
