@@ -1,80 +1,29 @@
-"use client"
+import { resolveCallbackOrigin } from "@/lib/auth/callback-origin"
 
-import * as React from "react"
-
-import { authClient } from "@/lib/auth/client"
-import { Button } from "@workspace/ui/components/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@workspace/ui/components/card"
-import { BotIcon } from "lucide-react"
+import { SignInForm } from "./sign-in-form"
 
 /**
- * Built from `@workspace/ui` rather than `@neondatabase/auth-ui`.
+ * A server component wrapping a client form, purely to read the environment.
  *
- * The prebuilt components ship their own stylesheet, and this repo has exactly
- * one — `packages/ui/src/styles/globals.css`, owned by the UI package. A second
- * one competing with it is a worse trade than a form we write ourselves.
+ * The form has to be a client component — it holds pending state and calls the
+ * browser auth client — and `VERCEL_BRANCH_URL` is not a `NEXT_PUBLIC_`
+ * variable, so it is not in the browser bundle. Reading it here and passing the
+ * result down keeps it that way: prefixing it instead would inline the value at
+ * build time (`next/dist/docs/01-app/02-guides/environment-variables.md`) and
+ * publish an internal hostname to every visitor of every environment, to solve
+ * a problem one prop already solves.
  *
- * There is no sign-up form and there will not be one: signup is closed, and the
- * allowlist in `lib/auth/current-user.ts` is what enforces it.
+ * Why the origin cannot simply be `window.location.origin` — the reason this
+ * split exists at all — is in `lib/auth/callback-origin.ts`.
+ *
+ * **This page prerenders as static, so the read happens at build time**, and
+ * that is fine rather than a thing to correct with `force-dynamic`. Every
+ * deployment is its own build, and `VERCEL_BRANCH_URL` is a property of the
+ * branch, so the baked value is the right one for any deployment that can serve
+ * this HTML. Keeping it static also leaves the one page an unauthenticated
+ * visitor always hits served from the edge. A variable that genuinely varied
+ * per request would need `force-dynamic` here — this one does not.
  */
-type Provider = "github" | "google"
-
 export default function SignInPage() {
-  const [pending, setPending] = React.useState<Provider | undefined>()
-  const [error, setError] = React.useState<string | undefined>()
-
-  async function signIn(provider: Provider) {
-    setPending(provider)
-    setError(undefined)
-    try {
-      await authClient.signIn.social({
-        provider,
-        callbackURL: window.location.origin,
-      })
-    } catch (cause) {
-      console.error(`sign-in: ${provider} failed`, cause)
-      setError("Could not start sign-in. Try again.")
-      setPending(undefined)
-    }
-  }
-
-  return (
-    <main className="flex min-h-svh items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="items-center text-center">
-          <BotIcon className="size-6" />
-          <CardTitle>Control Panel</CardTitle>
-          <CardDescription>
-            Sign in to continue. Access is limited to approved accounts.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <Button
-            onClick={() => signIn("github")}
-            disabled={pending !== undefined}
-          >
-            {pending === "github" ? "Redirecting…" : "Continue with GitHub"}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => signIn("google")}
-            disabled={pending !== undefined}
-          >
-            {pending === "google" ? "Redirecting…" : "Continue with Google"}
-          </Button>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-    </main>
-  )
+  return <SignInForm callbackOrigin={resolveCallbackOrigin(process.env)} />
 }
