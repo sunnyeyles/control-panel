@@ -67,6 +67,23 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      # First, because it needs nothing else and because of how the alternative
+      # fails. Without the secret `neon` exits with "Cannot run interactive auth
+      # in CI" — true, and it names neither the secret nor this workflow, forty
+      # seconds into a job whose install step was pure waste. Assert the input
+      # before spending anything on it, as `deploy-infra.yml` does with its
+      # repository variables.
+      - name: Check the NEON_API_KEY secret is set
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY:-}" ]; then
+            echo "::error::NEON_API_KEY is not set. This workflow applies Prisma"
+            echo "migrations to Neon and cannot authenticate without it. Add it"
+            echo "under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
           # `git checkout origin/main -- …` below needs main to exist locally,
@@ -104,21 +121,15 @@ jobs:
           # ::add-mask:: before anything else can echo it. Everything after this
           # point is free to fail loudly without printing credentials.
           echo "::add-mask::$url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-
-      # `prisma.config.ts` falls back to a localhost placeholder when the
-      # variable is empty, so an unset or misnamed secret would surface as
-      # "connection refused to 127.0.0.1" — a confusing way to learn the secret
-      # is missing. Same reasoning as test.yml's skip check: assert the input
-      # rather than let its absence become a misleading failure downstream.
-      - name: Check the connection string resolved
-        env:
-          DATABASE_URL_UNPOOLED: ${{ steps.connection.outputs.url }}
-        run: |
-          if [ -z "${DATABASE_URL_UNPOOLED:-}" ]; then
-            echo "::error::Empty connection string. Is the NEON_API_KEY secret set?"
+          # `prisma.config.ts` falls back to a localhost placeholder when the
+          # variable is empty, so an empty value here would surface downstream
+          # as "connection refused to 127.0.0.1" — a misleading way to learn
+          # that neon returned nothing while still exiting 0.
+          if [ -z "$url" ]; then
+            echo "::error::neon returned an empty connection string for main."
             exit 1
           fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Production must have every merged migration
         env:
@@ -151,6 +162,17 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      - name: Check the NEON_API_KEY secret is set
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY:-}" ]; then
+            echo "::error::NEON_API_KEY is not set. This workflow applies Prisma"
+            echo "migrations to Neon and cannot authenticate without it. Add it"
+            echo "under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -192,6 +214,10 @@ jobs:
         run: |
           url="$(neon connection-string "$BRANCH" --project-id "$NEON_PROJECT_ID")"
           echo "::add-mask::$url"
+          if [ -z "$url" ]; then
+            echo "::error::neon returned an empty connection string for $BRANCH."
+            exit 1
+          fi
           DATABASE_URL_UNPOOLED="$url" pnpm --filter @workspace/db migrate
 
   # Production. Unfiltered by path, unlike `deploy-infra.yml`, and that is the
@@ -212,6 +238,17 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      - name: Check the NEON_API_KEY secret is set
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY:-}" ]; then
+            echo "::error::NEON_API_KEY is not set. This workflow applies Prisma"
+            echo "migrations to Neon and cannot authenticate without it. Add it"
+            echo "under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -234,16 +271,11 @@ jobs:
         run: |
           url="$(neon connection-string main --project-id "$NEON_PROJECT_ID")"
           echo "::add-mask::$url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-
-      - name: Check the connection string resolved
-        env:
-          DATABASE_URL_UNPOOLED: ${{ steps.connection.outputs.url }}
-        run: |
-          if [ -z "${DATABASE_URL_UNPOOLED:-}" ]; then
-            echo "::error::Empty connection string. Is the NEON_API_KEY secret set?"
+          if [ -z "$url" ]; then
+            echo "::error::neon returned an empty connection string for main."
             exit 1
           fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       # Migrations are forward-only. There is no rollback step to write and
       # adding one would be a lie about what `migrate deploy` can undo.
