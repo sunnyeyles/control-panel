@@ -89,7 +89,7 @@ flowchart TD
     C --> D[(Neon — search criteria)]
     D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
-    P --> N[Rendering or editing a stored cover letter]
+    P --> N[Redrafting a cover letter with instructions, tone, or sending it]
     P --> Q[A viewer for the brief itself]
 ```
 
@@ -110,7 +110,8 @@ flowchart TD
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
-- **Rendering or editing a cover letter in the app.** Drafting one is built
+- **Redrafting a cover letter with instructions, or sending it.** Drafting one
+  is built
   (#84): a Draft button on each **Posting** on `/briefings` runs the **Letter
   Writer** and stores the result at
   `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting so a
@@ -121,11 +122,16 @@ flowchart TD
   metadata — a Posting that already has one says so instead of offering a first
   draft, and `/api/cover-letters/{postingId}` hands the Markdown back as a file.
   The letter is written from the newest **Document** labelled `resume`, and
-  since #86 that can be a PDF or a DOCX as well as `.md` or `.txt`. What is
-  still missing is everything past that: nothing renders a letter's text in the
-  app, and nothing can edit one, regenerate it with instructions, choose a tone,
-  or send it. Ticketed under #77; `docs/cover-letter-agent-plan.md` is the
-  staged plan.
+  since #86 that can be a PDF or a DOCX as well as `.md` or `.txt`. Reading and
+  editing one in the app is built as well: an **Edit letter** button beside the
+  draft button opens the stored Markdown as rich text in
+  `FileEditorDialog`, and **Save** writes it back over the same object —
+  carrying `drafted-at` and the letter's provenance across, because an edit is
+  not a drafting. A save refuses when no letter exists at that address, which is
+  what keeps an action that _does_ take letter text from a form out of the
+  business of creating one. What is still missing is everything past that:
+  nothing can regenerate a letter with instructions, choose a tone, or send it.
+  Ticketed under #77; `docs/cover-letter-agent-plan.md` is the staged plan.
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`

@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 
+import { saveCoverLetterAction } from "@/app/(app)/briefings/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { Button } from "@workspace/ui/components/button"
@@ -63,13 +64,20 @@ export function EditCoverLetterButton({
 }) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [state, setState] = useState<ActionState>(IDLE)
+  // Two states rather than one, because they are read in two places that are
+  // never both on screen: a load that fails means no dialog, so its message
+  // belongs beside the trigger, while a save happens with the dialog open and
+  // belongs in its footer. Sharing one would put the same `role="status"` text
+  // in the document twice.
+  const [loadState, setLoadState] = useState<ActionState>(IDLE)
+  const [saveState, setSaveState] = useState<ActionState>(IDLE)
   const [files, setFiles] = useState<MarkdownFile[]>([])
   const [session, setSession] = useState(0)
 
   async function openWithLetter() {
     setLoading(true)
-    setState(IDLE)
+    setLoadState(IDLE)
+    setSaveState(IDLE)
 
     try {
       const response = await fetch(`/api/cover-letters/${postingId}`)
@@ -78,7 +86,7 @@ export function EditCoverLetterButton({
         // The route conflates "no such letter" with "not yours" deliberately —
         // telling them apart would confirm another user's Posting exists — so
         // there are only three cases to tell apart here.
-        setState({
+        setLoadState({
           status: "error",
           message:
             response.status === 401
@@ -99,14 +107,36 @@ export function EditCoverLetterButton({
       // A dropped connection or an aborted request. Nothing the user can act on
       // beyond retrying, but it must not fail silently into an empty editor.
       console.error("cover-letters: could not load the letter", error)
-      setState({ status: "error", message: LOAD_FAILED })
+      setLoadState({ status: "error", message: LOAD_FAILED })
     } finally {
       setLoading(false)
     }
   }
 
+  /**
+   * Write the edited letter back.
+   *
+   * Called imperatively rather than through `useActionState` and a `<form>`,
+   * because the Save button that triggers it lives inside the shared dialog
+   * rather than in this component's own markup. `refresh()` still runs — it is
+   * inside the action, which has Next's request store either way.
+   *
+   * The letter is `files[0]` and there is only ever one: this dialog is opened
+   * for a single Posting.
+   */
+  async function handleSave(edited: MarkdownFile[]) {
+    const data = new FormData()
+    data.set("postingId", postingId)
+    data.set("markdown", edited[0]?.content ?? "")
+
+    setSaveState(await saveCoverLetterAction(IDLE, data))
+  }
+
   function handleOpenChange(next: boolean) {
     if (!next) {
+      // Clear the last save's message, or reopening shows a confirmation for
+      // an edit made a visit ago.
+      setSaveState(IDLE)
       setOpen(false)
       return
     }
@@ -126,6 +156,7 @@ export function EditCoverLetterButton({
         open={open}
         onOpenChange={handleOpenChange}
         title="Cover letter"
+        onSave={handleSave}
         trigger={
           <Button
             variant="outline"
@@ -136,6 +167,18 @@ export function EditCoverLetterButton({
             {loading ? "Opening…" : "Edit letter"}
           </Button>
         }
+        footer={
+          saveState.status === "success" ? (
+            // A save leaves the text exactly as it was, so there is no visible
+            // change to serve as its own confirmation — which is the case
+            // `ActionError` explicitly does not cover, hence a line of its own.
+            <p className="text-sm text-muted-foreground" role="status">
+              {saveState.message}
+            </p>
+          ) : (
+            <ActionError state={saveState} />
+          )
+        }
       />
 
       {/*
@@ -144,7 +187,7 @@ export function EditCoverLetterButton({
         there. `ActionError` rather than `ActionAlert` for the reason its own
         docblock gives: this sits next to a control with no room for a box.
       */}
-      <ActionError state={state} />
+      <ActionError state={loadState} />
     </div>
   )
 }

@@ -94,6 +94,55 @@ const draftSchema = z.object({
   postingId: z.string().regex(POSTING_ID_PATTERN),
 })
 
+/**
+ * There is no letter at that address to edit.
+ *
+ * ⚠️ **This refusal is the security property of {@link
+ * createCoverLetterActions.saveCoverLetter}, not a convenience.** Drafting
+ * deliberately never accepts letter text from a form — see property 1 above —
+ * because text taken from a form would become arbitrary content inside a
+ * document stored in the user's own voice. Saving *does* accept text, which is
+ * safe only for as long as it can nothing but overwrite a letter the caller
+ * already has. Requiring the object to exist is what holds that line: without
+ * it, a caller could spell any well-formed Posting id and mint a letter of
+ * their choosing at it.
+ *
+ * It is also the "not yours" answer, which is the same conflation the download
+ * route makes: the key is built from the session's user, so another user's
+ * letter is not merely refused here — it cannot be addressed at all, and what
+ * the caller sees is an empty prefix.
+ */
+export const LETTER_NOT_FOUND =
+  "There is no drafted cover letter for that posting. Draft one before editing it."
+
+/**
+ * The longest letter that can be saved.
+ *
+ * The drafting path needs no such bound because a model wrote the bytes and its
+ * own output limit is the ceiling. Here a person does, through a rich-text
+ * editor that will paste whatever is on a clipboard, so the bound is this
+ * side's job. Generous by the standards of a cover letter — a long one is a
+ * couple of thousand characters — because refusing a legitimate letter is worse
+ * than storing a silly one, and the object store is not the thing under
+ * pressure.
+ */
+export const MAX_LETTER_CHARS = 50_000
+
+/** Nothing survived the trim. */
+const EMPTY_LETTER = "There is nothing to save — the letter is empty."
+
+const LETTER_TOO_LONG = `That letter is too long to save. The limit is ${MAX_LETTER_CHARS.toLocaleString("en-AU")} characters.`
+
+/**
+ * ⚠️ **`markdown` is bounded below, not here.** A `.max()` on the schema would
+ * report a 60,000-character letter with the same message as a missing field,
+ * and the two are nothing alike from the user's side.
+ */
+const saveSchema = z.object({
+  postingId: z.string().regex(POSTING_ID_PATTERN),
+  markdown: z.string(),
+})
+
 export interface CoverLetterActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
   getUser: () => Promise<CurrentUser>
@@ -264,6 +313,106 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
   }
 
   /**
+   * Save an edited letter over the stored one.
+   *
+   * The counterpart to {@link draftCoverLetter}, and deliberately a different
+   * shape: no Run, no Findings, no model. A letter is addressed by
+   * `(user, Posting)` and the caller is editing something that already exists,
+   * so the Run that found the Posting is neither needed nor asked for — it is
+   * already recorded in the letter's own provenance, and that is where it stays.
+   *
+   * Three things this holds, in order:
+   *
+   * 1. **Who is asking, before the body is touched.** Same reasoning as the
+   *    draft action: for a Server Action `proxy.ts` cannot evaluate the session
+   *    on a POST, so this is the only real check.
+   * 2. **The letter must already exist** — see {@link LETTER_NOT_FOUND}, which
+   *    is where the reasoning lives, because it is the property that keeps an
+   *    action accepting letter text from being a way to create one.
+   * 3. **`draftedAt` and provenance are carried across, never restamped.** An
+   *    edit is not a drafting. The Posting card renders "Cover letter drafted
+   *    <date>", and the letters list renders the title and company out of
+   *    provenance — a save that dropped either would have the page report that
+   *    the model rewrote the letter just now, or blank a row down to a hex
+   *    digest.
+   */
+  async function saveCoverLetter(
+    state: ActionState,
+    formData: FormData
+  ): Promise<ActionState> {
+    const fail = (message: string) => carryResetKey(state, message)
+
+    const caller = await requireUser(deps.getUser, "cover-letters")
+    if (!caller.ok) return fail(caller.message)
+
+    const parsed = saveSchema.safeParse({
+      postingId: formData.get("postingId"),
+      markdown: formData.get("markdown"),
+    })
+
+    if (!parsed.success) return fail(BAD_REQUEST)
+
+    // Normalized before it is measured and before it is stored. Two separate
+    // reasons:
+    //
+    // `\r\n` because Turndown emits CRLF and the writer emits LF, so without
+    // this the same letter has different bytes depending on whether a model or
+    // a person last touched it — and every save of an unedited letter would be
+    // a diff. The store is told `text/markdown`, and this keeps that one thing.
+    //
+    // `trim()` because a letter that is only whitespace is an empty one however
+    // much of it there is, and Turndown leaves a trailing newline on nearly
+    // everything.
+    const markdown = parsed.data.markdown.replace(/\r\n/g, "\n").trim()
+
+    if (markdown.length === 0) return fail(EMPTY_LETTER)
+    if (markdown.length > MAX_LETTER_CHARS) return fail(LETTER_TOO_LONG)
+
+    const letters = deps.getCoverLetters()
+
+    // ⚠️ **The session's userId, never anything from the form** — the same rule
+    // as the draft action, and the reason a request naming another user's
+    // letter cannot be spelled rather than merely being refused.
+    const ref = { userId: caller.userId, postingId: parsed.data.postingId }
+
+    let existing
+    try {
+      existing = await letters.head(ref)
+    } catch (error) {
+      if (
+        isUserStorageError(error) &&
+        (error.code === "object_not_found" ||
+          error.code === "object_ownership" ||
+          error.code === "invalid_object_key")
+      ) {
+        return fail(LETTER_NOT_FOUND)
+      }
+
+      // Anything else is the bucket being unreachable, which must not be
+      // reported as "you have not drafted this" — that would tell a user their
+      // letter is gone during an outage.
+      return fail(storageMessage("read", error))
+    }
+
+    try {
+      await letters.put({
+        ...ref,
+        markdown,
+        draftedAt: existing.draftedAt,
+        provenance: existing.provenance,
+      })
+    } catch (error) {
+      return fail(storageMessage("write", error))
+    }
+
+    return {
+      status: "success",
+      message: "Saved your changes to this cover letter.",
+      resetKey: newResetKey(),
+    }
+  }
+
+  /**
    * One model call, traced.
    *
    * ⚠️ **The callback is not optional decoration.** Every other agent run in
@@ -320,7 +469,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     return letter
   }
 
-  return { draftCoverLetter }
+  return { draftCoverLetter, saveCoverLetter }
 }
 
 /**

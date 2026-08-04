@@ -32,6 +32,55 @@ function devKey(kind: string, userId: string, name: string): string {
   return `dev-fixture/${kind}/${userId}/${name}`
 }
 
+interface DevStores {
+  resumes?: ResumeStore
+  coverLetters?: CoverLetterStore
+}
+
+/**
+ * ⚠️ **The fakes are memoized on `globalThis`, not in a module variable, and
+ * that is not belt-and-braces.** `next dev` does not give every server bundle
+ * the same module instance: a Server Action and a Route Handler that both
+ * import `lib/storage.ts` can each get their own copy of its `let coverLetters`
+ * memo, and therefore their own `Map`. Against S3 that is invisible — two
+ * facades over one bucket — but against an in-memory fake the two are separate
+ * worlds, and a write through one is unreadable through the other.
+ *
+ * The symptom is specific and reads as a product bug rather than a harness one:
+ * saving an edited cover letter reports success, the action can read its own
+ * write back, and `/api/cover-letters/{postingId}` still serves the fixture. The
+ * same shape applies to `/documents`, where an upload is a Server Action and the
+ * download is a Route Handler.
+ *
+ * A string-keyed property rather than `Symbol.for`, only because a symbol from
+ * `Symbol.for` is typed `symbol` rather than `unique symbol` and cannot be a
+ * computed key in an interface.
+ *
+ * `lib/dev/fake-prisma.ts` is memoized the old way and may well have the same
+ * gap; nothing has needed it across that boundary yet, so it is left alone
+ * rather than changed speculatively.
+ */
+function devStores(): DevStores {
+  const holder = globalThis as typeof globalThis & {
+    __workspaceDevStores?: DevStores
+  }
+
+  holder.__workspaceDevStores ??= {}
+  return holder.__workspaceDevStores
+}
+
+export function getDevResumeStore(): ResumeStore {
+  const stores = devStores()
+  stores.resumes ??= createDevResumeStore()
+  return stores.resumes
+}
+
+export function getDevCoverLetterStore(): CoverLetterStore {
+  const stores = devStores()
+  stores.coverLetters ??= createDevCoverLetterStore()
+  return stores.coverLetters
+}
+
 export function createDevResumeStore(): ResumeStore {
   const stored = new Map<string, StoredResume & { bytes: Uint8Array }>()
 

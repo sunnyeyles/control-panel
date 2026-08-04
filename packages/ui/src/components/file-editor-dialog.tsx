@@ -20,7 +20,7 @@ import {
 } from "@workspace/ui/components/dialog"
 import { EditorToolbar } from "@workspace/ui/components/editor-toolbar"
 import { ScrollArea } from "@workspace/ui/components/scroll-area"
-import { DownloadIcon, FileTextIcon, Loader2Icon } from "lucide-react"
+import { DownloadIcon, FileTextIcon, Loader2Icon, SaveIcon } from "lucide-react"
 
 export interface MarkdownFile {
   id: string
@@ -41,6 +41,23 @@ export interface FileEditorDialogProps {
   trigger?: React.ReactNode
   /** Replaces the default "File editor" heading. */
   title?: React.ReactNode
+  /**
+   * Supplied ⇒ a Save button appears in the footer, left of the PDF export.
+   *
+   * It receives the file list with the active file already serialized back to
+   * markdown, so a caller never has to reach into the editor to find out what
+   * the user typed. Awaited, so the button can report the write.
+   */
+  onSave?: (files: MarkdownFile[]) => void | Promise<void>
+  /**
+   * Rendered in the footer beneath the active file's name.
+   *
+   * The slot exists so a caller's own status — a refused save, a confirmation —
+   * lands *inside* the open dialog. A message rendered beside the trigger would
+   * sit behind the overlay, unreadable until the user closed the thing the
+   * message is about.
+   */
+  footer?: React.ReactNode
   open?: boolean
   onOpenChange?: (open: boolean) => void
   className?: string
@@ -55,6 +72,8 @@ function FileEditorDialog({
   onFilesChange,
   trigger,
   title = "File editor",
+  onSave,
+  footer,
   open,
   onOpenChange,
   className,
@@ -63,6 +82,7 @@ function FileEditorDialog({
   const [internalFiles, setInternalFiles] = useState(files)
   const [activeId, setActiveId] = useState(() => files[0]?.id ?? "")
   const [exporting, setExporting] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const isOpen = open ?? internalOpen
   const currentFiles = onFilesChange ? files : internalFiles
@@ -126,15 +146,29 @@ function FileEditorDialog({
     onFilesChange?.(next)
   }
 
+  /**
+   * The file list with the active file's editor content serialized back to
+   * markdown — the single place the editor's HTML becomes markdown again.
+   *
+   * Returns the list rather than only pushing it into state because both
+   * callers that *do* something with the bytes — the PDF export and
+   * {@link FileEditorDialogProps.onSave} — need them in hand, and re-running
+   * Turndown to get a second copy is how the two would drift.
+   */
+  function serializeActiveFile(): MarkdownFile[] {
+    if (!editor || !activeFile) return currentFiles
+
+    const markdown = turndown.turndown(editor.getHTML())
+
+    return currentFiles.map((file) =>
+      file.id === activeFile.id ? { ...file, content: markdown } : file
+    )
+  }
+
   /** Serialize the current editor content back to markdown in state. */
   function saveActiveFile() {
     if (!editor || !activeFile) return
-    const markdown = turndown.turndown(editor.getHTML())
-    updateFiles(
-      currentFiles.map((file) =>
-        file.id === activeFile.id ? { ...file, content: markdown } : file
-      )
-    )
+    updateFiles(serializeActiveFile())
   }
 
   function switchFile(id: string) {
@@ -153,16 +187,38 @@ function FileEditorDialog({
 
   function downloadPdf() {
     if (!editor || !activeFile) return
-    saveActiveFile()
+
+    const next = serializeActiveFile()
+    updateFiles(next)
     setExporting(true)
+
     try {
       const pdfName = activeFile.name.replace(/\.md$/i, ".pdf")
-      const markdown = turndown.turndown(editor.getHTML())
+      const markdown =
+        next.find((file) => file.id === activeFile.id)?.content ?? ""
       exportMarkdownToPdf(markdown, pdfName)
     } catch (error) {
       console.error("PDF export failed:", error)
     } finally {
       setExporting(false)
+    }
+  }
+
+  async function handleSave() {
+    if (!editor || !activeFile || !onSave) return
+
+    const next = serializeActiveFile()
+    updateFiles(next)
+    setSaving(true)
+
+    try {
+      await onSave(next)
+    } finally {
+      // The caller reports the outcome through `footer`; all this owns is
+      // whether the button is still spinning. A `finally` rather than a
+      // `catch`, so a caller that throws still releases the button and the
+      // rejection still reaches the console rather than being swallowed here.
+      setSaving(false)
     }
   }
 
@@ -263,20 +319,41 @@ function FileEditorDialog({
             </ScrollArea>
 
             <footer className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
-              <p className="truncate text-sm text-muted-foreground">
-                {activeFile?.name ?? "No file selected"}
-              </p>
-              <Button
-                onClick={downloadPdf}
-                disabled={exporting || !editor || !activeFile}
-              >
-                {exporting ? (
-                  <Loader2Icon className="size-4 animate-spin" />
-                ) : (
-                  <DownloadIcon className="size-4" />
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="truncate text-sm text-muted-foreground">
+                  {activeFile?.name ?? "No file selected"}
+                </p>
+                {footer}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                {onSave && (
+                  <Button
+                    variant="outline"
+                    onClick={handleSave}
+                    disabled={saving || exporting || !editor || !activeFile}
+                  >
+                    {saving ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <SaveIcon className="size-4" />
+                    )}
+                    {saving ? "Saving…" : "Save"}
+                  </Button>
                 )}
-                {exporting ? "Preparing PDF…" : "Download PDF"}
-              </Button>
+
+                <Button
+                  onClick={downloadPdf}
+                  disabled={exporting || saving || !editor || !activeFile}
+                >
+                  {exporting ? (
+                    <Loader2Icon className="size-4 animate-spin" />
+                  ) : (
+                    <DownloadIcon className="size-4" />
+                  )}
+                  {exporting ? "Preparing PDF…" : "Download PDF"}
+                </Button>
+              </div>
             </footer>
           </div>
         </div>
