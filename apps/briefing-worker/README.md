@@ -48,7 +48,18 @@ Everything platform-shaped — the handler signature, fetching secrets, and
 reaching S3 — lives in `index.ts`.
 
 `runTick` takes a `PrismaClient` and a `BriefStore` rather than constructing
-either, for the same reason.
+either, for the same reason. It takes them as fields of one `RunTickInput`,
+which also carries the seams a test drives it through — the database operations
+and the kind registry — each optional and defaulting to the real thing, so
+production passes neither.
+
+**What runs a job is decided by `config.kind`, dispatched through a registry.**
+`job-kinds.ts` maps a config to a handler and `job-kind-registry.ts` holds the
+one real entry, the briefing. An absent discriminator means the briefing
+permanently, and so does `kind: "briefing"`; anything else unregistered — including
+a `kind` that is present but is not a non-empty string — is a kind nothing
+handles. That lookup happens **before the slot is claimed**, so such a job
+never advances `next_run_at` and never leaves a `runs` row.
 
 **`jobs.config` is interpreted here, not in `@workspace/db`.** The platform
 stores that column and never reads inside it, so the schema for it lives in
@@ -153,10 +164,22 @@ use a Langfuse project whose retention and access controls permit that content.
 self-hosted instance.
 
 Every invocation prints one JSON `tick` line — `due`, `claimed`, `skipped`,
-`succeeded`, `failed` — and one `briefing-run` line per job that was actually
-claimed. A tick with `"due":0` is a success and exits 0. Any failed job makes
-the process exit non-zero, which is what produces the `Errors` datapoint the
-alarm watches.
+`succeeded`, `failed`, `unhandled` — and one `briefing-run` line per job that
+was actually claimed. A tick with `"due":0` is a success and exits 0. Any failed
+job makes the process exit non-zero, which is what produces the `Errors`
+datapoint the alarm watches.
+
+`unhandled` counts jobs turned away before the claim for naming a kind nothing
+handles, and each one also prints an `unhandled-job-kind` line carrying the job
+id, the job name and the offending kind. **That line is the only record such a
+failure leaves.** The kind is decided before the claim, so there is no `runs`
+row to query and no `briefing-run` line — which is where the Errors alarm's
+runbook would otherwise send a reader. A non-zero `unhandled` on the tick line
+is the signal to go and find it.
+
+The counts on that line hold one invariant worth knowing: `succeeded + failed`
+equals `claimed`. `skipped` (another party holds the slot) and `unhandled` sit
+outside that sum deliberately.
 
 The unit tests need none of the above. They drive `runBriefing` with fake agents
 through its `createScout`/`createWriter` seams and assert on the shape of a run —

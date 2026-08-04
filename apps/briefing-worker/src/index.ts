@@ -147,7 +147,7 @@ export const handler = async (): Promise<void> => {
   const briefs = createBriefStore(createS3UserObjectStore())
 
   try {
-    await runTick(prisma, briefs)
+    await runTick({ prisma, briefs })
   } finally {
     await Promise.all([
       prisma.$disconnect(),

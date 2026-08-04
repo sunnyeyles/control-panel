@@ -234,6 +234,12 @@ The single structured log line a briefing run emits describing its outcome —
 object key. The artifact a human queries to verify a run happened. A **Tick
 Report** (`event: "tick"`) is its per-tick counterpart, answering "was there
 anything to do" rather than "what happened in this run".
+
+A third line, `event: "unhandled-job-kind"`, is emitted once per **Job** whose
+config names a kind the worker has no handler for. It is not a report of a run,
+because no run happened: the kind is decided before the slot is claimed, so
+there is no `runs` row and no **Run Report** either. It is the whole record of
+that failure.
 _Avoid_: run record, run log, result row
 
 **Trace**:
