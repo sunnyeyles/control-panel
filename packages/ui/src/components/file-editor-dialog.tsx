@@ -155,20 +155,23 @@ function FileEditorDialog({
    * {@link FileEditorDialogProps.onSave} — need them in hand, and re-running
    * Turndown to get a second copy is how the two would drift.
    */
-  function serializeActiveFile(): MarkdownFile[] {
-    if (!editor || !activeFile) return currentFiles
+  function serializeActiveFile(): { files: MarkdownFile[]; markdown: string } {
+    if (!editor || !activeFile) return { files: currentFiles, markdown: "" }
 
     const markdown = turndown.turndown(editor.getHTML())
 
-    return currentFiles.map((file) =>
-      file.id === activeFile.id ? { ...file, content: markdown } : file
-    )
+    return {
+      files: currentFiles.map((file) =>
+        file.id === activeFile.id ? { ...file, content: markdown } : file
+      ),
+      markdown,
+    }
   }
 
   /** Serialize the current editor content back to markdown in state. */
   function saveActiveFile() {
     if (!editor || !activeFile) return
-    updateFiles(serializeActiveFile())
+    updateFiles(serializeActiveFile().files)
   }
 
   function switchFile(id: string) {
@@ -188,14 +191,12 @@ function FileEditorDialog({
   function downloadPdf() {
     if (!editor || !activeFile) return
 
-    const next = serializeActiveFile()
+    const { files: next, markdown } = serializeActiveFile()
     updateFiles(next)
     setExporting(true)
 
     try {
       const pdfName = activeFile.name.replace(/\.md$/i, ".pdf")
-      const markdown =
-        next.find((file) => file.id === activeFile.id)?.content ?? ""
       exportMarkdownToPdf(markdown, pdfName)
     } catch (error) {
       console.error("PDF export failed:", error)
@@ -207,7 +208,7 @@ function FileEditorDialog({
   async function handleSave() {
     if (!editor || !activeFile || !onSave) return
 
-    const next = serializeActiveFile()
+    const { files: next } = serializeActiveFile()
     updateFiles(next)
     setSaving(true)
 

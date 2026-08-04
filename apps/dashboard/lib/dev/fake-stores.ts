@@ -81,7 +81,10 @@ export function getDevCoverLetterStore(): CoverLetterStore {
   return stores.coverLetters
 }
 
-export function createDevResumeStore(): ResumeStore {
+// Not exported: the only correct way to reach these is through the memoized
+// getters below. A second `createX()` call is a second `Map`, which is exactly
+// the bug the getters exist to prevent.
+function createDevResumeStore(): ResumeStore {
   const stored = new Map<string, StoredResume & { bytes: Uint8Array }>()
 
   const put = async (resume: NewResume): Promise<StoredResume> => {
@@ -145,7 +148,7 @@ export function createDevResumeStore(): ResumeStore {
   }
 }
 
-export function createDevCoverLetterStore(): CoverLetterStore {
+function createDevCoverLetterStore(): CoverLetterStore {
   const stored = new Map<string, StoredCoverLetter & { markdown: string }>()
 
   const put = async (letter: NewCoverLetter): Promise<StoredCoverLetter> => {

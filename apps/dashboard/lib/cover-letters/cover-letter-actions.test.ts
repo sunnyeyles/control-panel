@@ -123,6 +123,8 @@ function findings(postings: Posting[] = [POSTING]): Findings {
  */
 class MemoryObjects implements UserObjectStore {
   readonly puts: NewObject[] = []
+  /** Every key the store was *asked* about, however the ask turned out. */
+  readonly reads: string[] = []
   private readonly stored = new Map<string, StoredObject & { body: Buffer }>()
 
   private keyOf(ref: ObjectRef): string {
@@ -172,6 +174,7 @@ class MemoryObjects implements UserObjectStore {
   // here would send the missing-object case down the outage path and the
   // refusal being asserted below would pass for the wrong reason.
   async head(ref: ObjectRef): Promise<StoredObject> {
+    this.reads.push(this.keyOf(ref))
     const found = this.stored.get(this.keyOf(ref))
     if (!found) throw new ObjectNotFoundError(this.keyOf(ref))
     return found
@@ -854,9 +857,11 @@ describe("saveCoverLetter", () => {
       )
 
       expect(result.status).toBe("error")
-      // Refused on shape, before the store was asked for anything: a value the
-      // store would reject cannot name an object, and the seeded letter is
-      // untouched.
+      // Refused on shape, *before the store was asked anything at all* — not
+      // merely before it was written to. A value the store would reject cannot
+      // name an object, so there is nothing to look up, and asking would make
+      // a malformed id indistinguishable from a missing one in the logs.
+      expect(subject.objects.reads).toHaveLength(0)
       expect(subject.objects.puts).toHaveLength(1)
     })
 

@@ -23,6 +23,7 @@ import {
   isUserStorageError,
   type CoverLetterStore,
   type ResumeStore,
+  type StoredCoverLetter,
 } from "@workspace/user-storage"
 import { z } from "zod"
 
@@ -375,7 +376,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     // letter cannot be spelled rather than merely being refused.
     const ref = { userId: caller.userId, postingId: parsed.data.postingId }
 
-    let existing
+    let existing: StoredCoverLetter
     try {
       existing = await letters.head(ref)
     } catch (error) {

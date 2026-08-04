@@ -17,6 +17,8 @@ const LOAD_REFUSED =
   "Your session has expired. Reload the page and sign in again."
 const LOAD_GONE =
   "That cover letter could not be found. Refresh the page and try again."
+const SAVE_FAILED =
+  "Your changes could not be saved. Your edit is still here — try again in a moment."
 
 /**
  * Open one Posting's drafted Cover Letter in the editor.
@@ -129,7 +131,18 @@ export function EditCoverLetterButton({
     data.set("postingId", postingId)
     data.set("markdown", edited[0]?.content ?? "")
 
-    setSaveState(await saveCoverLetterAction(IDLE, data))
+    try {
+      setSaveState(await saveCoverLetterAction(IDLE, data))
+    } catch (error) {
+      // The action itself never throws for an expected failure — it returns an
+      // error state. This is the transport failing: a dropped connection, or
+      // Next unable to route the action at all. Caught here because
+      // `FileEditorDialog` releases its button in a `finally` rather than a
+      // `catch`, so an escaping rejection would leave the spinner cleared, no
+      // message rendered, and the user believing the letter was saved.
+      console.error("cover-letters: could not save the letter", error)
+      setSaveState({ status: "error", message: SAVE_FAILED })
+    }
   }
 
   function handleOpenChange(next: boolean) {
