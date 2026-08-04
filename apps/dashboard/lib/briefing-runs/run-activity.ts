@@ -5,15 +5,15 @@ import { isStale } from "./staleness"
 /**
  * The state of each briefing's most recent Run, whatever became of it.
  *
- * Deliberately separate from `lib/briefings/latest-postings.ts`, which asks a
- * narrower question — the most recent *successful* Run, for its Findings — and
- * whose four-state union is about what a Run *found*. This one is about what a
- * Run is *doing*, and merging them would give one type two jobs: "the last one
- * that worked" and "the last one at all" are different rows whenever the
- * newest Run failed or is still going, which is exactly when this matters.
+ * Deliberately separate from `lib/postings/list-postings.ts`, which asks a
+ * different question — every Posting a user's briefings have ever found, with
+ * no Run in the answer at all. This one is about what a Run is *doing*, and
+ * merging them would give one type two jobs: the table is cumulative and has no
+ * per-briefing row, while this is per-briefing and has nothing to say about
+ * what was found.
  *
  * **Nothing here imports Next**, and the client arrives as an argument rather
- * than through `getPrisma()`, for the reason `latest-postings.ts` gives: which
+ * than through `getPrisma()`, for the reason `list-postings.ts` gives: which
  * rows a user can reach is the interesting behaviour, and a page component
  * cannot be tested for it.
  */

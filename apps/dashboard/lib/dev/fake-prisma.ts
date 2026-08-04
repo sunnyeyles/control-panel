@@ -1,11 +1,13 @@
 import {
   devCoverLetterInstructions,
   devJobs,
+  devPostings,
   devRuns,
 } from "@/lib/dev/fixtures"
 import type {
   CoverLetterInstructions,
   Job,
+  Posting,
   PrismaClient,
   Run,
 } from "@workspace/db"
@@ -15,9 +17,9 @@ import type {
  * the queries this app makes and refuses every other one by name.
  *
  * **It filters and orders for real rather than returning canned rows**, so the
- * user-scoping in `latest-postings.ts` and `job-actions.ts` stays visible to
- * anyone editing around it. Follows the `FakeDb` in
- * `lib/briefings/latest-postings.test.ts`.
+ * user-scoping in `lib/postings/list-postings.ts` and `job-actions.ts` stays
+ * visible to anyone editing around it. Follows the `FakeDb` in
+ * `lib/postings/list-postings.test.ts`.
  *
  * **Writes survive the process, not a restart.** A pause has to outlive the
  * redirect after it or the form looks broken; a restart restoring the fixtures
@@ -49,6 +51,20 @@ export function createDevPrisma(): PrismaClient {
         where: { id: string; status?: string }
         data: Partial<Run>
       }) => db.updateRunsGuarded(query.where, query.data),
+    },
+    /**
+     * The Postings table, which is the one delegate here that is asked to
+     * **order and page for real** — see {@link DevDb.findManyPostings}.
+     */
+    posting: {
+      count: async (query: PostingsForUser) => db.countPostings(query.where),
+      findMany: async (query: FindManyPostings) => db.findManyPostings(query),
+      findUnique: async (query: ByUserAndPostingId) =>
+        db.findPosting(query.where.userId_postingId),
+      updateMany: async (query: {
+        where: { userId: string; postingId: string }
+        data: Partial<Posting>
+      }) => db.updatePostings(query.where, query.data),
     },
     coverLetterInstructions: {
       findUnique: async (query: ByUserId) =>
@@ -94,6 +110,38 @@ interface FindManyJobs {
   }
 }
 
+/**
+ * The whole of the row scoping the table applies, and the whole of what the
+ * count is asked for. A Posting is not addressable without naming a user.
+ */
+interface PostingsForUser {
+  where: { userId: string }
+}
+
+/**
+ * What `listPostings()` asks for.
+ *
+ * `select` is accepted and deliberately **not** applied: the fake answers with
+ * the whole row, which is a superset of what was asked for, and a caller that
+ * reads only the fields it selected cannot tell the difference. Ordering and
+ * paging are a different matter — those change *which* rows come back, so they
+ * are honoured exactly.
+ */
+interface FindManyPostings extends PostingsForUser {
+  orderBy?: PostingOrderBy[]
+  skip?: number
+  take?: number
+  select?: Record<string, boolean>
+}
+
+/** One `{ field: direction }` clause, as Prisma spells it. */
+type PostingOrderBy = Record<string, "asc" | "desc">
+
+/** How the compound unique is addressed — the shape Prisma generates for it. */
+interface ByUserAndPostingId {
+  where: { userId_postingId: { userId: string; postingId: string } }
+}
+
 /** How the one row-per-user table is addressed: its owner *is* its primary key. */
 interface ByUserId {
   where: { userId: string }
@@ -135,14 +183,18 @@ class DevDb {
   private readonly runs: Run[] = devRuns()
   private readonly coverLetterInstructions: CoverLetterInstructions[] =
     devCoverLetterInstructions()
+  private readonly postings: Posting[] = devPostings()
   private nextId = 1
 
   /**
    * Both shapes the dashboard asks for, discriminated by `select.runs` — the
    * callers do not know they are talking to a fake.
    *
-   * `orderBy` is not read; every call site wants `createdAt` descending. The one
-   * place this fake lies rather than throwing — cheap to fix if that changes.
+   * `orderBy` is not read; every call site wants `createdAt` descending, which
+   * is what this returns. The one place this fake lies rather than throwing —
+   * cheap to fix if that changes. {@link findManyPostings} is deliberately not
+   * like this: its order is chosen from the URL, so ignoring it there would be
+   * a wrong-order bug rather than a shortcut.
    */
   findManyJobs(query: FindManyJobs): unknown[] {
     const mine = this.jobs
@@ -169,6 +221,65 @@ class DevDb {
           findings: run.findings,
         })),
     }))
+  }
+
+  countPostings(where: { userId: string }): number {
+    return this.mine(where.userId).length
+  }
+
+  /**
+   * ⚠️ **`orderBy` is honoured here, unlike in {@link findManyJobs}.**
+   *
+   * That one may ignore it because every caller wants the same order. This one
+   * may not: the columns are sortable, the order is chosen from the URL, and a
+   * fake that ignored it would render the table in one fixed order under
+   * `DEV_AUTH_BYPASS` — silently, correctly-looking, and wrong — in exactly the
+   * environment the table is built in. `skip` and `take` are honoured for the
+   * same reason: paging that did nothing would make every page identical.
+   */
+  findManyPostings(query: FindManyPostings): Posting[] {
+    const ordered = sortPostings(
+      this.mine(query.where.userId),
+      query.orderBy ?? []
+    )
+    const from = query.skip ?? 0
+
+    return ordered.slice(
+      from,
+      query.take === undefined ? undefined : from + query.take
+    )
+  }
+
+  /**
+   * Addressed by the natural key, never by `postings.id`. Both halves are in
+   * the `where`, so there is no ownership left to check separately — which is
+   * the property `setPostingStatus()` in `@workspace/db` rests on.
+   */
+  findPosting(key: { userId: string; postingId: string }): Posting | null {
+    return (
+      this.postings.find(
+        (row) => row.userId === key.userId && row.postingId === key.postingId
+      ) ?? null
+    )
+  }
+
+  /**
+   * The row count as the answer, which is how `setPostingStatus()` distinguishes
+   * "no such Posting for this user" from a write it made.
+   */
+  updatePostings(
+    where: { userId: string; postingId: string },
+    data: Partial<Posting>
+  ): { count: number } {
+    const row = this.findPosting(where)
+    if (!row) return { count: 0 }
+
+    Object.assign(row, data)
+    return { count: 1 }
+  }
+
+  private mine(userId: string): Posting[] {
+    return this.postings.filter((row) => row.userId === userId)
   }
 
   findJob(id: string): Job | null {
@@ -396,6 +507,57 @@ class DevDb {
       failure: run.failure,
     }))
   }
+}
+
+/**
+ * Every `orderBy` clause applied in turn, first difference winning.
+ *
+ * The tie-break clause `list-postings.ts` appends is what makes a page boundary
+ * stable, so it has to be applied here too — a fake that stopped at the first
+ * clause would hide exactly the bug that tie-break exists to prevent.
+ */
+function sortPostings(rows: Posting[], orderBy: PostingOrderBy[]): Posting[] {
+  return [...rows].sort((left, right) => {
+    for (const clause of orderBy) {
+      for (const [field, direction] of Object.entries(clause)) {
+        const compared = comparePostingField(left, right, field)
+        if (compared !== 0) return direction === "desc" ? -compared : compared
+      }
+    }
+
+    return 0
+  })
+}
+
+/**
+ * Throws on a field it cannot order by, rather than answering `0`.
+ *
+ * The whole file's principle, applied to the one place where the alternative is
+ * invisible: a comparator that shrugged would leave the rows in insertion order
+ * and look like a table that had been sorted.
+ */
+function comparePostingField(
+  left: Posting,
+  right: Posting,
+  field: string
+): number {
+  if (!(field in left)) {
+    throw new DevPrismaError(
+      `prisma.posting.findMany orderBy.${field}`,
+      "That column is not on a Posting. Add it to lib/dev/fixtures.ts, or fix the orderBy in lib/postings/list-postings.ts."
+    )
+  }
+
+  const a = left[field as keyof Posting]
+  const b = right[field as keyof Posting]
+
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
+  if (typeof a === "string" && typeof b === "string") return a.localeCompare(b)
+
+  throw new DevPrismaError(
+    `prisma.posting.findMany orderBy.${field}`,
+    `Only text and timestamp columns can be ordered by here, and ${field} is neither.`
+  )
 }
 
 function byStartedAtThenIdDesc(a: Run, b: Run): number {

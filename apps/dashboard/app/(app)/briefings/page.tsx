@@ -1,5 +1,9 @@
-import { BriefingList } from "@/components/briefings/briefing-list"
+import {
+  BriefingStrip,
+  type BriefingStripEntry,
+} from "@/components/briefings/briefing-strip"
 import { CoverLetterList } from "@/components/briefings/cover-letter-list"
+import { PostingTable } from "@/components/briefings/posting-table"
 import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import {
@@ -8,14 +12,16 @@ import {
   type BriefingActivity,
 } from "@/lib/briefing-runs/run-activity"
 import {
-  latestPostingsForUser,
-  type BriefingPostings,
-} from "@/lib/briefings/latest-postings"
-import {
   listCoverLetters,
   type CoverLetterSummary,
 } from "@/lib/cover-letters/list-cover-letters"
 import { getPrisma } from "@/lib/db"
+import { listPostings, type PostingPage } from "@/lib/postings/list-postings"
+import {
+  parsePostingQuery,
+  type SearchParams,
+} from "@/lib/postings/posting-query"
+import type { BriefingCounts } from "@/lib/postings/postings-empty-state"
 import { getCoverLetterStore } from "@/lib/storage"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import Link from "next/link"
@@ -24,10 +30,12 @@ import Link from "next/link"
 export const dynamic = "force-dynamic"
 
 /**
- * One database round trip over a pooled Neon endpoint that a cold serverless
- * instance has to connect to first, plus a listing of this user's cover letters
- * and one `HeadObject` per letter — see `lib/cover-letters/list-cover-letters.ts`
- * for why that N+1 is the right shape and why it is bounded.
+ * Two database round trips for the table (a count and a page — see
+ * `list-postings.ts` for why they are serial), one more for the strip, over a
+ * pooled Neon endpoint that a cold serverless instance has to connect to first,
+ * plus a listing of this user's cover letters and one `HeadObject` per letter —
+ * see `lib/cover-letters/list-cover-letters.ts` for why that N+1 is the right
+ * shape and why it is bounded.
  *
  * Raised from 15 when the letters arrived. The S3 work is bounded but not
  * constant, and a page that renders postings correctly and then dies partway
@@ -36,7 +44,7 @@ export const dynamic = "force-dynamic"
 export const maxDuration = 30
 
 /**
- * What the briefings found.
+ * Every Posting this user's briefings have ever found.
  *
  * ⚠️ **`requirePageUser()` is this page's own authorization check and is not
  * inherited.** `app/(app)/layout.tsx` calls `getCurrentUser()` too, but that
@@ -45,22 +53,50 @@ export const maxDuration = 30
  * `lib/auth/require-page-user.ts`.
  *
  * The guard establishes who is asking. It does **not** scope rows — that is
- * `where: { userId }` inside `latestPostingsForUser`, and the session's
- * `userId` passed to `listCoverLetters`, which is where the two user-isolation
- * tests point. Neither identifier is ever read from the URL or a form.
+ * `where: { userId }` inside `listPostings`, and the session's `userId` passed
+ * to `listCoverLetters`, which is where the two user-isolation tests point.
+ * Neither identifier is ever read from the URL or a form.
+ *
+ * ⚠️ **The guard runs before `searchParams` is touched.** The query string is
+ * the app's first untrusted GET input; establishing who is asking before
+ * reading anything they sent keeps the order the rest of the app has.
+ *
+ * ⚠️ **Three independent loads, three independent failures, and none of them
+ * may blank the other two.** The postings are Postgres, the letters are S3, and
+ * the run activity is a third query answering a different question — the latest
+ * Run of any status rather than the rows a briefing has ever produced. The
+ * dashboard's `prod:cover-letters` grant is a Terraform apply away from the code
+ * that needs it, so "letters unreadable" is a state this page will genuinely be
+ * in.
+ *
+ * `searchParams` is typed inline rather than with the generated `PageProps`
+ * helper, which only exists once `next typegen` has written `.next/types/` —
+ * a typecheck in a clean checkout would not have it.
  */
-export default async function BriefingsPage() {
+export default async function BriefingsPage({
+  searchParams,
+}: {
+  /** A promise in Next 16, and a repeated parameter arrives as `string[]`. */
+  searchParams: Promise<SearchParams>
+}) {
   const user = await requirePageUser()
+  const query = parsePostingQuery(await searchParams)
 
   // A database outage should say so rather than replacing the page with an
   // error boundary, matching how `/documents` degrades when S3 is unreachable.
-  let briefings: BriefingPostings[] = []
+  let postings: PostingPage = {
+    postings: [],
+    total: 0,
+    page: 1,
+    pageCount: 1,
+    pageSize: 0,
+  }
   let loadFailed = false
 
   try {
-    briefings = await latestPostingsForUser(getPrisma(), user.userId)
+    postings = await listPostings(getPrisma(), user.userId, query)
   } catch (error) {
-    console.error("briefings: could not load", error)
+    console.error("postings: could not load", error)
     loadFailed = true
   }
 
@@ -80,26 +116,52 @@ export default async function BriefingsPage() {
   }
 
   // ⚠️ **A third independent load, failing independently.** It answers a
-  // different question from `latestPostingsForUser` — the latest Run of any
-  // status, rather than the latest successful one — and a failure here must
-  // cost the status line and the button, not the postings.
+  // different question from the table — the latest Run of any status, rather
+  // than every Posting ever found — and a failure here must cost the strip
+  // above the table, not the table.
+  //
+  // Two queries rather than one because the strip needs both halves and neither
+  // supplies the other: `runActivityForUser` returns nothing at all for a
+  // briefing that has never run, and it carries no names. They share a block
+  // because they are one feature — a strip with names and no status, or status
+  // and no names, is not worth rendering half of.
   let activity: BriefingActivity[] = []
+  let strip: BriefingStripEntry[] = []
+  let counts: BriefingCounts | undefined
 
   try {
-    activity = await runActivityForUser(getPrisma(), user.userId)
+    const [briefings, loaded] = await Promise.all([
+      getPrisma().job.findMany({
+        where: { userId: user.userId },
+        orderBy: { createdAt: "desc" },
+      }),
+      runActivityForUser(getPrisma(), user.userId),
+    ])
+
+    activity = loaded
+    const activityByBriefing = new Map(
+      activity.map((entry) => [entry.briefingId, entry.activity])
+    )
+
+    strip = briefings.map((briefing) => ({
+      id: briefing.id,
+      name: briefing.name,
+      activity: activityByBriefing.get(briefing.id) ?? { state: "never-run" },
+    }))
+
+    // Only known when this load succeeded, which is exactly why it is optional:
+    // "you have no briefings" is the wrong thing to tell someone whose
+    // briefings simply could not be read.
+    counts = { briefings: briefings.length, runs: activity.length }
   } catch (error) {
     console.error("briefings: could not load run activity", error)
   }
 
-  // Keyed so each Posting card can ask about itself without scanning. Built
-  // here rather than in the component because it is derived from data the page
-  // already holds, and a component that builds it would rebuild it per render.
+  // Keyed so each row can ask about itself without scanning. Built here rather
+  // than in the component because it is derived from data the page already
+  // holds, and a component that builds it would rebuild it per render.
   const lettersByPosting = new Map(
     letters.map((letter) => [letter.postingId, letter])
-  )
-
-  const activityByBriefing = new Map(
-    activity.map((entry) => [entry.briefingId, entry.activity])
   )
 
   return (
@@ -111,7 +173,7 @@ export default async function BriefingsPage() {
       */}
       <RefreshWhileRunning active={anyRunning(activity)} />
 
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 lg:px-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-8 lg:px-6">
         <section className="flex flex-col gap-4">
           {/*
             No heading of its own: `SiteHeader` already renders the `<h1>` for
@@ -119,23 +181,24 @@ export default async function BriefingsPage() {
             second one here would be a duplicate that could drift.
           */}
           <p className="text-sm text-muted-foreground">
-            The postings each briefing found on its most recent run. Manage
+            Every posting your briefings have found, however long ago. Manage
             schedules and search criteria in Settings.
           </p>
 
           {/*
             Two things the ticket requires be said outright rather than left to
-            be discovered, and both are said once here rather than on every
-            card:
+            be discovered:
 
             - A drafted letter is a **first draft to edit**. Bracketed
               placeholders are visible in the output by design — the writer is
               instructed to leave one wherever a fact nobody supplied would
               otherwise be invented and attributed to the user.
-            - **Only .md and .txt CVs can be read.** A PDF or DOCX uploads and
-              stores fine and cannot be turned into text yet (#86), so a user
-              whose CV is a PDF is refused for a reason that has nothing to do
-              with their document being wrong.
+            - **Three CV formats cannot be read.** `.doc`, `.odt` and `.rtf`
+              upload and store fine and have no parser — see
+              `READABLE_PROFILE_EXTENSIONS` in `lib/cover-letters/profile-text.ts`
+              — so a user whose CV is one of them is refused for a reason that
+              has nothing to do with their document being wrong. PDF and DOCX
+              *are* read, and this paragraph claimed otherwise for far too long.
           */}
           <p className="text-sm text-muted-foreground">
             Drafting a cover letter gives you a{" "}
@@ -145,23 +208,28 @@ export default async function BriefingsPage() {
             . Anything nobody supplied — a start date, a named recipient — is
             left as a visible [bracketed placeholder] rather than invented. It
             is written from the newest document you have labelled{" "}
-            <em>Resume</em> under Documents, and only{" "}
-            <code className="text-foreground">.md</code> and{" "}
-            <code className="text-foreground">.txt</code> files can be read so
-            far — PDF and Word documents can be stored but not yet read.
+            <em>Resume</em> under Documents. Markdown, plain text, PDF and Word
+            (<code className="text-foreground">.docx</code>) files can all be
+            read; <code className="text-foreground">.doc</code>,{" "}
+            <code className="text-foreground">.odt</code> and{" "}
+            <code className="text-foreground">.rtf</code> can be stored but not
+            yet read.
           </p>
+
+          <BriefingStrip briefings={strip} />
 
           {loadFailed ? (
             <Alert variant="destructive">
               <AlertDescription>
-                Your briefings could not be loaded. Try again in a moment.
+                Your postings could not be loaded. Try again in a moment.
               </AlertDescription>
             </Alert>
           ) : (
-            <BriefingList
-              briefings={briefings}
+            <PostingTable
+              page={postings}
+              query={query}
               letters={lettersByPosting}
-              activity={activityByBriefing}
+              counts={counts}
             />
           )}
         </section>
