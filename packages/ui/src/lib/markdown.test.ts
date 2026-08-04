@@ -74,9 +74,11 @@ describe("the markdown round trip", () => {
   })
 
   it("emits LF, never CRLF", () => {
-    // `saveCoverLetter` normalizes CRLF on the way in and its comment used to
-    // credit Turndown for producing it. Turndown does not — a pasted clipboard
-    // does — and this pins the half that is this package's to answer for.
+    // Implied by the fixed-point cases above — LF in, identical out — but
+    // asserted separately because `saveCoverLetter` normalizes CRLF and its
+    // comment has twice named a wrong source for it. This is the half that is
+    // this package's to answer for: whatever else reaches that action, it is
+    // not the serializer.
     expect(roundTrip("A line.\n\nAnother line.")).not.toMatch(/\r/)
   })
 })

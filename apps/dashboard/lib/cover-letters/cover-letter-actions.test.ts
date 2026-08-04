@@ -1090,10 +1090,10 @@ describe("saveCoverLetter", () => {
         extension: ".md",
       })
 
-      // CRLF arrives by paste — a clipboard from a Windows editor or a PDF —
-      // not from Turndown, which emits LF (pinned in the UI package's
-      // `markdown.test.ts`). Left alone, the same letter would have different
-      // bytes depending on where its words were typed.
+      // ⚠️ This asserts the *direct-POST* path, not anything a user can do.
+      // ProseMirror normalizes CRLF while parsing the clipboard and Turndown
+      // emits LF (pinned in the UI package's `markdown.test.ts`), so the editor
+      // cannot send CRLF — a hand-made FormData against the action can.
       expect(stored.text()).toBe("Dear Team,\n\nI would like to apply.")
     })
 
