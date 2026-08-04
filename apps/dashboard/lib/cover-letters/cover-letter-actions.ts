@@ -405,10 +405,18 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     // Normalized before it is measured and before it is stored. Two separate
     // reasons:
     //
-    // `\r\n` because Turndown emits CRLF and the writer emits LF, so without
-    // this the same letter has different bytes depending on whether a model or
-    // a person last touched it — and every save of an unedited letter would be
-    // a diff. The store is told `text/markdown`, and this keeps that one thing.
+    // `\r\n` because a rich-text editor accepts whatever is on the clipboard,
+    // and text pasted from a Windows editor or a PDF carries CRLF. Turndown
+    // itself emits LF — `packages/ui/src/lib/markdown.test.ts` pins that — so
+    // this is the paste path, not the serializer. Without it the same letter
+    // has different bytes depending on where its words were typed. The store is
+    // told `text/markdown`, and this keeps that one thing.
+    //
+    // ⚠️ **Line endings are the only normalization this side does, and the
+    // larger half is not here.** Whether an *unedited* save is a no-op depends
+    // on the markdown dialect the editor round-trips through, which is fixed in
+    // `createMarkdownSerializer()` and asserted there. This action cannot check
+    // it: by the time the bytes arrive they are already serialized.
     //
     // `trim()` because a letter that is only whitespace is an empty one however
     // much of it there is, and Turndown leaves a trailing newline on nearly

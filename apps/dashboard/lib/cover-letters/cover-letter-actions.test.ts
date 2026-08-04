@@ -1090,9 +1090,10 @@ describe("saveCoverLetter", () => {
         extension: ".md",
       })
 
-      // Turndown emits CRLF and the writer emits LF. Left alone, the same
-      // letter would have different bytes depending on which last touched it,
-      // and saving an unedited letter would rewrite every line.
+      // CRLF arrives by paste — a clipboard from a Windows editor or a PDF —
+      // not from Turndown, which emits LF (pinned in the UI package's
+      // `markdown.test.ts`). Left alone, the same letter would have different
+      // bytes depending on where its words were typed.
       expect(stored.text()).toBe("Dear Team,\n\nI would like to apply.")
     })
 
