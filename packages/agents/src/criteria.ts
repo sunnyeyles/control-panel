@@ -8,7 +8,7 @@ import * as z from "zod"
  * extractor proposes criteria, a caller stores them and later hands them to a
  * scout, and this module is what says whether what came back is usable. Reading
  * a CV is the one step in the pipeline with no source to check against — there
- * is no URL to click, no listing to re-fetch — so the shape of the answer is
+ * is no URL to click, no advertisement to re-fetch — so the shape of the answer is
  * the only thing that can be verified, and it is verified here.
  *
  * The extractor has no structured-output channel (the graph binds tools and
@@ -30,7 +30,7 @@ export const SearchCriteriaSchema = z.object({
     .array(z.string())
     .min(1)
     .describe(
-      "Role titles to search for — the roles this candidate could plausibly hold next, given the roles they have actually held and the seniority the CV evidences. At least one. Not a restatement of their most recent job title alone, and never a seniority the CV does not support."
+      "Role titles to search for — the roles this candidate could plausibly hold next, given the roles they have actually held and the seniority the CV evidences. At least one. Not a restatement of their most recent role title alone, and never a seniority the CV does not support."
     ),
   locations: z
     .array(z.string())

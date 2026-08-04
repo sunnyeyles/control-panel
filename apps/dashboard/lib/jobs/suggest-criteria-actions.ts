@@ -360,7 +360,7 @@ function describeMissingBackground(reason: NoBackgroundReason) {
  * named in each sentence differs. Here the consequence is worth stating plainly
  * because it is not a one-off: criteria invented from a document that says
  * nothing get saved and then searched on a cadence, so the mistake repeats
- * daily and looks like a quiet job market rather than like a bad extraction.
+ * daily and looks like a quiet hiring market rather than like a bad extraction.
  *
  * ⚠️ **The bounds are measured on the *extracted* text, not on the file.** A
  * 200 KB PDF whose text layer is a name and a phone number is `too-short`, and

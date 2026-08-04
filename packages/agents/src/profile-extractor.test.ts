@@ -162,7 +162,7 @@ describe("PROFILE_EXTRACTOR_SYSTEM_PROMPT", () => {
     expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/plausibly hold next/i)
     expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/seniority/i)
     expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(
-      /not a restatement of their most recent job title/i
+      /not a restatement of their most recent role title/i
     )
   })
 

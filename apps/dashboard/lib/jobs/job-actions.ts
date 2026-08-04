@@ -235,12 +235,21 @@ export function createJobActions(deps: JobActionsDeps) {
     // has no reason to connect to it. So the failing field is named, and the
     // two sentences say different things to do.
     if (!criteria.success) {
-      const keywordsRejected = criteria.error.issues.some(
-        (issue) => issue.path[0] === "keywords"
+      // ⚠️ **Keywords is named only when it is the *only* thing wrong.** Asking
+      // whether keywords merely appears among the issues gets the common case
+      // right and the overlapping one backwards: a submit that fails on an
+      // empty `titles` *and* an over-cap `keywords` would be answered with the
+      // keyword sentence, so the user trims the list, submits again, and only
+      // then learns about the field that was blocking them all along. One
+      // failure, two round trips, and the first message named a field that was
+      // not the obstacle.
+      const failed = new Set(
+        criteria.error.issues.map((issue) => issue.path[0])
       )
+      const keywordsAlone = failed.size === 1 && failed.has("keywords")
 
       return fail(
-        keywordsRejected
+        keywordsAlone
           ? `That is more than ${MAX_CRITERIA_ITEMS} keywords. Keep the list to the technologies that matter most for the roles you want — a longer one does not search harder.`
           : "Add at least one role title and one location."
       )
@@ -264,12 +273,14 @@ export function createJobActions(deps: JobActionsDeps) {
      */
     const { keywords, ...requiredCriteria } = criteria.data
 
-    // `?.` rather than `.length > 0` so this holds whether the schema hands
-    // back `[]` or nothing at all for an unfilled field — the branch is about
-    // "did the user name any keywords", and both spellings of "no" take it.
-    const config = keywords?.length
-      ? { ...requiredCriteria, keywords }
-      : requiredCriteria
+    // `optionalCriteriaList` pipes to a plain `z.array(...)`, so this is always
+    // a `string[]` — an unfilled field arrives as `[]`, never as `undefined`.
+    // Spelling the test `.length > 0` rather than `?.length` says that: an
+    // optional chain here would imply an absent case the type forbids, and
+    // would keep working if the schema ever grew one, which is precisely the
+    // change that should fail loudly instead.
+    const config =
+      keywords.length > 0 ? { ...requiredCriteria, keywords } : requiredCriteria
 
     let job: Job
 

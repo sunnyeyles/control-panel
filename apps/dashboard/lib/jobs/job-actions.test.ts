@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
 import { createJobActions } from "./job-actions"
+import { MAX_CRITERIA_ITEMS } from "./search-criteria"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
@@ -444,6 +445,46 @@ describe("createJob", () => {
 
     expect(result.status).toBe("success")
     expect(store.creates).toHaveLength(1)
+  })
+
+  /** One over the cap, which is the only way keywords can fail at all. */
+  const tooManyKeywords = Array.from(
+    { length: MAX_CRITERIA_ITEMS + 1 },
+    (_, index) => `tech-${index}`
+  ).join(", ")
+
+  it("names keywords when the list is the only thing over the line", async () => {
+    const result = await actionsFor(SIGNED_IN).createJob(
+      IDLE,
+      createForm({ keywords: tooManyKeywords })
+    )
+
+    expect(result.status).toBe("error")
+    // The count, so the sentence says how far over it is rather than only that
+    // it is over.
+    expect(result.status === "error" && result.message).toContain(
+      String(MAX_CRITERIA_ITEMS)
+    )
+    expect(store.creates).toHaveLength(0)
+  })
+
+  it("names the blocking field, not keywords, when both are wrong", async () => {
+    // ⚠️ The regression this exists for. Keywords appearing *among* the issues
+    // is not the same question as keywords being *the* issue: answer this with
+    // the keyword sentence and the user trims the list, submits again, and only
+    // then discovers the empty title that was blocking them the whole time —
+    // two round trips for one failure, the first naming a field that was never
+    // the obstacle.
+    const result = await actionsFor(SIGNED_IN).createJob(
+      IDLE,
+      createForm({ titles: "   ", keywords: tooManyKeywords })
+    )
+
+    expect(result.status).toBe("error")
+    expect(result.status === "error" && result.message).toBe(
+      "Add at least one role title and one location."
+    )
+    expect(store.creates).toHaveLength(0)
   })
 
   it("derives the cron from the interval and always stores UTC", async () => {

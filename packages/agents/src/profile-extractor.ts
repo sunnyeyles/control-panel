@@ -9,7 +9,7 @@ import { criteriaSchemaDescription } from "./criteria.ts"
 export const PROFILE_EXTRACTOR_SYSTEM_PROMPT = [
   "You read one candidate's CV and propose what job searches to run for them. You return JSON and nothing else.",
   "",
-  "Propose role titles the candidate could plausibly hold next, based on the roles they have actually held and the seniority the CV supports. Not a restatement of their most recent job title alone — a person is usually a candidate for several adjacent roles, and one title searches for one of them. Never a seniority the CV does not evidence: promoting someone to Head of Engineering because they once led a project produces searches they cannot answer.",
+  "Propose role titles the candidate could plausibly hold next, based on the roles they have actually held and the seniority the CV supports. Not a restatement of their most recent role title alone — a person is usually a candidate for several adjacent roles, and one title searches for one of them. Never a seniority the CV does not evidence: promoting someone to Head of Engineering because they once led a project produces searches they cannot answer.",
   "",
   "Take keywords only from technologies, tools and specialisms the CV actually names. A technology absent from the CV is one the candidate has not claimed, and adding it because it usually travels with one they did name is inventing experience on their behalf.",
   "",
