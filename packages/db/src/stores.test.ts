@@ -8,7 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
   artifactsForRun,
+  claimAdHocRun,
   claimJob,
+  coverLetterInstructions,
   createJob,
   createPrismaClient,
   dueJobs,
@@ -16,10 +18,13 @@ import {
   failRun,
   finishRun,
   latestArtifactForJob,
+  latestRunPerJob,
   pauseJob,
   recordArtifact,
   recordRunFindings,
   resumeJob,
+  runningRunForJob,
+  saveCoverLetterInstructions,
   startAdHocRun,
   updateJobSchedule,
   type DueJob,
@@ -232,6 +237,83 @@ describeWithDatabase("against a real database", () => {
       }
 
       expect(await claimJob(prisma, job)).toBeUndefined()
+    })
+
+    it("claims one exactly once, whatever the delivery count", async () => {
+      const job = await dueJob("ad-hoc-claim")
+      const run = await startAdHocRun(prisma, job.id)
+
+      const first = await claimAdHocRun(prisma, run.id)
+      const second = await claimAdHocRun(prisma, run.id)
+
+      expect(first).toMatchObject({ jobId: job.id })
+      expect(first?.startedAt.getTime()).toBe(run.startedAt.getTime())
+      expect(second).toBeUndefined()
+
+      const claimed = await prisma.run.findUnique({ where: { id: run.id } })
+      expect(claimed?.claimedAt).not.toBeNull()
+    })
+
+    it("refuses to claim a run that is already terminal", async () => {
+      const job = await dueJob("ad-hoc-terminal")
+      const run = await startAdHocRun(prisma, job.id)
+
+      expect(await finishRun(prisma, run.id)).toBe(true)
+      expect(await claimAdHocRun(prisma, run.id)).toBeUndefined()
+    })
+
+    it("refuses to claim a scheduled run, which the slot already protects", async () => {
+      const job = await dueJob("ad-hoc-not-scheduled")
+      const { runId } = await claimOrFail(job)
+
+      expect(await claimAdHocRun(prisma, runId)).toBeUndefined()
+    })
+
+    it("does not advance the schedule", async () => {
+      const job = await dueJob("ad-hoc-no-slot")
+      const before = await prisma.job.findUnique({ where: { id: job.id } })
+
+      const run = await startAdHocRun(prisma, job.id)
+      await claimAdHocRun(prisma, run.id)
+
+      const after = await prisma.job.findUnique({ where: { id: job.id } })
+      expect(after?.nextRunAt?.getTime()).toBe(before?.nextRunAt?.getTime())
+    })
+  })
+
+  describe("reading runs back", () => {
+    it("returns the newest run of each job and nobody else's", async () => {
+      const mine = await dueJob("latest-mine")
+      const older = await startAdHocRun(prisma, mine.id)
+      await finishRun(prisma, older.id)
+      const newest = await startAdHocRun(prisma, mine.id)
+
+      const summaries = await latestRunPerJob(prisma, userId)
+      const forJob = summaries.filter((row) => row.jobId === mine.id)
+
+      expect(forJob).toHaveLength(1)
+      expect(forJob[0]?.id).toBe(newest.id)
+      expect(forJob[0]?.status).toBe("running")
+      expect(forJob[0]?.scheduledFor).toBeNull()
+
+      const stranger = await ensureUserForAuth(prisma, randomUUID())
+      expect(await latestRunPerJob(prisma, stranger.id)).toEqual([])
+    })
+
+    it("finds a run still going, and ignores one that started too long ago", async () => {
+      const job = await dueJob("in-flight")
+      const run = await startAdHocRun(prisma, job.id)
+
+      const wellBefore = new Date(run.startedAt.getTime() - 60_000)
+      const wellAfter = new Date(run.startedAt.getTime() + 60_000)
+
+      expect(await runningRunForJob(prisma, job.id, wellBefore)).toMatchObject({
+        id: run.id,
+      })
+      expect(await runningRunForJob(prisma, job.id, wellAfter)).toBeUndefined()
+
+      await finishRun(prisma, run.id)
+      expect(await runningRunForJob(prisma, job.id, wellBefore)).toBeUndefined()
     })
   })
 
@@ -482,6 +564,103 @@ describeWithDatabase("against a real database", () => {
           [authUserId, other.id]
         )
       ).rejects.toThrow()
+    })
+  })
+
+  describe("cover letter instructions", () => {
+    it("reads nothing for a user who has never saved any", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      expect(await coverLetterInstructions(prisma, fresh.id)).toBeUndefined()
+    })
+
+    it("creates the row on the first save", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      const saved = await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: 'Never use the word "passionate".',
+        exampleLetter: "Dear Hiring Team,",
+      })
+
+      expect(saved.userId).toBe(fresh.id)
+      expect(await coverLetterInstructions(prisma, fresh.id)).toEqual(saved)
+    })
+
+    it("updates the row on a second save rather than adding one", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "Australian spelling.",
+        exampleLetter: "",
+      })
+      await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: 'Sign off "Kind regards".',
+        exampleLetter: "Dear Hiring Team,",
+      })
+
+      const row = await coverLetterInstructions(prisma, fresh.id)
+      expect(row?.instructions).toBe('Sign off "Kind regards".')
+      expect(row?.exampleLetter).toBe("Dear Hiring Team,")
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".cover_letter_instructions where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.count).toBe("1")
+    })
+
+    it("moves updated_at forward on the second save", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      const first = await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "Open with why the role.",
+        exampleLetter: "",
+      })
+      const second = await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "Open with why the company.",
+        exampleLetter: "",
+      })
+
+      expect(second.updatedAt.getTime()).toBeGreaterThan(
+        first.updatedAt.getTime()
+      )
+    })
+
+    it("stores empty strings rather than nulls when nothing is set", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await saveCoverLetterInstructions(prisma, fresh.id, {
+        instructions: "",
+        exampleLetter: "",
+      })
+
+      const row = await coverLetterInstructions(prisma, fresh.id)
+      expect(row?.instructions).toBe("")
+      expect(row?.exampleLetter).toBe("")
+
+      const { rows } = await admin.query<{
+        instructions: string | null
+        example_letter: string | null
+      }>(
+        `select instructions, example_letter from "${SCHEMA}".cover_letter_instructions where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.instructions).toBe("")
+      expect(rows[0]?.example_letter).toBe("")
+    })
+
+    it("goes with the user, which is the whole point of the cascade", async () => {
+      const doomed = await prisma.user.create({ data: {} })
+      await saveCoverLetterInstructions(prisma, doomed.id, {
+        instructions: "Delete me with my user.",
+        exampleLetter: "",
+      })
+
+      await admin.query(`delete from "${SCHEMA}".users where id = $1`, [
+        doomed.id,
+      ])
+
+      expect(await coverLetterInstructions(prisma, doomed.id)).toBeUndefined()
     })
   })
 

@@ -13,11 +13,15 @@ import {
   toCoverLetterPrompt,
   UndraftableError,
   type CoverLetterRequest,
+  type LetterInstructions,
 } from "@workspace/agents/cover-letter"
-import { createCoverLetterWriter } from "@workspace/agents/cover-letter-writer"
+import {
+  coverLetterSystemPrompt,
+  createCoverLetterWriter,
+} from "@workspace/agents/cover-letter-writer"
 import { FindingsSchema, type Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
-import type { PrismaClient } from "@workspace/db"
+import { coverLetterInstructions, type PrismaClient } from "@workspace/db"
 import { createLangfuseCallback } from "@workspace/langfuse"
 import {
   isUserStorageError,
@@ -54,6 +58,13 @@ import { z } from "zod"
  *    form reaches the `userId` segment, so `assertSegment` in
  *    `@workspace/user-storage` is a second line of defence rather than the only
  *    one.
+ *
+ * The candidate's saved instructions extend that first property rather than
+ * qualifying it. They are read from the database, keyed on the session's user
+ * id, and there is deliberately **no form field for them** — one would be a
+ * second way to put text of the caller's choosing into the system prompt of an
+ * agent holding the user's CV, which is exactly what re-reading the Posting
+ * server-side exists to prevent.
  *
  * And one that is about spending rather than security: the refusal for "no
  * readable CV" happens **before** the writer is constructed, so a user with
@@ -161,8 +172,14 @@ export interface CoverLetterActionsDeps {
    * The writer. Defaults to the real agent, which reads `OPENAI_API_KEY` when
    * constructed — hence a factory called inside the action, never at module
    * scope. A test passes one built over a fake chat model.
+   *
+   * Takes the candidate's saved instructions, because the system prompt is
+   * composed from them and an agent is built per draft anyway. The composition
+   * is `coverLetterSystemPrompt`'s, not this file's: what a test injected here
+   * asserts on is *which* prompt was composed, which is the only part that can
+   * be got wrong from this side.
    */
-  createWriter?: () => Agent
+  createWriter?: (extras: LetterInstructions) => Agent
   /** Overridden in tests, so an assertion can name the drafting instant. */
   now?: () => Date
   /** Overridden in tests, so an assertion can name the reset key. */
@@ -170,7 +187,12 @@ export interface CoverLetterActionsDeps {
 }
 
 export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
-  const createWriter = deps.createWriter ?? (() => createCoverLetterWriter())
+  const createWriter =
+    deps.createWriter ??
+    ((extras: LetterInstructions) =>
+      createCoverLetterWriter({
+        systemPrompt: coverLetterSystemPrompt(extras),
+      }))
   const now = deps.now ?? (() => new Date())
   const newResetKey = deps.newResetKey ?? (() => crypto.randomUUID())
 
@@ -272,9 +294,36 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       return fail("That posting could not be turned into a letter.")
     }
 
+    // ⚠️ **A failed read fails the draft — it never drafts without them.**
+    // Drafting anyway produces a letter that looks perfect and quietly ignores
+    // every rule the user wrote: the sign-off they asked for is missing, the
+    // word they banned is back, and nothing anywhere says why. That is the same
+    // silent-failure shape `assertDraftable` refuses one step earlier, and the
+    // reason the failure is loud here rather than degraded to the built-in
+    // behaviour.
+    //
+    // A user with *no row* is a different thing and is the ordinary case: they
+    // never opened Settings, `coverLetterSystemPrompt` composes byte-identically
+    // to the constant, and the draft proceeds.
+    let extras: LetterInstructions
+    try {
+      const saved = await coverLetterInstructions(
+        deps.getPrisma(),
+        caller.userId
+      )
+
+      extras = {
+        instructions: saved?.instructions ?? "",
+        exampleLetter: saved?.exampleLetter ?? "",
+      }
+    } catch (error) {
+      console.error("cover-letters: could not read the instructions", error)
+      return fail("Something went wrong.")
+    }
+
     let markdown: string
     try {
-      markdown = await draft(request, caller.userId)
+      markdown = await draft(request, caller.userId, extras)
     } catch (error) {
       console.error("cover-letters: the writer failed", error)
       return fail("The letter could not be drafted. Try again in a moment.")
@@ -434,9 +483,10 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
    */
   async function draft(
     request: CoverLetterRequest,
-    userId: string
+    userId: string,
+    extras: LetterInstructions
   ): Promise<string> {
-    const writer = createWriter()
+    const writer = createWriter(extras)
     const sessionId = crypto.randomUUID()
 
     const callback = createLangfuseCallback({

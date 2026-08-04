@@ -1,6 +1,12 @@
 import { BriefingList } from "@/components/briefings/briefing-list"
 import { CoverLetterList } from "@/components/briefings/cover-letter-list"
+import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
 import { requirePageUser } from "@/lib/auth/require-page-user"
+import {
+  anyRunning,
+  runActivityForUser,
+  type BriefingActivity,
+} from "@/lib/briefing-runs/run-activity"
 import {
   latestPostingsForUser,
   type BriefingPostings,
@@ -12,6 +18,7 @@ import {
 import { getPrisma } from "@/lib/db"
 import { getCoverLetterStore } from "@/lib/storage"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import Link from "next/link"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
@@ -72,6 +79,18 @@ export default async function BriefingsPage() {
     lettersFailed = true
   }
 
+  // ⚠️ **A third independent load, failing independently.** It answers a
+  // different question from `latestPostingsForUser` — the latest Run of any
+  // status, rather than the latest successful one — and a failure here must
+  // cost the status line and the button, not the postings.
+  let activity: BriefingActivity[] = []
+
+  try {
+    activity = await runActivityForUser(getPrisma(), user.userId)
+  } catch (error) {
+    console.error("briefings: could not load run activity", error)
+  }
+
   // Keyed so each Posting card can ask about itself without scanning. Built
   // here rather than in the component because it is derived from data the page
   // already holds, and a component that builds it would rebuild it per render.
@@ -79,8 +98,19 @@ export default async function BriefingsPage() {
     letters.map((letter) => [letter.postingId, letter])
   )
 
+  const activityByBriefing = new Map(
+    activity.map((entry) => [entry.briefingId, entry.activity])
+  )
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {/*
+        Mounted only while something is actually running, which is what keeps
+        the app's only poller from being a request every five seconds for the
+        life of an idle tab. It renders nothing; mounting it is the effect.
+      */}
+      <RefreshWhileRunning active={anyRunning(activity)} />
+
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 lg:px-6">
         <section className="flex flex-col gap-4">
           {/*
@@ -128,7 +158,11 @@ export default async function BriefingsPage() {
               </AlertDescription>
             </Alert>
           ) : (
-            <BriefingList briefings={briefings} letters={lettersByPosting} />
+            <BriefingList
+              briefings={briefings}
+              letters={lettersByPosting}
+              activity={activityByBriefing}
+            />
           )}
         </section>
 
@@ -138,6 +172,23 @@ export default async function BriefingsPage() {
             <p className="text-sm text-muted-foreground">
               Every letter you have drafted, newest first. Drafting again for
               the same posting replaces the letter here.
+            </p>
+            {/*
+              The knob is on another page, and nothing else would say it exists
+              — the Draft button is here and what it obeys is set in Settings,
+              so a user who never visits Settings would assume the writer cannot
+              be told anything.
+            */}
+            <p className="text-sm text-muted-foreground">
+              How these are written — tone, wording, an example letter to
+              imitate — is set under{" "}
+              <Link
+                href="/settings"
+                className="underline underline-offset-4 hover:no-underline"
+              >
+                Settings
+              </Link>
+              .
             </p>
           </div>
 

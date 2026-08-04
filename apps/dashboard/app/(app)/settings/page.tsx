@@ -1,10 +1,23 @@
 import { BriefingSection } from "@/components/settings/briefing-section"
+import { CoverLetterSection } from "@/components/settings/cover-letter-section"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import { Label } from "@workspace/ui/components/label"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
+
+/**
+ * Raised when the Cover letters section started listing documents.
+ *
+ * `listDocuments()` pays one `HeadObject` per document — S3's listing carries
+ * no user metadata, so a display name costs a round trip — and that fan-out now
+ * happens on this page as well as `/documents`, which sets the same 30 for the
+ * same reason. Without it a user with a shelf full of documents gets a settings
+ * page that times out, and only that user, which is the worst way for it to
+ * fail.
+ */
+export const maxDuration = 30
 
 export default async function SettingsPage() {
   const user = await requirePageUser()
@@ -18,6 +31,8 @@ export default async function SettingsPage() {
           that can scope this list.
         */}
         <BriefingSection userId={user.userId} />
+
+        <CoverLetterSection userId={user.userId} />
 
         <section className="flex flex-col gap-4">
           <div>

@@ -1,5 +1,10 @@
 output "worker_function_name" {
-  description = "Pass to `aws lambda invoke` to force a run."
+  description = <<-EOT
+    Pass to `aws lambda invoke` to force a run.
+
+    Also what the dashboard needs as `BRIEFING_WORKER_FUNCTION_NAME` on Vercel,
+    so it can ask for an ad-hoc run — see `infra/aws/DEPLOYING.md`.
+  EOT
   value       = module.briefing_worker.function_name
 }
 

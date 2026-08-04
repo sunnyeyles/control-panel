@@ -285,14 +285,22 @@ terraform -chdir=infra/aws output -raw vercel_dashboard_role_arn
 
 ## 4. Set the Vercel project environment
 
-Production scope, four variables:
+Production scope, five variables:
 
-| Variable                   | Value                                            |
-| -------------------------- | ------------------------------------------------ |
-| `USER_STORAGE_BUCKET_NAME` | `terraform output -raw user_storage_bucket_name` |
-| `USER_STORAGE_ENVIRONMENT` | `prod`                                           |
-| `AWS_REGION`               | `ap-southeast-2` — **an override, not a gap**    |
-| `AWS_ROLE_ARN`             | the output from step 3                           |
+| Variable                        | Value                                            |
+| ------------------------------- | ------------------------------------------------ |
+| `USER_STORAGE_BUCKET_NAME`      | `terraform output -raw user_storage_bucket_name` |
+| `USER_STORAGE_ENVIRONMENT`      | `prod`                                           |
+| `AWS_REGION`                    | `ap-southeast-2` — **an override, not a gap**    |
+| `AWS_ROLE_ARN`                  | the output from step 3                           |
+| `BRIEFING_WORKER_FUNCTION_NAME` | `terraform output -raw worker_function_name`     |
+
+**`BRIEFING_WORKER_FUNCTION_NAME` is what the Run now button needs.** Without it
+the button fails at the moment of the click, saying the briefing could not be
+started; everything else in the app works. Note that the role also has to carry
+the invoke grant — `aws_iam_role_policy.vercel_dashboard_invoke_worker` in
+`vercel-dashboard.tf` — so a Vercel variable set before that apply lands still
+produces an `AccessDeniedException`.
 
 **`AWS_REGION` is the row to be careful with, and not because it is missing.**
 Vercel sets it for you, to the region the function happened to execute in. Its

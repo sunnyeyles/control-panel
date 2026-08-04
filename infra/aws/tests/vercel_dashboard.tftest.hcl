@@ -15,9 +15,21 @@
 # decoded `VERCEL_OIDC_TOKEN` and is called out in DEPLOYING.md.
 
 mock_provider "aws" {
+  # `override_during = plan` so the worker's ARN is known while these run
+  # blocks plan. Without it the invoke policy's `resources` is unknown until
+  # apply, and the assertion that it is not a wildcard — the one worth having —
+  # cannot be evaluated at all.
+  override_during = plan
+
   mock_data "aws_iam_policy_document" {
     defaults = {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  mock_resource "aws_lambda_function" {
+    defaults = {
+      arn = "arn:aws:lambda:ap-southeast-2:000000000000:function:briefing-worker"
     }
   }
 
@@ -106,6 +118,36 @@ run "configured" {
     error_message = "The dashboard's and the worker's storage grants must be disjoint."
   }
 
+  # The dashboard may *start* a briefing run and still not author one. That is
+  # only true while this grant stays what it says it is, so both halves are
+  # asserted: that it exists at all, and that it names one function.
+  assert {
+    condition     = length(aws_iam_role_policy.vercel_dashboard_invoke_worker) == 1
+    error_message = "The dashboard needs lambda:InvokeFunction to start an ad-hoc run."
+  }
+
+  # A wildcard here would let the app invoke anything in the account — including
+  # a future function with grants of its own — which is the confused-deputy
+  # shape this whole stack is arranged to avoid.
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.vercel_dashboard_invoke_worker[0].statement :
+      !contains(statement.resources, "*")
+    ])
+    error_message = "The invoke grant must name the worker's ARN, never `*`."
+  }
+
+  # Stated separately because it is the property, not its spelling: invoking is
+  # not writing. If someone ever adds an `s3:` action to this document, the
+  # storage assertions above would still pass and this is what would not.
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.vercel_dashboard_invoke_worker[0].statement :
+      alltrue([for action in statement.actions : startswith(action, "lambda:")])
+    ])
+    error_message = "The invoke policy must grant nothing but lambda: actions; storage access belongs to the per-kind policies, which deliberately exclude briefs."
+  }
+
   # A wildcard smuggled into a StringEquals value does not match broadly — it
   # never matches at all — so this fails closed rather than open. It is asserted
   # anyway because the failure is silent and looks like a credentials problem.
@@ -158,6 +200,14 @@ run "unconfigured_creates_nothing" {
   assert {
     condition     = length(aws_iam_role_policy_attachment.vercel_dashboard_user_storage) == 0
     error_message = "An unconfigured vercel_dashboard must attach no policy."
+  }
+
+  # Gated on the same `count` as the role it would attach to. A policy created
+  # without one fails the apply rather than the plan, which is a worse place to
+  # find out.
+  assert {
+    condition     = length(aws_iam_role_policy.vercel_dashboard_invoke_worker) == 0
+    error_message = "An unconfigured vercel_dashboard must create no invoke policy."
   }
 
   # The other two stacks are untouched by the gate.

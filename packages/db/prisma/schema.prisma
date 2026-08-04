@@ -21,9 +21,28 @@ model User {
   // users remain legal; UNIQUE still maps one auth identity to at most one row.
   authUserId String?  @unique @map("auth_user_id")
 
-  jobs Job[]
+  jobs                    Job[]
+  coverLetterInstructions CoverLetterInstructions?
 
   @@map("users")
+}
+
+model CoverLetterInstructions {
+  userId        String   @id @map("user_id") @db.Uuid
+  instructions  String   @default("")
+  // A letter the candidate wants imitated. Held apart from `instructions`
+  // rather than concatenated into it, because the prompt has to fence the two
+  // differently: rules are followed, an example is a style reference and never
+  // a source of facts.
+  exampleLetter String   @default("") @map("example_letter")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // The one deliberate cascade. This row is a preference with no independent
+  // existence, not a record that something happened, so `Restrict` would make a
+  // user undeletable for the sake of a settings row. Everywhere else restricts.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("cover_letter_instructions")
 }
 
 model Job {
@@ -55,6 +74,12 @@ model Run {
   // text + CHECK in migration SQL rather than a Postgres enum.
   status       String
   startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  // When the worker picked this run up, as distinct from when it was requested.
+  // Only the ad-hoc path writes it: a scheduled run is made at-most-once by the
+  // partial unique index on (job_id, scheduled_for), which by definition does
+  // not cover an ad-hoc run. NULL means unclaimed, and is what the claim's
+  // compare-and-swap matches on.
+  claimedAt    DateTime? @map("claimed_at") @db.Timestamptz(6)
   finishedAt   DateTime? @map("finished_at") @db.Timestamptz(6)
   failure      Json?
   // What the scout found, kept so it outlives the run that found it. NULL for

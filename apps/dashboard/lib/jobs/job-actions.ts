@@ -19,6 +19,7 @@ import {
   toCron,
   type IntervalHours,
 } from "./interval"
+import { requireOwnedJob } from "./owned-job"
 import { searchCriteriaSchema } from "./search-criteria"
 
 /**
@@ -258,26 +259,6 @@ export function createJobActions(deps: JobActionsDeps) {
     updateJobSchedule: updateJobScheduleAction,
     createJob: createJobAction,
   }
-}
-
-/**
- * The ownership boundary.
- *
- * Job helpers take an id and **do not filter by `user_id`** — the worker's tick
- * legitimately operates across every user's jobs. So a `jobId` from a form
- * addresses any row in the table, and the check has to happen here.
- *
- * Returns `undefined` for both "no such row" and "not yours".
- */
-async function requireOwnedJob(
-  prisma: PrismaClient,
-  jobId: string,
-  userId: string
-): Promise<Job | undefined> {
-  const job = await prisma.job.findUnique({ where: { id: jobId } })
-  if (!job || job.userId !== userId) return undefined
-
-  return job
 }
 
 /**
