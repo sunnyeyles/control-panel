@@ -44,9 +44,10 @@ burns a slot to discover something knowable before the slot was claimed.
 
 **3. `run-tick.ts` has no test.** The worker's only tests are
 `src/run-briefing.test.ts` and `src/dev/stores.test.ts` — and the second covers
-the local harness, not the pipeline. `runTick` takes a concrete `PrismaClient`,
-which is awkward to fake — which is why it has none, and why the dispatch
-decision needs to be testable without one.
+the local harness, not the pipeline. `runTick` takes a concrete `PrismaClient`
+and imports `dueJobs`, `claimJob` and the rest as module bindings
+(`run-tick.ts:1-9`), which is awkward to fake — which is why it has none, and why
+Stage 0 exists before any of this.
 
 **4. The Errors alarm is daily and latching, not per-invocation.**
 `infra/aws/modules/briefing-worker/monitoring.tf:16-30` sets `period = 86400`
@@ -287,6 +288,35 @@ job is a regression regardless of how much tidier it reads.
 ---
 
 ## Stages
+
+### Stage 0 — a seam over the tick's database calls
+
+Fact 3 above says `runTick` has no test because it takes a concrete
+`PrismaClient`, and concludes that "the dispatch decision needs to be testable
+without one". Making the _decision_ pure is necessary and not sufficient. Stage 2
+has to prove three things a pure function cannot observe: that `claimJob` was
+never called, that no `runs` row was created, and that `next_run_at` did not
+move. Those are assertions about database calls, and `run-tick.ts:1-9` imports
+every one of them — `dueJobs`, `claimJob`, `failRun`, `finishRun`,
+`recordArtifact`, `recordRunFindings` — as module bindings. Nothing can see them
+called or not called.
+
+The alternative is a real Postgres, and this repo already knows what that costs:
+`@workspace/db`'s `stores.test.ts` skips itself when `DATABASE_URL_UNPOOLED` is
+unset, so the assertions Decision 3 most wants held would be the ones a clean
+local run silently does not make.
+
+So the prefactor comes first: `runTick` takes its database operations as an
+injected port, defaulting to the real ones so `index.ts` is unaffected. It is the
+same seam the codebase already uses twice — `recordArtifact` and `recordFindings`
+are injected into `runBriefing` for exactly this reason (`run-briefing.ts:99-109`,
+"so a test should not need a Prisma client to assert that the write happened"),
+and `createScout` / `createWriter` for the equivalent reason. This stage copies a
+pattern rather than inventing one.
+
+Make the change easy, then make the easy change. Done when: `runTick` behaves
+identically, `index.ts` is unchanged or changed once, and a test drives a whole
+tick — due, claim, run, finish — with no Prisma client anywhere.
 
 ### Stage 1 — the registry, one entry, no behaviour change
 
