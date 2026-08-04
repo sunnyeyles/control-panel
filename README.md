@@ -34,6 +34,12 @@ pnpm typecheck   # tsc --noEmit per workspace
 Terraform and database migrations are **not** covered by Turborepo and run on
 their own; `CLAUDE.md` has both incantations.
 
+To edit the UI without signing in, set `DEV_AUTH_BYPASS=1` in
+`apps/dashboard/.env.local`. `pnpm dev` then serves every page as a fixed dev
+user against in-memory fixtures, needing no database, no AWS credentials and no
+`NEON_*` variables — and refusing to start at all if it ever reaches a
+production build. See `apps/dashboard/CLAUDE.md`.
+
 ## Langfuse tracing
 
 The dashboard records each chat turn as `chat-response`; the Lambda records

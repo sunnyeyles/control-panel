@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 
 import { auth } from "@/lib/auth/server"
+import { devMockEnabled } from "@/lib/dev/mode"
 
 /**
  * The first of two layers gating this app.
@@ -87,6 +88,13 @@ function hasSessionCookie(request: NextRequest): boolean {
 export default async function proxy(
   request: NextRequest
 ): Promise<NextResponse> {
+  /**
+   * `DEV_AUTH_BYPASS=1`. Needed here as well as in `getCurrentUser()`: `gate`
+   * resolves its own session and would redirect every GET to `/auth/sign-in`
+   * before a page ran, making that bypass unreachable.
+   */
+  if (devMockEnabled()) return NextResponse.next()
+
   const { pathname } = request.nextUrl
   const isApi = pathname.startsWith("/api/")
 

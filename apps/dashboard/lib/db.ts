@@ -1,3 +1,5 @@
+import { createDevPrisma } from "@/lib/dev/fake-prisma"
+import { devMockEnabled } from "@/lib/dev/mode"
 import { createPrismaClient, type PrismaClient } from "@workspace/db"
 
 /**
@@ -15,6 +17,9 @@ import { createPrismaClient, type PrismaClient } from "@workspace/db"
 let prisma: PrismaClient | undefined
 
 export function getPrisma(): PrismaClient {
-  prisma ??= createPrismaClient()
+  // Memoized through the same variable, so the fake's rows are one set per
+  // process — a briefing paused on /settings reads as paused on /briefings.
+  // `createPrismaClient()` is never called, so `DATABASE_URL` is never read.
+  prisma ??= devMockEnabled() ? createDevPrisma() : createPrismaClient()
   return prisma
 }

@@ -2,6 +2,8 @@ import { cache } from "react"
 
 import { auth } from "@/lib/auth/server"
 import { getPrisma } from "@/lib/db"
+import { DEV_USER } from "@/lib/dev/fixtures"
+import { devMockEnabled } from "@/lib/dev/mode"
 import { ensureUserForAuth } from "@workspace/db"
 
 /**
@@ -72,6 +74,17 @@ function isAllowed(email: string): boolean {
  */
 export const getCurrentUser = cache(
   async function getCurrentUser(): Promise<CurrentUser> {
+    /**
+     * ⚠️ **The one way past everything below.** Every page, Server Action and
+     * API route establishes who is asking through this function, so opening it
+     * opens the app — and nothing downstream needs a branch of its own.
+     *
+     * Returning before `auth.getSession()` skips the session lookup, the
+     * allowlist and the `ensureUserForAuth` upsert together, which is what lets
+     * the app run with no `NEON_*` variables and no database.
+     */
+    if (devMockEnabled()) return DEV_USER
+
     const { data: session } = await auth.getSession()
 
     const user = session?.user

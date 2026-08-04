@@ -18,6 +18,23 @@ Three things here are easy to undo by accident:
 - **The SDK's skip list is hardcoded** — `/api/auth`, `/auth/callback`, `/auth/sign-in`, `/auth/sign-up` are ungated no matter what `config.matcher` says, and nothing in this repo can extend or override it. It is also why `/auth/sign-up` would be public if anyone built it.
 - **`users.id` is the platform identity; the Neon Auth id is only a mapping.** `lib/auth/current-user.ts` returns the uuid from `users`, never `session.user.id`. That uuid is what `jobs.user_id` references and what becomes the `userId` segment of every S3 key, where `assertSegment()` in `@workspace/user-storage` treats it as the ownership boundary. `ensureUserForAuth(prisma, authUserId)` from `@workspace/db` — a free function, not a store method — is a single idempotent upsert, so it is safe on every request and self-heals — there is no transaction to coordinate with, because Neon has already created the account by the time our code runs.
 
+## `DEV_AUTH_BYPASS=1` — the one thing that turns the gate off
+
+**Set it in `apps/dashboard/.env.local` and `next dev` serves every page as a fixed fake user, from fixtures** — no `DATABASE_URL`, no AWS credentials, no `NEON_*`. It exists because editing a component otherwise costs an OAuth round trip, and what renders then depends on whatever is in that Neon branch.
+
+`lib/dev/mode.ts` is the only module that reads the variable, and **it throws when the flag is set under `NODE_ENV=production`** rather than quietly returning `false`. That fires during `next build`, not at the first request — `app/api/auth/[...path]/route.ts` makes page-data collection evaluate `lib/auth/server.ts` at module scope — so such a build cannot be produced at all. Local cost: `pnpm build` fails while the flag is in `.env.local`.
+
+Five accessors branch on `devMockEnabled()`, each before reading any configuration:
+
+- **`lib/auth/current-user.ts`** returns the fixed `DEV_USER`. The one that matters — every page, action and API route asks through it, so **nothing else needs an auth branch**.
+- **`lib/db.ts`** and **`lib/storage.ts`** hand out `lib/dev/fake-prisma.ts` and `lib/dev/fake-stores.ts`, memoized through the same variables so a briefing paused on `/settings` reads as paused on `/briefings`.
+- **`lib/auth/server.ts`** takes placeholder config — the only reason the app boots with `NEON_AUTH_BASE_URL` unset, since the instance is built at module scope. Nothing calls it.
+- **`proxy.ts`** returns `NextResponse.next()`. Needed _as well as_ the `getCurrentUser()` branch: `gate` resolves its own session and would redirect every GET first.
+
+Two things not to "fix": the fake Prisma **throws by name on unimplemented queries** instead of answering `undefined`, and implements `$executeRaw` because `updateJobSchedule()` is raw SQL matched by position (`fake-prisma.test.ts` catches that statement changing). And **`list()` in the fake stores returns less than `head()`**, as the real ones must — supplying the metadata would make the deliberate `head()`-per-item loops look deletable.
+
+**`/api/chat` still calls OpenAI**; everything else is offline. The seam to fake it is `ChatHandlerDeps.createAgent`.
+
 **The app shell lives in `app/(app)/layout.tsx`, and navigation speed is why.** `SidebarProvider`, `AppSidebar` and `SiteHeader` belong to that one layout; `/`, `/documents` and `/settings` sit under the group and render only a `<main>`. A route group rather than the root layout, because `/auth/sign-in` and `/auth/refused` must render without a sidebar — the parentheses keep the URLs unchanged.
 
 Each page used to render the shell itself. That put it inside the segment being swapped, so every navigation tore the sidebar down, re-rendered it on the server and remounted it; hoisting it buys Next's guarantee that layouts "preserve state, remain interactive, and do not rerender" on navigation. Three consequences, each easy to undo:

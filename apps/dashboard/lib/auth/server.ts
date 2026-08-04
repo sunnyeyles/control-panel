@@ -1,5 +1,7 @@
 import { createNeonAuth } from "@neondatabase/auth/next/server"
 
+import { devMockEnabled } from "@/lib/dev/mode"
+
 /**
  * The server-side Neon Auth instance.
  *
@@ -32,12 +34,37 @@ function required(name: string): string {
   return value
 }
 
-export const auth = createNeonAuth({
-  baseUrl: required("NEON_AUTH_BASE_URL"),
-  cookies: {
-    // Signs the session_data cookie cache (HMAC-SHA256), which is what lets the
-    // proxy verify a session without a round trip to the auth server on every
-    // request. 32+ characters is an SDK requirement, not a suggestion.
-    secret: required("NEON_AUTH_COOKIE_SECRET"),
-  },
-})
+/**
+ * The placeholder branch is what lets `DEV_AUTH_BYPASS=1` run with no `NEON_*`
+ * variables at all.
+ *
+ * The instance is built at module scope — Next's file conventions require it,
+ * as the comment above explains — so `required()` would throw at server boot,
+ * before any bypass branch downstream got a chance to run. Constructing it with
+ * nonsense instead is safe precisely because nothing calls it: `proxy.ts`
+ * returns before `gate`, and `getCurrentUser()` returns before
+ * `auth.getSession()`. The one surface still wired to it,
+ * `app/api/auth/[...path]/route.ts`, is only reached by a sign-in attempt,
+ * which under this flag is a thing nobody needs to make.
+ */
+export const auth = createNeonAuth(
+  devMockEnabled()
+    ? {
+        // `.invalid` is RFC 2606, reserved as never-resolvable, so reaching this
+        // fails as an immediate DNS error naming a domain that is obviously not
+        // an auth server.
+        baseUrl: "https://dev-auth-bypass.invalid",
+        // 32+ characters, which the SDK enforces at construction.
+        cookies: { secret: "dev-auth-bypass-placeholder-not-a-real-key" },
+      }
+    : {
+        baseUrl: required("NEON_AUTH_BASE_URL"),
+        cookies: {
+          // Signs the session_data cookie cache (HMAC-SHA256), which is what
+          // lets the proxy verify a session without a round trip to the auth
+          // server on every request. 32+ characters is an SDK requirement, not
+          // a suggestion.
+          secret: required("NEON_AUTH_COOKIE_SECRET"),
+        },
+      }
+)
