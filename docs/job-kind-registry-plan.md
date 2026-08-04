@@ -83,6 +83,22 @@ with no down migration (`0001_init/migration.sql:6`). Absent-means-briefing
 costs neither, and it is the reading that stays correct if the platform is ever
 pointed at a database it did not create.
 
+**What counts as a discriminator, exactly.** Absent means the briefing, and so
+does `kind: "briefing"` — the briefing is registered under that name, so a row
+that says out loud what an empty row means routes identically. Anything else
+that is not a registered key is an unhandled kind, **including a `kind` that is
+present but is not a non-empty string**. `kind: 42`, `kind: null` and `kind: ""`
+must be faults, not absences: reading a malformed discriminator as "absent, so
+briefing" would spend a paid job-search run on a config that was never meant for
+one, which is the exact outcome Decision 3 exists to prevent.
+
+One property this leans on, worth stating because it is invisible in the code:
+`JobSearchConfigSchema` is a plain `z.object` (`job-search-config.ts:19`), and a
+plain `z.object` **strips** unknown keys rather than rejecting them. So `kind`
+rides along inside `config` and `parseJobSearchConfig` neither sees it nor trips
+on it. Turning that schema into a `z.strictObject` later would break every
+explicit `kind: "briefing"` row; the registry depends on it staying as it is.
+
 **What this costs, stated plainly:** the discriminator is invisible to ordinary
 SQL. "How many weather jobs do I have" becomes a JSONB expression rather than a
 `WHERE`. That is acceptable while the answer is a handful of rows a single user
@@ -114,9 +130,9 @@ Construction is not free — `createBriefStore(createS3UserObjectStore())`
 the likely answer; it does not have to be built now, but the context shape must
 not foreclose it.
 
-### 3. An unknown kind fails the run and does not claim the slot
+### 3. An unknown kind fails the tick and does not claim the slot
 
-Two failure modes must stay distinguishable in `runs.failure`:
+Two failure modes must stay distinguishable:
 
 - **this job names a kind nothing handles** — a deployment or data fault, not
   fixable by retrying
@@ -125,12 +141,43 @@ Two failure modes must stay distinguishable in `runs.failure`:
 
 Today both would read as the second, because there is only one path.
 
+**They cannot be distinguished in the same place, and that follows from the
+decision below rather than from carelessness.** `claimJob` is what inserts the
+`running` row (`packages/db/src/jobs.ts:118-124`), and `slot.runId` is the only
+handle `failRun` takes (`run-tick.ts:125`). A lookup that happens before the
+claim therefore has no run row to write to: the malformed-config case keeps
+landing in `runs.failure` exactly as it does today, and the unhandled-kind case
+**leaves no database record at all** — no `runs` row, no `runs.failure`, nothing
+a later query can find. Its whole trace is the thrown error and a line on
+stdout. Not claiming and writing to `runs` are the same choice made twice; only
+one of them is available.
+
+That is the cost, and §The unhandled-kind log line is what makes the remaining
+trace worth reading.
+
 The kind lookup happens **before `claimJob`**. An unhandled kind is knowable from
 the row alone, and claiming a slot to discover it advances `next_run_at`, inserts
 a `running` row, and consumes the occurrence — for a job that had no chance of
 running. The tick's existing `skipped` counter (`run-tick.ts:45-46`) is for slots
 another party holds and should not be borrowed for this; an unhandled kind is a
 fault and must be visible as one.
+
+So it needs a counter of its own, and the report needs it more than it looks.
+`TickReport` carries an invariant its field list never states:
+`succeeded + failed === claimed`, because both of those counters are only ever
+incremented inside the claimed branch (`run-tick.ts:99-131`). Folding unhandled
+kinds into `failed` breaks that silently, and a reader who trusted it would
+compute a phantom skipped job. The report gains `unhandled: number`, incremented
+before the claim, and the invariant survives intact.
+
+The `AggregateError` message needs the same care and is easier to miss. It reads
+`` `${failures.length} of ${report.claimed} claimed jobs failed` ``
+(`run-tick.ts:141-143`), and an unhandled kind pushes onto `failures` without
+ever incrementing `claimed` — so a tick whose only due job is an unhandled kind
+would throw _"1 of 0 claimed jobs failed"_, and one alongside a real failure
+would overcount against an undercounted denominator. Either the denominator
+becomes `claimed + unhandled`, or the message stops naming a denominator; what
+it cannot do is keep the current wording.
 
 **Not claiming has a consequence worth stating outright: the row never moves.**
 `claimJob`'s guarded `UPDATE` (`packages/db/src/jobs.ts:109-112`) is the only
@@ -144,9 +191,9 @@ moment it is written until a human edits it. Other due jobs still run — the ti
 attempts all of them before it rethrows — but the invocation is marked failed
 each hour regardless.
 
-So the cost is larger than the alarm. The honest options are (a) fail the run and
-leave the row alone, (b) fail the run and pause it, (c) report it distinctly and
-do not throw.
+So the cost is larger than the alarm. The honest options are (a) fail the tick
+and leave the row alone, (b) fail the tick and pause the row, (c) report it
+distinctly and do not throw.
 
 **This plan takes (a)**, and the reasoning has to be stated more carefully than
 "quarantine is out of scope", because it is not out of reach: `pauseJob`
@@ -169,6 +216,33 @@ sequencing is the point: build the runs surface, then quarantine, then revisit
 this. Until then the latched alarm and the recurring failure are accepted, and
 written down here so the next person meets them as a decision rather than a bug.
 
+One wrinkle in that sequencing, because it will bite whoever picks it up: **a
+runs surface does not by itself make this failure visible.** There is no `runs`
+row to render, for the reason given above. Quarantining an unhandled kind
+therefore means either claiming a slot in order to have somewhere to record the
+fault — which is the thing this decision refuses — or recording it somewhere
+other than `runs`. That choice belongs to the quarantine work, and naming it now
+is the difference between inheriting a decision and inheriting a surprise.
+
+#### The unhandled-kind log line
+
+The Errors alarm carries its own runbook in its description
+(`modules/briefing-worker/monitoring.tf:19`): _"Check the tick line for counts,
+then the briefing-run line with outcome=failure for the reason."_ An unhandled
+kind emits no `briefing-run` line, because `runBriefing` is never reached — so
+the second half of that runbook dead-ends on precisely the failure mode that has
+no `runs` row either. Someone woken by the alarm would find a failed invocation,
+a tick line, and nothing anywhere naming a job.
+
+Since this plan changes nothing under `infra/aws/`, the fix has to be in the
+worker: the unhandled-kind path emits one JSON line on stdout carrying the event,
+`jobId`, `jobName` and the offending `kind`, and the tick line's `unhandled`
+count is what tells a reader to go looking for it. That keeps the runbook true by
+making the log the record — which is already what the log is for a run that dies
+before it can write a row (`run-briefing.ts:83-87`). It is a required part of
+Stage 2, not a diagnostic nicety, because it is the **only** durable evidence
+this failure mode produces.
+
 ### 4. The dashboard writes nothing new
 
 `apps/dashboard/lib/jobs/job-actions.ts:239` writes `config: criteria.data` on
@@ -190,6 +264,17 @@ at creation and cannot drift — which is what makes absent-means-briefing safe 
 rely on rather than merely convenient, and it is also why a future kind arrives
 as a new row rather than as an edit to an old one.
 
+That narrowness has a second consequence the plan should not leave implicit:
+**there is no way to create a non-briefing job through the product at all.**
+`searchCriteriaSchema` (`search-criteria.ts:47-50`) parses exactly `titles` and
+`locations` and outputs nothing else, so the `criteria.data` that reaches
+`createJob` cannot carry a `kind` even if a form offered one. A second kind's
+first row arrives by hand — SQL, a seed, or a `createJob` call from a script —
+until something is built to write it. None of that is a reason to widen the
+dashboard now, and Stage 3's test fake needs no row at all. It is recorded
+because the success criterion below would otherwise quietly claim ground it does
+not hold.
+
 ### 5. `runTick`'s throw contract is untouched
 
 Every due job is still attempted, each failure is still recorded to its row and
@@ -209,9 +294,29 @@ A pure function from a config bag to a handler, and a registry with exactly one
 entry: the briefing. The briefing handler is an adapter over `runBriefing` that
 changes nothing about how a briefing runs.
 
-`runTick`'s body loses its bare `runBriefing` call and gains the lookup. The
-registry is injectable — the same seam idea as `createScout` / `createWriter` in
-`RunBriefingInput` — so the dispatch can be exercised without a Prisma fake.
+`runTick`'s body loses its bare `runBriefing` call and gains the lookup. **In
+this stage the lookup sits exactly where the `runBriefing` call sat** — inside
+the `try`, after the claim — which is what makes "no behaviour change" literally
+rather than approximately true: a job that would have failed at config parse
+still fails at config parse, having claimed its slot, and the `runs` row it
+leaves behind is the one it leaves behind today. Stage 2 is the stage that moves
+it, and moving it is a behaviour change, which is why it is a separate stage.
+
+The registry is injectable — the same seam idea as `createScout` /
+`createWriter` in `RunBriefingInput` — so the dispatch can be exercised without a
+Prisma fake. That changes `runTick`'s signature, and it has exactly one
+production caller: `runTick(prisma, briefs)` at
+`apps/briefing-worker/src/index.ts:150`. An optional parameter defaulting to the
+real registry leaves that call site untouched and still lets a test pass a fake;
+a required one means editing `index.ts` in the same commit. Either is defensible
+— the point is that it is chosen rather than discovered at typecheck.
+
+The `pnpm watch` harness is **not** a caller and cannot break.
+`apps/briefing-worker/src/dev/cli.ts:264` drives `runBriefing` directly and
+deliberately — "no claim, no `runs` row, no `next_run_at` advance"
+(`cli.ts:28`). The flip side is worth knowing before someone is surprised by it:
+nothing in these three stages makes a future kind watchable through `pnpm watch`,
+because the harness bypasses the registry along with everything else.
 
 The registry lives in the worker. It must not go in `@workspace/db`: the opacity
 of `jobs.config` is the platform's organising rule, and a database package that
@@ -228,9 +333,16 @@ whose message names the kind and does not resemble a config-parse failure. Slot
 untouched.
 
 Done when: a test proves an unknown kind fails distinguishably, proves no slot
-was claimed for it, and proves the row's `next_run_at` is unchanged — the last
-being the behaviour Decision 3 accepts deliberately, so it should be asserted
-rather than discovered.
+was claimed for it, proves **no `runs` row was created** — the same fact as the
+previous one, but the one a reader of the `runs` table will actually notice —
+and proves the row's `next_run_at` is unchanged. That last one is the behaviour
+Decision 3 accepts deliberately, so it should be asserted rather than discovered.
+
+Three more things are contract, not diagnostics, and are asserted here: the tick
+report's new `unhandled` count, the stdout line §The unhandled-kind log line
+requires, and the `AggregateError` message no longer claiming a denominator it
+does not have. Also proved: a `kind` that is present but not a non-empty string
+takes the unhandled path rather than falling back to the briefing.
 
 ### Stage 3 — prove the seam with a fake
 
@@ -258,12 +370,27 @@ Run the full `pnpm test` if anything outside the worker is touched. Note that
 `@workspace/db`'s `stores.test.ts` skips itself when `DATABASE_URL_UNPOOLED` is
 unset, so a clean local run does not exercise the claim race.
 
-If `apps/briefing-worker/src/dev/cli.ts` (the `pnpm watch` harness) drives a
-briefing through a changed path, it keeps working.
+`apps/briefing-worker/src/dev/cli.ts` (the `pnpm watch` harness) needs no check.
+It calls `runBriefing` directly at `cli.ts:264` and never touches `runTick`, so
+it is outside the blast radius of all three stages — and outside the reach of the
+registry, which Stage 1 states as the trade it is.
 
 The success criterion is not a passing suite. It is this: **adding the second
-job kind costs one config schema, one run function, and one registry line.** If
-it costs more, the seam is not finished.
+job kind costs one config schema, one run function, and one registry line —
+inside the worker.** If it costs more _there_, the seam is not finished.
+
+The qualifier is load-bearing rather than defensive. Two costs sit outside that
+boundary by design, and neither is evidence against the seam:
+
+- **A store the new kind needs.** Decision 2 leaves lazy per-kind construction
+  unbuilt, so a kind that wants its own store also costs whatever that turns out
+  to be. What the stages do enforce is narrower and checkable: the context shape
+  must not make it impossible.
+- **A way to create the row.** Decision 4 explains why nothing in the product can
+  write a non-briefing `config` today.
+
+A criterion that silently included those would be unmeetable by construction, and
+an unmeetable criterion measures nothing.
 
 ---
 
@@ -296,8 +423,9 @@ things merely get slightly harder, one query at a time, and the moment to
 migrate passes unnoticed. The concrete tripwires worth naming now:
 
 - **Observability across kinds.** The tick report (`run-tick.ts:37-49`) counts
-  due, claimed, skipped, succeeded and failed with no breakdown by kind. Two
-  kinds in, "which kind is failing" is unanswerable from the logs.
+  due, claimed, skipped, succeeded and failed — plus `unhandled` after Stage 2 —
+  with no breakdown by kind. Two kinds in, "which kind is failing" is
+  unanswerable from the tick line alone.
 - **Anything the dashboard filters on.** The moment a UI wants "show me only my
   watchers", kind has become something the platform queries, which is the exact
   test `0001_init/migration.sql:3-4` sets for a real column.
