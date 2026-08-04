@@ -188,6 +188,31 @@ Two things here look wrong and are not:
 - **Declaration output keeps the `.ts` specifier.** `dist/*.d.ts` reads `from "./keys.ts"`. Only TypeScript reads a `.d.ts`, and it resolves that to the sibling `.d.ts` — downstream packages typecheck against it without needing `allowImportingTsExtensions` themselves. Do not "fix" it.
 - **The extension is `.ts`, not nothing.** Extensionless imports would mean abandoning NodeNext for `Bundler` resolution. NodeNext is what the emitted `dist/` and its `.d.ts` declare, and every relative specifier in NodeNext ESM must carry an explicit extension — that is the output contract consumers resolve against, whether Node runs a file directly or esbuild bundles it first.
 
+## Pull requests
+
+**Every pull request uses `.github/pull_request_template.md`, and passing `--body` does not excuse it.** GitHub injects the template only when `gh pr create` is given no body at all, so an agent that composes its own body silently bypasses it. Compose the filled body — the same four headings, in the same order — into a file and open the PR with it:
+
+```bash
+gh pr create --title "…" --body-file pr-body.md   # a scratch file, not committed
+```
+
+The four sections are required on every PR, however small:
+
+- **`## Type`** — one of Feature, Bug fix, Refactor, Docs, Infrastructure, Chore.
+- **`## What this does`** — behaviour, not the diff, written for someone who has not read it. For a feature, what a user can now do that they could not before; for a fix, what was broken, what the user saw, and what they see now. "Adds a helper to parse X" describes the diff and is not an answer.
+- **`## Why`** — the problem or need behind the change, in a sentence or two.
+- **`## Changes`** — the notable edits, one bullet each, with backticked paths.
+
+`## Verification`, `## Noted, not fixed` and `## ⚠️ Before merging` are optional and sit commented out at the foot of the template. They are house style rather than ceremony: verification carries the commands actually run _and_ what they did not cover, and the ⚠️ heading exists because changes here regularly need a step the merger must take out of band — a migration, a Terraform apply, a secret value, a Neon setting.
+
+**The title is a sentence about the behaviour that changed** — imperative, sentence case, no `feat:`/`fix:` prefix, no trailing period. "Propose search criteria from the candidate's resume", "Fix the Illegal invocation that blanked the dashboard home", "Send OAuth back to the branch alias, not the deployment host". A title derived from the branch name — "Worktree dev auth bypass" — is the failure mode this rule exists to stop, and is never acceptable.
+
+**`CONTEXT.md` binds the prose.** A PR body is prose about this system, so the glossary applies to it: "job" is a row in `jobs`, never an employment opportunity — that is a "posting".
+
+Two constraints are not about writing and are set out in `RELEASING.md`: **squash-merge**, because GitGuardian scans every commit on a pull request and a credential-shaped string removed in a later commit still flags; and a pull request runs `check` only, since the deploy role's trust policy names `ref:refs/heads/main` alone.
+
+Close an agent-written body with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` trailer. The template itself does not carry it — a human filling it in from the GitHub UI is not generating anything.
+
 ## Repo context
 
 `.mcp.json` registers the LangChain docs and API-reference MCP servers, and `.claude/skills/` symlinks a set of vendored skills (tracked in `skills-lock.json`) into `.agents/skills/`.
