@@ -74,6 +74,12 @@ model Run {
   // text + CHECK in migration SQL rather than a Postgres enum.
   status       String
   startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  // When the worker picked this run up, as distinct from when it was requested.
+  // Only the ad-hoc path writes it: a scheduled run is made at-most-once by the
+  // partial unique index on (job_id, scheduled_for), which by definition does
+  // not cover an ad-hoc run. NULL means unclaimed, and is what the claim's
+  // compare-and-swap matches on.
+  claimedAt    DateTime? @map("claimed_at") @db.Timestamptz(6)
   finishedAt   DateTime? @map("finished_at") @db.Timestamptz(6)
   failure      Json?
   // What the scout found, kept so it outlives the run that found it. NULL for

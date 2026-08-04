@@ -14,11 +14,11 @@ the one-time-by-a-human parts.
 Three, and they are not interchangeable. Most feature deploys touch only the
 first.
 
-| Store                   | Holds                                                                                                           | Who writes it                                                                                           |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **AWS Secrets Manager** | the worker's runtime secrets — five today                                                                       | **a person, by hand.** Terraform creates the shell empty and the deploy role is denied `PutSecretValue` |
-| **GitHub**              | three repository **variables**, no secrets: `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `TF_STATE_BUCKET`              | you, once, from the bootstrap outputs                                                                   |
-| **Vercel**              | `USER_STORAGE_BUCKET_NAME`, `USER_STORAGE_ENVIRONMENT`, `AWS_REGION`, `AWS_ROLE_ARN`, plus the Neon Auth values | you, in project settings                                                                                |
+| Store                   | Holds                                                                                                                                            | Who writes it                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| **AWS Secrets Manager** | the worker's runtime secrets — five today                                                                                                        | **a person, by hand.** Terraform creates the shell empty and the deploy role is denied `PutSecretValue` |
+| **GitHub**              | three repository **variables**, no secrets: `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `TF_STATE_BUCKET`                                               | you, once, from the bootstrap outputs                                                                   |
+| **Vercel**              | `USER_STORAGE_BUCKET_NAME`, `USER_STORAGE_ENVIRONMENT`, `AWS_REGION`, `AWS_ROLE_ARN`, `BRIEFING_WORKER_FUNCTION_NAME`, plus the Neon Auth values | you, in project settings                                                                                |
 
 The GitHub three change only when bootstrap is re-applied. They must be
 **variables** — `deploy-infra.yml` reads `vars.*`, and a value created as a

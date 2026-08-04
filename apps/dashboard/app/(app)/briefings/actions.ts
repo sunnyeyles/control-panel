@@ -2,6 +2,8 @@
 
 import type { ActionState } from "@/lib/actions/action-state"
 import { getCurrentUser } from "@/lib/auth/current-user"
+import { getBriefingInvoker } from "@/lib/briefing-runs/invoke-worker"
+import { createRunActions } from "@/lib/briefing-runs/run-actions"
 import { createCoverLetterActions } from "@/lib/cover-letters/cover-letter-actions"
 import { getPrisma } from "@/lib/db"
 import { getCoverLetterStore, getResumeStore } from "@/lib/storage"
@@ -30,6 +32,12 @@ const actions = createCoverLetterActions({
   getCoverLetters: getCoverLetterStore,
 })
 
+const runActions = createRunActions({
+  getUser: getCurrentUser,
+  getPrisma,
+  getInvoker: getBriefingInvoker,
+})
+
 /**
  * `refresh()` after a success, for the same reason the document actions call
  * it: `/briefings` is `force-dynamic` and `staleTimes.dynamic` lets the client
@@ -45,6 +53,26 @@ export async function draftCoverLetterAction(
   formData: FormData
 ): Promise<ActionState> {
   const result = await actions.draftCoverLetter(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Start a briefing now.
+ *
+ * `refresh()` on success is what puts the new `running` row on the page: the
+ * action writes it, and without this the client router would keep serving the
+ * segment it cached up to 30 seconds ago and the run would appear not to have
+ * started. From there `RefreshWhileRunning` takes over until the run is
+ * terminal.
+ */
+export async function triggerBriefingRunAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await runActions.triggerBriefingRun(state, formData)
 
   if (result.status === "success") refresh()
 

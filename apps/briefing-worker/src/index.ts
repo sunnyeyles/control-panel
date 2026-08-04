@@ -9,6 +9,9 @@ import {
 } from "@workspace/user-storage"
 import { initializeLangfuse, shutdownLangfuse } from "@workspace/langfuse"
 
+import { z } from "zod"
+
+import { runAdHocBriefing } from "./run-ad-hoc.ts"
 import { runTick } from "./run-tick.ts"
 
 /**
@@ -115,24 +118,66 @@ async function loadSecrets(): Promise<void> {
 }
 
 /**
- * The scheduled entry point.
+ * What the function can be asked to do.
  *
- * EventBridge Scheduler invokes this **hourly**, and the tick's cadence — not
- * any job's — is what lives in Terraform. That keeps the one thing every job
- * shares reviewable in a diff, while a job's own schedule is a row that costs
- * an INSERT to add rather than an apply.
+ * **An absent `kind` is the tick**, permanently, and not a value waiting to be
+ * filled in. EventBridge Scheduler sends `{}`, and so does
+ * `aws lambda invoke --payload '{}'`; both must keep meaning what they have
+ * always meant. That also makes the ad-hoc path opt-in by construction — a
+ * malformed or unrecognised payload can never be mistaken for one, because
+ * reaching it requires spelling the discriminator exactly.
  *
- * The payload is ignored on purpose. Nothing job-specific is passed in: the
- * tick asks the database what is due, so a slot is identified by a value read
- * from a row rather than by a clock or a scheduler's idea of "today".
- *
- * Nothing is caught, on purpose. A throw is the contract: it marks the
- * invocation failed and produces the `Errors` datapoint the alarm watches, so a
- * bad run is visible without anyone reading logs. `runTick()` has already
- * emitted its tick report, and each failing run its own report, by the time it
- * rethrows.
+ * `passthrough()` is deliberate: EventBridge and the console both decorate a
+ * payload with fields of their own, and a strict object would reject an
+ * invocation over something nothing reads.
  */
-export const handler = async (): Promise<void> => {
+const adHocPayloadSchema = z.object({
+  kind: z.literal("ad-hoc-run"),
+  runId: z.uuid(),
+  jobId: z.uuid(),
+})
+
+const payloadSchema = z
+  .looseObject({ kind: z.string().optional() })
+  .nullish()
+  .transform((value) => value ?? {})
+
+/**
+ * The entry point, for both ways in.
+ *
+ * EventBridge Scheduler invokes this **hourly** with an empty payload, and the
+ * tick's cadence — not any job's — is what lives in Terraform. That keeps the
+ * one thing every job shares reviewable in a diff, while a job's own schedule is
+ * a row that costs an INSERT to add rather than an apply.
+ *
+ * The dashboard invokes it asynchronously with an `ad-hoc-run` payload naming a
+ * `runs` row it has already inserted. That path claims no slot: it runs one
+ * briefing, out of band, without disturbing the schedule.
+ *
+ * The payload is read *here* and nowhere else. `run-tick.ts` and
+ * `run-ad-hoc.ts` are both platform-independent, so the shape AWS delivers is
+ * this file's business alone — as the handler signature, the secrets and S3
+ * already are.
+ *
+ * **The two paths differ in what they do with a failure, and deliberately.**
+ * The tick rethrows: that throw marks the invocation failed and produces the
+ * `Errors` datapoint the alarm watches, so a broken schedule is visible without
+ * anyone reading logs. An ad-hoc run records its failure on the row and returns
+ * — see `run-ad-hoc.ts` for why polluting a 24-hour latching alarm with
+ * failures a person is already watching would cost more than it buys.
+ */
+export const handler = async (event?: unknown): Promise<void> => {
+  const payload = payloadSchema.parse(event)
+  const adHoc = adHocPayloadSchema.safeParse(payload)
+
+  // Named before any work: a payload that carries the discriminator but not a
+  // usable body must not silently fall through and run the whole tick instead.
+  if (!adHoc.success && payload.kind !== undefined) {
+    throw new Error(
+      `Unrecognised payload kind ${JSON.stringify(payload.kind)}. Omit "kind" entirely to run the hourly tick.`
+    )
+  }
+
   await loadSecrets()
   const langfuseEnabled = initializeLangfuse({ exportMode: "immediate" })
 
@@ -147,6 +192,14 @@ export const handler = async (): Promise<void> => {
   const briefs = createBriefStore(createS3UserObjectStore())
 
   try {
+    if (adHoc.success) {
+      await runAdHocBriefing(prisma, briefs, {
+        runId: adHoc.data.runId,
+        jobId: adHoc.data.jobId,
+      })
+      return
+    }
+
     await runTick(prisma, briefs)
   } finally {
     await Promise.all([

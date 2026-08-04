@@ -40,6 +40,15 @@ export function createDevPrisma(): PrismaClient {
     },
     run: {
       findUnique: async (query: ById) => db.findRun(query.where.id),
+      findFirst: async (query: RunningRunQuery) => db.findRunningRun(query),
+      create: async (query: { data: RunCreateData }) =>
+        db.createRun(query.data),
+      update: async (query: ById & { data: Partial<Run> }) =>
+        db.updateRun(query.where.id, query.data),
+      updateMany: async (query: {
+        where: { id: string; status?: string }
+        data: Partial<Run>
+      }) => db.updateRunsGuarded(query.where, query.data),
     },
     coverLetterInstructions: {
       findUnique: async (query: ByUserId) =>
@@ -62,6 +71,8 @@ export function createDevPrisma(): PrismaClient {
     },
     $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) =>
       db.executeRaw(strings, values),
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) =>
+      db.queryRaw(strings, values),
     $connect: async () => {},
     $disconnect: async () => {},
   }) as unknown as PrismaClient
@@ -104,6 +115,19 @@ interface UpsertCoverLetterInstructions extends ByUserId {
 }
 
 type JobCreateData = Omit<Job, "id" | "createdAt" | "updatedAt">
+
+/** What `startAdHocRun()` inserts — everything else takes a column default. */
+type RunCreateData = Pick<Run, "jobId" | "scheduledFor" | "status">
+
+/** What `runningRunForJob()` asks for. */
+interface RunningRunQuery {
+  where: {
+    jobId: string
+    status: string
+    startedAt: { gte: Date }
+  }
+  orderBy?: unknown
+}
 
 /** The rows, and the only place under the flag that holds any state. */
 class DevDb {
@@ -164,6 +188,67 @@ class DevDb {
     if (!job) return null
 
     return { ...run, job: { userId: job.userId } }
+  }
+
+  /** The trigger's one-run-at-a-time guard, filtering for real. */
+  findRunningRun(query: RunningRunQuery): Run | null {
+    const { jobId, status, startedAt } = query.where
+
+    return (
+      this.runs
+        .filter(
+          (run) =>
+            run.jobId === jobId &&
+            run.status === status &&
+            run.startedAt.getTime() >= startedAt.gte.getTime()
+        )
+        .sort(byStartedAtThenIdDesc)[0] ?? null
+    )
+  }
+
+  createRun(data: RunCreateData): Run {
+    const run: Run = {
+      ...data,
+      id: `3f8d1b2a-0000-4000-8000-${String(this.nextId++).padStart(12, "0")}`,
+      startedAt: new Date(),
+      claimedAt: null,
+      finishedAt: null,
+      failure: null,
+      findings: null,
+    }
+
+    this.runs.push(run)
+    return run
+  }
+
+  updateRun(id: string, data: Partial<Run>): Run {
+    const run = this.runs.find((candidate) => candidate.id === id)
+    if (!run) throw notFound()
+
+    Object.assign(run, data)
+    return run
+  }
+
+  /**
+   * `updateMany` with the row count as the answer — the shape `finishRun()` and
+   * `failRun()` use to make a transition at-most-once. The `status` in the
+   * `where` is the guard, so honouring it is what keeps a terminal run
+   * terminal here too.
+   */
+  updateRunsGuarded(
+    where: { id: string; status?: string },
+    data: Partial<Run>
+  ): { count: number } {
+    const run = this.runs.find(
+      (candidate) =>
+        candidate.id === where.id &&
+        (where.status === undefined || candidate.status === where.status)
+    )
+
+    if (!run) return { count: 0 }
+
+    Object.assign(run, data)
+    return { count: 1 }
   }
 
   createJob(data: JobCreateData): Job {
@@ -264,6 +349,52 @@ class DevDb {
     job.updatedAt = new Date()
 
     return 1
+  }
+
+  /**
+   * ⚠️ **`latestRunPerJob()` is raw SQL, not `run.findMany`** — it needs
+   * `DISTINCT ON`, which Prisma's model API cannot express — so the briefings
+   * page lands here.
+   *
+   * Recognised by shape rather than parsed, exactly as {@link executeRaw} is,
+   * and it throws on anything else so a changed statement fails by name instead
+   * of silently returning nothing and rendering an empty page.
+   */
+  queryRaw(strings: TemplateStringsArray, values: unknown[]): unknown[] {
+    const sql = strings.join("?")
+
+    if (
+      !/distinct\s+on\s*\(\s*r\.job_id\s*\)/i.test(sql) ||
+      values.length !== 1
+    ) {
+      throw new DevPrismaError(
+        "$queryRaw",
+        `Only the DISTINCT ON in latestRunPerJob() is understood, and it is ` +
+          `matched by shape. If packages/db/src/runs.ts changed its ` +
+          `statement, update queryRaw() in this file to match. Got: ${sql}`
+      )
+    }
+
+    const [userId] = values as [string]
+    const mine = new Set(
+      this.jobs.filter((job) => job.userId === userId).map((job) => job.id)
+    )
+
+    const newest = new Map<string, Run>()
+    for (const run of [...this.runs].sort(byStartedAtThenIdDesc)) {
+      if (mine.has(run.jobId) && !newest.has(run.jobId))
+        newest.set(run.jobId, run)
+    }
+
+    return [...newest.values()].map((run) => ({
+      id: run.id,
+      jobId: run.jobId,
+      status: run.status,
+      scheduledFor: run.scheduledFor,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      failure: run.failure,
+    }))
   }
 }
 

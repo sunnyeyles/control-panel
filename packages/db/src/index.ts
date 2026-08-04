@@ -56,7 +56,17 @@ export {
   type NewJob,
 } from "./jobs.ts"
 
-export { failRun, finishRun, recordRunFindings, startAdHocRun } from "./runs.ts"
+export {
+  claimAdHocRun,
+  failRun,
+  finishRun,
+  latestRunPerJob,
+  recordRunFindings,
+  runningRunForJob,
+  startAdHocRun,
+  type ClaimedRun,
+  type RunSummary,
+} from "./runs.ts"
 
 export {
   artifactsForRun,

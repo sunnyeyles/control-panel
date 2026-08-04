@@ -175,7 +175,13 @@ keeps the diagnostics nothing will ever query, and the report is the only record
 left when a run dies before it can write a row.
 
 A run with no `scheduled_for` is ad-hoc: it occupies no slot, and any number of
-them may exist for one job.
+them may exist for one job. The **Run now** button on `/briefings` starts one —
+the dashboard inserts the row and asks the worker to pick it up, and because the
+run fills no occurrence it neither consumes the next scheduled run nor moves it
+closer, and it works on a **Briefing** that is turned off. `runs.claimed_at` is
+what makes it at-most-once, standing in for the slot the scheduled path claims:
+the trigger is an asynchronous Lambda invocation, which AWS delivers _at least_
+once.
 _Avoid_: execution, attempt, task run
 
 **Artifact**:

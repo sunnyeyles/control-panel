@@ -156,6 +156,8 @@ export function devRuns(): Run[] {
       scheduledFor: RAN_AT,
       status: "succeeded",
       startedAt: RAN_AT,
+      // A scheduled run is claimed by its slot, never by this column.
+      claimedAt: null,
       finishedAt: new Date(RAN_AT.getTime() + 90_000),
       failure: null,
       findings: {
@@ -169,11 +171,25 @@ export function devRuns(): Run[] {
       scheduledFor: RAN_AT,
       status: "succeeded",
       startedAt: RAN_AT,
+      claimedAt: null,
       finishedAt: new Date(RAN_AT.getTime() + 45_000),
       failure: null,
       findings: { postings: [CORVUS] },
     },
   ]
+}
+
+/**
+ * What the fake worker "finds" when a run is triggered from the UI.
+ *
+ * Deliberately a different set from what the seeded runs hold, so that a
+ * triggered run visibly changes the page rather than appearing to do nothing.
+ */
+export function devAdHocFindings(): { postings: Posting[]; notes: string } {
+  return {
+    postings: [CORVUS, MERIDIAN],
+    notes: "Found by a run you started from the dashboard.",
+  }
 }
 
 /**

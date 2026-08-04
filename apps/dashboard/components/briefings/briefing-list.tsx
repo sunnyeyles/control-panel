@@ -1,5 +1,8 @@
 import { CoverLetterDownloadLink } from "@/components/briefings/cover-letter-list"
 import { DraftCoverLetterButton } from "@/components/briefings/draft-cover-letter-button"
+import { RunActivityStatus } from "@/components/briefings/run-activity-status"
+import { RunNowButton } from "@/components/briefings/run-now-button"
+import type { RunActivity } from "@/lib/briefing-runs/run-activity"
 import type {
   BriefingPostings,
   LatestFindings,
@@ -23,8 +26,17 @@ import { Badge } from "@workspace/ui/components/badge"
 export function BriefingList({
   briefings,
   letters,
+  activity,
 }: {
   briefings: readonly BriefingPostings[]
+  /**
+   * What each briefing's most recent Run is doing, keyed by briefing id.
+   *
+   * Keyed for the reason `letters` is, and optional for the same reason too:
+   * the page loads it independently and a failure there degrades to cards with
+   * no status rather than to no page.
+   */
+  activity?: ReadonlyMap<string, RunActivity>
   /**
    * The letters this user has already drafted, keyed by Posting id.
    *
@@ -54,6 +66,7 @@ export function BriefingList({
           key={briefing.briefingId}
           briefing={briefing}
           letters={letters}
+          activity={activity?.get(briefing.briefingId)}
         />
       ))}
     </div>
@@ -63,25 +76,42 @@ export function BriefingList({
 function BriefingCard({
   briefing,
   letters,
+  activity,
 }: {
   briefing: BriefingPostings
   letters?: ReadonlyMap<string, CoverLetterSummary>
+  activity?: RunActivity
 }) {
   const { latest } = briefing
 
   return (
     <section className="flex flex-col gap-4 rounded-lg border p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-medium">{briefing.briefingName}</h2>
-        <p className="text-sm text-muted-foreground">
-          {latest.state === "no-run"
-            ? "Not run yet"
-            : `Last run ${latest.ranAt}`}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-col gap-1">
+          <h2 className="font-medium">{briefing.briefingName}</h2>
+          {/*
+            The *latest* Run, whatever became of it — not the latest successful
+            one, which is what `latest` below describes. When the newest Run
+            failed or is still going those are different rows, and that is
+            exactly when someone needs to be told: the postings underneath are
+            still the last ones that worked, and saying so is more honest than
+            showing a success time for a Run that failed.
+          */}
+          <RunActivityStatus activity={activity ?? { state: "never-run" }} />
+        </div>
+
+        <RunNowButton
+          briefingId={briefing.briefingId}
+          briefingName={briefing.briefingName}
+          running={activity?.state === "running"}
+        />
       </div>
 
-      {latest.state === "recorded" && latest.notes ? (
-        <p className="text-sm text-muted-foreground">{latest.notes}</p>
+      {latest.state === "recorded" ? (
+        <p className="text-sm text-muted-foreground">
+          Found {latest.ranAt}
+          {latest.notes ? ` — ${latest.notes}` : ""}
+        </p>
       ) : null}
 
       {latest.state === "recorded" && latest.postings.length > 0 ? (

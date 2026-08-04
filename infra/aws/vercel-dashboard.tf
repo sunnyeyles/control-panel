@@ -159,3 +159,50 @@ resource "aws_iam_role_policy_attachment" "vercel_dashboard_user_storage" {
   role       = aws_iam_role.vercel_dashboard[0].name
   policy_arn = each.value
 }
+
+# ---------------------------------------------------------------------------
+# Asking the worker to run a briefing now
+# ---------------------------------------------------------------------------
+#
+# The dashboard's "Run now" button does not run a briefing — it asks the worker
+# to, with an asynchronous invocation naming a `runs` row it has already
+# inserted. This is the grant that lets it ask.
+#
+# **This does not widen the storage boundary above, and the distinction is the
+# whole reason the button works this way.** The property those attachments
+# protect is that the app which *renders* a briefing cannot *author* one: it
+# holds no `prod:briefs` grant, so it cannot write a Brief, cannot overwrite
+# one, and cannot delete one. Invoking the worker does not change that. The
+# worker reads the job from the database and writes the Brief under its own
+# role, so what the dashboard gains is the ability to *start* work, never to
+# produce or alter its output. `tests/vercel_dashboard.tftest.hcl` asserts both
+# halves — that the storage set is unchanged, and that this grant names one
+# function rather than `*`.
+#
+# An **inline** role policy rather than a managed policy and an attachment.
+# Nothing else can ever want this grant — it names one function in one
+# account — and a managed policy would also land in the `for_each` map that the
+# storage assertion checks by exact key set, making a test about storage fail
+# for a reason that has nothing to do with storage.
+#
+# No boundary change is needed: `bootstrap/boundary.tf` already permits
+# `lambda:InvokeFunction` on `*` (sid `InvokeFunctions`), written for the
+# scheduler role. A boundary is a ceiling, so it is allowed to be wider than any
+# one role's own policy — and this policy is what actually decides.
+data "aws_iam_policy_document" "vercel_dashboard_invoke_worker" {
+  count = local.vercel_dashboard_enabled ? 1 : 0
+
+  statement {
+    sid       = "InvokeBriefingWorker"
+    actions   = ["lambda:InvokeFunction"]
+    resources = [module.briefing_worker.function_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "vercel_dashboard_invoke_worker" {
+  count = local.vercel_dashboard_enabled ? 1 : 0
+
+  name   = "invoke-briefing-worker"
+  role   = aws_iam_role.vercel_dashboard[0].id
+  policy = data.aws_iam_policy_document.vercel_dashboard_invoke_worker[0].json
+}
