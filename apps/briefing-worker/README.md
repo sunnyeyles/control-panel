@@ -274,19 +274,47 @@ Letters land under `.letters/`, which is git-ignored.
 
 ## Forcing a run in AWS
 
+The handler takes a payload, and **an absent `kind` means the tick** — which is
+what EventBridge Scheduler sends and what this has always done:
+
 ```bash
 aws lambda invoke --function-name briefing-worker \
   --cli-binary-format raw-in-base64-out --payload '{}' /dev/stdout
 ```
 
+The other shape runs **one** briefing, out of band. It is what the dashboard's
+**Run now** button sends, and the `runs` row must already exist — this claims a
+row rather than creating one, so a hand-written payload naming a row that is
+finished, or already claimed, correctly does nothing:
+
+```bash
+aws lambda invoke --function-name briefing-worker \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"kind":"ad-hoc-run","runId":"<runs.id>","jobId":"<jobs.id>"}' \
+  /dev/stdout
+```
+
+A payload carrying an unrecognised `kind` throws rather than falling through to
+the tick — running every due job because a discriminator was misspelt is a
+worse outcome than a failed invocation.
+
+Unlike the tick, an ad-hoc run that fails **does not throw**, so it produces no
+`Errors` datapoint and does not trip the alarm. Its outcome is on the `runs` row
+and in its own `"event":"ad-hoc-run"` log line.
+
 Read the result in CloudWatch Logs Insights:
 
 ```
 fields @timestamp, @message
-| filter @message like /"event":"tick"/ or @message like /"event":"briefing-run"/
+| filter @message like /"event":"tick"/ or @message like /"event":"briefing-run"/ or @message like /"event":"ad-hoc-run"/
 | sort @timestamp desc
 | limit 40
 ```
+
+Every `briefing-run` line carries `"trigger"`, which is `"schedule"` or
+`"manual"` — `scheduledFor` no longer tells them apart, because an ad-hoc run
+files under the instant it was requested. Filter on it to answer "is it the
+schedule that is failing, or the button".
 
 A healthy hour with nothing scheduled is one `tick` line with `"due":0` and no
 `briefing-run` line at all — which is why the tick line exists. When a job does

@@ -24,14 +24,15 @@ Three things here are easy to undo by accident:
 
 `lib/dev/mode.ts` is the only module that reads the variable, and **it throws when the flag is set under `NODE_ENV=production`** rather than quietly returning `false`. That fires during `next build`, not at the first request — `app/api/auth/[...path]/route.ts` makes page-data collection evaluate `lib/auth/server.ts` at module scope — so such a build cannot be produced at all. Local cost: `pnpm build` fails while the flag is in `.env.local`.
 
-Five accessors branch on `devMockEnabled()`, each before reading any configuration:
+Six accessors branch on `devMockEnabled()`, each before reading any configuration:
 
 - **`lib/auth/current-user.ts`** returns the fixed `DEV_USER`. The one that matters — every page, action and API route asks through it, so **nothing else needs an auth branch**.
 - **`lib/db.ts`** and **`lib/storage.ts`** hand out `lib/dev/fake-prisma.ts` and `lib/dev/fake-stores.ts`, memoized through the same variables so a briefing paused on `/settings` reads as paused on `/briefings`.
 - **`lib/auth/server.ts`** takes placeholder config — the only reason the app boots with `NEON_AUTH_BASE_URL` unset, since the instance is built at module scope. Nothing calls it.
 - **`proxy.ts`** returns `NextResponse.next()`. Needed _as well as_ the `getCurrentUser()` branch: `gate` resolves its own session and would redirect every GET first.
+- **`lib/briefing-runs/invoke-worker.ts`** hands out `lib/dev/fake-invoker.ts` instead of a `LambdaClient`, so **Run now** works with no role and no function name. The fake deliberately **returns immediately and finishes the run six seconds later**, through the same `finishRun`/`recordRunFindings` the worker uses — an invoker that completed synchronously would make the in-flight UI, which is most of that feature, impossible to see without deploying.
 
-Two things not to "fix": the fake Prisma **throws by name on unimplemented queries** instead of answering `undefined`, and implements `$executeRaw` because `updateJobSchedule()` is raw SQL matched by position (`fake-prisma.test.ts` catches that statement changing). And **`list()` in the fake stores returns less than `head()`**, as the real ones must — supplying the metadata would make the deliberate `head()`-per-item loops look deletable.
+Two things not to "fix": the fake Prisma **throws by name on unimplemented queries** instead of answering `undefined`, and implements `$executeRaw` because `updateJobSchedule()` is raw SQL matched by position (`fake-prisma.test.ts` catches that statement changing). It implements `$queryRaw` for the same reason — `latestRunPerJob()` needs `DISTINCT ON`, which Prisma's model API cannot express. And **`list()` in the fake stores returns less than `head()`**, as the real ones must — supplying the metadata would make the deliberate `head()`-per-item loops look deletable.
 
 **`/api/chat` still calls OpenAI**; everything else is offline. The seam to fake it is `ChatHandlerDeps.createAgent`.
 

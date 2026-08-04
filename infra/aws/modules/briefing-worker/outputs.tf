@@ -3,6 +3,17 @@ output "function_name" {
   value       = aws_lambda_function.worker.function_name
 }
 
+output "function_arn" {
+  description = <<-EOT
+    ARN of the Lambda function, for scoping an `lambda:InvokeFunction` grant to
+    exactly this function.
+
+    The name is what a caller passes to the API; the ARN is what a policy has to
+    name, and the two are not interchangeable in an IAM `Resource`.
+  EOT
+  value       = aws_lambda_function.worker.arn
+}
+
 output "execution_role_name" {
   description = <<-EOT
     Name of the Lambda execution role.
