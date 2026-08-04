@@ -11,7 +11,7 @@ import { jobScoutSchemaDescription } from "./findings.ts"
 /**
  * Enough turns to search several times and then answer.
  *
- * The runtime default of 10 is sized for a question with one tool round trip.
+ * The runtime default of 5 is sized for a question with one tool round trip.
  * A scout is expected to make a handful of focused searches — one per role
  * title and location — and each costs a model call, so the default would
  * divert it to `halt` mid-search and produce a partial answer that still

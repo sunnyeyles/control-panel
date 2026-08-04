@@ -6,9 +6,15 @@
  * dependency graph, and a bundled worker is exactly where that happens — so the
  * string is the contract and the classes are a convenience.
  */
-export type DbErrorCode = "invalid_schedule" | "database_unavailable"
+export type DbErrorCode = "invalid_schedule"
 
-/** Base for everything below. Never thrown directly. */
+/**
+ * Base for everything below. Never thrown directly.
+ *
+ * Still abstract with a single subclass, because the discriminant above is what
+ * callers branch on and a second code is expected to arrive with the next
+ * failure this package chooses to own.
+ */
 export abstract class DbError extends Error {
   abstract readonly code: DbErrorCode
 
@@ -30,16 +36,14 @@ export class InvalidScheduleError extends DbError {
   readonly code = "invalid_schedule" as const
 }
 
-/**
- * The database refused or could not be reached.
- *
- * Wraps connection, permission and transport faults alike. Constraint
- * violations are not remapped — they keep Prisma's / Postgres's own codes so a
- * duplicate name can still be recognised as `P2002` / `23505`.
- */
-export class DatabaseUnavailableError extends DbError {
-  readonly code = "database_unavailable" as const
-}
+// Note what is deliberately absent: a `DatabaseUnavailableError`. One existed
+// and was never thrown — connection, permission and transport faults propagate
+// as Prisma's own errors, and constraint violations keep Prisma's / Postgres's
+// codes so a duplicate name can still be recognised as `P2002` / `23505` (see
+// `isUniqueViolation` below). Add one when something actually raises it.
+//
+// A line comment, not a doc block: TypeScript attaches every leading `/** */` to
+// the next declaration, so this would surface in `isDbError`'s hover text.
 
 /** Narrows an unknown catch binding to this package's errors. */
 export function isDbError(error: unknown): error is DbError {
@@ -60,5 +64,5 @@ export function isUniqueViolation(error: unknown): boolean {
 }
 
 function isErrorCode(value: unknown): value is DbErrorCode {
-  return value === "invalid_schedule" || value === "database_unavailable"
+  return value === "invalid_schedule"
 }

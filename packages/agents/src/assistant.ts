@@ -6,12 +6,6 @@ import {
   type CreateAgentOptions,
 } from "@workspace/agents-core"
 
-export const ASSISTANT_SYSTEM_PROMPT = [
-  "You are a helpful assistant with access to tools.",
-  "Use a tool whenever the answer depends on information you cannot know on your own — the current time, or anything a tool can look up. Do not guess at it.",
-  "Lead with the outcome: answer first, supporting detail after.",
-].join("\n")
-
 export interface CreateAssistantOptions extends Omit<
   CreateAgentOptions,
   "tools"
@@ -23,6 +17,13 @@ export interface CreateAssistantOptions extends Omit<
 /**
  * A general-purpose assistant carrying the whole tool catalog.
  *
+ * The tool set is the whole of what this factory adds. It states no prompt of
+ * its own: an `ASSISTANT_SYSTEM_PROMPT` lived here and was byte-for-byte
+ * `DEFAULT_SYSTEM_PROMPT` in `@workspace/agents-core`, so `createAgent`'s own
+ * fallback already produced it — two copies of one string, with somewhere for
+ * them to drift apart and no consumer importing either. An `options.systemPrompt`
+ * still overrides, because it flows through to `createAgent` untouched.
+ *
  * A factory rather than a ready-made instance on purpose: building an agent
  * constructs a model, which reads `OPENAI_API_KEY` and throws without one.
  * A module-level instance would move that failure to import time, breaking any
@@ -30,15 +31,10 @@ export interface CreateAssistantOptions extends Omit<
  * rendered, say — rather than the one that actually runs the agent.
  */
 export function createAssistant(options: CreateAssistantOptions = {}): Agent {
-  const {
-    extraTools = [],
-    systemPrompt = ASSISTANT_SYSTEM_PROMPT,
-    ...rest
-  } = options
+  const { extraTools = [], ...rest } = options
 
   return createAgent({
     ...rest,
-    systemPrompt,
     tools: [...allTools, ...extraTools],
   })
 }

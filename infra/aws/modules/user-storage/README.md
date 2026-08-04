@@ -87,7 +87,6 @@ policies can be expressed as `…/{environment}/*/{kind}/*`.
 | Name                      | Description                                                       |
 | ------------------------- | ----------------------------------------------------------------- |
 | `bucket_name`             | Set as `USER_STORAGE_BUCKET_NAME`.                                |
-| `bucket_arn`              | For policies written outside this module.                         |
 | `bucket_region`           | Set as `AWS_REGION`.                                              |
 | `access_policy_arns`      | Per environment, every kind. The broad grant.                     |
 | `kind_access_policy_arns` | Per `<environment>:<kind>`, e.g. `prod:briefs`. The narrow grant. |

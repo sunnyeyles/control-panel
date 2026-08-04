@@ -1,8 +1,4 @@
-export {
-  ASSISTANT_SYSTEM_PROMPT,
-  createAssistant,
-  type CreateAssistantOptions,
-} from "./assistant.ts"
+export { createAssistant, type CreateAssistantOptions } from "./assistant.ts"
 
 export {
   BRIEF_WRITER_SYSTEM_PROMPT,

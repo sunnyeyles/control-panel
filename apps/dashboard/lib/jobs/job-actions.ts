@@ -299,9 +299,13 @@ function storeMessage(operation: "create" | "update", error: unknown): string {
       case "invalid_schedule":
         return INVALID_INTERVAL
 
-      case "database_unavailable":
-        return "The database is unavailable. Try again in a moment."
-
+      // No `database_unavailable` branch: @workspace/db no longer declares that
+      // code, because nothing ever threw it — a connection or permission fault
+      // arrives as Prisma's own error, never satisfies `isDbError`, and so
+      // reaches the "Something went wrong." at the end of this function, which
+      // is what it always did. It does not reach the `default` below. That
+      // `never` is what will demand a branch here the day a second code is
+      // added.
       default: {
         const _exhaustive: never = error.code
         return _exhaustive

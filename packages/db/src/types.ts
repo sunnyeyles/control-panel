@@ -4,7 +4,6 @@ import type {
   Run as PrismaRun,
   User as PrismaUser,
 } from "./generated/prisma/client.ts"
-import type { Prisma } from "./generated/prisma/client.ts"
 
 /**
  * Domain aliases over generated Prisma model types.
@@ -40,24 +39,3 @@ export type User = PrismaUser
 export type Job = PrismaJob
 export type Run = PrismaRun
 export type Artifact = PrismaArtifact
-
-/** Narrow a Prisma JSON value to the opaque config bag the pipeline owns. */
-export function asJobConfig(value: Prisma.JsonValue): JobConfig {
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    return value as JobConfig
-  }
-
-  return {}
-}
-
-/** Narrow a Prisma JSON value to a failure payload, or null. */
-export function asRunFailure(
-  value: Prisma.JsonValue | null
-): RunFailure | null {
-  if (value === null) return null
-  if (typeof value === "object" && !Array.isArray(value)) {
-    return value as RunFailure
-  }
-
-  return { value }
-}

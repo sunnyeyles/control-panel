@@ -14,7 +14,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--sans);
   --font-mono: var(--mono);
-  --font-display: var(--display);
   --font-heading: var(--display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -24,17 +23,10 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
-  --color-warn: var(--warn);
-  --color-ok: var(--ok);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -51,13 +43,23 @@
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
+  /* The ramp stays unbroken even where nothing uses a step yet. `@theme inline`
+     extends Tailwind's default theme rather than replacing it, so dropping
+     2xl/3xl would not remove `rounded-2xl` — it would silently resolve to
+     Tailwind's stock 1rem, off this scale and with nothing to signal it. */
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 /* Calm OS — the app theme. Neutral and spacious, one iris accent.
-   warn/ok are semantic status colors (waiting / synced-healthy). */
+
+   Only the colors something renders are declared. A chart ramp (--chart-1…5)
+   and a warn/ok status pair lived here and were never referenced by any
+   utility class — and unlike a radius step, a missing color token has no
+   Tailwind default to fall back on, so the utility simply does not exist. A
+   palette nothing reads is a palette that silently stops matching the design.
+   Add them back beside the first component that uses them. */
 :root {
   --sans: var(--font-hanken);
   --mono: var(--font-plex-mono);
@@ -80,13 +82,6 @@
   --border: #e3e4e1;
   --input: #d8d9d5;
   --ring: #5b5bd6;
-  --warn: #b08a3e;
-  --ok: #5f7a6a;
-  --chart-1: #5b5bd6;
-  --chart-2: #5f7a6a;
-  --chart-3: #b08a3e;
-  --chart-4: #c0392b;
-  --chart-5: #6e7073;
   --radius: 0.625rem;
   --sidebar: #f0f0ee;
   --sidebar-foreground: #191a1c;
@@ -117,13 +112,6 @@
   --border: #2d2e32;
   --input: #3a3b40;
   --ring: #8687e8;
-  --warn: #cfa552;
-  --ok: #7fa38d;
-  --chart-1: #8687e8;
-  --chart-2: #7fa38d;
-  --chart-3: #cfa552;
-  --chart-4: #e26c5c;
-  --chart-5: #9b9da2;
   --sidebar: #1c1d20;
   --sidebar-foreground: #ececea;
   --sidebar-primary: #8687e8;
