@@ -268,7 +268,13 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       }
     } catch (error) {
       console.error("cover-letters: could not read the instructions", error)
-      return fail("Something went wrong.")
+      // Names what failed, because the refusal is the whole point of the branch
+      // above and "something went wrong" leaves the user re-pressing Draft on
+      // what looks like a transient blip. It also says the letter was not
+      // written, so nobody goes hunting for one that does not exist.
+      return fail(
+        "Your saved cover letter instructions could not be read, so nothing was drafted — a letter written without them would quietly ignore every rule you set. Try again in a moment."
+      )
     }
 
     let markdown: string

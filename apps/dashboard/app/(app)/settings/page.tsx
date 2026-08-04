@@ -16,6 +16,10 @@ export const dynamic = "force-dynamic"
  * same reason. Without it a user with a shelf full of documents gets a settings
  * page that times out, and only that user, which is the worst way for it to
  * fail.
+ *
+ * Still needed now that the picker streams behind a `<Suspense>`: the fan-out
+ * happens inside the same invocation either way, so what streaming buys is the
+ * rest of the page painting first, not a shorter function.
  */
 export const maxDuration = 30
 

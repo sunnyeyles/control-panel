@@ -10,6 +10,7 @@ import { listDocuments } from "@/lib/documents/list-documents"
 import { getResumeStore } from "@/lib/storage"
 import { COVER_LETTER_WRITER_SYSTEM_PROMPT } from "@workspace/agents/cover-letter-writer"
 import { coverLetterInstructions } from "@workspace/db"
+import { Suspense } from "react"
 
 /**
  * The Cover letters section of the settings page.
@@ -17,40 +18,20 @@ import { coverLetterInstructions } from "@workspace/db"
  * A server component, like `briefing-section.tsx`: it reads the saved row and
  * the user's documents and hands the client components plain strings. Nothing
  * with a `Date` on it crosses — `DocumentSummary.uploadedAt` is one, so the
- * picker gets a name and a type label and no timestamp. See
- * `lib/jobs/briefing-summary.ts` for why that boundary matters.
+ * picker gets a name and a type label and no timestamp, and `updatedAt` goes
+ * over as an ISO string. See `lib/jobs/briefing-summary.ts` for why that
+ * boundary matters.
+ *
+ * ⚠️ **Only the Postgres read is awaited here; the S3 listing is streamed.**
+ * This component gates the whole settings page — Briefings included — so
+ * anything awaited in it is on the critical path of a render nothing else can
+ * start without. The row is one indexed primary-key lookup; `listDocuments` is
+ * a LIST plus one `HeadObject` per document, which is what forced
+ * `maxDuration = 30` on the page. Behind a `<Suspense>` it costs the picker its
+ * own paint and nothing else's.
  */
 export async function CoverLetterSection({ userId }: { userId: string }) {
   const saved = await coverLetterInstructions(getPrisma(), userId)
-
-  // A storage outage should cost the import picker and nothing else. The
-  // instructions themselves live in Postgres, and a settings page that cannot
-  // reach S3 must still be able to save them — the same degradation
-  // `app/(app)/documents/page.tsx` makes for the same reason.
-  let documents: ImportableDocument[] = []
-
-  try {
-    const listed = await listDocuments(userId, getResumeStore())
-
-    documents = listed
-      // Only formats `extractProfileText` can actually turn into text. Offering
-      // a `.doc` here would produce a picker entry whose only outcome is a
-      // refusal.
-      .filter((document) => isReadableProfileExtension(document.extension))
-      // Already newest first out of `listDocuments`.
-      .map((document) => ({
-        file: document.file,
-        name: document.displayName,
-        type: document.documentType
-          ? DOCUMENT_TYPE_LABELS[document.documentType]
-          : "Unlabelled",
-      }))
-  } catch (error) {
-    console.error(
-      "cover-letters: could not list documents to import from",
-      error
-    )
-  }
 
   return (
     <section className="flex flex-col gap-4">
@@ -91,9 +72,59 @@ export async function CoverLetterSection({ userId }: { userId: string }) {
       <LetterInstructionsForm
         instructions={saved?.instructions ?? ""}
         exampleLetter={saved?.exampleLetter ?? ""}
+        // Not displayed. It keys the example field, so that an import storing
+        // the text already on screen still replaces what is in the box — see
+        // the paragraph on that key.
+        savedAt={saved?.updatedAt.toISOString() ?? ""}
       />
 
-      <ExampleLetterImport documents={documents} />
+      <Suspense
+        fallback={
+          <p className="text-sm text-muted-foreground">
+            Looking for documents you have uploaded…
+          </p>
+        }
+      >
+        <ImportPicker userId={userId} />
+      </Suspense>
     </section>
   )
+}
+
+/**
+ * The picker, and the one thing on this page that talks to S3.
+ *
+ * Its own component so the `await` sits behind the `<Suspense>` above rather
+ * than in front of the form. A storage outage costs the picker and nothing
+ * else: the instructions live in Postgres, and a settings page that cannot
+ * reach S3 must still be able to save them — the same degradation
+ * `app/(app)/documents/page.tsx` makes for the same reason.
+ */
+async function ImportPicker({ userId }: { userId: string }) {
+  let documents: ImportableDocument[] = []
+
+  try {
+    const listed = await listDocuments(userId, getResumeStore())
+
+    documents = listed
+      // Only formats `extractProfileText` can actually turn into text. Offering
+      // a `.doc` here would produce a picker entry whose only outcome is a
+      // refusal.
+      .filter((document) => isReadableProfileExtension(document.extension))
+      // Already newest first out of `listDocuments`.
+      .map((document) => ({
+        file: document.file,
+        name: document.displayName,
+        type: document.documentType
+          ? DOCUMENT_TYPE_LABELS[document.documentType]
+          : "Unlabelled",
+      }))
+  } catch (error) {
+    console.error(
+      "cover-letters: could not list documents to import from",
+      error
+    )
+  }
+
+  return <ExampleLetterImport documents={documents} />
 }

@@ -28,9 +28,16 @@ import { cn } from "@workspace/ui/lib/utils"
 export function LetterInstructionsForm({
   instructions,
   exampleLetter,
+  savedAt,
 }: {
   instructions: string
   exampleLetter: string
+  /**
+   * When the row was last written, as an ISO string — `""` for a user who has
+   * never saved. Not shown anywhere: it is the example field's key, and the
+   * paragraph beside that key is why it has to be this rather than the text.
+   */
+  savedAt: string
 }) {
   const [state, formAction, pending] = useActionState(
     saveLetterInstructionsAction,
@@ -51,20 +58,27 @@ export function LetterInstructionsForm({
       <InstructionsField value={instructions} pending={pending} />
 
       {/*
-        ⚠️ **Only the example is keyed, and only on the stored value.** A
-        textarea is uncontrolled, so when the import form below writes a
-        document's text into the row, nothing would otherwise replace what is on
-        screen — the import would land in the database and look like it had done
-        nothing.
+        ⚠️ **Only the example is keyed, and it is keyed on when the row was
+        written rather than on what is in it.** A textarea is uncontrolled, so
+        when the import form below writes a document's text into the row,
+        nothing would otherwise replace what is on screen — the import would
+        land in the database and look like it had done nothing.
+
+        Keying on the *value* did not close that: importing the same document
+        twice with an edit in between stores text identical to what is already
+        saved, so the key would not change, the box would keep the edit, and the
+        alert would still say the example had been filled. `updatedAt` moves on
+        every write, including one that changes nothing, which is the property
+        this needs.
 
         The key is on this field alone rather than on both, because a remount
         discards whatever is in the box: keying the pair would mean importing an
         example silently reverted unsaved edits to the instructions above it.
-        An ordinary save cannot trip either, because by then the stored value is
+        An ordinary save cannot trip that, because by then the stored value is
         already what is on screen.
       */}
       <ExampleField
-        key={`example:${exampleLetter}`}
+        key={`example:${savedAt}`}
         value={exampleLetter}
         pending={pending}
       />
@@ -118,7 +132,11 @@ function InstructionsField({
           Applied to every letter, on top of the built-in rules. Tone, length,
           structure, salutation, what to emphasise, what to avoid.
         </p>
-        <CharacterCount count={count} max={MAX_INSTRUCTIONS_CHARS} />
+        <CharacterCount
+          label="Your instructions"
+          count={count}
+          max={MAX_INSTRUCTIONS_CHARS}
+        />
       </div>
     </div>
   )
@@ -158,7 +176,11 @@ function ExampleField({ value, pending }: { value: string; pending: boolean }) {
           </strong>{" "}
           — no employer, role, date or number in it is treated as yours.
         </p>
-        <CharacterCount count={count} max={MAX_EXAMPLE_LETTER_CHARS} />
+        <CharacterCount
+          label="Your example letter"
+          count={count}
+          max={MAX_EXAMPLE_LETTER_CHARS}
+        />
       </div>
     </div>
   )
@@ -187,7 +209,15 @@ function countOf(value: string): number {
  */
 const COUNT_FORMAT = new Intl.NumberFormat("en-AU")
 
-function CharacterCount({ count, max }: { count: number; max: number }) {
+function CharacterCount({
+  label,
+  count,
+  max,
+}: {
+  label: string
+  count: number
+  max: number
+}) {
   // Strictly over, not at. The server's `.max()` accepts a value exactly on the
   // cap, so turning red there would refuse in the UI what the action saves
   // without complaint.
@@ -199,10 +229,21 @@ function CharacterCount({ count, max }: { count: number; max: number }) {
         "text-sm tabular-nums",
         overLimit ? "text-destructive" : "text-muted-foreground"
       )}
-      role="status"
-      aria-live="polite"
     >
       {COUNT_FORMAT.format(count)} / {COUNT_FORMAT.format(max)}
+      {/*
+        ⚠️ **The count is not itself a live region, and the sentence beside it
+        is.** The count changes on every keystroke, so announcing it read the
+        running total out character by character — the colour change that warns
+        a sighted user is a single event, and this has to be one too. The text
+        here only changes when the limit is crossed, and an unchanged live
+        region says nothing, so it announces once each way.
+      */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {overLimit
+          ? `${label} is over the ${COUNT_FORMAT.format(max)} character limit.`
+          : ""}
+      </span>
     </p>
   )
 }
