@@ -137,6 +137,31 @@ DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
 `DATABASE_URL_UNPOOLED`, not `DATABASE_URL` — the pooled endpoint runs PgBouncer
 in transaction mode, which is the wrong endpoint for migrate. Forward-only.
 
+**A migration that creates a table the dashboard will read has a backfill
+between the two, and the order is not interchangeable:**
+
+```
+migrate  →  backfill  →  deploy the dashboard
+```
+
+Deploying the dashboard first shows every user an empty page — a table the
+worker has begun filling but that holds nothing from before the migration. The
+one that exists today is the cumulative postings record:
+
+```bash
+DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
+DATABASE_URL=… pnpm --filter @workspace/briefing-worker backfill:postings
+```
+
+The backfill takes the **pooled** `DATABASE_URL`, unlike the migration above it:
+it is ordinary application traffic through `createPrismaClient()`, not a schema
+change. It walks every succeeded run oldest-first, prints one
+`"event":"backfill-postings"` line saying how many runs it walked, how many it
+skipped and how many records it wrote, and is safe to run again — the write it
+uses is an upsert that never touches a status a person set. Runs it skips are
+ordinary: findings that are absent or unparseable, which is every run predating
+the `runs.findings` column.
+
 **The dashboard.** Vercel deploys it from git on its own; nothing here is needed
 unless its environment changed. If it did, set the value in the project's
 Production scope and **redeploy** — Vercel does not re-inject into a running
