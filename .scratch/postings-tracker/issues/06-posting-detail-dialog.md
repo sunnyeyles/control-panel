@@ -27,6 +27,11 @@ table
 - [ ] Drafting a Cover Letter works from inside the dialog, and an existing
       draft is still downloadable and labelled as already drafted rather than
       offering a first draft.
+- [ ] **Editing an existing draft works from inside the dialog too.** Drafting,
+      editing and downloading are three separate affordances that today all sit
+      on the Posting card, and editing is offered nowhere else in the app — the
+      letters listing carries downloads only. A dialog that takes drafting and
+      leaves editing behind removes the editor.
 - [ ] Closing returns to the same page and scroll position.
 - [ ] Fully keyboard-navigable: focus moves into the dialog, is trapped while it
       is open, and returns to the trigger on close.

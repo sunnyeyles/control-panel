@@ -47,5 +47,17 @@ work does not depend on them.)_
 - [ ] The Cover Letters section still lists, and still fails independently of
       the Postings query — one is Postgres and the other object storage, and an
       outage in either must not take the other down.
+- [ ] **Running a briefing on demand, and seeing that one is running, both
+      survive.** Each Briefing is still individually runnable, and still reports
+      whether its last Run succeeded, failed or is in flight. A cumulative table
+      has no per-Briefing row to carry that, so it moves above the table as a
+      compact strip — one line per Briefing.
+- [ ] The page still refreshes itself while a Run is in flight, and still stops
+      doing so when none is — an idle tab must not poll.
+- [ ] Run status fails independently of both the Postings query and the Cover
+      Letters listing: three sources, three outcomes, no one of them able to
+      blank the other two.
 - [ ] The superseded card path and its read module are removed, not left
-      orphaned.
+      orphaned — **after** everything living inside them has a new home. That
+      component is also the only place the run controls and the letter controls
+      are rendered, and nothing fails to compile when they disappear.

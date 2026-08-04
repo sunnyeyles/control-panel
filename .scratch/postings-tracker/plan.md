@@ -1,5 +1,21 @@
 # Postings tracker: a cumulative, sortable, paginated table
 
+## Drift since this was written
+
+Drafted against `ecd3c5b` (#117) and revised against `923cb45`. Five things
+landed in between, and each one moved something this plan names:
+
+| Landed                                 | What it moved here                                                                                                                       |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| #119 — run a briefing now              | `/briefings` gained a **third** independent load and two per-briefing controls that live only inside the component Phase 5 deletes       |
+| #122 — letter instructions in Settings | `cover-letter-actions.ts` gained a reason the Posting is re-read server-side; the page gained a paragraph pointing at Settings           |
+| #123 / #125 — the letter editor        | a third action (`saveCoverLetter`), `LETTER_NOT_FOUND`, `EditCoverLetterButton`, and `/api/cover-letters/[postingId]`                    |
+| #128 — criteria from the résumé        | `lib/jobs/criteria-suggestion.ts` and `suggest-criteria-actions.ts` — no overlap, but `job-actions.ts` is no longer the only action file |
+| #124 and the 0003/0004 migrations      | `0003_run_claimed_at` and `0004_cover_letter_instructions` took the migration number this plan claimed                                   |
+
+The two that change work rather than wording are marked **⚠️ Drift** where they
+land, in Phase 4 and Phase 5.
+
 ## Context
 
 `/briefings` today renders the Postings from each briefing's **latest successful
@@ -51,7 +67,12 @@ whole feature, and it lives in one `DO UPDATE SET` column list.
 
 ## Phase 1 — `packages/db`
 
-### Migration `prisma/migrations/0003_postings/migration.sql`
+### Migration `prisma/migrations/0005_postings/migration.sql`
+
+**`0003` and `0004` are taken** — `0003_run_claimed_at` and
+`0004_cover_letter_instructions` landed after this plan was drafted. Migrations
+are forward-only, so this is the next free number, not a renumbering; check the
+directory before writing rather than trusting this line.
 
 Identity is `(user_id, posting_id)` with **no Run in it** — the precedent stated
 in `packages/user-storage/src/cover-letter-store.ts:20-31`. Runs are provenance.
@@ -105,7 +126,9 @@ CREATE INDEX "postings_user_last_seen_idx"
 one; the row count is bounded by what one person's briefings found. Four indexes
 to avoid sorting a few hundred rows is four things to keep correct for no gain.
 
-**On the `posting_id` CHECK.** `cover-letter-ref.ts:28-32` insists on _one copy_
+**On the `posting_id` CHECK.**
+`apps/dashboard/lib/cover-letters/cover-letter-ref.ts:28-32` — the dashboard's
+module, not anything under `packages/user-storage` — insists on _one copy_
 of the shape rule — but that rule is about validating **untrusted input**, and it
 stays the only copy of that. This is a different claim: the column is a key
 segment and the database should refuse to hold a value that cannot be one,
@@ -125,15 +148,15 @@ ordinary case, not an edge one.
 ```ts
 export async function recordPostings(
   prisma: DbClient,
-  seen: SeenPostings,
-): Promise<number>;
+  seen: SeenPostings
+): Promise<number>
 export async function setPostingStatus(
   prisma: DbClient,
   userId: string,
   postingId: string,
   status: PostingStatus,
-  now?: Date,
-): Promise<boolean>;
+  now?: Date
+): Promise<boolean>
 ```
 
 ```sql
@@ -302,6 +325,24 @@ from the client surface entirely, and makes ownership structural.
   verbatim, and "Run ownership is checked" becomes "the Posting is addressed by
   (session user, posting id), so there is no ownership to assume".
 
+**⚠️ Drift — the file grew a second half after this was written.** #123/#125
+added `saveCoverLetter`, `LETTER_NOT_FOUND`, and the read route
+`app/api/cover-letters/[postingId]/route.ts`. None of it is touched here, and
+the reason is the plan's own thesis: **all three are already addressed by
+`(session user, posting id)` with no Run anywhere in them.** The save action's
+zod schema is `{ postingId }` today, which is exactly what `draftSchema` is
+being reduced to — after this change the two schemas are identical, and that is
+the shape agreeing rather than a duplication to collapse. Three consequences:
+
+- The draft action is the **only** Run reader left in the file. Deleting
+  `RUN_NOT_FOUND` and `POSTING_GONE` frees `runId` from the client surface
+  entirely, because nothing else was ever using it.
+- `LETTER_NOT_FOUND` and the save refusal's reasoning are untouched — they turn
+  on the object existing, not on a Run.
+- The route needs no change and should not get one. It reads S3 by key and
+  never queries Postgres; a reviewer who "repoints it at postings too" has
+  added a database round trip to a path that had none.
+
 _Fallback if this needs staging:_ thread the run id through the existing hidden
 field and change nothing else — at the cost of leaving that hole open.
 
@@ -310,24 +351,69 @@ field and change nothing else — at the cost of leaving that hole open.
 ## Phase 5 — page, components, nav
 
 **`app/(app)/briefings/page.tsx`** (rewrite) — keeps `force-dynamic`,
-`maxDuration`, `requirePageUser()` **before** `searchParams` is read, and the two
-independent try/catch blocks so Postgres and S3 still fail separately. Type
-`searchParams` inline rather than with the generated `PageProps` helper, which
-only exists after `next typegen` has written `.next/types/`. `max-w-3xl` →
+`maxDuration`, `requirePageUser()` **before** `searchParams` is read, and the
+**three** independent try/catch blocks so each source still fails on its own.
+Type `searchParams` inline rather than with the generated `PageProps` helper,
+which only exists after `next typegen` has written `.next/types/`. `max-w-3xl` →
 `max-w-6xl`. Keep the "Your cover letters" section — it is the only route to a
 letter drafted for a Posting with no row yet.
 
+**⚠️ Drift — there are three loads now, not two, and the third has a poller
+attached.** #119 added `runActivityForUser` beside the postings and letters
+loads, and `<RefreshWhileRunning active={anyRunning(activity)} />` above the
+content: it renders nothing, and mounting it _is_ the effect that stops the
+app's only poller from running for the life of an idle tab. Both survive the
+rewrite verbatim. The postings query replaces `latestPostingsForUser` in the
+first block only; the letters block and the activity block are untouched, and
+`anyRunning` still reads the activity load, so dropping that load silently
+disables the poller rather than breaking a build.
+
+**⚠️ Drift — `briefing-list.tsx` is not only the card path.** It is also the
+only place `RunNowButton` and `RunActivityStatus` are rendered, both from #119.
+A cumulative table has no per-briefing row to hang them on, so deleting the
+component as written would remove the ability to run a briefing on demand and
+to see that one is running — a feature regression with nothing failing to
+announce it. **Decision: a briefing strip above the table**, one compact row per
+briefing — name, last-run status, Run now. Both controls move across
+_unchanged_; what is new is only the strip that arranges them.
+
+```
+┌─────────────────────────────────────────────────┐
+│ Sydney backend roles    ✓ ran 2h ago  [Run now] │
+│ Remote platform roles   ⏵ running…    [Run now] │
+└─────────────────────────────────────────────────┘
+
+  Postings                          25 of 68 ▾
+  ─────────────────────────────────────────────
+  Title       Company     Status    Last seen
+```
+
 _Drive-by, a real bug:_ the second paragraph still says only `.md`/`.txt` CVs can
-be read. PDF and DOCX shipped in #86. Fix it while rewriting.
+be read. PDF and DOCX shipped in #86 — `lib/cover-letters/profile-text.ts` reads
+PDF via `unpdf` and DOCX via `mammoth`, and `OVERVIEW.md:117-125` already says
+so, so the page is the last thing still claiming otherwise. `.doc`, `.odt` and
+`.rtf` genuinely have no parser and are refused by name; say _that_ rather than
+deleting the caveat wholesale. Fix it while rewriting.
 
 | Component                   | Kind   | Notes                                                                                                              |
 | --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| `briefing-strip.tsx`        | server | Per-briefing name + `RunActivityStatus` + `RunNowButton`, both reused as-is. Reads the activity load, not postings |
 | `posting-table.tsx`         | server | `Table` + rows + the 3-way empty state                                                                             |
 | `posting-sort-header.tsx`   | server | `<Link>` + arrow, **`aria-sort`** — a sortable table without it is one a screen reader cannot tell has been sorted |
 | `posting-row.tsx`           | server | Where the client boundary sits; external `<a rel="noreferrer noopener">`, never `next/link`                        |
 | `posting-status-select.tsx` | client | See below                                                                                                          |
-| `posting-detail-dialog.tsx` | client | Receives the whole row as props                                                                                    |
+| `posting-detail-dialog.tsx` | client | Receives the whole row as props. Hosts all three letter affordances — see below                                    |
 | `posting-pagination.tsx`    | server | Hand-rolled                                                                                                        |
+
+**⚠️ Drift — the dialog inherits three letter controls, not one.** The card
+renders `DraftCoverLetterButton`, and since #123 also `EditCoverLetterButton`
+and `CoverLetterDownloadLink`. Editing is rendered **nowhere else** — the "Your
+cover letters" section carries download links only — so a dialog that takes the
+draft button and leaves the other two behind deletes the editor from the app.
+All three move into `posting-detail-dialog.tsx` together. `EditCoverLetterButton`
+needs no prop change: it takes `postingId` alone and fetches
+`/api/cover-letters/[postingId]`, which is the identity this whole plan is
+built on.
 
 **No `useSearchParams`, no client table state.** Sort headers and pagination are
 plain `<Link>`s, which the local docs confirm maintain scroll position
@@ -361,7 +447,15 @@ plus `lib/nav.ts`, the trace metadata in `cover-letter-actions.ts`, and prose in
 three docs. Mechanical, but a decision rather than a tidy-up.
 
 **Deleted:** `lib/briefings/latest-postings.ts` (+ its test),
-`components/briefings/briefing-list.tsx`.
+`components/briefings/briefing-list.tsx` — **the latter only once the strip and
+the dialog have taken what lives inside it.** `git rm` it first and five things
+go quiet at once: the two run controls, the two letter controls, and the
+download link. Nothing else imports it, so nothing fails to compile.
+
+**Kept, unchanged and easy to delete by accident:**
+`run-now-button.tsx`, `run-activity-status.tsx`, `refresh-while-running.tsx`,
+`edit-cover-letter-button.tsx`, `cover-letter-list.tsx`,
+`lib/briefing-runs/run-activity.ts`.
 
 ---
 
@@ -371,7 +465,7 @@ three docs. Mechanical, but a decision rather than a tidy-up.
 whole app loudly until done — the design working.
 
 - Add a `posting` model: `count`, `findMany`, `findUnique`, `updateMany`.
-- **Make `orderBy` real.** It is ignored outright today (`fake-prisma.ts:83` —
+- **Make `orderBy` real.** It is ignored outright today (`fake-prisma.ts:144` —
   "every call site wants `createdAt` descending"). With sortable columns that
   becomes a silent wrong-order bug in exactly the environment the UI is built in.
   Honour `where`, `orderBy`, `skip`, `take`, per the file's own stated principle
@@ -429,19 +523,26 @@ property of the database, not the code:
 - **`CONTEXT.md`** — new **Posting Status** term after **Posting** (the three
   values; `new` is the only one the worker writes; the `DO UPDATE SET` list is
   what protects the others). Amend **Posting** (now also a row keyed
-  `(user, posting_id)`), **Findings** (`:90-92` — the page no longer renders
-  Postings out of it; findings are what one Run reported, the table is the record
-  of the search, and the two are not redundant), **Cover Letter** (drafted from
-  the Posting's payload), and the intro (`:7`).
+  `(user, posting_id)`), **Findings** (`:118-120`, _moved from `:90-92`_ — the
+  page no longer renders Postings out of it; findings are what one Run reported,
+  the table is the record of the search, and the two are not redundant),
+  **Cover Letter** (drafted from the Posting's payload), and the intro (`:7`).
 - **`OVERVIEW.md`** — seam table gains `postings.ts`; the flow diagram gains the
   upsert; the `/briefings` bullet is rewritten (the Brief viewer remains the
-  blocked item).
+  blocked item). **Two specific stale references, both in the Brief-viewer bullet
+  at `:182-198`:** it names
+  `apps/dashboard/lib/briefings/latest-postings.ts` as how the page reads
+  Postings — this deletes that module — and it explains `run-activity.ts` and the
+  **Run now** button in terms of a page that no longer exists in that shape.
+  Neither claim survives Phase 5, and grepping for `latest-postings` is the way
+  to be sure none is left.
 - **`packages/db/README.md`** — seam listing; and in §Schema notes: identity is
   `(user_id, posting_id)`; **adding `status` to the SET list is silent data
   loss**; the `WHERE` guard is what makes the write order-independent.
 - **`apps/dashboard/CLAUDE.md`** — a short section on search params as the app's
   first untrusted GET input.
-- **`cover-letter-ref.ts`** — amend "One copy, in this module" to name
+- **`apps/dashboard/lib/cover-letters/cover-letter-ref.ts`** — amend "One copy,
+  in this module" to name
   `postings_posting_id_check` as the deliberate second statement, in a different
   language for a different job.
 - **`RELEASING.md`** — the ordering below.
@@ -480,6 +581,13 @@ Then drive it offline — `DEV_AUTH_BYPASS=1`,
 table paginates, every column sorts both ways, a status survives a reload, the
 Dialog opens with highlights and match reason, and the Draft button still works.
 `pnpm build` fails while the flag is set; that is deliberate.
+
+**The five controls that moved rather than being written** are the ones a
+rewrite loses quietly, so walk them explicitly on that same page: **Run now**
+fires and the status line changes; the poller mounts while something is running;
+and inside the dialog a letter can be **drafted**, **edited** and
+**downloaded**. Each of these worked before this change and no test asserts it
+still does.
 
 **End-to-end**, the thing no unit test covers: run the worker twice against the
 same search so a Posting is re-found, and confirm a status set between the runs

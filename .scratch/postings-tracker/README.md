@@ -51,6 +51,21 @@ migrate  →  backfill  →  deploy dashboard
   This is the same unit of identity a stored Cover Letter is keyed on, which is
   why the two agree without coordination.
 
+## Settled since drafting
+
+These tickets were written against `ecd3c5b`; `plan.md` §Drift lists everything
+that landed after. Two of those changes needed a decision rather than a
+rewording, and both are folded into existing tickets because each is a re-home
+rather than a feature:
+
+- **Running a briefing on demand outlives the cards.** #119 put a Run-now button
+  and a run-status line on each Briefing card — the component ticket 04 removes,
+  and the only place either is rendered. They move to a **compact strip above
+  the table**, one line per Briefing, both controls reused unchanged. → 04
+- **So does editing a cover letter.** #123 put an edit button on the Posting
+  card beside drafting and downloading; the letters listing offers downloads
+  only. All three move into the dialog together. → 06
+
 ## Open questions, carried from the plan
 
 - The sidebar will say **Postings** while the URL stays `/briefings`. Renaming
