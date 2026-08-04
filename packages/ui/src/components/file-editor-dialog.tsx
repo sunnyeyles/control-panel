@@ -39,6 +39,8 @@ export interface FileEditorDialogProps {
   onFilesChange?: (files: MarkdownFile[]) => void
   /** Replaces the default "Open file editor" button. */
   trigger?: React.ReactNode
+  /** Replaces the default "File editor" heading. */
+  title?: React.ReactNode
   open?: boolean
   onOpenChange?: (open: boolean) => void
   className?: string
@@ -52,6 +54,7 @@ function FileEditorDialog({
   files,
   onFilesChange,
   trigger,
+  title = "File editor",
   open,
   onOpenChange,
   className,
@@ -72,6 +75,12 @@ function FileEditorDialog({
 
   const activeFile =
     currentFiles.find((file) => file.id === activeId) ?? currentFiles[0]
+
+  // Both switchers are chrome for a choice that does not exist when there is
+  // one file — a 208px sidebar listing a single entry, and below `sm` a
+  // dropdown with one option. A caller editing one document is the ordinary
+  // case, not a degenerate one.
+  const showFileList = currentFiles.length > 1
 
   const editor = useEditor({
     extensions: [StarterKit],
@@ -175,7 +184,7 @@ function FileEditorDialog({
         )}
       >
         <DialogHeader className="border-b border-border px-4 py-3">
-          <DialogTitle className="text-base">File editor</DialogTitle>
+          <DialogTitle className="text-base">{title}</DialogTitle>
           <DialogDescription className="sr-only">
             Edit markdown files with rich text formatting and download them as
             PDF.
@@ -184,56 +193,60 @@ function FileEditorDialog({
 
         <div className="flex min-h-0 flex-1">
           {/* File sidebar */}
-          <nav
-            aria-label="Files"
-            className="hidden w-52 shrink-0 border-r border-border bg-muted/40 sm:block"
-          >
-            <ScrollArea className="h-full">
-              <ul className="flex flex-col gap-0.5 p-2">
-                {currentFiles.map((file) => (
-                  <li key={file.id}>
-                    <button
-                      type="button"
-                      onClick={() => switchFile(file.id)}
-                      aria-current={
-                        file.id === activeFile?.id ? "true" : undefined
-                      }
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
-                        file.id === activeFile?.id
-                          ? "bg-accent font-medium text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                      )}
-                    >
-                      <FileTextIcon className="size-4 shrink-0" />
-                      <span className="truncate">{file.name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </ScrollArea>
-          </nav>
+          {showFileList && (
+            <nav
+              aria-label="Files"
+              className="hidden w-52 shrink-0 border-r border-border bg-muted/40 sm:block"
+            >
+              <ScrollArea className="h-full">
+                <ul className="flex flex-col gap-0.5 p-2">
+                  {currentFiles.map((file) => (
+                    <li key={file.id}>
+                      <button
+                        type="button"
+                        onClick={() => switchFile(file.id)}
+                        aria-current={
+                          file.id === activeFile?.id ? "true" : undefined
+                        }
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
+                          file.id === activeFile?.id
+                            ? "bg-accent font-medium text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                        )}
+                      >
+                        <FileTextIcon className="size-4 shrink-0" />
+                        <span className="truncate">{file.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            </nav>
+          )}
 
           {/* Editor area */}
           <div className="flex min-w-0 flex-1 flex-col">
             {/* Mobile file switcher */}
-            <div className="border-b border-border p-2 sm:hidden">
-              <label htmlFor="file-editor-file-select" className="sr-only">
-                Select file
-              </label>
-              <select
-                id="file-editor-file-select"
-                value={activeFile?.id ?? ""}
-                onChange={(event) => switchFile(event.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-              >
-                {currentFiles.map((file) => (
-                  <option key={file.id} value={file.id}>
-                    {file.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {showFileList && (
+              <div className="border-b border-border p-2 sm:hidden">
+                <label htmlFor="file-editor-file-select" className="sr-only">
+                  Select file
+                </label>
+                <select
+                  id="file-editor-file-select"
+                  value={activeFile?.id ?? ""}
+                  onChange={(event) => switchFile(event.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                >
+                  {currentFiles.map((file) => (
+                    <option key={file.id} value={file.id}>
+                      {file.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {editor && <EditorToolbar editor={editor} />}
 
@@ -249,7 +262,7 @@ function FileEditorDialog({
               </div>
             </ScrollArea>
 
-            <footer className="flex items-center justify-between border-t border-border px-4 py-3">
+            <footer className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
               <p className="truncate text-sm text-muted-foreground">
                 {activeFile?.name ?? "No file selected"}
               </p>

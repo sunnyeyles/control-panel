@@ -1,5 +1,6 @@
 import { CoverLetterDownloadLink } from "@/components/briefings/cover-letter-list"
 import { DraftCoverLetterButton } from "@/components/briefings/draft-cover-letter-button"
+import { EditCoverLetterButton } from "@/components/briefings/edit-cover-letter-button"
 import type {
   BriefingPostings,
   LatestFindings,
@@ -205,12 +206,33 @@ function PostingCard({
         </p>
       ) : null}
 
-      <DraftCoverLetterButton
-        runId={runId}
-        postingId={posting.id}
-        title={posting.title}
-        drafted={letter !== undefined}
-      />
+      {/*
+        A row, so the two actions on a drafted Posting read as alternatives to
+        each other — replace what the model wrote, or edit it. The draft button
+        renders its own column (a form stacked over its alert), which nests
+        inside this row unchanged.
+      */}
+      <div className="flex flex-wrap items-start gap-2">
+        <DraftCoverLetterButton
+          runId={runId}
+          postingId={posting.id}
+          title={posting.title}
+          drafted={letter !== undefined}
+        />
+
+        {/*
+          Conditional on the letter for the same reason the download link above
+          is: with nothing drafted there is nothing to edit, and the editor
+          would open on an empty document.
+        */}
+        {letter ? (
+          <EditCoverLetterButton
+            postingId={letter.postingId}
+            displayName={letter.displayName}
+            filename={letter.filename}
+          />
+        ) : null}
+      </div>
     </article>
   )
 }
