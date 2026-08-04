@@ -44,9 +44,10 @@ const runActions = createRunActions({
  * router reuse the segment for 30 seconds, so without this the page would keep
  * showing a state that predates the draft.
  *
- * It is arguably belt-and-braces today — nothing on the page renders a letter
- * yet — but the alternative is a call site that has to remember to add it when
- * something does, and the documents actions had exactly that bug.
+ * The page does render a letter — the drafted-on line and the download link on
+ * each Posting card, and the list above them — so this is load-bearing rather
+ * than belt-and-braces: without it a first draft leaves the card still offering
+ * a first draft.
  */
 export async function draftCoverLetterAction(
   state: ActionState,
@@ -73,6 +74,25 @@ export async function triggerBriefingRunAction(
   formData: FormData
 ): Promise<ActionState> {
   const result = await runActions.triggerBriefingRun(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Save an edited letter.
+ *
+ * `refresh()` for a narrower reason than the draft above: the letter's bytes
+ * are fetched by the editor rather than rendered by the page, so what goes
+ * stale here is only its `size` in the letters list. Cheap, and the alternative
+ * is the one thing on this page that silently disagrees with storage.
+ */
+export async function saveCoverLetterAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await actions.saveCoverLetter(state, formData)
 
   if (result.status === "success") refresh()
 

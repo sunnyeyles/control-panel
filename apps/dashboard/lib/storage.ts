@@ -1,7 +1,7 @@
 import { S3Client } from "@aws-sdk/client-s3"
 import {
-  createDevCoverLetterStore,
-  createDevResumeStore,
+  getDevCoverLetterStore,
+  getDevResumeStore,
 } from "@/lib/dev/fake-stores"
 import { devMockEnabled } from "@/lib/dev/mode"
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider"
@@ -66,10 +66,10 @@ let builtFor: string | undefined
 export function getResumeStore(): ResumeStore {
   // Before `getObjectStore()` reads the storage config and builds an
   // `S3Client` — the two things this mode exists to not need.
-  if (devMockEnabled()) {
-    resumes ??= createDevResumeStore()
-    return resumes
-  }
+  // Memoized inside the dev module rather than here: `next dev` can hand two
+  // server bundles two copies of this module, and two copies of an in-memory
+  // store are two different worlds. See `getDevResumeStore`.
+  if (devMockEnabled()) return getDevResumeStore()
 
   const store = getObjectStore()
   resumes ??= createResumeStore(store)
@@ -92,10 +92,7 @@ export function getResumeStore(): ResumeStore {
  * than "Document storage is unavailable".
  */
 export function getCoverLetterStore(): CoverLetterStore {
-  if (devMockEnabled()) {
-    coverLetters ??= createDevCoverLetterStore()
-    return coverLetters
-  }
+  if (devMockEnabled()) return getDevCoverLetterStore()
 
   const store = getObjectStore()
   coverLetters ??= createCoverLetterStore(store)

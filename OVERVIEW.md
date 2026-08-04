@@ -104,7 +104,7 @@ flowchart TD
     C --> D[(Neon — search criteria)]
     D -.->|replaces hand-entered jobs.config| P[Briefing pipeline above]
     P --> M[Several scouts, merged and ranked]
-    P --> N[Rendering or editing a stored cover letter]
+    P --> N[Sending a cover letter]
     P --> Q[A viewer for the brief itself]
 ```
 
@@ -125,27 +125,33 @@ flowchart TD
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
-- **Rendering or editing a cover letter in the app.** Drafting one is built
-  (#84): a Draft button on each **Posting** on `/briefings` runs the **Letter
-  Writer** and stores the result at
-  `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting so a
-  redraft overwrites one object. Seeing and downloading them is built too (#85):
-  `/briefings` lists every stored letter with when it was drafted and which
-  Posting it belongs to — `apps/dashboard/lib/cover-letters/list-cover-letters.ts`,
-  which pays one `HeadObject` per letter because a listing carries no user
-  metadata — a Posting that already has one says so instead of offering a first
-  draft, and `/api/cover-letters/{postingId}` hands the Markdown back as a file.
-  The letter is written from the newest **Document** labelled `resume`, and
-  since #86 that can be a PDF or a DOCX as well as `.md` or `.txt`. Telling the
-  writer how to write is built too: **Letter Instructions** are a per-user row
-  in `cover_letter_instructions`, edited from `/settings`, composed onto the
+- **Sending a cover letter.** Drafting one is built (#84): a Draft button on
+  each **Posting** on `/briefings` runs the **Letter Writer** and stores the
+  result at `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting
+  so a redraft overwrites one object. Seeing and downloading them is built too
+  (#85): `/briefings` lists every stored letter with when it was drafted and
+  which Posting it belongs to —
+  `apps/dashboard/lib/cover-letters/list-cover-letters.ts`, which pays one
+  `HeadObject` per letter because a listing carries no user metadata — a Posting
+  that already has one says so instead of offering a first draft, and
+  `/api/cover-letters/{postingId}` hands the Markdown back as a file. The letter
+  is written from the newest **Document** labelled `resume`, and since #86 that
+  can be a PDF or a DOCX as well as `.md` or `.txt`. Telling the writer how to
+  write is built too: **Letter Instructions** are a per-user row in
+  `cover_letter_instructions`, edited from `/settings`, composed onto the
   writer's system prompt by `coverLetterSystemPrompt()` and applied to every
   draft — free-text rules, plus an optional example letter that is fenced as a
   style reference and never as a source of facts. So tone, wording and structure
-  are settable, and redrafting a Posting applies them. What is still missing is
-  everything past that: nothing renders a letter's text in the app, and nothing
-  can edit one or send it. Ticketed under #77;
+  are settable, and redrafting a Posting applies them. Reading and editing one
+  in the app is built as well: an **Edit letter** button beside the draft button
+  opens the stored Markdown as rich text in `FileEditorDialog`, and **Save**
+  writes it back over the same object — carrying `drafted-at` and the letter's
+  provenance across, because an edit is not a drafting. A save refuses when no
+  letter exists at that address, which is what keeps an action that _does_ take
+  letter text from a form out of the business of creating one. What is still
+  missing is sending it. Ticketed under #77;
   `docs/cover-letter-agent-plan.md` is the staged plan.
+
 - **A viewer for the brief itself.** `/briefings` shows what a run _found_: the
   **Postings** from each briefing's most recent successful **Run**, read out of
   the `runs.findings` record by `apps/dashboard/lib/briefings/latest-postings.ts`

@@ -11,6 +11,7 @@ import type { Findings, Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
 import type { PrismaClient } from "@workspace/db"
 import { createCoverLetterStore } from "@workspace/user-storage/cover-letter-store"
+import { ObjectNotFoundError } from "@workspace/user-storage/errors"
 import { buildObjectKey } from "@workspace/user-storage/keys"
 import type {
   NewResume,
@@ -29,7 +30,12 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
-import { createCoverLetterActions, RUN_NOT_FOUND } from "./cover-letter-actions"
+import {
+  createCoverLetterActions,
+  LETTER_NOT_FOUND,
+  MAX_LETTER_CHARS,
+  RUN_NOT_FOUND,
+} from "./cover-letter-actions"
 
 /**
  * The draft action's authorization and provenance branches.
@@ -122,6 +128,8 @@ function findings(postings: Posting[] = [POSTING]): Findings {
  */
 class MemoryObjects implements UserObjectStore {
   readonly puts: NewObject[] = []
+  /** Every key the store was *asked* about, however the ask turned out. */
+  readonly reads: string[] = []
   private readonly stored = new Map<string, StoredObject & { body: Buffer }>()
 
   private keyOf(ref: ObjectRef): string {
@@ -156,7 +164,7 @@ class MemoryObjects implements UserObjectStore {
 
   async get(ref: ObjectRef): Promise<FetchedObject> {
     const found = this.stored.get(this.keyOf(ref))
-    if (!found) throw new Error(`not stored: ${this.keyOf(ref)}`)
+    if (!found) throw new ObjectNotFoundError(this.keyOf(ref))
 
     return {
       ...found,
@@ -165,9 +173,15 @@ class MemoryObjects implements UserObjectStore {
     }
   }
 
+  // `ObjectNotFoundError` rather than a bare `Error`, because that is what the
+  // S3 store raises and `saveCoverLetter` branches on the code to tell "no
+  // letter drafted yet" apart from "the bucket is unreachable". A plain throw
+  // here would send the missing-object case down the outage path and the
+  // refusal being asserted below would pass for the wrong reason.
   async head(ref: ObjectRef): Promise<StoredObject> {
+    this.reads.push(this.keyOf(ref))
     const found = this.stored.get(this.keyOf(ref))
-    if (!found) throw new Error(`not stored: ${this.keyOf(ref)}`)
+    if (!found) throw new ObjectNotFoundError(this.keyOf(ref))
     return found
   }
 
@@ -371,6 +385,7 @@ class FakeDb {
 
 interface Harness {
   draft: (state: ActionState, formData: FormData) => Promise<ActionState>
+  save: (state: ActionState, formData: FormData) => Promise<ActionState>
   objects: MemoryObjects
   resumes: FakeResumes
   writer: FakeWriter
@@ -417,6 +432,7 @@ function harness(
 
   return {
     draft: actions.draftCoverLetter,
+    save: actions.saveCoverLetter,
     objects,
     resumes,
     writer,
@@ -884,6 +900,234 @@ describe("draftCoverLetter", () => {
 
       expect(result.status).toBe("error")
       expect(subject.objects.puts).toHaveLength(0)
+    })
+  })
+})
+
+/**
+ * Saving an edited letter back over the stored one.
+ *
+ * ⚠️ **The property these tests exist for is that a save cannot *create* a
+ * letter.** `draftCoverLetter` deliberately never takes letter text from a form
+ * — it carries identifiers and re-reads the Posting out of the Run's Findings,
+ * and there is a test above submitting a `posting` field to prove it is
+ * ignored. This action *does* take text, which is only safe because it edits
+ * something the user already has: the object must already exist at
+ * `(caller, Posting)` or nothing is written. Without that check the two actions
+ * together would let a caller put text of their choosing into a document stored
+ * in their own voice at any well-formed Posting id, which is the exact thing the
+ * drafting rule was written to prevent.
+ *
+ * The other half is that an edit is not a drafting: `draftedAt` and the
+ * provenance a letter was written with are metadata, and a save must carry them
+ * across rather than restamp them.
+ */
+describe("saveCoverLetter", () => {
+  const EDITED = "Dear Hiring Team,\n\nI would like to apply. Sincerely, Alice"
+
+  /** Puts a letter at `(USER_ID, POSTING_ID)` the way drafting would have. */
+  async function seedLetter(subject: Harness): Promise<void> {
+    const result = await subject.draft(IDLE, form(VALID))
+    expect(result.status).toBe("success")
+  }
+
+  const saveForm = (overrides: Record<string, string> = {}) =>
+    form({ postingId: POSTING_ID, markdown: EDITED, ...overrides })
+
+  describe("who is asking", () => {
+    it("refuses an anonymous caller and writes nothing", async () => {
+      await seedLetter(subject)
+      const before = subject.objects.puts.length
+
+      subject = harness({ user: ANONYMOUS })
+      const result = await subject.save(IDLE, saveForm())
+
+      expect(result).toEqual({ status: "error", message: NOT_AUTHORIZED })
+      // A fresh harness, so its own store must never have been written to.
+      expect(subject.objects.puts).toHaveLength(0)
+      expect(before).toBe(1)
+    })
+
+    it("gives a signed-in-but-unapproved caller the same message", async () => {
+      subject = harness({ user: REFUSED })
+
+      const result = await subject.save(IDLE, saveForm())
+
+      expect(result).toEqual({ status: "error", message: NOT_AUTHORIZED })
+      expect(subject.objects.puts).toHaveLength(0)
+    })
+  })
+
+  describe("what it accepts", () => {
+    it("refuses a posting id that is not the derived shape", async () => {
+      await seedLetter(subject)
+
+      const result = await subject.save(
+        IDLE,
+        saveForm({ postingId: "../../etc/passwd" })
+      )
+
+      expect(result.status).toBe("error")
+      // Refused on shape, *before the store was asked anything at all* — not
+      // merely before it was written to. A value the store would reject cannot
+      // name an object, so there is nothing to look up, and asking would make
+      // a malformed id indistinguishable from a missing one in the logs.
+      expect(subject.objects.reads).toHaveLength(0)
+      expect(subject.objects.puts).toHaveLength(1)
+    })
+
+    it("refuses an empty letter", async () => {
+      await seedLetter(subject)
+
+      const result = await subject.save(IDLE, saveForm({ markdown: "   \n  " }))
+
+      expect(result.status).toBe("error")
+      expect(subject.objects.puts).toHaveLength(1)
+    })
+
+    it("refuses a letter past the length bound", async () => {
+      await seedLetter(subject)
+
+      const result = await subject.save(
+        IDLE,
+        saveForm({ markdown: "x".repeat(MAX_LETTER_CHARS + 1) })
+      )
+
+      expect(result.status).toBe("error")
+      expect(subject.objects.puts).toHaveLength(1)
+    })
+  })
+
+  describe("a letter that is not there", () => {
+    it("refuses, and writes nothing at all", async () => {
+      // Nothing seeded: this is a caller naming a well-formed Posting id they
+      // have never drafted for.
+      const result = await subject.save(IDLE, saveForm())
+
+      expect(result).toEqual({
+        status: "error",
+        message: LETTER_NOT_FOUND,
+      })
+      // The assertion the whole describe block is for. Not merely "reported an
+      // error" — no object was created, so a save cannot mint a letter.
+      expect(subject.objects.puts).toHaveLength(0)
+      expect(subject.objects.keys()).toHaveLength(0)
+    })
+
+    it("refuses for a Posting whose letter belongs to another user", async () => {
+      await seedLetter(subject)
+
+      // Same Posting id, different session. The key is built from the session's
+      // user, so this addresses a prefix that has nothing in it rather than
+      // reaching the letter seeded above.
+      subject = harness({
+        user: { ...SIGNED_IN, userId: OTHER_USER_ID },
+      })
+
+      const result = await subject.save(IDLE, saveForm())
+
+      expect(result).toEqual({ status: "error", message: LETTER_NOT_FOUND })
+      expect(subject.objects.puts).toHaveLength(0)
+    })
+  })
+
+  describe("what it writes", () => {
+    it("replaces the markdown at the same key", async () => {
+      await seedLetter(subject)
+
+      const result = await subject.save(IDLE, saveForm())
+
+      expect(result.status).toBe("success")
+      // One object, not two: the key holds the Posting and nothing else, so an
+      // edit supersedes rather than accumulates.
+      expect(subject.objects.keys()).toEqual([EXPECTED_KEY])
+
+      const stored = await subject.objects.get({
+        userId: USER_ID,
+        kind: "cover-letters",
+        segments: [POSTING_ID],
+        extension: ".md",
+      })
+      expect(stored.text()).toBe(EDITED)
+    })
+
+    it("keeps the drafting instant and the provenance the letter was written with", async () => {
+      await seedLetter(subject)
+
+      await subject.save(IDLE, saveForm())
+
+      const stored = await subject.objects.head({
+        userId: USER_ID,
+        kind: "cover-letters",
+        segments: [POSTING_ID],
+        extension: ".md",
+      })
+
+      // An edit is not a drafting. The card reports "drafted <date>", and a
+      // save that restamped it would have the page claim the model rewrote the
+      // letter just now.
+      expect(stored.metadata["drafted-at"]).toBe(NOW.toISOString())
+      // And the list renders the title and company out of provenance, so
+      // dropping it would blank the row down to a hex digest.
+      expect(stored.metadata["posting-title"]).toBe(POSTING.title)
+      expect(stored.metadata["posting-company"]).toBe(POSTING.company)
+      expect(stored.metadata["posting-url"]).toBe(POSTING.url)
+      expect(stored.metadata["run-id"]).toBe(RUN_ID)
+    })
+
+    it("stores LF line endings whatever the editor sent", async () => {
+      await seedLetter(subject)
+
+      await subject.save(
+        IDLE,
+        saveForm({ markdown: "Dear Team,\r\n\r\nI would like to apply.\r\n" })
+      )
+
+      const stored = await subject.objects.get({
+        userId: USER_ID,
+        kind: "cover-letters",
+        segments: [POSTING_ID],
+        extension: ".md",
+      })
+
+      // Turndown emits CRLF and the writer emits LF. Left alone, the same
+      // letter would have different bytes depending on which last touched it,
+      // and saving an unedited letter would rewrite every line.
+      expect(stored.text()).toBe("Dear Team,\n\nI would like to apply.")
+    })
+
+    it("builds the key from the session, ignoring a userId in the form", async () => {
+      await seedLetter(subject)
+
+      const result = await subject.save(
+        IDLE,
+        saveForm({ userId: OTHER_USER_ID })
+      )
+
+      expect(result.status).toBe("success")
+      // Still the caller's own prefix. Nothing from the form reaches the key.
+      expect(subject.objects.keys()).toEqual([EXPECTED_KEY])
+    })
+
+    it("mints no Run and no artifact row", async () => {
+      await seedLetter(subject)
+
+      await subject.save(IDLE, saveForm())
+
+      // Same reason drafting mints none: `artifacts.run_id` is NOT NULL and
+      // references `runs`, and editing a letter is not an execution of a
+      // briefing job.
+      expect(subject.db.writes).toEqual([])
+    })
+
+    it("spends no model call", async () => {
+      await seedLetter(subject)
+      const promptsAfterDraft = subject.writer.prompts.length
+
+      await subject.save(IDLE, saveForm())
+
+      // The user's own words are the input. There is nothing to generate.
+      expect(subject.writer.prompts).toHaveLength(promptsAfterDraft)
     })
   })
 })

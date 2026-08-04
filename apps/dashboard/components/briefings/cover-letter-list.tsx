@@ -10,9 +10,11 @@ import type { CoverLetterSummary } from "@/lib/cover-letters/list-cover-letters"
  * React reports the disagreement as a hydration mismatch rather than as the
  * timezone bug it is.
  *
- * **There is nothing here but reading and downloading.** No edit, no redraft
- * with instructions, no tone, no send. A letter is drafted from a Posting on the
- * cards below, and this is where it can be taken away as a file.
+ * **There is nothing in this list but downloading.** No redraft with
+ * instructions, no tone, no send. A letter is drafted from a Posting on the
+ * cards below and edited there too — the card owns both actions, because both
+ * need the Posting the letter was written for. This is where it can be taken
+ * away as a file.
  */
 export function CoverLetterList({
   letters,
