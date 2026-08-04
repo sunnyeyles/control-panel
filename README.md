@@ -9,12 +9,13 @@ S3, and Terraform for all of it.
 
 ## Start here
 
-| Read          | For                                                    |
-| ------------- | ------------------------------------------------------ |
-| `OVERVIEW.md` | the pipeline end to end, and what is **not** built yet |
-| `CONTEXT.md`  | the vocabulary — read before writing prose about this  |
-| `CLAUDE.md`   | commands, workspace layout, and the architecture rules |
-| `infra/aws/`  | the Terraform, its own README, and `DEPLOYING.md`      |
+| Read           | For                                                    |
+| -------------- | ------------------------------------------------------ |
+| `OVERVIEW.md`  | the pipeline end to end, and what is **not** built yet |
+| `CONTEXT.md`   | the vocabulary — read before writing prose about this  |
+| `CLAUDE.md`    | commands, workspace layout, and the architecture rules |
+| `RELEASING.md` | shipping a change end to end — secrets, apply, verify  |
+| `infra/aws/`   | the Terraform, its own README, and `DEPLOYING.md`      |
 
 `CONTEXT.md` first if you are about to name something: **job** means a row in
 `jobs`, a thing that runs on a cadence, never an employment opportunity — that
