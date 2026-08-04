@@ -22,7 +22,11 @@ Terraform for deployment. See `apps/briefing-worker/README.md` and
 `infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
 cover it.
 
-Database migrations are also outside Turborepo, and are run by hand:
+Database migrations are outside Turborepo, and **CI applies them** —
+`.github/workflows/migrate.yml`, on every push to `main`. The same workflow
+applies a PR's migrations to that PR's Neon preview branch, and fails a PR when
+production is behind what is already merged. Running one by hand is the escape
+hatch, not the routine:
 
 ```bash
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
@@ -32,6 +36,13 @@ That runs Prisma Migrate (`prisma migrate deploy`) against the direct Neon
 endpoint. **`DATABASE_URL_UNPOOLED`, not `DATABASE_URL`** — the pooled endpoint
 runs PgBouncer in transaction mode, which is the wrong endpoint for migrate.
 Migrations are forward-only. See `packages/db/README.md`.
+
+**`turbo test` cannot catch an unapplied migration, by construction.**
+`stores.test.ts` replays every migration into a throwaway schema, so it proves
+the SQL is valid and ordered and knows nothing about any long-lived database.
+Drift belongs to the environment, not to the migration set, and the Vercel build
+never opens a connection — so a missing table stays invisible until a request
+renders the page that reads it. That is what `migrate.yml` is for.
 
 Authentication is Neon Auth (Managed Better Auth), configured from the Neon CLI
 rather than from anything in this repo. The workspace is linked to a project and
