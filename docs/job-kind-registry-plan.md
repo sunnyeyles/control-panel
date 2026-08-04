@@ -1,5 +1,15 @@
 # Job kinds — a dispatch registry for the worker
 
+> ## Not built. This is a plan, not a description of the code.
+>
+> Nothing dispatches on a job kind today: `apps/briefing-worker/src/` has no
+> registry, and `run-tick.ts` runs the one briefing path for every due row. The
+> present tense below is the present tense of a design, and describes what the
+> worker _would_ look like rather than what it does.
+>
+> Delete this file when the work ships — `CLAUDE.md` §Repo context is where that
+> convention lives, and git history is where a shipped plan belongs.
+
 ## Context
 
 The platform is a scheduler with four nouns — users, jobs, runs, artifacts
