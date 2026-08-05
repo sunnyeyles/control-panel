@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 
 import type { Posting } from "./findings.ts"
+import { boardForHost } from "./job-boards.ts"
 
 /**
  * Identity for a Posting, derived rather than assigned.
@@ -29,6 +30,12 @@ import type { Posting } from "./findings.ts"
  * kept, because a query parameter can genuinely carry a posting's identity
  * (`/jobs?id=123`) and merging two distinct postings is a far worse error than
  * failing to merge one posting with itself.
+ *
+ * That conservatism is why a board's own stamps do not get added here. LinkedIn
+ * needs `position` dropped, and `position` is a plausible identity parameter on
+ * some board nobody has looked at yet; `JOB_BOARDS` in `job-boards.ts` scopes
+ * such a name to the hosts known to stamp it, so dropping it costs nothing
+ * elsewhere.
  */
 const TRACKING_PARAMETERS = new Set([
   "fbclid",
@@ -60,6 +67,12 @@ const ID_LENGTH = 16
  * 4. A trailing `/` is stripped from the path, except on a bare root.
  * 5. The path's case is left alone. Paths are case-*sensitive*, and lowercasing
  *    one would merge two distinct postings on any server that agrees.
+ * 6. If the host belongs to a known job board, that board's own stamps are
+ *    dropped too — and only on that board's hosts. This is rule 3 for names
+ *    too risky to drop everywhere, which is most of them: LinkedIn's `refId`
+ *    and `trackingId` change on every search, so without this the same
+ *    advertisement gets a new id every Run and takes a person's `applied`
+ *    status with it.
  *
  * A URL the `URL` constructor rejects cannot reach here through a parsed
  * Posting — `PostingSchema` already refused it — but the fallback keeps this
@@ -75,12 +88,20 @@ function normalisePostingUrl(url: string): string {
 
   parsed.hash = ""
 
+  const board = boardForHost(parsed.hostname)
+  const boardParameters = new Set(
+    board?.trackingParameters.map((name) => name.toLowerCase()) ?? []
+  )
+
   const parameters = [...parsed.searchParams.entries()]
-    .filter(
-      ([key]) =>
-        !key.toLowerCase().startsWith("utm_") &&
-        !TRACKING_PARAMETERS.has(key.toLowerCase())
-    )
+    .filter(([key]) => {
+      const lowered = key.toLowerCase()
+      return (
+        !lowered.startsWith("utm_") &&
+        !TRACKING_PARAMETERS.has(lowered) &&
+        !boardParameters.has(lowered)
+      )
+    })
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
 
   // Rebuilt rather than mutated in place: assigning to `searchParams` does
