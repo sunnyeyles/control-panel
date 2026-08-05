@@ -1,6 +1,7 @@
 "use client"
 
 import { useActionState } from "react"
+import { StarsIcon } from "lucide-react"
 
 import { draftCoverLetterAction } from "@/app/(app)/briefings/actions"
 import { ActionAlert } from "@/components/forms/action-alert"
@@ -54,15 +55,11 @@ export function DraftCoverLetterButton({
       <input type="hidden" name="postingId" value={postingId} />
 
       <div>
-        {/*
-          `SubmitButton` omits `children` from its props on purpose — the label
-          and the pending spinner are its whole content — so there is no icon
-          here. The label carries the meaning.
-        */}
         <SubmitButton
           pending={pending}
           variant="outline"
           size="sm"
+          icon={<StarsIcon data-icon="inline-start" />}
           label={drafted ? "Replace this draft" : "Draft cover letter"}
           pendingLabel="Drafting…"
           aria-label={
