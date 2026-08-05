@@ -205,16 +205,7 @@ export function PostingDetailDialog({
               its alert), which nests inside this row unchanged.
             */}
             <div className="flex flex-wrap items-start gap-2">
-              {/*
-                `runId` is the Run that most recently reported this
-                advertisement. The draft action still re-reads the Posting out
-                of that Run's stored Findings, so it has to be named — ticket 07
-                repoints the action at `postings.payload` and this prop
-                disappears with it. Deliberately unchanged here: this dialog is
-                not gated on that rework's security tests.
-              */}
               <DraftCoverLetterButton
-                runId={posting.lastSeenRunId}
                 postingId={posting.id}
                 title={posting.title}
                 drafted={letter !== undefined}

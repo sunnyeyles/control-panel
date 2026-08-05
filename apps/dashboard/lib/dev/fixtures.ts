@@ -230,11 +230,12 @@ export function devPostings(): PostingRow[] {
 
   /**
    * The rest, generated. They carry {@link DEV_RUN_ACTIVE_ID} like the first
-   * two, which is a small lie with one visible consequence under the flag:
-   * that Run's stored findings hold two Postings, so **Draft cover letter** on
-   * a generated row is refused as no longer in the run. Ticket 07 removes the
-   * Run from that path entirely — the draft action reads `postings.payload` —
-   * and the lie goes with it.
+   * two, which is a small lie about which Run found them and no longer has any
+   * visible consequence: drafting reads `postings.payload`, which every row
+   * here has, so **Draft cover letter** works on a generated row and the run id
+   * only rides along as provenance on the letter. It used to be refused as no
+   * longer in the run, because the draft action re-read the Posting out of that
+   * Run's findings and they hold two Postings.
    */
   for (let index = seeded.length; index < DEV_POSTING_COUNT; index++) {
     rows.push(

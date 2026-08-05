@@ -41,7 +41,6 @@ export function createDevPrisma(): PrismaClient {
         db.updateJob(query.where.id, query.data),
     },
     run: {
-      findUnique: async (query: ById) => db.findRun(query.where.id),
       findFirst: async (query: RunningRunQuery) => db.findRunningRun(query),
       create: async (query: { data: RunCreateData }) =>
         db.createRun(query.data),
@@ -102,12 +101,6 @@ interface ById {
 interface FindManyJobs {
   where: { userId: string }
   orderBy?: unknown
-  select?: {
-    runs?: {
-      where: { status: string }
-      take?: number
-    }
-  }
 }
 
 /**
@@ -187,8 +180,15 @@ class DevDb {
   private nextId = 1
 
   /**
-   * Both shapes the dashboard asks for, discriminated by `select.runs` — the
-   * callers do not know they are talking to a fake.
+   * The whole rows, which is the only shape the dashboard asks for — both call
+   * sites (`/briefings` and the settings section) select nothing.
+   *
+   * It used to answer a second shape too, `select: { runs: … }`, for the
+   * deleted `lib/briefings/latest-postings.ts`, which read one Run's findings
+   * to build the page. Nothing asks that now, so the branch is gone rather than
+   * left answering a question nobody puts — and if a caller starts asking
+   * again, {@link guard} is not what catches it: `select` would be accepted and
+   * silently ignored, so the branch has to come back with the caller.
    *
    * `orderBy` is not read; every call site wants `createdAt` descending, which
    * is what this returns. The one place this fake lies rather than throwing —
@@ -196,31 +196,10 @@ class DevDb {
    * like this: its order is chosen from the URL, so ignoring it there would be
    * a wrong-order bug rather than a shortcut.
    */
-  findManyJobs(query: FindManyJobs): unknown[] {
-    const mine = this.jobs
+  findManyJobs(query: FindManyJobs): Job[] {
+    return this.jobs
       .filter((job) => job.userId === query.where.userId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-
-    const runsSelect = query.select?.runs
-    if (!runsSelect) return mine
-
-    return mine.map((job) => ({
-      id: job.id,
-      name: job.name,
-      runs: this.runs
-        .filter(
-          (run) =>
-            run.jobId === job.id && run.status === runsSelect.where.status
-        )
-        .sort(byStartedAtThenIdDesc)
-        .slice(0, runsSelect.take ?? this.runs.length)
-        .map((run) => ({
-          id: run.id,
-          startedAt: run.startedAt,
-          finishedAt: run.finishedAt,
-          findings: run.findings,
-        })),
-    }))
   }
 
   countPostings(where: { userId: string }): number {
@@ -284,21 +263,6 @@ class DevDb {
 
   findJob(id: string): Job | null {
     return this.jobs.find((job) => job.id === id) ?? null
-  }
-
-  /**
-   * With its `job` relation attached: `cover-letter-actions.ts` compares the
-   * owning Job's `userId` to the caller's, so dropping it would make that
-   * comparison read `undefined.userId`.
-   */
-  findRun(id: string): (Run & { job: { userId: string } }) | null {
-    const run = this.runs.find((candidate) => candidate.id === id)
-    if (!run) return null
-
-    const job = this.findJob(run.jobId)
-    if (!job) return null
-
-    return { ...run, job: { userId: job.userId } }
   }
 
   /** The trigger's one-run-at-a-time guard, filtering for real. */

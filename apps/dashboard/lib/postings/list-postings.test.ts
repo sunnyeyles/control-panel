@@ -19,7 +19,6 @@ interface PostingRow {
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
-  lastSeenRunId: string
 }
 
 function payload(overrides: Record<string, unknown> = {}) {
@@ -65,7 +64,6 @@ class FakeDb {
       payload: payload(),
       firstSeenAt: at,
       lastSeenAt: at,
-      lastSeenRunId: "run-1",
       ...row,
     })
 

@@ -7,7 +7,7 @@ import {
   COVER_LETTER_WRITER_SYSTEM_PROMPT,
   coverLetterSystemPrompt,
 } from "@workspace/agents/cover-letter-writer"
-import type { Findings, Posting } from "@workspace/agents/findings"
+import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
 import type { PrismaClient } from "@workspace/db"
 import { createCoverLetterStore } from "@workspace/user-storage/cover-letter-store"
@@ -34,7 +34,7 @@ import {
   createCoverLetterActions,
   LETTER_NOT_FOUND,
   MAX_LETTER_CHARS,
-  RUN_NOT_FOUND,
+  POSTING_NOT_FOUND,
 } from "./cover-letter-actions"
 
 /**
@@ -42,10 +42,11 @@ import {
  *
  * Every claim the ticket makes about this feature is a claim about something
  * that cannot be seen from the happy path: that a form-supplied Posting is
- * ignored, that a Run belonging to someone else is refused, that a user with no
- * readable CV costs no model call, and that a redraft overwrites one object.
- * The action takes its dependencies through a `createXActions(deps)` seam and
- * imports nothing from Next precisely so all four are reachable here.
+ * ignored, that another user's Posting can neither be drafted for nor told
+ * apart from one nobody has, that a user with no readable CV costs no model
+ * call, and that a redraft overwrites one object. The action takes its
+ * dependencies through a `createXActions(deps)` seam and imports nothing from
+ * Next precisely so all four are reachable here.
  *
  * The storage side is the **real** `createCoverLetterStore` over an in-memory
  * `UserObjectStore`, not a stub that records a key someone typed into the test.
@@ -114,10 +115,6 @@ function posting(overrides: Partial<Posting> = {}): Posting {
 
 const POSTING = posting()
 const POSTING_ID = postingId(POSTING)
-
-function findings(postings: Posting[] = [POSTING]): Findings {
-  return { postings, notes: "One search." }
-}
 
 /**
  * An in-memory {@link UserObjectStore} that builds real keys.
@@ -309,7 +306,16 @@ class FakeWriter {
 
 /** Records everything the action asks the database for, and refuses writes. */
 class FakeDb {
-  readonly runs = new Map<string, { jobUserId: string; findings: unknown }>()
+  /**
+   * Keyed `${userId}:${postingId}`, which is the natural key the action
+   * addresses a row by. A row seeded under another owner is therefore not
+   * merely refused — it cannot be *reached* by a lookup naming this caller,
+   * which is the property the two refusal tests below are about.
+   */
+  readonly postings = new Map<
+    string,
+    { payload: unknown; lastSeenRunId: string }
+  >()
   readonly writes: string[] = []
   /** Who the saved instructions were read for. Empty means never read. */
   readonly instructionReads: string[] = []
@@ -319,8 +325,16 @@ class FakeDb {
   /** Set to make the read throw, which must fail the draft rather than skip it. */
   instructionsError: unknown
 
-  seedRun(id: string, jobUserId: string, recorded: unknown): this {
-    this.runs.set(id, { jobUserId, findings: recorded })
+  /**
+   * `payload` is the whole Posting, as `recordPostings` writes it, and the id
+   * is *derived* from it rather than passed in — the same derivation the form
+   * carries — so no test can seed a row under an id nothing would ever ask for.
+   */
+  seedPosting(userId: string, posting: Posting, runId: string): this {
+    this.postings.set(`${userId}:${postingId(posting)}`, {
+      payload: posting,
+      lastSeenRunId: runId,
+    })
     return this
   }
 
@@ -353,16 +367,26 @@ class FakeDb {
           }
         },
       },
+      posting: {
+        // Addressed by the compound unique, exactly as Prisma spells it. Both
+        // halves are in the `where`, so there is no ownership left for the
+        // action to check separately and none for this fake to model.
+        findUnique: async ({
+          where,
+        }: {
+          where: { userId_postingId: { userId: string; postingId: string } }
+        }) => {
+          const key = where.userId_postingId
+          return this.postings.get(`${key.userId}:${key.postingId}`) ?? null
+        },
+      },
       run: {
-        findUnique: async ({ where }: { where: { id: string } }) => {
-          const found = this.runs.get(where.id)
-          if (!found) return null
-
-          return {
-            id: where.id,
-            findings: found.findings,
-            job: { userId: found.jobUserId },
-          }
+        // ⚠️ Nothing on this path may read a Run any more, so asking for one is
+        // a regression rather than a slow query — this throws instead of
+        // answering. Every test in this file therefore asserts, at once, that
+        // the originating Run is never consulted.
+        findUnique: async () => {
+          throw new Error("the draft action must not read a Run")
         },
         // A letter gets no ad-hoc Run. If one is ever minted, these record it
         // and the assertions below fail rather than the test quietly passing.
@@ -398,7 +422,7 @@ function harness(
   options: {
     user?: CurrentUser
     resumes?: FakeResumes
-    runs?: FakeDb
+    db?: FakeDb
   } = {}
 ): Harness {
   const objects = new MemoryObjects()
@@ -411,7 +435,7 @@ function harness(
       originalFilename: "alice-cv.md",
     })
   const writer = new FakeWriter()
-  const db = options.runs ?? new FakeDb().seedRun(RUN_ID, USER_ID, findings())
+  const db = options.db ?? new FakeDb().seedPosting(USER_ID, POSTING, RUN_ID)
 
   const actions = createCoverLetterActions({
     getUser: async () => options.user ?? SIGNED_IN,
@@ -447,7 +471,7 @@ function form(fields: Record<string, string>): FormData {
   return data
 }
 
-const VALID = { runId: RUN_ID, postingId: POSTING_ID }
+const VALID = { postingId: POSTING_ID }
 
 const EXPECTED_KEY = `${ENVIRONMENT}/${USER_ID}/cover-letters/${POSTING_ID}.md`
 
@@ -484,30 +508,32 @@ describe("draftCoverLetter", () => {
     })
   })
 
-  describe("whose Run it is", () => {
-    it("refuses a Run whose Job belongs to another user", async () => {
-      // The run id arrives from a hidden field. Nothing about being signed in
-      // says which Runs a caller may read, so the Job's owner is loaded and
-      // compared — this is the assertion that check exists.
+  describe("whose Posting it is", () => {
+    it("refuses a Posting belonging to another user", async () => {
+      // Seeded under a different owner, so the lookup naming this caller finds
+      // nothing at all. There is no ownership comparison to assert here and
+      // that is the point of the change: `(user, posting id)` is the key, the
+      // user half is the session's, and a stranger's row cannot be addressed.
       subject = harness({
-        runs: new FakeDb().seedRun(RUN_ID, OTHER_USER_ID, findings()),
+        db: new FakeDb().seedPosting(OTHER_USER_ID, POSTING, RUN_ID),
       })
 
       const result = await subject.draft(IDLE, form(VALID))
 
-      expect(result).toEqual({ status: "error", message: RUN_NOT_FOUND })
+      expect(result).toEqual({ status: "error", message: POSTING_NOT_FOUND })
       expect(subject.writer.prompts).toHaveLength(0)
       expect(subject.objects.puts).toHaveLength(0)
     })
 
-    it("says the same thing about a Run that does not exist", async () => {
-      // One message for both, or a hidden field that takes a uuid becomes an
-      // oracle for whether another user's Run is real.
-      subject = harness({ runs: new FakeDb() })
+    it("says the same thing about a Posting nobody has", async () => {
+      // One message for both, or a field taking a derived id becomes an oracle
+      // for whether a stranger was shown the same advertisement — and the ids
+      // come from a public URL, so anyone reading that job board can spell one.
+      subject = harness({ db: new FakeDb() })
 
       const result = await subject.draft(IDLE, form(VALID))
 
-      expect(result).toEqual({ status: "error", message: RUN_NOT_FOUND })
+      expect(result).toEqual({ status: "error", message: POSTING_NOT_FOUND })
     })
   })
 
@@ -551,13 +577,45 @@ describe("draftCoverLetter", () => {
       expect(metadata["posting-url"]).toBe("https://www.seek.com.au/job/1")
     })
 
-    it("refuses a Posting id the Run's Findings do not carry", async () => {
+    it("never consults the Run that found the advertisement", async () => {
+      // ⚠️ The ticket's first acceptance criterion, asserted structurally: the
+      // fake throws on `run.findUnique`, so a draft that succeeds is one that
+      // read nothing but the Posting row. Recording Postings and recording
+      // Findings are independent non-fatal steps, so a Run can succeed holding
+      // no readable Findings at all — and that can no longer refuse a Posting
+      // the user is looking at.
+      const result = await subject.draft(IDLE, form(VALID))
+
+      expect(result.status).toBe("success")
+      // And the Run is still recorded — carried off the row, not looked up.
+      expect(subject.objects.puts[0]?.metadata?.["run-id"]).toBe(RUN_ID)
+    })
+
+    it("refuses a Posting id this user has no row for", async () => {
       const absent = postingId({ url: "https://www.seek.com.au/job/999" })
 
-      const result = await subject.draft(
-        IDLE,
-        form({ runId: RUN_ID, postingId: absent })
-      )
+      const result = await subject.draft(IDLE, form({ postingId: absent }))
+
+      expect(result.status).toBe("error")
+      expect(subject.writer.prompts).toHaveLength(0)
+      expect(subject.objects.puts).toHaveLength(0)
+    })
+
+    it("refuses a row whose stored Posting will not parse", async () => {
+      // The table renders such a row degraded to its four columns rather than
+      // dropping it, so this Posting is on screen and looks ordinary. There is
+      // nothing to degrade to here — the payload *is* what the letter would be
+      // written from — so it is refused before the CV is read and before the
+      // model is reached.
+      const db = new FakeDb()
+      db.postings.set(`${USER_ID}:${POSTING_ID}`, {
+        payload: { title: "Backend Engineer" },
+        lastSeenRunId: RUN_ID,
+      })
+
+      subject = harness({ db })
+
+      const result = await subject.draft(IDLE, form(VALID))
 
       expect(result.status).toBe("error")
       expect(subject.writer.prompts).toHaveLength(0)
@@ -567,7 +625,7 @@ describe("draftCoverLetter", () => {
     it("refuses a malformed Posting id without querying anything", async () => {
       const result = await subject.draft(
         IDLE,
-        form({ runId: RUN_ID, postingId: "../../etc/passwd" })
+        form({ postingId: "../../etc/passwd" })
       )
 
       expect(result.status).toBe("error")
@@ -909,9 +967,9 @@ describe("draftCoverLetter", () => {
  *
  * ⚠️ **The property these tests exist for is that a save cannot *create* a
  * letter.** `draftCoverLetter` deliberately never takes letter text from a form
- * — it carries identifiers and re-reads the Posting out of the Run's Findings,
- * and there is a test above submitting a `posting` field to prove it is
- * ignored. This action *does* take text, which is only safe because it edits
+ * — it carries one identifier and re-reads the Posting out of the stored row's
+ * payload, and there is a test above submitting a `posting` field to prove it
+ * is ignored. This action *does* take text, which is only safe because it edits
  * something the user already has: the object must already exist at
  * `(caller, Posting)` or nothing is written. Without that check the two actions
  * together would let a caller put text of their choosing into a document stored

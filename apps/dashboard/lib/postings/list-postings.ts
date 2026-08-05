@@ -47,17 +47,17 @@ export interface PostingView {
   firstSeen: string
   /** Already formatted, UTC, with the zone named. */
   lastSeen: string
-  /**
-   * The most recent Run to have seen this advertisement.
-   *
-   * Provenance, never identity — a Posting is `(user, posting id)` and a cover
-   * letter's storage key holds no Run at all. It is carried for exactly one
-   * reason: `DraftCoverLetterButton` still names a Run, because the draft
-   * action still re-reads the Posting out of `runs.findings`. **Ticket 07
-   * repoints that at `postings.payload`, and this field goes with it.**
-   */
-  lastSeenRunId: string
 }
+
+/**
+ * ⚠️ **`lastSeenRunId` is deliberately not on {@link PostingView}.** The column
+ * exists and is real provenance, but nothing this page renders needs it: the
+ * only reader was `DraftCoverLetterButton`, back when drafting re-read the
+ * Posting out of `runs.findings` and had to name a Run. It reads
+ * `postings.payload` now — and reads the run id off the row itself, server-side,
+ * to record on the letter — so carrying the value out to a client component
+ * would put an identifier on the wire that nothing sends back.
+ */
 
 export interface PostingPage {
   postings: PostingView[]
@@ -129,7 +129,6 @@ export async function listPostings(
       payload: true,
       firstSeenAt: true,
       lastSeenAt: true,
-      lastSeenRunId: true,
     },
   })
 
@@ -203,7 +202,6 @@ interface PostingRow {
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
-  lastSeenRunId: string
 }
 
 /**
@@ -234,7 +232,6 @@ function toView(row: PostingRow): PostingView {
     status: toStatus(row.status),
     firstSeen: formatSeenAt(row.firstSeenAt),
     lastSeen: formatSeenAt(row.lastSeenAt),
-    lastSeenRunId: row.lastSeenRunId,
     highlights: parsed.success ? (parsed.data.highlights ?? []) : [],
     ...(parsed.success && parsed.data.postedAt
       ? { postedAt: parsed.data.postedAt }

@@ -60,9 +60,9 @@ import {
  * One message for "no such document" and "someone else's document".
  *
  * Distinct messages would turn a picker that takes a uuid into an oracle for
- * whether another user's document exists — the same reasoning `RUN_NOT_FOUND`
- * in `cover-letter-actions.ts` and `NOT_FOUND` in `lib/jobs/job-actions.ts`
- * give for theirs.
+ * whether another user's document exists — the same reasoning
+ * `POSTING_NOT_FOUND` in `cover-letter-actions.ts` and `NOT_FOUND` in
+ * `lib/jobs/job-actions.ts` give for theirs.
  */
 export const DOCUMENT_NOT_FOUND = "That document could not be found."
 
