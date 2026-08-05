@@ -12,7 +12,15 @@
 #   * no live claude session holds its lock,
 #   * GitHub reports a MERGED or CLOSED pull request for the branch, and no
 #     OPEN one — an open PR is still being iterated on,
-#   * the working tree is clean and carries no commit the remote does not have.
+#   * the working tree is clean, and its tip is exactly the commit that pull
+#     request carried, so nothing here went unreviewed,
+#   * and, for a CLOSED pull request only, those commits reached the default
+#     branch anyway — closing merged nothing.
+#
+# The tip is compared against the PR's head sha rather than against the default
+# branch or the configured upstream, because neither can answer the question
+# here: this repo squash-merges, so a merged branch is never an ancestor of the
+# default branch, and a worktree's upstream is not always its own remote branch.
 #
 # Anything failing a check is left exactly as it was and noted in the log. The
 # hook is silent and makes no network call when there is nothing to consider.
@@ -71,18 +79,25 @@ consider() {
 
   # gh reads the repository from the working directory. A failure here (offline,
   # unauthenticated, no remote) yields no states, which falls through to "leave
-  # it alone" rather than to a deletion.
+  # it alone" rather than to a deletion. Each row is "<state> <head sha>"; the
+  # sha is what the tip is checked against below.
   local states
-  states=$(cd "$repo" && gh pr list --head "$branch" --state all --json state --jq '.[].state' 2>/dev/null)
+  states=$(cd "$repo" && gh pr list --head "$branch" --state all --json state,headRefOid --jq '.[] | "\(.state) \(.headRefOid)"' 2>/dev/null)
 
   case "$states" in
   *OPEN*) return 0 ;;
   esac
 
-  local outcome
+  local outcome state_token
   case "$states" in
-  *MERGED*) outcome=merged ;;
-  *CLOSED*) outcome=closed ;;
+  *MERGED*)
+    outcome=merged
+    state_token=MERGED
+    ;;
+  *CLOSED*)
+    outcome=closed
+    state_token=CLOSED
+    ;;
   *) return 0 ;;
   esac
 
@@ -91,19 +106,42 @@ consider() {
     return 0
   fi
 
-  local ahead head
-  ahead=$(git -C "$path" rev-list --count '@{u}..HEAD' 2>/dev/null)
-  if [ -z "$ahead" ]; then
-    # No upstream: usually the remote branch was deleted on merge. Accept only
-    # if the commits landed in the default branch anyway.
-    head=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-    if [ -z "$head" ] || ! git -C "$repo" merge-base --is-ancestor "$head" "$default_ref" 2>/dev/null; then
-      say "keep $path — $branch has no upstream and is not contained in ${default_ref#refs/remotes/}"
+  # Is the tip exactly what GitHub saw on that pull request? Neither of the two
+  # local signals can answer that here. This repo squash-merges (RELEASING.md),
+  # so a merged branch's tip is never an ancestor of the default branch; and a
+  # worktree's configured upstream is not necessarily its own remote branch, so
+  # `@{u}..HEAD` can count commits that were pushed. The PR's head sha is the
+  # one thing that is not guesswork.
+  local head pr_head ahead
+  head=$(git -C "$path" rev-parse HEAD 2>/dev/null)
+  pr_head=$(printf '%s\n' "$states" | awk -v s="$state_token" '$1 == s { print $2; exit }')
+
+  if [ -n "$head" ] && [ -n "$pr_head" ]; then
+    if [ "$head" != "$pr_head" ]; then
+      say "keep $path — $branch has commits beyond the PR head (PR $outcome)"
       return 0
     fi
-  elif [ "$ahead" != 0 ]; then
-    say "keep $path — $branch has $ahead unpushed commit(s)"
-    return 0
+    # A merge needs nothing further: the content is on the default branch as a
+    # squash commit. A close merged nothing, so still require the commits to
+    # have reached it by some other route.
+    if [ "$outcome" = closed ] &&
+      ! git -C "$repo" merge-base --is-ancestor "$head" "$default_ref" 2>/dev/null; then
+      say "keep $path — $branch's PR was closed and it is not contained in ${default_ref#refs/remotes/}"
+      return 0
+    fi
+  else
+    # gh gave us no head sha (older gh, API hiccup). Fall back to the upstream
+    # and ancestry test rather than guessing.
+    ahead=$(git -C "$path" rev-list --count '@{u}..HEAD' 2>/dev/null)
+    if [ -z "$ahead" ]; then
+      if [ -z "$head" ] || ! git -C "$repo" merge-base --is-ancestor "$head" "$default_ref" 2>/dev/null; then
+        say "keep $path — $branch has no upstream and is not contained in ${default_ref#refs/remotes/}"
+        return 0
+      fi
+    elif [ "$ahead" != 0 ]; then
+      say "keep $path — $branch has $ahead unpushed commit(s)"
+      return 0
+    fi
   fi
 
   git -C "$repo" worktree unlock "$path" >/dev/null 2>&1
