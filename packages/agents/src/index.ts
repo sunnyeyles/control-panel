@@ -45,6 +45,8 @@ export {
   type Posting,
 } from "./findings.ts"
 
+export { boardForHost, JOB_BOARDS, type JobBoard } from "./job-boards.ts"
+
 export { postingId } from "./posting-id.ts"
 
 export {

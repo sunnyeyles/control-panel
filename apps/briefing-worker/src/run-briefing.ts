@@ -6,6 +6,7 @@ import {
 import {
   createBriefWriter,
   createJobScout,
+  JOB_SCOUT_SEARCH_TOOLS,
   parseFindings,
   type Findings,
 } from "@workspace/agents"
@@ -13,7 +14,11 @@ import type { Artifact, Job, NewPosting, RunFailure } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 import { runWithLangfuseTrace } from "@workspace/langfuse"
 
-import { parseJobSearchConfig, toSearchBrief } from "./job-search-config.ts"
+import {
+  parseJobSearchConfig,
+  scoutLlmCallBudget,
+  toSearchBrief,
+} from "./job-search-config.ts"
 import { toNewPostings } from "./postings.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
 import {
@@ -186,7 +191,7 @@ export interface RunBriefingInput {
    * so that is what it asks for. A compiled agent from `@workspace/agents`
    * satisfies it.
    */
-  createScout?: () => AgentLike
+  createScout?: (options: { maxLlmCalls: number }) => AgentLike
   createWriter?: () => AgentLike
   /**
    * Where to send the step-by-step transcript. Omitted in production, where the
@@ -279,7 +284,15 @@ export async function runBriefing(
             const prompt = toSearchBrief(config, slot.scheduledFor)
             trace({ type: "prompt", agent: "scout", text: prompt })
 
-            const scout = (input.createScout ?? createJobScout)()
+            // Sized to the config rather than to a constant: a sweep is
+            // titles × locations × boards, and a scout that runs out of turns
+            // mid-search still answers with something well-formed.
+            const scout = (input.createScout ?? createJobScout)({
+              maxLlmCalls: scoutLlmCallBudget(
+                config,
+                JOB_SCOUT_SEARCH_TOOLS.length
+              ),
+            })
             return runAgent(
               scout,
               "scout",

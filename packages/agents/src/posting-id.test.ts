@@ -91,6 +91,60 @@ describe("postingId", () => {
   })
 
   /**
+   * The two URLs below are the same LinkedIn advertisement — job 4446494860 —
+   * as returned by two runs of one search twenty seconds apart on 2026-08-05,
+   * copied verbatim rather than constructed. Before per-host stripping they
+   * hashed to `3c2ccd59cf66c9bb` and `3cbcd7167f8f18ac`, and zero of the nine
+   * postings in that pair of runs kept an id. `postings` is keyed on
+   * `(user_id, posting_id)` and `status` is a column a person sets, so the
+   * churn does not merely duplicate rows — it loses whatever was marked
+   * `applied`.
+   */
+  it("gives one LinkedIn posting one id across two searches", () => {
+    const run1 =
+      "https://au.linkedin.com/jobs/view/software-engineer-at-simplus-anz-4446494860?position=60&pageNum=0&refId=Is5ZuQhoQvvBiFXvJlNIWQ%3D%3D&trackingId=D%2BHsFbhLc9%2FrXeVDtM0zBw%3D%3D"
+    const run2 =
+      "https://au.linkedin.com/jobs/view/software-engineer-at-simplus-anz-4446494860?position=60&pageNum=0&refId=VFISQlvQTHqUyNaHNKmYlA%3D%3D&trackingId=j2rmVDCPTAKzWLnGjnvhVQ%3D%3D"
+
+    expect(postingId({ url: run1 })).toBe(postingId({ url: run2 }))
+  })
+
+  it.each([
+    ["www.linkedin.com", "the host the search asks for"],
+    ["au.linkedin.com", "the host the results come back on"],
+  ])("strips LinkedIn's stamps on %s (%s)", (host) => {
+    const bare = `https://${host}/jobs/view/software-engineer-4446494860`
+
+    expect(postingId({ url: `${bare}?position=60&pageNum=0` })).toBe(
+      postingId({ url: bare })
+    )
+  })
+
+  /**
+   * The reason the lists are per-host rather than global, asserted directly:
+   * `position` is an ordinary enough name that some board will one day use it
+   * to say *which* posting, not *where in the results it appeared*. Dropping it
+   * everywhere would merge two distinct postings, which is the error the whole
+   * scheme is arranged to avoid.
+   */
+  it("keeps a board's tracking parameter on a host that is not that board", () => {
+    expect(postingId({ url: "https://example.com/jobs?position=2" })).not.toBe(
+      postingId({ url: "https://example.com/jobs?position=3" })
+    )
+    expect(
+      postingId({ url: "https://notlinkedin.com/jobs/view/1?refId=abc" })
+    ).not.toBe(postingId({ url: "https://notlinkedin.com/jobs/view/1" }))
+  })
+
+  it("still distinguishes two LinkedIn postings", () => {
+    expect(
+      postingId({ url: "https://au.linkedin.com/jobs/view/x-4446494860" })
+    ).not.toBe(
+      postingId({ url: "https://au.linkedin.com/jobs/view/x-4446494861" })
+    )
+  })
+
+  /**
    * Asserted against the storage package's own predicate rather than a restated
    * pattern: a copy here could drift from the rule that actually gates key
    * construction, and the drift would only surface when a key was built.

@@ -1,3 +1,4 @@
+import { JOB_SCOUT_MAX_LLM_CALLS } from "@workspace/agents"
 import * as z from "zod"
 
 /**
@@ -37,7 +38,7 @@ export const JobSearchConfigSchema = z.object({
     .array(nonEmpty)
     .optional()
     .describe(
-      'Job boards the candidate follows, e.g. ["seek.com.au"]. A soft hint: the scout searches what its tools reach.'
+      'Job boards the candidate follows, e.g. ["seek.com.au"]. Context for the scout, not a filter — it searches every board its tools reach whatever this says.'
     ),
   maxPostings: z
     .number()
@@ -52,6 +53,47 @@ export type JobSearchConfig = z.infer<typeof JobSearchConfigSchema>
 
 /** How many postings to ask for when the job does not say. */
 export const DEFAULT_MAX_POSTINGS = 8
+
+/**
+ * The hard ceiling on a scout's model calls, whatever the config asks for.
+ *
+ * A budget is not a quality dial: every extra call buys another search, and
+ * another search buys tens of kilobytes of advertisement text in a context the
+ * scout still has to reason over. A configuration wide enough to need more than
+ * this wants fewer results per search, or splitting into two jobs — and either
+ * way somebody should notice, which a truncated run makes them do.
+ */
+const MAX_SCOUT_LLM_CALLS = 40
+
+/**
+ * How many model calls to give the scout for one config.
+ *
+ * A sweep is titles × locations × boards searches, so the constant that was
+ * right for one board silently truncates a run with three: the scout is routed
+ * to `halt` mid-search and answers with whatever it had, which still parses as
+ * a well-formed brief. Sizing the budget to the work is what stops a run
+ * quietly covering less than it was asked to.
+ *
+ * The `+ 3` is the turns that are not searches: reading the brief, and writing
+ * the findings out at the end. `JOB_SCOUT_MAX_LLM_CALLS` stays the floor, so a
+ * one-title, one-location job is unaffected by this existing. In practice the
+ * budget is slack rather than tight — the model issues several tool calls in
+ * one turn, and parallel calls cost one call between them.
+ *
+ * `boardCount` is passed rather than read here so the caller stays the single
+ * place that knows which search tools the scout carries.
+ */
+export function scoutLlmCallBudget(
+  config: JobSearchConfig,
+  boardCount: number
+): number {
+  const searches = config.titles.length * config.locations.length * boardCount
+
+  return Math.min(
+    Math.max(searches + 3, JOB_SCOUT_MAX_LLM_CALLS),
+    MAX_SCOUT_LLM_CALLS
+  )
+}
 
 /**
  * Read the job's config, or fail the run.
@@ -104,8 +146,12 @@ export function toSearchBrief(
   }
 
   if (config.sources?.length) {
+    // Not an instruction to search only these: the scout searches every board
+    // it has a tool for regardless, and saying otherwise would have it report a
+    // restriction it did not apply. The list is here because knowing where a
+    // candidate already looks is worth something when ranking.
     lines.push(
-      `Job boards the candidate follows: ${config.sources.join("; ")}. Search the ones your tools reach; note any you cannot.`
+      `Job boards the candidate follows: ${config.sources.join("; ")}. Search every board your tools reach — this list is context, not a restriction.`
     )
   }
 
