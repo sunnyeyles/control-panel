@@ -18,8 +18,8 @@ what `posting-id.ts` refuses to derive identity from.
 The grouping key is normalised company, normalised title and a city token: lowercase, strip
 punctuation and company legal suffixes, and take the city from the front of the location so
 `"Sydney NSW"` and `"Sydney, New South Wales, Australia"` agree. Which board a posting came
-from is read from its URL host, against the descriptors ticket 01 added — never from anything
-the model wrote.
+from is read from its URL host, against the descriptors in
+`packages/agents/src/job-scout.ts` — never from anything the model wrote.
 
 Three restraints, and they are the ticket rather than decoration:
 
@@ -55,9 +55,3 @@ Write it down in the docblock rather than leaving the next reader to discover it
       what it was before this ticket
 - [ ] Unit tests cover each restraint above, including the ambiguous case
 - [ ] Typecheck, lint (zero warnings) and `pnpm test` are clean
-
-**The test that matters most is the negative one.** It is easy to write a grouper that makes
-briefs look tidy and quietly drops a second real opening. If you have to choose between
-grouping one more true duplicate and never grouping a false one, choose the second — that is
-the trade-off `posting-id.ts` already states, and this ticket inherits it rather than
-revisiting it.

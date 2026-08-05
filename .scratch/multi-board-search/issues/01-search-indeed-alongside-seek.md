@@ -9,22 +9,18 @@ A new `indeed_search` tool over Apify's `misceres/indeed-scraper`, built as a ne
 `packages/agent-tools/src/seek-search.ts` — same synchronous run endpoint, same `APIFY_TOKEN`
 read inside the call so importing the module never throws, same split between a rejected token
 (throw; a deployment fault no rephrasing fixes) and any other failure (return a sentence the
-scout can act on). Read that file first and follow it; where this ticket is silent, it is
-because the answer is to do what SEEK does.
+scout can act on).
 
 **Its input schema is the same five fields SEEK's is** — `query`, `location`, `maxResults`,
-`daysOld`, `workType` — translated inside the tool to whatever the actor wants. The scout must
-not learn a second dialect; see the vocabulary section of `plan.md`. Board-specific phrasing
-belongs in this tool's own `location` description, as SEEK's already carries `"Sydney NSW"`.
+`daysOld`, `workType` — translated inside the tool to whatever the actor wants. Board-specific
+phrasing belongs in this tool's own `location` description, as SEEK's already carries
+`"Sydney NSW"`.
 
 Three things this ticket changes beyond adding a file:
 
-- **`JOB_SCOUT_SEARCH_TOOLS` becomes a list of descriptors, not bare tools.** Grouping in
-  ticket 02 needs to know which hosts belong to which board, and the docblock at
-  `packages/agents/src/job-scout.ts` promises adding a board is one edit in one package.
-  Export a small descriptor per tool — its tool, and the hosts its results live on — and
-  derive `SEARCH_TOOL_NAMES` from it exactly as `search-results.ts` derives it today. Nothing
-  downstream should need a second list.
+- **`JOB_SCOUT_SEARCH_TOOLS` becomes a list of descriptors, not bare tools.** Export each
+  tool with the hosts its results live on. Keep `SEARCH_TOOL_NAMES` deriving from that list, so
+  board provenance has one registry and no downstream second list.
 - **The system prompt stops naming SEEK.** `JOB_SCOUT_SYSTEM_PROMPT` currently says the scout
   works "by searching SEEK's live listings" and tells it to pass locations "the way SEEK writes
   them". Both are now false in the general case. Make the prompt board-neutral and let each

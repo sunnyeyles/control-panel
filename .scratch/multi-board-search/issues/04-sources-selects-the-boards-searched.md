@@ -37,8 +37,3 @@ there is a real choice to express.
 - [ ] The run report's per-board counts reflect the boards this Job asked for
 - [ ] `sources`'s description in `job-search-config.ts` no longer calls itself a soft hint
 - [ ] Typecheck, lint (zero warnings) and `pnpm test` are clean
-
-**Optional, and genuinely so.** Nothing blocks on this. It is here because leaving a field that
-looks like a switch and is not one is the kind of thing that costs someone an afternoon two
-years from now — and because the fixtures already ship `"sources": ["seek.com.au"]`, which
-reads today as a working example of a feature that does not exist.

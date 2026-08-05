@@ -15,9 +15,8 @@ decision. The tickets below are vertical slices of it, in dependency order.
 | [04](issues/04-sources-selects-the-boards-searched.md)    | `sources` selects the boards searched  | 03         |
 
 04 is optional and does not block anything. It exists because `sources` is currently a config
-field that looks like it selects boards and selects nothing. 05 is the quality baseline:
-adding sources is not a reason to preserve a Scout that chooses which criteria to search and
-which candidates to show without an inspectable retrieval step.
+field that looks like it selects boards and selects nothing. 05 establishes the retrieval
+baseline before adding more source choices.
 
 ## The property that must not be lost
 
@@ -39,11 +38,3 @@ posting twice** — once from each board. That is deliberate: grouping cannot be
 tested until something produces duplicates. It is a known, bounded, visible state, not a
 bug to be discovered later. Do not merge 01 to production without 02 close behind, and say
 so on 01's pull request.
-
-## Adjacent, deliberately not blocking
-
-- **`docs/job-kind-registry-plan.md`** — the live plan for a worker dispatch registry. These
-  tickets add tools to the scout, not job kinds to the worker, so the two do not collide.
-- **Context and cost growth** — three boards multiply both. Ticket 03 carries the
-  measurement, but if a run starts halting mid-search before then, read the budget note in
-  `plan.md` rather than raising the call ceiling on reflex.
