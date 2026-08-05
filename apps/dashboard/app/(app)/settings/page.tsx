@@ -3,6 +3,8 @@ import { CoverLetterSection } from "@/components/settings/cover-letter-section"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import { Label } from "@workspace/ui/components/label"
+import { Skeleton } from "@workspace/ui/components/skeleton"
+import { Suspense } from "react"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
@@ -30,9 +32,13 @@ export default async function SettingsPage() {
           Auth id. It is what `jobs.user_id` references, so it is the only thing
           that can scope this list.
         */}
-        <BriefingSection userId={user.userId} />
+        <Suspense fallback={<SettingsSectionSkeleton />}>
+          <BriefingSection userId={user.userId} />
+        </Suspense>
 
-        <CoverLetterSection userId={user.userId} />
+        <Suspense fallback={<SettingsSectionSkeleton />}>
+          <CoverLetterSection userId={user.userId} />
+        </Suspense>
 
         <section className="flex flex-col gap-4">
           <div>
@@ -57,5 +63,18 @@ export default async function SettingsPage() {
         </section>
       </div>
     </main>
+  )
+}
+
+function SettingsSectionSkeleton() {
+  return (
+    <section className="flex flex-col gap-4" aria-busy="true">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-4 w-full max-w-lg" />
+      </div>
+      <Skeleton className="h-32 w-full rounded-lg" />
+      <Skeleton className="h-10 w-full rounded-lg" />
+    </section>
   )
 }

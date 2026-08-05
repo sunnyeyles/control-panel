@@ -60,6 +60,8 @@ export interface FileEditorDialogProps {
    * message is about.
    */
   footer?: React.ReactNode
+  /** Set false when a caller provides its own trigger outside the dialog. */
+  showTrigger?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
   className?: string
@@ -72,6 +74,7 @@ function FileEditorDialog({
   title = "File editor",
   onSave,
   footer,
+  showTrigger = true,
   open,
   onOpenChange,
   className,
@@ -219,14 +222,16 @@ function FileEditorDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button size="lg">
-            <FileTextIcon className="size-4" />
-            Open file editor
-          </Button>
-        )}
-      </DialogTrigger>
+      {showTrigger ? (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button size="lg">
+              <FileTextIcon className="size-4" />
+              Open file editor
+            </Button>
+          )}
+        </DialogTrigger>
+      ) : null}
       <DialogContent
         data-slot="file-editor-dialog"
         className={cn(

@@ -82,8 +82,6 @@ export default async function BriefingsPage({
   const user = await requirePageUser()
   const query = parsePostingQuery(await searchParams)
 
-  // A database outage should say so rather than replacing the page with an
-  // error boundary, matching how `/documents` degrades when S3 is unreachable.
   let postings: PostingPage = {
     postings: [],
     total: 0,
@@ -92,69 +90,47 @@ export default async function BriefingsPage({
     pageSize: 0,
   }
   let loadFailed = false
-
-  try {
-    postings = await listPostings(getPrisma(), user.userId, query)
-  } catch (error) {
-    console.error("postings: could not load", error)
-    loadFailed = true
-  }
-
-  // ⚠️ **Loaded separately, and failing separately.** The two sources are
-  // Postgres and S3, and the dashboard's `prod:cover-letters` grant is a
-  // Terraform apply away from the code that needs it — so "letters unreadable"
-  // is a state this page will genuinely be in, and it must not take the
-  // postings down with it.
   let letters: CoverLetterSummary[] = []
   let lettersFailed = false
-
-  try {
-    letters = await listCoverLetters(user.userId, getCoverLetterStore())
-  } catch (error) {
-    console.error("cover-letters: could not list", error)
-    lettersFailed = true
-  }
-
-  // ⚠️ **A third independent load, failing independently.** It answers a
-  // different question from the table — the latest Run of any status, rather
-  // than every Posting ever found — and a failure here must cost the strip
-  // above the table, not the table.
-  //
-  // Two queries rather than one because the strip needs both halves and neither
-  // supplies the other: `runActivityForUser` returns nothing at all for a
-  // briefing that has never run, and it carries no names. They share a block
-  // because they are one feature — a strip with names and no status, or status
-  // and no names, is not worth rendering half of.
   let activity: BriefingActivity[] = []
   let strip: BriefingStripEntry[] = []
   let counts: BriefingCounts | undefined
 
-  try {
-    const [briefings, loaded] = await Promise.all([
-      getPrisma().job.findMany({
-        where: { userId: user.userId },
-        orderBy: { createdAt: "desc" },
-      }),
-      runActivityForUser(getPrisma(), user.userId),
-    ])
+  // The postings table, cover-letter list, and briefing strip are independent,
+  // so start all three together. Their failures stay independent too: an S3
+  // grant problem must not hide Postgres postings, and a strip failure must not
+  // hide either list.
+  const [postingsResult, lettersResult, stripResult] = await Promise.allSettled(
+    [
+      listPostings(getPrisma(), user.userId, query),
+      listCoverLetters(user.userId, getCoverLetterStore()),
+      loadBriefingStrip(user.userId),
+    ]
+  )
 
-    activity = loaded
-    const activityByBriefing = new Map(
-      activity.map((entry) => [entry.briefingId, entry.activity])
+  if (postingsResult.status === "fulfilled") {
+    postings = postingsResult.value
+  } else {
+    console.error("postings: could not load", postingsResult.reason)
+    loadFailed = true
+  }
+
+  if (lettersResult.status === "fulfilled") {
+    letters = lettersResult.value
+  } else {
+    console.error("cover-letters: could not list", lettersResult.reason)
+    lettersFailed = true
+  }
+
+  if (stripResult.status === "fulfilled") {
+    activity = stripResult.value.activity
+    strip = stripResult.value.strip
+    counts = stripResult.value.counts
+  } else {
+    console.error(
+      "briefings: could not load briefing strip",
+      stripResult.reason
     )
-
-    strip = briefings.map((briefing) => ({
-      id: briefing.id,
-      name: briefing.name,
-      activity: activityByBriefing.get(briefing.id) ?? { state: "never-run" },
-    }))
-
-    // Only known when this load succeeded, which is exactly why it is optional:
-    // "you have no briefings" is the wrong thing to tell someone whose
-    // briefings simply could not be read.
-    counts = { briefings: briefings.length, runs: activity.length }
-  } catch (error) {
-    console.error("briefings: could not load run activity", error)
   }
 
   // Keyed so each row can ask about itself without scanning. Built here rather
@@ -273,4 +249,33 @@ export default async function BriefingsPage({
       </div>
     </main>
   )
+}
+
+async function loadBriefingStrip(userId: string): Promise<{
+  activity: BriefingActivity[]
+  strip: BriefingStripEntry[]
+  counts: BriefingCounts
+}> {
+  // These queries are one feature: `runActivityForUser` cannot name a briefing
+  // that has never run, while the jobs query has no current-run state.
+  const [briefings, activity] = await Promise.all([
+    getPrisma().job.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    }),
+    runActivityForUser(getPrisma(), userId),
+  ])
+  const activityByBriefing = new Map(
+    activity.map((entry) => [entry.briefingId, entry.activity])
+  )
+
+  return {
+    activity,
+    strip: briefings.map((briefing) => ({
+      id: briefing.id,
+      name: briefing.name,
+      activity: activityByBriefing.get(briefing.id) ?? { state: "never-run" },
+    })),
+    counts: { briefings: briefings.length, runs: activity.length },
+  }
 }

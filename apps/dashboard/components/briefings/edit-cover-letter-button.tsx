@@ -1,15 +1,19 @@
 "use client"
 
-import { useState } from "react"
+import dynamic from "next/dynamic"
+import { useRef, useState } from "react"
 
 import { saveCoverLetterAction } from "@/app/(app)/briefings/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { Button } from "@workspace/ui/components/button"
-import {
-  FileEditorDialog,
-  type MarkdownFile,
-} from "@workspace/ui/components/file-editor-dialog"
+import type { MarkdownFile } from "@workspace/ui/components/file-editor-dialog"
+
+const FileEditorDialog = dynamic(() =>
+  import("@workspace/ui/components/file-editor-dialog").then(
+    (module) => module.FileEditorDialog
+  )
+)
 
 const LOAD_FAILED =
   "The cover letter could not be loaded. Try again in a moment."
@@ -42,21 +46,9 @@ const SAVE_FAILED =
  * changes nothing on screen: same id, no reload. Opening only once the bytes are
  * in hand means the editor always mounts over a complete file.
  *
- * **`session` rides in the file's id for the same reason**, one step later. A
- * second open re-fetches, and on a bare `postingId` the re-fetched letter would
- * carry the same id as the first — so the effect would again decline to re-run
- * and the editor would show the previous visit's text rather than what is
- * stored. Suffixing the id makes every visit a new file as far as the editor is
- * concerned, which is what a fresh editing session over freshly fetched bytes
- * actually is.
- *
- * ⚠️ **The id, deliberately, rather than a `key` on the dialog.** Remounting
- * would re-run the effect just as well, but it also destroys and rebuilds the
- * trigger in the same commit that opens the dialog — and Radix records the
- * element to restore focus to at mount time. The button the user just pressed
- * would already be detached, so closing would drop focus to `<body>` and a
- * keyboard user would lose their place on the page. Nothing downstream reads
- * the id: {@link handleSave} sends the `postingId` prop.
+ * The dialog itself is loaded only after the body arrives. Its trigger remains
+ * mounted outside the lazy boundary, and focus returns there after close, so a
+ * keyboard user keeps their place while the editor bundle is deferred.
  *
  * Refetching every time rather than caching follows from the same idea: the
  * stored letter is the thing being edited, and a cached copy would show the user
@@ -83,7 +75,7 @@ export function EditCoverLetterButton({
   const [loadState, setLoadState] = useState<ActionState>(IDLE)
   const [saveState, setSaveState] = useState<ActionState>(IDLE)
   const [files, setFiles] = useState<MarkdownFile[]>([])
-  const [session, setSession] = useState(0)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   async function openWithLetter() {
     setLoading(true)
@@ -109,16 +101,13 @@ export function EditCoverLetterButton({
         return
       }
 
-      const visit = session + 1
-
       setFiles([
         {
-          id: `${postingId}#${visit}`,
+          id: postingId,
           name: filename,
           content: await response.text(),
         },
       ])
-      setSession(visit)
       setOpen(true)
     } catch (error) {
       // A dropped connection or an aborted request. Nothing the user can act on
@@ -166,47 +155,47 @@ export function EditCoverLetterButton({
       // an edit made a visit ago.
       setSaveState(IDLE)
       setOpen(false)
+      requestAnimationFrame(() => triggerRef.current?.focus())
       return
     }
-
-    // The trigger asks to open; the fetch decides when. Deliberately not
-    // awaited — this is a DOM event handler, and the button's pending state is
-    // what reports the wait.
-    void openWithLetter()
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <FileEditorDialog
-        files={files}
-        onFilesChange={setFiles}
-        open={open}
-        onOpenChange={handleOpenChange}
-        title="Cover letter"
-        onSave={handleSave}
-        trigger={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={loading}
-            aria-label={`Edit the cover letter for ${displayName}`}
-          >
-            {loading ? "Opening…" : "Edit letter"}
-          </Button>
-        }
-        footer={
-          saveState.status === "success" ? (
-            // A save leaves the text exactly as it was, so there is no visible
-            // change to serve as its own confirmation — which is the case
-            // `ActionError` explicitly does not cover, hence a line of its own.
-            <p className="text-sm text-muted-foreground" role="status">
-              {saveState.message}
-            </p>
-          ) : (
-            <ActionError state={saveState} />
-          )
-        }
-      />
+      <Button
+        ref={triggerRef}
+        variant="outline"
+        size="sm"
+        disabled={loading || open}
+        onClick={() => void openWithLetter()}
+        aria-label={`Edit the cover letter for ${displayName}`}
+      >
+        {loading || open ? "Opening…" : "Edit letter"}
+      </Button>
+
+      {open ? (
+        <FileEditorDialog
+          files={files}
+          onFilesChange={setFiles}
+          open={open}
+          onOpenChange={handleOpenChange}
+          showTrigger={false}
+          title="Cover letter"
+          onSave={handleSave}
+          footer={
+            saveState.status === "success" ? (
+              // A save leaves the text exactly as it was, so there is no visible
+              // change to serve as its own confirmation — which is the case
+              // `ActionError` explicitly does not cover, hence a line of its own.
+              <p className="text-sm text-muted-foreground" role="status">
+                {saveState.message}
+              </p>
+            ) : (
+              <ActionError state={saveState} />
+            )
+          }
+        />
+      ) : null}
 
       {/*
         Outside the dialog, because a load that fails is a dialog that never
