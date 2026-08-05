@@ -408,6 +408,7 @@ class FakeDb {
 }
 
 interface Harness {
+  create: (state: ActionState, formData: FormData) => Promise<ActionState>
   draft: (state: ActionState, formData: FormData) => Promise<ActionState>
   save: (state: ActionState, formData: FormData) => Promise<ActionState>
   objects: MemoryObjects
@@ -455,6 +456,7 @@ function harness(
   })
 
   return {
+    create: actions.createCoverLetter,
     draft: actions.draftCoverLetter,
     save: actions.saveCoverLetter,
     objects,
@@ -962,6 +964,58 @@ describe("draftCoverLetter", () => {
   })
 })
 
+describe("createCoverLetter", () => {
+  const MANUAL =
+    "Dear Hiring Team,\n\nI would like to apply for this position.\n\nKind regards,\nAlice"
+
+  it("creates a letter for an owned Posting without calling the writer", async () => {
+    const result = await subject.create(
+      IDLE,
+      form({ postingId: POSTING_ID, markdown: MANUAL })
+    )
+
+    expect(result.status).toBe("success")
+    expect(subject.writer.prompts).toHaveLength(0)
+    expect(subject.objects.keys()).toEqual([EXPECTED_KEY])
+
+    const stored = await subject.objects.get({
+      userId: USER_ID,
+      kind: "cover-letters",
+      segments: [POSTING_ID],
+      extension: ".md",
+    })
+    expect(stored.text()).toBe(MANUAL)
+    expect(stored.metadata["run-id"]).toBe(RUN_ID)
+    expect(stored.metadata["posting-title"]).toBe(POSTING.title)
+  })
+
+  it("refuses to create a letter for a Posting the caller cannot read", async () => {
+    subject = harness({
+      db: new FakeDb().seedPosting(OTHER_USER_ID, POSTING, RUN_ID),
+    })
+
+    const result = await subject.create(
+      IDLE,
+      form({ postingId: POSTING_ID, markdown: MANUAL })
+    )
+
+    expect(result).toEqual({ status: "error", message: POSTING_NOT_FOUND })
+    expect(subject.objects.puts).toHaveLength(0)
+  })
+
+  it("does not overwrite an existing letter", async () => {
+    await subject.draft(IDLE, form(VALID))
+
+    const result = await subject.create(
+      IDLE,
+      form({ postingId: POSTING_ID, markdown: MANUAL })
+    )
+
+    expect(result.status).toBe("error")
+    expect(subject.objects.puts).toHaveLength(1)
+  })
+})
+
 /**
  * Saving an edited letter back over the stored one.
  *
@@ -972,9 +1026,9 @@ describe("draftCoverLetter", () => {
  * is ignored. This action *does* take text, which is only safe because it edits
  * something the user already has: the object must already exist at
  * `(caller, Posting)` or nothing is written. Without that check the two actions
- * together would let a caller put text of their choosing into a document stored
- * in their own voice at any well-formed Posting id, which is the exact thing the
- * drafting rule was written to prevent.
+ * without the check a caller could overwrite a stored letter through the wrong
+ * path. Manual creation belongs to its own action, which re-reads the owned
+ * Posting before accepting the user's text.
  *
  * The other half is that an edit is not a drafting: `draftedAt` and the
  * provenance a letter was written with are metadata, and a save must carry them

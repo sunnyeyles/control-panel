@@ -77,7 +77,7 @@ export interface StoredCoverLetter extends CoverLetterRef {
   size: number
   draftedAt: Date
   provenance: CoverLetterProvenance
-  /** Present on a read, absent from a `put` or `list` result. */
+  /** Present on a read, absent from a metadata-only result. */
   markdown?: string
 }
 
@@ -93,7 +93,7 @@ export interface StoredCoverLetter extends CoverLetterRef {
  * `NOT NULL` and references `runs`, and drafting is not an execution of a
  * briefing job — minting an ad-hoc Run per click would put rows that are not
  * briefings into a job's history. The key is fully derivable from the user and
- * the Posting, so a row buys no addressability that `list()` does not already
+ * the Posting, so a row buys no addressability that `head()` does not already
  * give. Uploaded documents have no row for exactly this reason.
  */
 export interface CoverLetterStore {
@@ -109,15 +109,6 @@ export interface CoverLetterStore {
   /** Metadata only — does not transfer the markdown. */
   head(ref: CoverLetterRef): Promise<StoredCoverLetter>
   delete(ref: CoverLetterRef): Promise<void>
-  /**
-   * Every letter belonging to one user.
-   *
-   * ⚠️ **`draftedAt` and `provenance` are recovered from the object's write
-   * time and an empty record here.** Both live in S3 user metadata, and
-   * ListObjectsV2 does not return user metadata at all — the same N+1 the
-   * documents list documents. A caller needing either must `head()`.
-   */
-  list(userId: string): Promise<StoredCoverLetter[]>
 }
 
 export function createCoverLetterStore(
@@ -170,11 +161,6 @@ export function createCoverLetterStore(
 
     async delete(ref: CoverLetterRef): Promise<void> {
       await objects.delete(refFor(ref))
-    },
-
-    async list(userId: string): Promise<StoredCoverLetter[]> {
-      const found = await objects.list(userId, KIND)
-      return found.map((object) => toStoredCoverLetter(userId, object))
     },
   }
 }
