@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 import { Button } from "@workspace/ui/components/button"
 import { Spinner } from "@workspace/ui/components/spinner"
 
@@ -20,6 +22,7 @@ export function SubmitButton({
   label,
   pendingLabel,
   disabled,
+  icon,
   ...props
 }: {
   pending: boolean
@@ -31,10 +34,15 @@ export function SubmitButton({
    */
   pendingLabel?: string
   disabled?: boolean
+  /**
+   * Leading icon, shown only while idle. The pending spinner takes its place
+   * so the button does not grow a second glyph mid-submit.
+   */
+  icon?: ReactNode
 } & Omit<React.ComponentProps<typeof Button>, "children">) {
   return (
     <Button type="submit" disabled={pending || disabled} {...props}>
-      {pending ? <Spinner /> : null}
+      {pending ? <Spinner /> : icon}
       {pending ? (pendingLabel ?? label) : label}
     </Button>
   )
