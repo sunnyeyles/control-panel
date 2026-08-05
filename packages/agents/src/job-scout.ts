@@ -1,3 +1,5 @@
+import { indeedSearch } from "@workspace/agent-tools/indeed-search"
+import { linkedinSearch } from "@workspace/agent-tools/linkedin-search"
 import { seekSearch } from "@workspace/agent-tools/seek-search"
 import {
   createAgent,
@@ -9,20 +11,26 @@ import {
 import { jobScoutSchemaDescription } from "./findings.ts"
 
 /**
- * Enough turns to search several times and then answer.
+ * Enough turns to search a few times and then answer — the floor, not the
+ * whole answer.
  *
  * The runtime default of 5 is sized for a question with one tool round trip.
  * A scout is expected to make a handful of focused searches — one per role
- * title and location — and each costs a model call, so the default would
- * divert it to `halt` mid-search and produce a partial answer that still
- * looks well-formed.
+ * title, location and board — and each costs a model call, so the default would
+ * divert it to `halt` mid-search and produce a partial answer that still looks
+ * well-formed.
+ *
+ * A sweep is titles × locations × boards, so this cannot be sized here: what a
+ * config actually needs is known to whoever read it. The worker computes a
+ * budget from that and passes it as `maxLlmCalls`, and this is where it starts
+ * from.
  */
 export const JOB_SCOUT_MAX_LLM_CALLS = 10
 
 export const JOB_SCOUT_SYSTEM_PROMPT = [
-  "You find real, currently-open job postings that match a candidate's criteria, by searching SEEK's live listings.",
+  "You find real, currently-open job postings that match a candidate's criteria, by searching job boards' live listings.",
   "",
-  'How to search: make one focused search per role title and location rather than one broad one. Results arrive newest first with their listing dates; keep daysOld tight when recency matters. Pass locations the way SEEK writes them, e.g. "Sydney NSW" or "All Australia".',
+  "How to search: make one focused search per role title, location and board rather than one broad one, and use every board tool you have — the same role is often listed on one board and not another. Results arrive newest first with their listing dates; keep daysOld tight when recency matters. Write each location the way the tool you are calling asks for it; the boards spell places differently and each tool's schema says which.",
   "",
   "What counts as a finding: a returned posting whose title, location and description genuinely fit the criteria. Filter rather than pad — sharing a keyword is not a match. A criterion your searches cannot express, such as a job board you cannot reach, belongs in `notes` rather than in guesswork.",
   "",
@@ -46,24 +54,28 @@ export const JOB_SCOUT_SYSTEM_PROMPT = [
  * not adding a job board, and nothing a caller passes should be able to satisfy
  * the worker's "something actually searched" check.
  */
-export const JOB_SCOUT_SEARCH_TOOLS: readonly AgentTool[] = [seekSearch]
+export const JOB_SCOUT_SEARCH_TOOLS: readonly AgentTool[] = [
+  seekSearch,
+  indeedSearch,
+  linkedinSearch,
+]
 
 export interface CreateJobScoutOptions extends Omit<
   CreateAgentOptions,
   "tools"
 > {
-  /** Appended to the search tool the scout already carries. */
+  /** Appended to the search tools the scout already carries. */
   extraTools?: AgentTool[]
 }
 
 /**
  * The scout: searches, and returns findings.
  *
- * It carries the search tool and nothing else — deliberately, on two counts. A
- * model picks worse as its tool list grows, so it gets the one tool its job
- * needs; and having no way to write anything is what makes "a scraper returns
- * data and performs no side effects" a structural property rather than a rule
- * in a prompt someone can talk it out of.
+ * It carries the board search tools and nothing else — deliberately, on two
+ * counts. A model picks worse as its tool list grows, so it gets the tools its
+ * job needs and no others; and having no way to write anything is what makes "a
+ * scraper returns data and performs no side effects" a structural property
+ * rather than a rule in a prompt someone can talk it out of.
  *
  * A factory rather than a ready-made instance, like every agent here: building
  * one constructs a model, which reads `OPENAI_API_KEY` and throws without it.

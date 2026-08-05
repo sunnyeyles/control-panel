@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { AgentLike, AgentStreamOptions } from "./run-agent.ts"
 import { runBriefing } from "./run-briefing.ts"
+import { SEARCH_TOOL_NAMES } from "./search-results.ts"
 import type { TraceEvent } from "./trace.ts"
 
 /**
@@ -53,6 +54,18 @@ const FINDINGS = {
       matchReason: "Matches the title and location.",
     },
   ],
+}
+
+/**
+ * Every board at zero — the breakdown a run carries before anything searched.
+ *
+ * Derived from the tool list rather than written out, because the number of
+ * boards is not what these tests are about: pinning it here would mean a test
+ * failing the next time one is added, which is exactly the noise that teaches
+ * people to update an expectation without reading it.
+ */
+function noSearches(): Record<string, number> {
+  return Object.fromEntries(SEARCH_TOOL_NAMES.map((name) => [name, 0]))
 }
 
 /** A successful search result — what proves the scout actually searched. */
@@ -523,7 +536,10 @@ describe("runBriefing", () => {
       })
 
       expect(report.searches).toBe(1)
-      expect(report.searchesBySource).toEqual({ seek_search: 1 })
+      expect(report.searchesBySource).toEqual({
+        ...noSearches(),
+        seek_search: 1,
+      })
     })
 
     it("survives a search that failed alongside one that worked", async () => {
@@ -555,7 +571,7 @@ describe("runBriefing", () => {
       ).rejects.toThrow()
 
       const failure = JSON.parse(String(log.mock.calls[0]?.[0]))
-      expect(failure.searchesBySource).toEqual({ seek_search: 0 })
+      expect(failure.searchesBySource).toEqual(noSearches())
     })
   })
 
