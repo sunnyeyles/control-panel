@@ -11,10 +11,10 @@ import type { CoverLetterSummary } from "@/lib/cover-letters/list-cover-letters"
  * timezone bug it is.
  *
  * **There is nothing in this list but downloading.** No redraft with
- * instructions, no tone, no send. A letter is drafted from a Posting on the
- * cards below and edited there too — the card owns both actions, because both
- * need the Posting the letter was written for. This is where it can be taken
- * away as a file.
+ * instructions, no tone, no send. A letter is drafted from a Posting's detail
+ * dialog in the table above, and edited there too — the dialog owns both
+ * actions, because both need the Posting the letter was written for. This is
+ * where it can be taken away as a file.
  */
 export function CoverLetterList({
   letters,
@@ -25,8 +25,8 @@ export function CoverLetterList({
     return (
       <div className="rounded-lg border border-dashed p-6 text-center">
         <p className="text-sm text-muted-foreground">
-          No cover letters yet. Draft one from a posting below and it will
-          appear here.
+          No cover letters yet. Open a posting in the table above and draft one
+          from its detail, and it will appear here.
         </p>
       </div>
     )
