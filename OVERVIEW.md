@@ -105,9 +105,9 @@ flowchart TD
 ## Not built yet
 
 The pipeline above runs end to end. These are the parts of the intended product
-that do not exist, and nothing in the code today implies them. One entry has
-since gone half-built rather than leaving the list, so **a solid edge below is a
-path that exists and a dotted one is still the gap**:
+it still lacks. Most began as whole gaps and have since been partly closed —
+each entry below leads with what is _missing_, so **a solid edge is a path that
+exists and a dotted one is still the gap**:
 
 ```mermaid
 flowchart TD
@@ -121,100 +121,77 @@ flowchart TD
     P --> Q[A viewer for the brief itself]
 ```
 
-- **Profile extraction — half closed, and it is worth being exact about which
-  half.** Upload was always there: `/documents` writes to the `resumes` object
-  kind through a Server Action, and lists, downloads and deletes what is there.
-  Reading a stored document came next —
-  `apps/dashboard/lib/cover-letters/candidate-background.ts` fetches the newest
-  document labelled `resume` and turns it into text for the **Letter Writer**,
-  through `profile-text.ts` (#86) — `.md`, `.txt`, PDF via `unpdf` and DOCX via
-  `mammoth`. `.doc`, `.odt` and `.rtf` still upload and still have no parser,
-  and are refused by name.
+- **Nothing turns a document into criteria with nobody watching.** Extraction
+  itself is built: the **Profile Extractor**
+  (`packages/agents/src/profile-extractor.ts`) reads the newest **Document**
+  labelled `resume` and _proposes_ **Search Criteria**, validated on shape by
+  `SearchCriteriaSchema` (`packages/agents/src/criteria.ts`), behind **Suggest
+  from my resume** on the new-briefing form
+  (`apps/dashboard/lib/jobs/suggest-criteria-actions.ts`). It reads through
+  `loadCandidateBackground()` rather than adding a document picker, deliberately
+  — "which document is my resume" has to mean one thing across the app, or a
+  **Cover Letter** and a **Briefing** end up drawn from different files with
+  nothing saying so.
 
-  Extraction proper now exists on top of that. The **Profile Extractor**
-  (`packages/agents/src/profile-extractor.ts`) reads that text and proposes
-  **Search Criteria** — titles and keywords from what the CV actually names, and
-  a location only when the CV states one, otherwise an empty list and a sentence
-  in `notes` saying so. `packages/agents/src/criteria.ts` is what makes the
-  answer checkable: `SearchCriteriaSchema` both renders into the prompt and
-  validates what comes back, so reading a CV — the one step with no source to
-  re-fetch and nothing to check a claim against — is verified on shape at least.
-  `apps/dashboard/lib/jobs/suggest-criteria-actions.ts` is the Server Action
-  behind **Suggest from my resume** on the new-briefing form. It reuses
-  `loadCandidateBackground()` and its bounds check rather than adding a document
-  picker, deliberately: "which document is my resume" has to mean one thing
-  across the app, or a **Cover Letter** and a **Briefing** end up drawn from
-  different files with nothing saying so.
-
-  What is _not_ built is anything that closes the loop without a person in it.
-  The extractor **proposes**: the criteria arrive in the form's fields, the user
-  edits them, and `jobs.config` is written by the ordinary create action when
-  they press Create. The suggestion itself persists nothing — which is why the
-  action calls no `refresh()`, having invalidated nothing — so a suggestion
-  someone abandons leaves no trace anywhere. Nor does any Postgres row point at
-  an upload: `artifacts.run_id` is `NOT NULL` and references `runs`, so there is
-  still no row shape for one, and nothing records which **Document** a briefing's
-  criteria came out of.
+  What is missing is anything that closes the loop without a person in it. The
+  extractor proposes into the form's fields, the user edits them, and
+  `jobs.config` is written by the ordinary create action on Create. The
+  suggestion persists nothing — which is why the action calls no `refresh()`,
+  having invalidated nothing — and no Postgres row points at an upload:
+  `artifacts.run_id` is `NOT NULL` and references `runs`, so nothing records
+  which Document a briefing's criteria came out of. `.doc`, `.odt` and `.rtf`
+  also still upload with no parser and are refused by name; `.md`, `.txt`, PDF
+  and DOCX are read by `profile-text.ts` (#86).
 
 - **Fan-out across several scouts, with merge and rank.** One scout runs today.
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
-- **Sending a cover letter.** Drafting one is built (#84): a Draft button on
-  each **Posting** on `/briefings` runs the **Letter Writer** over the
-  advertisement stored on that Posting's row — `postings.payload`, re-read
-  server-side, since the page no longer holds a Run's findings to draft from —
-  and stores the result at `prod/{userId}/cover-letters/{postingId}.md`, keyed
-  on the Posting so a redraft overwrites one object. The letter's key and the
-  row's identity are the same `postingId()` value, which is what keeps a stored
-  letter attached to the Posting it was written for. Seeing and downloading them
-  is built too (#85): `/briefings` lists every stored letter with when it was
-  drafted and which Posting it belongs to —
-  `apps/dashboard/lib/cover-letters/list-cover-letters.ts`, which pays one
-  `HeadObject` per letter because a listing carries no user metadata — a Posting
-  that already has one says so instead of offering a first draft, and
-  `/api/cover-letters/{postingId}` hands the Markdown back as a file. The letter
-  is written from the newest **Document** labelled `resume`, and since #86 that
-  can be a PDF or a DOCX as well as `.md` or `.txt`. Telling the writer how to
-  write is built too: **Letter Instructions** are a per-user row in
-  `cover_letter_instructions`, edited from `/settings`, composed onto the
-  writer's system prompt by `coverLetterSystemPrompt()` and applied to every
-  draft — free-text rules, plus an optional example letter that is fenced as a
-  style reference and never as a source of facts. So tone, wording and structure
-  are settable, and redrafting a Posting applies them. Reading and editing one
-  in the app is built as well: an **Edit letter** button beside the draft button
-  opens the stored Markdown as rich text in `FileEditorDialog`, and **Save**
-  writes it back over the same object — carrying `drafted-at` and the letter's
-  provenance across, because an edit is not a drafting. A save refuses when no
-  letter exists at that address, which is what keeps an action that _does_ take
-  letter text from a form out of the business of creating one. What is still
-  missing is sending it. Ticketed under #77;
-  `docs/cover-letter-agent-plan.md` is the staged plan.
+- **Sending a cover letter.** Everything short of delivery is built, under #77.
+  Drafting (#84): a Draft button on each **Posting** on `/briefings` runs the
+  **Letter Writer** over the advertisement stored on that Posting's row —
+  `postings.payload`, re-read server-side, since the page no longer holds a
+  Run's findings to draft from — and stores the result at
+  `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting so a
+  redraft overwrites one object. The letter's key and the row's identity are the
+  same `postingId()` value, which is what keeps a stored letter attached to the
+  Posting it was written for. Listing and downloading (#85):
+  `list-cover-letters.ts` pays one `HeadObject` per letter because a listing
+  carries no user metadata, and `/api/cover-letters/{postingId}` hands the
+  Markdown back as a file. **Letter Instructions** — a per-user row in
+  `cover_letter_instructions`, edited from `/settings` and composed onto the
+  writer's prompt by `coverLetterSystemPrompt()` — make tone and structure
+  settable, with an optional example letter fenced as a style reference and
+  never as a source of facts. Editing: **Edit letter** opens the stored Markdown
+  as rich text in `FileEditorDialog` and **Save** writes it back over the same
+  object, carrying `drafted-at` and provenance across because an edit is not a
+  drafting. A save refuses when no letter exists at that address, which keeps an
+  action that _does_ take letter text from a form out of the business of
+  creating one. Delivery has no code at all.
 
-- **A viewer for the brief itself.** `/briefings` shows what the runs have
-  _found_: every **Posting** any of this user's briefings has ever turned up,
-  read out of the `postings` table by
-  `apps/dashboard/lib/postings/list-postings.ts` as a sorted, server-paginated
-  table, each row carrying the **Posting Status** its owner set and opening its
-  full detail in a dialog. It no longer reads one Run's `runs.findings`, so a
-  Posting the next Run does not re-find stays on the page rather than vanishing
-  overnight. What is still missing is the **Brief** — the markdown that run
-  wrote — and that gap is structural rather than merely unbuilt: the dashboard's
-  IAM grants are `prod:resumes` and `prod:cover-letters`, and a brief lives
-  under `prod:briefs`, so the app cannot read one without an infrastructure
-  change. Widening the grant for cover letters (#84) deliberately did not widen
-  it here — `tests/vercel_dashboard.tftest.hcl` asserts the exact key set, and
-  that the dashboard's and the worker's grants stay disjoint. Nothing lists
-  **Runs** either, and `latestArtifactForJob()` still has no caller outside its
-  own tests — the page deliberately does not use it, because it orders on run
-  start _and_ artifact creation and stops being well defined once a run writes
-  more than one artifact. What _does_ read a **Run** now is the strip above the
-  table: `apps/dashboard/components/briefings/briefing-strip.tsx` renders one
-  line per briefing from `apps/dashboard/lib/briefing-runs/run-activity.ts` —
-  its most recent Run whatever became of it, running, failed, or too long in
-  `running` to still be believed — and carries that briefing's **Run now**
-  button, which is what needs the line to be watchable. That is a status line,
-  not a history: nothing lists more than one Run per briefing, and nothing can
-  cancel one.
+- **A viewer for the Brief itself, and that gap is structural rather than
+  merely unbuilt.** The dashboard's IAM grants are `prod:resumes` and
+  `prod:cover-letters` while a brief lives under `prod:briefs`, so the app
+  cannot read one without an infrastructure change. Widening the grant for cover
+  letters (#84) deliberately did not widen it here —
+  `tests/vercel_dashboard.tftest.hcl` asserts the exact key set, and that the
+  dashboard's and the worker's grants stay disjoint.
+
+  What `/briefings` does show is what the runs have _found_ — every **Posting**
+  any of this user's briefings has ever turned up, read out of the `postings`
+  table by `lib/postings/list-postings.ts` as a sorted, server-paginated table,
+  each row carrying the **Posting Status** its owner set and opening its full
+  detail in a dialog. It no longer reads one Run's `runs.findings`, so a Posting
+  the next Run does not re-find stays on the page rather than vanishing
+  overnight. Above the table, `components/briefings/briefing-strip.tsx` renders
+  one line per briefing from `run-activity.ts` — its most recent Run whatever
+  became of it, running, failed, or too long in `running` to still be believed —
+  and carries that briefing's **Run now** button, which is what makes the line
+  worth watching. That is a status line and not a history: nothing lists more
+  than one Run per briefing and nothing can cancel one.
+  `latestArtifactForJob()` still has no caller outside its own tests, and the
+  briefings page deliberately does not use it — it orders on run start _and_
+  artifact creation, and stops being well defined once a run writes more than
+  one artifact.
 
 ## Infrastructure
 

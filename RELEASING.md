@@ -127,8 +127,14 @@ terraform -chdir=infra/aws apply -var="schedule_enabled=false"
 
 ## 4. The other two deploy surfaces
 
-**The database.** Migrations are outside Turborepo and run by hand, against the
-direct endpoint:
+**The database.** Nothing to do: `.github/workflows/migrate.yml` applies
+migrations on every push to `main`, and confirms afterwards that production is
+level with the repo. It is unfiltered by path on purpose — `migrate deploy`
+against an up-to-date database is a no-op, while a path filter that fails to
+match is how production silently falls behind.
+
+To apply by hand anyway — a failed run, or a database the workflow does not
+know about — use the direct endpoint:
 
 ```bash
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
@@ -136,6 +142,11 @@ DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
 
 `DATABASE_URL_UNPOOLED`, not `DATABASE_URL` — the pooled endpoint runs PgBouncer
 in transaction mode, which is the wrong endpoint for migrate. Forward-only.
+
+The workflow needs one secret, `NEON_API_KEY`; the project id is committed in
+the workflow because it identifies a project rather than granting access to one.
+Prior to 2026-08-05 this step was manual, was missed twice, and put `/settings`
+into a 500 on a `cover_letter_instructions` table that only ever existed in git.
 
 **A migration that creates a table the dashboard will read has a backfill
 between the two, and the order is not interchangeable:**
@@ -145,11 +156,20 @@ migrate  →  backfill  →  deploy the dashboard
 ```
 
 Deploying the dashboard first shows every user an empty page — a table the
-worker has begun filling but that holds nothing from before the migration. The
-one that exists today is the cumulative postings record:
+worker has begun filling but that holds nothing from before the migration.
+
+**Automating the migration removed the gap this ordering used to sit in.** One
+push to `main` now applies the migration and hands Vercel the dashboard that
+reads it, while the backfill between them is still a person running a command.
+So the ordering is no longer a sequence you carry out; it is a constraint on how
+the work is merged. Land the schema and the worker on their own, run the
+backfill, and merge the dashboard after — the record fills up while nothing
+reads it, which is what makes the window harmless rather than merely short.
+
+The one that exists today is the cumulative postings record:
 
 ```bash
-DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
+DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate   # or let CI do it
 DATABASE_URL=… pnpm --filter @workspace/briefing-worker backfill:postings
 ```
 

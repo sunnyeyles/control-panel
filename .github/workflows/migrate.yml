@@ -1,0 +1,294 @@
+name: Migrate
+
+# The schema half of a deploy, which nothing else in this repo covers.
+#
+# `test.yml` proves the migration SQL is valid: it creates a throwaway schema
+# and replays every directory under `prisma/migrations` in order. That is a good
+# check and it is structurally incapable of catching the failure this workflow
+# exists for — building a schema from zero has no history to diverge from, so it
+# can never notice that a *long-lived* database is behind. Drift is a property
+# of the deployed environment, not of the migration set.
+#
+# The Vercel build is blind for a different reason: it compiles the Next app and
+# never opens a database connection, so a missing table costs nothing until a
+# request renders the page that reads it. On 2026-08-05 that was `/settings`,
+# 500ing on `cover_letter_instructions` while every other route was fine —
+# `0004` had never been applied, and `0003` had been missing silently for days
+# behind it because its only reader is the ad-hoc claim path.
+#
+# Three jobs, because applying and verifying catch different failures:
+#
+#   guard    — on a PR, is production up to date with what is *already* merged?
+#   preview  — on a PR, apply this PR's migrations to its own Neon branch.
+#   apply    — on a push to main, apply to production.
+#
+# The project id is committed rather than held in a repository variable, for the
+# reason `deploy-infra.yml` gives about `terraform.tfvars`: the value CI uses
+# should be the value in the diff. It identifies a Neon project and grants
+# nothing — `NEON_API_KEY` is the credential, and it is the only secret here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NEON_PROJECT_ID: sparkling-paper-60637779
+  # Pinned to a major: `neon connection-string --pooled` defaults to false, and
+  # the direct endpoint is the whole point — PgBouncer in transaction mode does
+  # not carry the session state migrate needs. See `packages/db/prisma.config.ts`.
+  NEONCTL_VERSION: "2"
+
+jobs:
+  # Is production already behind? This is the job that would have caught
+  # `0003_run_claimed_at` before `0004` landed on top of it and made the drift
+  # visible as a 500.
+  #
+  # It deliberately checks production against **main's** migrations, not this
+  # PR's. A PR that adds a migration leaves production legitimately one behind —
+  # failing on that would make the check fire on every schema PR and be turned
+  # off within a week. The invariant worth enforcing is narrower and never
+  # legitimately violated: everything already merged has been applied.
+  guard:
+    # Secrets are absent on a fork's pull request, so this would fail for a
+    # reason that has nothing to do with the contribution. `test.yml` runs there
+    # on purpose (its Postgres container needs no secret); this cannot.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    concurrency:
+      group: migrate-guard-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      # First, because it needs nothing else and because of how the alternative
+      # fails. Without the secret `neon` exits with "Cannot run interactive auth
+      # in CI" — true, and it names neither the secret nor this workflow, forty
+      # seconds into a job whose install step was pure waste. Assert the input
+      # before spending anything on it, as `deploy-infra.yml` does with its
+      # repository variables.
+      - name: Check the NEON_API_KEY secret is set
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY:-}" ]; then
+            echo "::error::NEON_API_KEY is not set. This workflow applies Prisma"
+            echo "migrations to Neon and cannot authenticate without it. Add it"
+            echo "under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          # `git checkout origin/main -- …` below needs main to exist locally,
+          # and a pull_request checkout is a shallow merge commit by default.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install neonctl
+        run: npm install -g neonctl@${{ env.NEONCTL_VERSION }}
+
+      # Replace the PR's view of the migrations directory with main's. `rm -rf`
+      # first because `git checkout <ref> -- <path>` restores what main has
+      # without removing what only this branch added, and a directory the PR
+      # introduced would otherwise be counted as pending against production.
+      - name: Take main's migrations, not this PR's
+        run: |
+          rm -rf packages/db/prisma/migrations
+          git checkout origin/main -- packages/db/prisma/migrations
+
+      - name: Resolve the production connection string
+        id: connection
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          url="$(neon connection-string main --project-id "$NEON_PROJECT_ID")"
+          # ::add-mask:: before anything else can echo it. Everything after this
+          # point is free to fail loudly without printing credentials.
+          echo "::add-mask::$url"
+          # `prisma.config.ts` falls back to a localhost placeholder when the
+          # variable is empty, so an empty value here would surface downstream
+          # as "connection refused to 127.0.0.1" — a misleading way to learn
+          # that neon returned nothing while still exiting 0.
+          if [ -z "$url" ]; then
+            echo "::error::neon returned an empty connection string for main."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Production must have every merged migration
+        env:
+          DATABASE_URL_UNPOOLED: ${{ steps.connection.outputs.url }}
+        run: |
+          if ! pnpm --filter @workspace/db exec prisma migrate status; then
+            echo "::error::Production is behind main. A previously merged migration"
+            echo "was never applied — apply it before merging more on top, or this"
+            echo "PR inherits a 500 that looks like its own bug."
+            echo "Fix: run the Migrate workflow manually (workflow_dispatch)."
+            exit 1
+          fi
+
+  # Apply this PR's migrations to the Neon branch its preview deployment reads.
+  #
+  # The Vercel–Neon integration creates `preview/<git branch>` automatically and
+  # migrates it never, which is why PR #123 looked fine before merge: its own
+  # preview branch was missing the very table the PR added, and nobody loaded
+  # the page that reads it. A preview that cannot exercise the new schema is not
+  # a preview of the change.
+  preview:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    concurrency:
+      group: migrate-preview-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Check the NEON_API_KEY secret is set
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY:-}" ]; then
+            echo "::error::NEON_API_KEY is not set. This workflow applies Prisma"
+            echo "migrations to Neon and cannot authenticate without it. Add it"
+            echo "under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install neonctl
+        run: npm install -g neonctl@${{ env.NEONCTL_VERSION }}
+
+      # The branch is created by the integration when the preview deploys, which
+      # races this workflow and may not have happened yet — and a PR that
+      # touches no schema may never get one at all. Absent is a skip, not a
+      # failure: this job's job is to migrate a preview branch that exists.
+      - name: Find this PR's Neon branch
+        id: branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          name="preview/$HEAD_REF"
+          if neon branches list --project-id "$NEON_PROJECT_ID" --output json \
+            | jq -e --arg n "$name" 'any(.[]; .name == $n)' > /dev/null; then
+            echo "name=$name" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No Neon branch $name yet — nothing to migrate."
+          fi
+
+      - name: Apply migrations to the preview branch
+        if: steps.branch.outputs.name != ''
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          url="$(neon connection-string "$BRANCH" --project-id "$NEON_PROJECT_ID")"
+          echo "::add-mask::$url"
+          if [ -z "$url" ]; then
+            echo "::error::neon returned an empty connection string for $BRANCH."
+            exit 1
+          fi
+          DATABASE_URL_UNPOOLED="$url" pnpm --filter @workspace/db migrate
+
+  # Production. Unfiltered by path, unlike `deploy-infra.yml`, and that is the
+  # point rather than an oversight: `migrate deploy` against an up-to-date
+  # database is a no-op costing one connection, while a path filter that fails
+  # to match reproduces exactly the bug this workflow was written for. The
+  # cheaper of the two mistakes is to run it every time.
+  apply:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # `cancel-in-progress: false`, matching the deploy job in
+    # `deploy-infra.yml` and for a sharper version of the same reason: an
+    # interrupted DDL run is worse than a late one.
+    concurrency:
+      group: migrate-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Check the NEON_API_KEY secret is set
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY:-}" ]; then
+            echo "::error::NEON_API_KEY is not set. This workflow applies Prisma"
+            echo "migrations to Neon and cannot authenticate without it. Add it"
+            echo "under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install neonctl
+        run: npm install -g neonctl@${{ env.NEONCTL_VERSION }}
+
+      - name: Resolve the production connection string
+        id: connection
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          url="$(neon connection-string main --project-id "$NEON_PROJECT_ID")"
+          echo "::add-mask::$url"
+          if [ -z "$url" ]; then
+            echo "::error::neon returned an empty connection string for main."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Migrations are forward-only. There is no rollback step to write and
+      # adding one would be a lie about what `migrate deploy` can undo.
+      - name: Apply migrations to production
+        env:
+          DATABASE_URL_UNPOOLED: ${{ steps.connection.outputs.url }}
+        run: pnpm --filter @workspace/db migrate
+
+      # `migrate deploy` exits non-zero on a failed migration, but this asserts
+      # the end state rather than the command's opinion of it — the question
+      # worth answering in the log is "is production level with the repo", which
+      # is the question that went unasked for two migrations.
+      - name: Confirm production is level with the repo
+        env:
+          DATABASE_URL_UNPOOLED: ${{ steps.connection.outputs.url }}
+        run: pnpm --filter @workspace/db exec prisma migrate status

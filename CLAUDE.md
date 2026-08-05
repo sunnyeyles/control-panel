@@ -22,7 +22,11 @@ Terraform for deployment. See `apps/briefing-worker/README.md` and
 `infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
 cover it.
 
-Database migrations are also outside Turborepo, and are run by hand:
+Database migrations are outside Turborepo, and **CI applies them** —
+`.github/workflows/migrate.yml`, on every push to `main`. The same workflow
+applies a PR's migrations to that PR's Neon preview branch, and fails a PR when
+production is behind what is already merged. Running one by hand is the escape
+hatch, not the routine:
 
 ```bash
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
@@ -32,6 +36,13 @@ That runs Prisma Migrate (`prisma migrate deploy`) against the direct Neon
 endpoint. **`DATABASE_URL_UNPOOLED`, not `DATABASE_URL`** — the pooled endpoint
 runs PgBouncer in transaction mode, which is the wrong endpoint for migrate.
 Migrations are forward-only. See `packages/db/README.md`.
+
+**`turbo test` cannot catch an unapplied migration, by construction.**
+`stores.test.ts` replays every migration into a throwaway schema, so it proves
+the SQL is valid and ordered and knows nothing about any long-lived database.
+Drift belongs to the environment, not to the migration set, and the Vercel build
+never opens a connection — so a missing table stays invisible until a request
+renders the page that reads it. That is what `migrate.yml` is for.
 
 Authentication is Neon Auth (Managed Better Auth), configured from the Neon CLI
 rather than from anything in this repo. The workspace is linked to a project and
@@ -188,10 +199,37 @@ Two things here look wrong and are not:
 - **Declaration output keeps the `.ts` specifier.** `dist/*.d.ts` reads `from "./keys.ts"`. Only TypeScript reads a `.d.ts`, and it resolves that to the sibling `.d.ts` — downstream packages typecheck against it without needing `allowImportingTsExtensions` themselves. Do not "fix" it.
 - **The extension is `.ts`, not nothing.** Extensionless imports would mean abandoning NodeNext for `Bundler` resolution. NodeNext is what the emitted `dist/` and its `.d.ts` declare, and every relative specifier in NodeNext ESM must carry an explicit extension — that is the output contract consumers resolve against, whether Node runs a file directly or esbuild bundles it first.
 
+## Pull requests
+
+**Every pull request uses `.github/pull_request_template.md`, and passing `--body` does not excuse it.** GitHub injects the template only when `gh pr create` is given no body at all, so an agent that composes its own body silently bypasses it. Compose the filled body — the same four headings, in the same order — into a file and open the PR with it:
+
+```bash
+gh pr create --title "…" --body-file pr-body.md   # a scratch file, not committed
+```
+
+The four sections are required on every PR, however small:
+
+- **`## Type`** — one of Feature, Bug fix, Refactor, Docs, Infrastructure, Chore.
+- **`## What this does`** — behaviour, not the diff, written for someone who has not read it. For a feature, what a user can now do that they could not before; for a fix, what was broken, what the user saw, and what they see now. "Adds a helper to parse X" describes the diff and is not an answer.
+- **`## Why`** — the problem or need behind the change, in a sentence or two.
+- **`## Changes`** — the notable edits, one bullet each, with backticked paths.
+
+`## Verification`, `## Noted, not fixed` and `## ⚠️ Before merging` are optional and sit commented out at the foot of the template. They are house style rather than ceremony: verification carries the commands actually run _and_ what they did not cover, and the ⚠️ heading exists because changes here regularly need a step the merger must take out of band — a migration, a Terraform apply, a secret value, a Neon setting.
+
+**The title is a sentence about the behaviour that changed** — imperative, sentence case, no `feat:`/`fix:` prefix, no trailing period. "Propose search criteria from the candidate's resume", "Fix the Illegal invocation that blanked the dashboard home", "Send OAuth back to the branch alias, not the deployment host". A title derived from the branch name — "Worktree dev auth bypass" — is the failure mode this rule exists to stop, and is never acceptable.
+
+**`CONTEXT.md` binds the prose.** A PR body is prose about this system, so the glossary applies to it: "job" is a row in `jobs`, never an employment opportunity — that is a "posting".
+
+Two constraints are not about writing and are set out in `RELEASING.md`: **squash-merge**, because GitGuardian scans every commit on a pull request and a credential-shaped string removed in a later commit still flags; and a pull request runs `check` only, since the deploy role's trust policy names `ref:refs/heads/main` alone.
+
+Close an agent-written body with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` trailer. The template itself does not carry it — a human filling it in from the GitHub UI is not generating anything.
+
 ## Repo context
 
 `.mcp.json` registers the LangChain docs and API-reference MCP servers, and `.claude/skills/` symlinks a set of vendored skills (tracked in `skills-lock.json`) into `.agents/skills/`.
 
 **A `SessionEnd` hook deletes worktrees whose pull request is finished.** `.claude/hooks/cleanup-merged-worktrees.sh`, wired up in `.claude/settings.json`, removes a checkout under `.claude/worktrees/` and its local branch once GitHub reports the branch's PR as merged or closed. It refuses to touch a worktree that a live session still holds, that has uncommitted changes, or that carries a commit the remote has never seen — an open PR is left alone entirely, so a review can still be answered from the same checkout. Removals and refusals are logged to `~/.claude/worktree-cleanup.log`; nothing is written and no network call is made when there is nothing to collect.
 
-`CONTEXT.md` is the domain glossary — what "briefing", "brief", "scout", "findings" and "run report" mean, and which words to avoid. Read it before writing prose about this system: **"job" means a row in `jobs`, a thing that runs on a cadence, and never an employment opportunity** — that is a "posting". The schema owns the word and prose must not borrow it back. `OVERVIEW.md` states the shape of the pipeline and, in its "Not built yet" section, which parts of the intended product do not exist (profile extraction, scout fan-out, cover letters, a viewer for the brief itself). Earlier commits carried more design material (a `.wayfinder/` ticket set, planning docs) that survives only in git history — historical intent, not current spec.
+`CONTEXT.md` is the domain glossary — what "briefing", "brief", "scout", "findings" and "run report" mean, and which words to avoid. Read it before writing prose about this system: **"job" means a row in `jobs`, a thing that runs on a cadence, and never an employment opportunity** — that is a "posting". The schema owns the word and prose must not borrow it back. `OVERVIEW.md` states the shape of the pipeline and, in its "Not built yet" section, what the product still lacks: closing the criteria loop with nobody watching, scout fan-out, _sending_ a cover letter, and a viewer for the brief itself. **Read that section rather than assuming from the heading** — most of its entries are partly closed, so proposing criteria from a resume, and drafting, listing and editing a cover letter, are all built.
+
+**Design material in the tree is either a live plan or a ticket set, and a plan is deleted once its work ships.** `docs/job-kind-registry-plan.md` is the one live plan — a dispatch registry for the worker, with nothing implementing it yet. `.scratch/<feature>/` holds committed ticket sets: an `issues/` directory, sometimes a `plan.md` and a `README.md`. That is where a feature's tickets live, never GitHub Issues, despite the remote having labels for them. Superseded design material belongs in git history rather than in an annotated file — a `.wayfinder/` ticket set and the staged cover-letter plan both went that way.
