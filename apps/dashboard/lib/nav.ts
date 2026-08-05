@@ -31,14 +31,21 @@ export interface NavItem {
 }
 
 /**
- * "Briefings" is the glossary's word for what a user set up and what one
+ * "Briefing" is the glossary's word for what a user set up and what one
  * occurrence of it produced — never "Jobs", which in this system means a row in
- * `jobs` and never an employment opportunity. What the page lists is
- * **Postings**.
+ * `jobs` and never an employment opportunity. What the page *lists* is
+ * **Postings**, which is what it is now called.
+ *
+ * ⚠️ **The label says Postings and the URL still says `/briefings`, and that is
+ * a known mismatch rather than an oversight.** Renaming the segment is a folder
+ * move plus this file, the trace metadata in `lib/cover-letters/cover-letter-actions.ts`
+ * and prose in three documents — mechanical, but a decision, and one nobody has
+ * taken. Until then the heading follows the label, because `titleForPathname`
+ * reads it from here.
  */
 export const navMain: readonly NavItem[] = [
   { title: "Assistant", url: "/", icon: MessageSquareIcon },
-  { title: "Briefings", url: "/briefings", icon: NewspaperIcon },
+  { title: "Postings", url: "/briefings", icon: NewspaperIcon },
   { title: "Documents", url: "/documents", icon: FileTextIcon },
 ]
 

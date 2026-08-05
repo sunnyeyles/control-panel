@@ -148,6 +148,40 @@ the workflow because it identifies a project rather than granting access to one.
 Prior to 2026-08-05 this step was manual, was missed twice, and put `/settings`
 into a 500 on a `cover_letter_instructions` table that only ever existed in git.
 
+**A migration that creates a table the dashboard will read has a backfill
+between the two, and the order is not interchangeable:**
+
+```
+migrate  →  backfill  →  deploy the dashboard
+```
+
+Deploying the dashboard first shows every user an empty page — a table the
+worker has begun filling but that holds nothing from before the migration.
+
+**Automating the migration removed the gap this ordering used to sit in.** One
+push to `main` now applies the migration and hands Vercel the dashboard that
+reads it, while the backfill between them is still a person running a command.
+So the ordering is no longer a sequence you carry out; it is a constraint on how
+the work is merged. Land the schema and the worker on their own, run the
+backfill, and merge the dashboard after — the record fills up while nothing
+reads it, which is what makes the window harmless rather than merely short.
+
+The one that exists today is the cumulative postings record:
+
+```bash
+DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate   # or let CI do it
+DATABASE_URL=… pnpm --filter @workspace/briefing-worker backfill:postings
+```
+
+The backfill takes the **pooled** `DATABASE_URL`, unlike the migration above it:
+it is ordinary application traffic through `createPrismaClient()`, not a schema
+change. It walks every succeeded run oldest-first, prints one
+`"event":"backfill-postings"` line saying how many runs it walked, how many it
+skipped and how many records it wrote, and is safe to run again — the write it
+uses is an upsert that never touches a status a person set. Runs it skips are
+ordinary: findings that are absent or unparseable, which is every run predating
+the `runs.findings` column.
+
 **The dashboard.** Vercel deploys it from git on its own; nothing here is needed
 unless its environment changed. If it did, set the value in the project's
 Production scope and **redeploy** — Vercel does not re-inject into a running

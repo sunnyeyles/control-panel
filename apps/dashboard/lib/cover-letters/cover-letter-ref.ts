@@ -29,6 +29,17 @@
  * download route needed the same rule the moment a letter could be fetched
  * back. Two copies of a pattern that gates key construction is how one of them
  * gets relaxed alone.
+ *
+ * **The shape is stated a second time, in SQL, and that one is deliberate.**
+ * `packages/db/prisma/migrations/0005_postings/migration.sql` constrains
+ * `postings.posting_id` with `postings_posting_id_check` — the same sixteen hex
+ * characters, in a different language doing a different job. This pattern
+ * validates *untrusted input* on its way to a key segment, and stays the only
+ * copy of that; the CHECK refuses to *store* a value that could never be a key
+ * segment at all, exactly as `artifacts_object_key_check` refuses a URL where a
+ * key belongs. Neither can stand in for the other — a database cannot see a
+ * form field, and a TypeScript guard cannot see a row a backfill wrote — so the
+ * rule against a second copy of *this* check is unaffected by it.
  */
 export const POSTING_ID_PATTERN = /^[0-9a-f]{16}$/
 

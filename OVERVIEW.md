@@ -5,7 +5,8 @@ job-search brief.
 
 Each run: read the criteria → query SEEK's live listings for matching postings →
 validate the findings → compose markdown → upload to private S3 → record the
-object key and the findings in Neon.
+object key and the findings in Neon → add every posting found to the cumulative
+`postings` record.
 
 Vocabulary is in `CONTEXT.md`, and it is worth reading first — in particular
 **Job** means "a row in `jobs`, a thing that runs on a cadence" and never an
@@ -28,6 +29,7 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                        |
 | Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                              |
 | Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                                            |
+| Every Posting ever found, and its status     | `packages/db/src/postings.ts`, projected from findings by `apps/briefing-worker/src/postings.ts`, read by `apps/dashboard/lib/postings/` |
 | S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts` / `cover-letter-store.ts`, never import the AWS SDK elsewhere |
 | Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                            |
 | EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                            |
@@ -68,6 +70,10 @@ is `get_current_time` and `web_search` — `seekSearch` is deliberately not in i
 - **A run with no successful search fails.** Well-formed findings that never
   touched a live search would produce a confident brief citing postings nobody
   looked up — worse than no brief.
+- **A run never overwrites a Posting's status.** `recordPostings` upserts on
+  `(user_id, posting_id)` and its `DO UPDATE SET` list omits `status` — the only
+  column in the schema a person writes. That omission is the tracker; see
+  `packages/db/README.md` §Schema notes.
 - **New `kinds.ts` entries need a matching `object_kinds` entry in Terraform**,
   or the objects get no retention and writes 403 for want of the per-kind grant.
 - **Tracing is opt-in and never load-bearing.** `@workspace/langfuse` is a no-op
@@ -91,6 +97,7 @@ flowchart TD
     U --> V[(S3 bucket — markdown briefs)]
     V --> W[Record object key in artifacts]
     W --> K[Keep findings on the run row]
+    K --> PT[Upsert every posting into postings, statuses untouched]
     F --> CW[CloudWatch logs & metrics]
     F -.->|optional, keys permitting| LF[Langfuse trace: generate-briefing]
 ```
@@ -141,9 +148,13 @@ flowchart TD
   of it alone.
 - **Sending a cover letter.** Everything short of delivery is built, under #77.
   Drafting (#84): a Draft button on each **Posting** on `/briefings` runs the
-  **Letter Writer** and stores the result at
+  **Letter Writer** over the advertisement stored on that Posting's row —
+  `postings.payload`, re-read server-side, since the page no longer holds a
+  Run's findings to draft from — and stores the result at
   `prod/{userId}/cover-letters/{postingId}.md`, keyed on the Posting so a
-  redraft overwrites one object. Listing and downloading (#85):
+  redraft overwrites one object. The letter's key and the row's identity are the
+  same `postingId()` value, which is what keeps a stored letter attached to the
+  Posting it was written for. Listing and downloading (#85):
   `list-cover-letters.ts` pays one `HeadObject` per letter because a listing
   carries no user metadata, and `/api/cover-letters/{postingId}` hands the
   Markdown back as a file. **Letter Instructions** — a per-user row in
@@ -165,12 +176,18 @@ flowchart TD
   `tests/vercel_dashboard.tftest.hcl` asserts the exact key set, and that the
   dashboard's and the worker's grants stay disjoint.
 
-  What `/briefings` does show is what a run _found_ — the **Postings** off each
-  briefing's most recent successful **Run** via `latest-postings.ts` (#83) — and
-  a status line for the most recent Run whatever became of it, running, failed,
-  or too long in `running` to still be believed (`run-activity.ts`), which is
-  what makes **Run now** watchable. That is a status line and not a history:
-  nothing lists more than one Run per briefing and nothing can cancel one.
+  What `/briefings` does show is what the runs have _found_ — every **Posting**
+  any of this user's briefings has ever turned up, read out of the `postings`
+  table by `lib/postings/list-postings.ts` as a sorted, server-paginated table,
+  each row carrying the **Posting Status** its owner set and opening its full
+  detail in a dialog. It no longer reads one Run's `runs.findings`, so a Posting
+  the next Run does not re-find stays on the page rather than vanishing
+  overnight. Above the table, `components/briefings/briefing-strip.tsx` renders
+  one line per briefing from `run-activity.ts` — its most recent Run whatever
+  became of it, running, failed, or too long in `running` to still be believed —
+  and carries that briefing's **Run now** button, which is what makes the line
+  worth watching. That is a status line and not a history: nothing lists more
+  than one Run per briefing and nothing can cancel one.
   `latestArtifactForJob()` still has no caller outside its own tests, and the
   briefings page deliberately does not use it — it orders on run start _and_
   artifact creation, and stops being well defined once a run writes more than

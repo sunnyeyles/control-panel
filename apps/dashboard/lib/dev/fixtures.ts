@@ -8,7 +8,13 @@ import { postingId } from "@workspace/agents/posting-id"
  * stay on the barrel — they are erased.
  */
 import { computeNextRunAt } from "@workspace/db/schedule"
-import type { CoverLetterInstructions, Job, Run } from "@workspace/db/types"
+import type {
+  CoverLetterInstructions,
+  Job,
+  Posting as PostingRow,
+  PostingStatus,
+  Run,
+} from "@workspace/db/types"
 import { contentTypeFor } from "@workspace/user-storage/kinds"
 import type { NewCoverLetter, NewResume } from "@workspace/user-storage"
 
@@ -177,6 +183,147 @@ export function devRuns(): Run[] {
       findings: { postings: [CORVUS] },
     },
   ]
+}
+
+/**
+ * The rows the Postings table reads: every advertisement these briefings have
+ * "ever" found, deduped, with a status on each.
+ *
+ * Fresh rows per call, for the reason {@link devJobs} gives — the fake Prisma
+ * mutates what it is seeded with, so a shared array would leak one status
+ * change into the next seed.
+ *
+ * Three properties this fixture exists to make checkable by hand, none of which
+ * a smaller set would exercise:
+ *
+ * - **Thirty rows, so the table has two pages.** Pagination is a branch, and
+ *   the file's philosophy is that fixtures are picked to exercise branches. At
+ *   `PAGE_SIZE = 25` the second page holds five rows, which also proves the
+ *   last page is not padded.
+ * - **Every sort visibly differs.** Titles and companies run down the alphabet
+ *   in the opposite order to the dates, and `firstSeenAt` and `lastSeenAt` are
+ *   spread over different spans, so "sorted by title" and "sorted by last seen"
+ *   cannot be mistaken for each other on screen.
+ * - **One row per status**, on the three hand-written Postings, so the status
+ *   column is not thirty copies of `new`.
+ * - **Both Briefings are represented, on both pages.** The Run a row names is
+ *   what the detail dialog resolves into a Briefing name, so rows alternate
+ *   between the two — see the loop below.
+ *
+ * ⚠️ **The ids are derived by `postingId()`, never written out.** The seeded
+ * cover letter is keyed by {@link DEV_DRAFTED_POSTING_ID}, which is derived the
+ * same way from the same Posting — hard-coding either would let the letter and
+ * the row it belongs to drift apart, and the drafted state on the row is
+ * exactly what that match draws.
+ */
+export function devPostings(): PostingRow[] {
+  const seeded = [
+    { posting: MERIDIAN, status: "applied", runId: DEV_RUN_ACTIVE_ID },
+    { posting: NORTHWIND, status: "new", runId: DEV_RUN_ACTIVE_ID },
+    { posting: CORVUS, status: "rejected", runId: DEV_RUN_PAUSED_ID },
+  ] as const satisfies readonly {
+    posting: Posting
+    status: PostingStatus
+    runId: string
+  }[]
+
+  const rows = seeded.map((row, index) =>
+    devPosting(index, row.posting, row.status, row.runId)
+  )
+
+  /**
+   * The rest, generated, alternating between the two Runs.
+   *
+   * ⚠️ **Which Run a row names is no longer only bookkeeping.** The detail
+   * dialog resolves it to the Briefing that found the advertisement —
+   * `lastSeenRunId` → `runs.job_id` → `jobs.name` — so a fixture where every
+   * generated row named {@link DEV_RUN_ACTIVE_ID}, as they all once did, would
+   * put a single Briefing name on twenty-nine of the thirty rows and nothing
+   * but that name on the second page. Alternating puts both on both pages,
+   * which is what makes the point of the field — a table cumulative across
+   * Briefings — checkable by eye.
+   *
+   * It stays a lie about which Run *found* them, and a harmless one: drafting
+   * reads `postings.payload`, which every row here has, so **Draft cover
+   * letter** works on a generated row and the run id only rides along as
+   * provenance on the letter. It used to be refused as no longer in the run,
+   * because the draft action re-read the Posting out of that Run's findings and
+   * they hold two Postings.
+   */
+  for (let index = seeded.length; index < DEV_POSTING_COUNT; index++) {
+    rows.push(
+      devPosting(
+        index,
+        generatedPosting(index),
+        "new",
+        index % 2 === 0 ? DEV_RUN_ACTIVE_ID : DEV_RUN_PAUSED_ID
+      )
+    )
+  }
+
+  return rows
+}
+
+/** Two pages at `PAGE_SIZE = 25`, with a short second one. */
+const DEV_POSTING_COUNT = 30
+
+/**
+ * One row, with its sighting times derived from its position.
+ *
+ * `lastSeenAt` walks backwards in hours and `firstSeenAt` in days, so the two
+ * date sorts do not agree with each other — a fixture where they did would make
+ * a wrong `orderBy` invisible.
+ */
+function devPosting(
+  index: number,
+  posting: Posting,
+  status: PostingStatus,
+  runId: string
+): PostingRow {
+  const lastSeenAt = new Date(RAN_AT.getTime() - index * 3_600_000)
+  const firstSeenAt = new Date(
+    lastSeenAt.getTime() - ((index % 9) + 1) * 86_400_000
+  )
+
+  return {
+    id: `3f8d1b2a-0000-4000-8000-${String(2000 + index).padStart(12, "0")}`,
+    userId: DEV_USER_ID,
+    postingId: postingId(posting),
+    title: posting.title,
+    company: posting.company,
+    location: posting.location,
+    url: posting.url,
+    payload: posting,
+    status,
+    // NULL for everything nobody has moved off `new`, which is the state the
+    // worker writes and the only one it can write.
+    statusChangedAt: status === "new" ? null : RAN_AT,
+    firstSeenAt,
+    lastSeenAt,
+    firstSeenRunId: runId,
+    lastSeenRunId: runId,
+  }
+}
+
+/**
+ * A filler advertisement, distinct in every field a column sorts on.
+ *
+ * The title and company letters run *up* the alphabet as the dates run *down*,
+ * so no two sorts produce the same order.
+ */
+function generatedPosting(index: number): Posting {
+  const letter = String.fromCharCode(65 + (index % 26))
+  const number = index + 1
+
+  return {
+    title: `${letter}${number} Engineer`,
+    company: `${letter}${number} Systems`,
+    location: index % 3 === 0 ? "Remote (Australia)" : "Sydney, NSW",
+    url: `https://www.seek.com.au/job/dev-fixture-generated-${number}`,
+    summary: `A generated fixture posting, number ${number} of ${DEV_POSTING_COUNT}.`,
+    matchReason: "Generated so the table has enough rows to paginate.",
+    highlights: [`Fixture row ${number}`],
+  }
 }
 
 /**

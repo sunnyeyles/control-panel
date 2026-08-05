@@ -1,8 +1,10 @@
 # @workspace/db
 
 Postgres for **scheduling and provenance** — jobs, their runs, and pointers to
-what those runs produced. Neon behind Prisma Client, with domain helpers for the
-claim and schedule invariants that the model API cannot express alone.
+what those runs produced — plus the one record a person writes into: the
+cumulative `postings` table and the status they set on each Posting. Neon behind
+Prisma Client, with domain helpers for the claim and schedule invariants that
+the model API cannot express alone.
 
 ## The seam
 
@@ -17,6 +19,7 @@ cover-letter-instructions.ts
 jobs.ts        create / claim / due / schedule helpers
 runs.ts        finish / fail / startAdHoc / recordFindings
 artifacts.ts   record / latest helpers
+postings.ts    recordPostings / setPostingStatus — the cumulative tracker
 client.ts      createPrismaClient() — adapter + pooled URL
 prisma/        schema + Prisma Migrate history
 ```
@@ -27,7 +30,8 @@ Two rules keep the package replaceable:
    only place the `pg` adapter is wired).
 2. **Concurrency-sensitive writes are helpers, not free-form SQL at call sites.**
    `claimJob` owns the partial-index `ON CONFLICT` target; `finishRun` /
-   `failRun` own the `WHERE status = 'running'` guard.
+   `failRun` own the `WHERE status = 'running'` guard; `recordPostings` owns the
+   `DO UPDATE SET` list that decides what a Run may overwrite.
 
 ## Using it
 
@@ -138,9 +142,11 @@ Postgres:
   slots, the UTC partition day.
 - **`stores.test.ts` needs a real database** and **skips when
   `DATABASE_URL_UNPOOLED` is unset**. It asserts the claim race, unlimited
-  ad-hoc runs beside unique scheduled ones, the `object_key` CHECK, and the
-  refusal to walk a terminal run back to `running`. It migrates into a schema
-  it creates and drops, so it cannot touch data it did not write.
+  ad-hoc runs beside unique scheduled ones, the `object_key` CHECK, the refusal
+  to walk a terminal run back to `running`, and every property of the `postings`
+  upsert — above all that a status a person set survives a later Run. It
+  migrates into a schema it creates and drops, so it cannot touch data it did
+  not write.
 
 ## Schema notes worth not undoing
 
@@ -172,6 +178,31 @@ Postgres:
   the prompt built from them fences each differently — rules are followed, an
   example letter is imitated and never mined for facts — and one column could
   not express that distinction.
+- **A Posting's identity is `(user_id, posting_id)`, with no Run in it.**
+  `posting_id` is the id `postingId()` derives from the advertisement's
+  normalised URL — the same value a stored cover letter is keyed on, so the two
+  agree by construction. The same advertisement found by two Runs a week apart
+  is one row; the Runs are recorded as `first_seen_run_id` / `last_seen_run_id`,
+  which is provenance and not identity.
+- **Adding `status` to `recordPostings`' `DO UPDATE SET` list is silent data
+  loss.** `status`, `status_changed_at`, `first_seen_at` and `first_seen_run_id`
+  are absent from it deliberately. `status` is the only column in this schema a
+  person writes, and adding it "for symmetry" — or rewriting the upsert as
+  DELETE + INSERT — reverts every Posting marked `applied` the next time a Run
+  re-finds it, on a schedule, with no error. The `first_seen_*` pair answers
+  "when did this first appear", which a second sighting cannot change.
+- **The upsert's trailing `WHERE EXCLUDED.last_seen_at >= postings.last_seen_at`
+  is what makes the write order-independent**, so a backfill walking Runs
+  oldest-first can race live traffic without dragging `last_seen_at` backwards
+  or leaving `last_seen_run_id` naming a Run that is not the most recent.
+  `recordPostings` also dedupes its own batch, because Postgres raises `21000`
+  when one statement affects a row twice and two links to the same
+  advertisement in one findings list is the ordinary case.
+- **`postings.posting_id` has a CHECK, and it is not a duplicated validation.**
+  `apps/dashboard/lib/cover-letters/cover-letter-ref.ts` keeps the one copy of
+  the rule for _untrusted input_. This one says the database must not hold a
+  value that cannot be an object key segment, exactly as
+  `artifacts_object_key_check` refuses a URL.
 - **`object_key` holds an S3 key and the CHECK enforces it** — no scheme prefix,
   no leading slash.
 - **`auth_user_id` is text, nullable, unique, and not an FK to `neon_auth`.**

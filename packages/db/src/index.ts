@@ -74,6 +74,14 @@ export {
   recordArtifact,
 } from "./artifacts.ts"
 
+export {
+  POSTING_STATUSES,
+  recordPostings,
+  setPostingStatus,
+  type NewPosting,
+  type SeenPostings,
+} from "./postings.ts"
+
 export { computeNextRunAt, isValidSchedule } from "./schedule.ts"
 
 export type {
@@ -81,6 +89,9 @@ export type {
   CoverLetterInstructions,
   Job,
   JobConfig,
+  Posting,
+  PostingPayload,
+  PostingStatus,
   Run,
   RunFailure,
   RunFindings,

@@ -9,7 +9,7 @@ import type { CoverLetterStore } from "@workspace/user-storage"
  * component that passes only strings down, because a `Date` formatted in the
  * browser uses the browser's locale and timezone and React reports the
  * disagreement as a hydration mismatch rather than as the timezone bug it is.
- * Same boundary as `lib/briefings/latest-postings.ts` and
+ * Same boundary as `lib/postings/list-postings.ts` and
  * `components/documents/document-list.tsx`.
  */
 export interface CoverLetterSummary {
@@ -156,8 +156,8 @@ export async function listCoverLetters(
  * A fixed locale, because the server's default is whatever the platform
  * decides, and an explicit zone that is named in the output — UTC, because a
  * time with no zone beside it reads as local and is wrong by hours. The same
- * format `lib/briefings/latest-postings.ts` renders a Run's time in, so the two
- * lines of provenance on one page agree with each other.
+ * format `lib/postings/list-postings.ts` renders a sighting in, so the two lines
+ * of provenance on one page agree with each other.
  */
 function formatDraftedAt(date: Date): string {
   return new Intl.DateTimeFormat("en-AU", {

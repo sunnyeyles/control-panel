@@ -19,8 +19,7 @@ import {
   coverLetterSystemPrompt,
   createCoverLetterWriter,
 } from "@workspace/agents/cover-letter-writer"
-import { FindingsSchema, type Posting } from "@workspace/agents/findings"
-import { postingId } from "@workspace/agents/posting-id"
+import { PostingSchema, type Posting } from "@workspace/agents/findings"
 import { coverLetterInstructions, type PrismaClient } from "@workspace/db"
 import { createLangfuseCallback } from "@workspace/langfuse"
 import {
@@ -44,20 +43,37 @@ import { z } from "zod"
  * Three properties this module exists to hold, each of which would be invisible
  * if it were satisfied only by the current call site:
  *
- * 1. **The form carries identifiers, never a Posting.** A Posting arriving in
- *    form data would let a caller put text of their choosing into a stored
+ * 1. **The form carries one identifier, never a Posting.** A Posting arriving
+ *    in form data would let a caller put text of their choosing into a stored
  *    document written in the user's voice — and it would break *copied, never
  *    composed* at the last step of the chain that maintains it. The Posting is
- *    re-read out of the Run's stored Findings and matched by
- *    {@link postingId}. `cover-letter-actions.test.ts` submits a `posting`
- *    field and asserts it changes nothing.
- * 2. **Run ownership is checked, not assumed.** The run id arrives from a
- *    hidden field, so the Run and its Job are loaded and the Job's owner must
- *    be the caller.
+ *    re-read server-side out of the stored row's `payload` — the validated
+ *    advertisement as its producer wrote it, which nothing on the client can
+ *    write. `cover-letter-actions.test.ts` submits a `posting` field and
+ *    asserts it changes nothing.
+ * 2. **The Posting is addressed by (session user, posting id), so there is no
+ *    ownership to assume.** `(user_id, posting_id)` is the natural key of
+ *    `postings` and the user half comes from the session, so a stranger's
+ *    advertisement cannot be *named* from here rather than being named, loaded,
+ *    and then refused by a comparison somebody has to remember to write. There
+ *    is no Run in the path at all, and no window between a check and a read.
  * 3. **The storage key is built from the session's user id.** Nothing from the
  *    form reaches the `userId` segment, so `assertSegment` in
  *    `@workspace/user-storage` is a second line of defence rather than the only
  *    one.
+ *
+ * ⚠️ **The Posting is read from `postings.payload`, never from `runs.findings`,
+ * and the smaller alternative was rejected on purpose.** Threading the row's
+ * stored run id through the hidden field this action used to take would have
+ * worked and been a smaller change. But recording Postings and recording
+ * Findings are two independent non-fatal steps, so a Run can succeed with its
+ * Postings recorded and its `findings` left NULL — the row would then name a
+ * Run holding nothing to read back, and drafting would refuse an advertisement
+ * plainly on the screen in front of the user. Reading the payload removes that
+ * failure mode, removes the Run from the client surface entirely, and is what
+ * makes property 2 structural rather than a comparison bolted beside a query.
+ * The Run survives as provenance on the stored letter, where "which Run found
+ * this" is still worth knowing and is still no part of any key.
  *
  * The candidate's saved instructions extend that first property rather than
  * qualifying it. They are read from the database, keyed on the session's user
@@ -73,25 +89,34 @@ import { z } from "zod"
  */
 
 /**
- * One message for "no such run" and "someone else's run".
+ * One message for "no such Posting" and "someone else's Posting".
  *
- * Distinct messages would turn a hidden field that takes a uuid into an oracle
- * for whether another user's Run exists — the same reasoning `lib/jobs/
- * job-actions.ts` gives for its `NOT_FOUND`.
+ * The two are indistinguishable to this action by construction — the lookup
+ * names the caller as half its key, so a stranger's advertisement comes back as
+ * the same absent row — and that identity is load-bearing rather than tidy.
+ * Posting ids are derived from an advertisement's URL, so anybody reading the
+ * same job board can produce one; two messages would turn that into an oracle
+ * for whether a stranger has been shown it. `lib/postings/posting-actions.ts`
+ * gives the same reasoning for its own copy, and the two are stated separately
+ * because they guard two independent submissions rather than one shared check.
  */
-export const RUN_NOT_FOUND = "That briefing run could not be found."
+export const POSTING_NOT_FOUND = "That posting could not be found."
 
-/** Reachable only by posting the form directly; the button always sends both. */
+/** Reachable only by posting a form directly; the buttons always send it. */
 const BAD_REQUEST = "That posting could not be identified."
 
 /**
- * The Posting was not in that Run's Findings.
+ * The row is there and the Posting stored on it will not parse.
  *
- * Ordinary rather than exotic: a Run's Findings are replaced by the next Run,
- * and a page open in another tab still holds the previous set.
+ * `lib/postings/list-postings.ts` degrades such a row to its projected columns
+ * and renders it anyway, so a Posting in this state is on the page and looks
+ * ordinary. Here there is nothing to degrade to: `payload` *is* what the letter
+ * would be written from, and `title`/`company`/`location`/`url` are a
+ * projection for a table rather than an advertisement. Refuse, and say which
+ * half is missing rather than reporting it as a Posting nobody ever found.
  */
-const POSTING_GONE =
-  "That posting is no longer in this briefing's latest run. Refresh the page and try again."
+const POSTING_UNREADABLE =
+  "The details this posting was found with could not be read, so there is nothing to write a letter from."
 
 /**
  * The Posting id shape, from `cover-letter-ref.ts`.
@@ -100,9 +125,16 @@ const POSTING_GONE =
  * for why it is restated at all rather than exported from `@workspace/agents`
  * moved with it. One copy, because it is what makes every value reaching the
  * store a legal key segment by construction.
+ *
+ * ⚠️ **This is now {@link saveSchema} without its `markdown`, and that is the
+ * two actions agreeing rather than a duplication to collapse.** A letter is
+ * addressed by `(user, Posting)` however it came to be written, so each action
+ * asks for exactly one identifier. Sharing one schema would tie what a draft
+ * accepts to what an edit accepts, which is the pair most worth leaving free to
+ * diverge: one of them takes letter text from the caller, and the other must
+ * never.
  */
 const draftSchema = z.object({
-  runId: z.uuid(),
   postingId: z.string().regex(POSTING_ID_PATTERN),
 })
 
@@ -210,51 +242,56 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     const caller = await requireUser(deps.getUser, "cover-letters")
     if (!caller.ok) return fail(caller.message)
 
-    // ⚠️ **Only these two fields are read, and that is the security property.**
+    // ⚠️ **Only this one field is read, and that is the security property.**
     // `formData` may well carry a `posting` — the test suite submits one — and
     // nothing here looks at it. A Posting body accepted from a form would be
     // arbitrary text stored in a document written in the user's voice.
     const parsed = draftSchema.safeParse({
-      runId: formData.get("runId"),
       postingId: formData.get("postingId"),
     })
 
     if (!parsed.success) return fail(BAD_REQUEST)
 
-    let run
+    let row
     try {
-      run = await deps.getPrisma().run.findUnique({
-        where: { id: parsed.data.runId },
-        select: { id: true, findings: true, job: { select: { userId: true } } },
+      // ⚠️ **`caller.userId` here is not a shortcut past an ownership check —
+      // it is half the natural key.** A Posting is not addressable without
+      // naming a user, so this `where` *is* the check rather than a query that
+      // skipped one: there is no loaded row whose owner a later line could
+      // forget to compare, and nothing can change between the check and the
+      // read because they are the same statement. Nothing from the form reaches
+      // the `userId` half.
+      row = await deps.getPrisma().posting.findUnique({
+        where: {
+          userId_postingId: {
+            userId: caller.userId,
+            postingId: parsed.data.postingId,
+          },
+        },
+        select: { payload: true, lastSeenRunId: true },
       })
     } catch (error) {
-      console.error("cover-letters: could not load the run", error)
+      console.error("cover-letters: could not load the posting", error)
       return fail("Something went wrong.")
     }
 
-    // **Ownership, explicitly.** The run id came from a hidden field, so the
-    // Job it hangs off is loaded and its owner compared to the caller. There is
-    // no `where: { job: { userId } }` shortcut here on purpose: the comparison
-    // is the thing being asserted, and a test that seeds another user's Run
-    // needs it to be visible rather than folded into a query.
-    if (!run || run.job.userId !== caller.userId) return fail(RUN_NOT_FOUND)
+    if (!row) return fail(POSTING_NOT_FOUND)
 
-    const findings = FindingsSchema.safeParse(run.findings)
+    // The Posting, re-read server-side off the row a Run wrote. This is the
+    // line the first property above is about: `payload` is the validated
+    // advertisement its producer reported, and no submission can put anything
+    // there.
+    const stored = PostingSchema.safeParse(row.payload)
 
-    if (!findings.success) {
-      // Covers both "the Run kept none" and "what it kept does not parse".
-      // Neither is actionable by the user beyond re-running the briefing.
-      console.error("cover-letters: findings are unreadable", run.id)
-      return fail(POSTING_GONE)
+    if (!stored.success) {
+      console.error(
+        "cover-letters: the stored posting is unreadable",
+        parsed.data.postingId
+      )
+      return fail(POSTING_UNREADABLE)
     }
 
-    // The Posting, re-read server-side and matched by identifier. This is the
-    // line the first property above is about.
-    const posting: Posting | undefined = findings.data.postings.find(
-      (candidate) => postingId(candidate) === parsed.data.postingId
-    )
-
-    if (!posting) return fail(POSTING_GONE)
+    const posting: Posting = stored.data
 
     // Before the writer is constructed, so a user with nothing to write from
     // spends nothing. Since #86 this is also where a PDF or a DOCX is parsed —
@@ -343,7 +380,11 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         // value is model-copied text and is stripped to what an HTTP header can
         // carry by the store; see `toMetadataRecord`.
         provenance: {
-          runId: run.id,
+          // The Run that most recently reported this advertisement, carried
+          // off the row rather than looked up. Provenance exactly as it was
+          // when this action read a Run directly — "which Run found this" is
+          // worth keeping, and it is still no part of the key.
+          runId: row.lastSeenRunId,
           title: posting.title,
           company: posting.company,
           url: posting.url,
@@ -366,8 +407,11 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
    * Save an edited letter over the stored one.
    *
    * The counterpart to {@link draftCoverLetter}, and deliberately a different
-   * shape: no Run, no Findings, no model. A letter is addressed by
-   * `(user, Posting)` and the caller is editing something that already exists,
+   * shape: **no model.** It read "no Run, no Findings, no model" until drafting
+   * moved to the stored Posting's `payload` — the draft action names neither a
+   * Run nor Findings now either, so the model call is the one of the three
+   * still telling them apart. A letter is addressed by `(user, Posting)` and
+   * the caller is editing something that already exists,
    * so the Run that found the Posting is neither needed nor asked for — it is
    * already recorded in the letter's own provenance, and that is where it stays.
    *

@@ -1,11 +1,13 @@
 import {
   devCoverLetterInstructions,
   devJobs,
+  devPostings,
   devRuns,
 } from "@/lib/dev/fixtures"
 import type {
   CoverLetterInstructions,
   Job,
+  Posting,
   PrismaClient,
   Run,
 } from "@workspace/db"
@@ -15,9 +17,9 @@ import type {
  * the queries this app makes and refuses every other one by name.
  *
  * **It filters and orders for real rather than returning canned rows**, so the
- * user-scoping in `latest-postings.ts` and `job-actions.ts` stays visible to
- * anyone editing around it. Follows the `FakeDb` in
- * `lib/briefings/latest-postings.test.ts`.
+ * user-scoping in `lib/postings/list-postings.ts` and `job-actions.ts` stays
+ * visible to anyone editing around it. Follows the `FakeDb` in
+ * `lib/postings/list-postings.test.ts`.
  *
  * **Writes survive the process, not a restart.** A pause has to outlive the
  * redirect after it or the form looks broken; a restart restoring the fixtures
@@ -39,7 +41,6 @@ export function createDevPrisma(): PrismaClient {
         db.updateJob(query.where.id, query.data),
     },
     run: {
-      findUnique: async (query: ById) => db.findRun(query.where.id),
       findFirst: async (query: RunningRunQuery) => db.findRunningRun(query),
       create: async (query: { data: RunCreateData }) =>
         db.createRun(query.data),
@@ -49,6 +50,21 @@ export function createDevPrisma(): PrismaClient {
         where: { id: string; status?: string }
         data: Partial<Run>
       }) => db.updateRunsGuarded(query.where, query.data),
+    },
+    /**
+     * The Postings table, which is the one delegate here that is asked to
+     * **order, page and project for real** — see {@link DevDb.findManyPostings}
+     * and {@link DevDb.projectPosting}.
+     */
+    posting: {
+      count: async (query: PostingsForUser) => db.countPostings(query.where),
+      findMany: async (query: FindManyPostings) => db.findManyPostings(query),
+      findUnique: async (query: ByUserAndPostingId) =>
+        db.findPosting(query.where.userId_postingId),
+      updateMany: async (query: {
+        where: { userId: string; postingId: string }
+        data: Partial<Posting>
+      }) => db.updatePostings(query.where, query.data),
     },
     coverLetterInstructions: {
       findUnique: async (query: ByUserId) =>
@@ -86,12 +102,53 @@ interface ById {
 interface FindManyJobs {
   where: { userId: string }
   orderBy?: unknown
-  select?: {
-    runs?: {
-      where: { status: string }
-      take?: number
-    }
-  }
+}
+
+/**
+ * The whole of the row scoping the table applies, and the whole of what the
+ * count is asked for. A Posting is not addressable without naming a user.
+ */
+interface PostingsForUser {
+  where: { userId: string }
+}
+
+/**
+ * What `listPostings()` asks for.
+ *
+ * ⚠️ **`select` is applied for real, and it used not to be.** Answering the
+ * whole row was defensible while every selected field was a column: the answer
+ * was a superset of the question, and no caller could tell. It stopped being
+ * defensible the moment the `select` named a **relation** — a whole `postings`
+ * row does not carry `lastSeenRun`, so ignoring the `select` handed the page an
+ * `undefined` where a Briefing's name belonged and the dialog rendered a blank.
+ * Silently, in the one environment the dialog is built in. See
+ * {@link DevDb.projectPosting}, which throws on a shape it cannot serve rather
+ * than repeating that.
+ */
+interface FindManyPostings extends PostingsForUser {
+  orderBy?: PostingOrderBy[]
+  skip?: number
+  take?: number
+  select?: PostingSelect
+}
+
+/**
+ * A `select` as this fake reads it: `true` for a column of `postings`, or a
+ * nested `select` for one of its relations.
+ */
+type PostingSelect = Record<string, boolean | NestedSelect>
+
+/** The relation half of a `select`, left `unknown` inside so it is checked. */
+interface NestedSelect {
+  select?: Record<string, unknown>
+}
+
+/** One `{ field: direction }` clause, as Prisma spells it. */
+type PostingOrderBy = Record<string, "asc" | "desc">
+
+/** How the compound unique is addressed — the shape Prisma generates for it. */
+interface ByUserAndPostingId {
+  where: { userId_postingId: { userId: string; postingId: string } }
 }
 
 /** How the one row-per-user table is addressed: its owner *is* its primary key. */
@@ -135,59 +192,183 @@ class DevDb {
   private readonly runs: Run[] = devRuns()
   private readonly coverLetterInstructions: CoverLetterInstructions[] =
     devCoverLetterInstructions()
+  private readonly postings: Posting[] = devPostings()
   private nextId = 1
 
   /**
-   * Both shapes the dashboard asks for, discriminated by `select.runs` — the
-   * callers do not know they are talking to a fake.
+   * The whole rows, which is the only shape the dashboard asks for — both call
+   * sites (`/briefings` and the settings section) select nothing.
    *
-   * `orderBy` is not read; every call site wants `createdAt` descending. The one
-   * place this fake lies rather than throwing — cheap to fix if that changes.
+   * It used to answer a second shape too, `select: { runs: … }`, for the
+   * deleted `lib/briefings/latest-postings.ts`, which read one Run's findings
+   * to build the page. Nothing asks that now, so the branch is gone rather than
+   * left answering a question nobody puts — and if a caller starts asking
+   * again, {@link guard} is not what catches it: `select` would be accepted and
+   * silently ignored, so the branch has to come back with the caller.
+   *
+   * `orderBy` is not read; every call site wants `createdAt` descending, which
+   * is what this returns. The one place this fake lies rather than throwing —
+   * cheap to fix if that changes. {@link findManyPostings} is deliberately not
+   * like this: its order is chosen from the URL, so ignoring it there would be
+   * a wrong-order bug rather than a shortcut.
    */
-  findManyJobs(query: FindManyJobs): unknown[] {
-    const mine = this.jobs
+  findManyJobs(query: FindManyJobs): Job[] {
+    return this.jobs
       .filter((job) => job.userId === query.where.userId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+  }
 
-    const runsSelect = query.select?.runs
-    if (!runsSelect) return mine
+  countPostings(where: { userId: string }): number {
+    return this.mine(where.userId).length
+  }
 
-    return mine.map((job) => ({
-      id: job.id,
-      name: job.name,
-      runs: this.runs
-        .filter(
-          (run) =>
-            run.jobId === job.id && run.status === runsSelect.where.status
-        )
-        .sort(byStartedAtThenIdDesc)
-        .slice(0, runsSelect.take ?? this.runs.length)
-        .map((run) => ({
-          id: run.id,
-          startedAt: run.startedAt,
-          finishedAt: run.finishedAt,
-          findings: run.findings,
-        })),
-    }))
+  /**
+   * ⚠️ **`orderBy` is honoured here, unlike in {@link findManyJobs}.**
+   *
+   * That one may ignore it because every caller wants the same order. This one
+   * may not: the columns are sortable, the order is chosen from the URL, and a
+   * fake that ignored it would render the table in one fixed order under
+   * `DEV_AUTH_BYPASS` — silently, correctly-looking, and wrong — in exactly the
+   * environment the table is built in. `skip` and `take` are honoured for the
+   * same reason: paging that did nothing would make every page identical.
+   *
+   * ⚠️ **`select` is honoured too, relations included** — see
+   * {@link projectPosting}. It was ignored until the table started asking which
+   * Briefing found a Posting, at which point ignoring it stopped being a
+   * harmless superset and became a blank in the dialog.
+   */
+  findManyPostings(query: FindManyPostings): unknown[] {
+    const ordered = sortPostings(
+      this.mine(query.where.userId),
+      query.orderBy ?? []
+    )
+    const from = query.skip ?? 0
+
+    const page = ordered.slice(
+      from,
+      query.take === undefined ? undefined : from + query.take
+    )
+
+    const select = query.select
+    if (select === undefined) return page
+
+    return page.map((row) => this.projectPosting(row, select))
+  }
+
+  /**
+   * One row as the `select` asked for it — columns copied across, relations
+   * resolved against the other fixtures.
+   *
+   * ⚠️ **Every branch here either answers or throws; none returns
+   * `undefined`.** That is the whole file's principle applied where the
+   * alternative is invisible: a projection that quietly skipped a field it did
+   * not understand would render a missing Briefing exactly like a Briefing
+   * whose name is blank, and the page would look like it worked.
+   *
+   * A query carrying no `select` at all is not a shape to handle here —
+   * {@link findManyPostings} answers those with whole rows, which is what
+   * Prisma does too.
+   */
+  private projectPosting(
+    row: Posting,
+    select: PostingSelect
+  ): Record<string, unknown> {
+    const projected: Record<string, unknown> = {}
+
+    for (const [field, wanted] of Object.entries(select)) {
+      if (wanted === false) continue
+
+      if (wanted === true) {
+        if (!(field in row)) {
+          throw new DevPrismaError(
+            `prisma.posting.findMany select.${field}`,
+            "That column is not on a Posting. Add it to lib/dev/fixtures.ts, or fix the select in lib/postings/list-postings.ts."
+          )
+        }
+
+        projected[field] = row[field as keyof Posting]
+        continue
+      }
+
+      if (field === "lastSeenRun" && isBriefingNameSelect(wanted)) {
+        projected[field] = { job: { name: this.briefingThatFound(row) } }
+        continue
+      }
+
+      throw new DevPrismaError(
+        `prisma.posting.findMany select.${field}`,
+        "The only relation understood here is `lastSeenRun: { select: { job: { select: { name: true } } } }`. Teach projectPosting() in this file the new shape — leaving it out would answer undefined and render a blank."
+      )
+    }
+
+    return projected
+  }
+
+  /**
+   * The name of the Briefing that most recently found a Posting, joined out of
+   * the fixtures rather than stored on the row: `lastSeenRunId` → `runs.job_id`
+   * → `jobs.name`, which is the join the real query makes.
+   *
+   * Joining beats denormalising it onto the fixture rows, for the reason
+   * {@link devPostings} derives its ids rather than writing them out: a name
+   * copied onto a Posting could disagree with the Briefing that fixture claims
+   * to have come from, and disagree silently.
+   *
+   * ⚠️ **A dangling reference throws.** Both foreign keys are NOT NULL with
+   * `ON DELETE RESTRICT`, so this is not a state the page has to survive — it
+   * is a fixture that has drifted, and it should say so by name here rather
+   * than reach `list-postings.ts` as an unnamed Briefing.
+   */
+  private briefingThatFound(row: Posting): string {
+    const run = this.runs.find(
+      (candidate) => candidate.id === row.lastSeenRunId
+    )
+    const job = run ? this.findJob(run.jobId) : null
+
+    if (!job) {
+      throw new DevPrismaError(
+        "prisma.posting.findMany select.lastSeenRun",
+        `No run ${row.lastSeenRunId} with a briefing behind it. Every posting in lib/dev/fixtures.ts must name a run from devRuns() whose job is in devJobs() — the foreign keys make that so in Postgres.`
+      )
+    }
+
+    return job.name
+  }
+
+  /**
+   * Addressed by the natural key, never by `postings.id`. Both halves are in
+   * the `where`, so there is no ownership left to check separately — which is
+   * the property `setPostingStatus()` in `@workspace/db` rests on.
+   */
+  findPosting(key: { userId: string; postingId: string }): Posting | null {
+    return (
+      this.postings.find(
+        (row) => row.userId === key.userId && row.postingId === key.postingId
+      ) ?? null
+    )
+  }
+
+  /**
+   * The row count as the answer, which is how `setPostingStatus()` distinguishes
+   * "no such Posting for this user" from a write it made.
+   */
+  updatePostings(
+    where: { userId: string; postingId: string },
+    data: Partial<Posting>
+  ): { count: number } {
+    const row = this.findPosting(where)
+    if (!row) return { count: 0 }
+
+    Object.assign(row, data)
+    return { count: 1 }
+  }
+
+  private mine(userId: string): Posting[] {
+    return this.postings.filter((row) => row.userId === userId)
   }
 
   findJob(id: string): Job | null {
     return this.jobs.find((job) => job.id === id) ?? null
-  }
-
-  /**
-   * With its `job` relation attached: `cover-letter-actions.ts` compares the
-   * owning Job's `userId` to the caller's, so dropping it would make that
-   * comparison read `undefined.userId`.
-   */
-  findRun(id: string): (Run & { job: { userId: string } }) | null {
-    const run = this.runs.find((candidate) => candidate.id === id)
-    if (!run) return null
-
-    const job = this.findJob(run.jobId)
-    if (!job) return null
-
-    return { ...run, job: { userId: job.userId } }
   }
 
   /** The trigger's one-run-at-a-time guard, filtering for real. */
@@ -396,6 +577,82 @@ class DevDb {
       failure: run.failure,
     }))
   }
+}
+
+/**
+ * Every `orderBy` clause applied in turn, first difference winning.
+ *
+ * The tie-break clause `list-postings.ts` appends is what makes a page boundary
+ * stable, so it has to be applied here too — a fake that stopped at the first
+ * clause would hide exactly the bug that tie-break exists to prevent.
+ */
+function sortPostings(rows: Posting[], orderBy: PostingOrderBy[]): Posting[] {
+  return [...rows].sort((left, right) => {
+    for (const clause of orderBy) {
+      for (const [field, direction] of Object.entries(clause)) {
+        const compared = comparePostingField(left, right, field)
+        if (compared !== 0) return direction === "desc" ? -compared : compared
+      }
+    }
+
+    return 0
+  })
+}
+
+/**
+ * Throws on a field it cannot order by, rather than answering `0`.
+ *
+ * The whole file's principle, applied to the one place where the alternative is
+ * invisible: a comparator that shrugged would leave the rows in insertion order
+ * and look like a table that had been sorted.
+ */
+function comparePostingField(
+  left: Posting,
+  right: Posting,
+  field: string
+): number {
+  if (!(field in left)) {
+    throw new DevPrismaError(
+      `prisma.posting.findMany orderBy.${field}`,
+      "That column is not on a Posting. Add it to lib/dev/fixtures.ts, or fix the orderBy in lib/postings/list-postings.ts."
+    )
+  }
+
+  const a = left[field as keyof Posting]
+  const b = right[field as keyof Posting]
+
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
+  if (typeof a === "string" && typeof b === "string") return a.localeCompare(b)
+
+  throw new DevPrismaError(
+    `prisma.posting.findMany orderBy.${field}`,
+    `Only text and timestamp columns can be ordered by here, and ${field} is neither.`
+  )
+}
+
+/**
+ * Exactly `{ select: { job: { select: { name: true } } } }`, and nothing wider.
+ *
+ * Matched by shape rather than merely by the key `lastSeenRun`, in the spirit of
+ * {@link DevDb.executeRaw}: a caller that starts asking the relation for a
+ * second field gets a named refusal here, instead of a row missing whichever
+ * field this fake never learned to fill in.
+ */
+function isBriefingNameSelect(wanted: NestedSelect): boolean {
+  const runSelect = wanted.select
+
+  if (!isPlainObject(runSelect) || Object.keys(runSelect).length !== 1) {
+    return false
+  }
+
+  const job = runSelect.job
+  if (!isPlainObject(job) || !isPlainObject(job.select)) return false
+
+  const fields = Object.entries(job.select)
+
+  return (
+    fields.length === 1 && fields[0]?.[0] === "name" && fields[0]?.[1] === true
+  )
 }
 
 function byStartedAtThenIdDesc(a: Run, b: Run): number {

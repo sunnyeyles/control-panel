@@ -9,6 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "backfill:postings": "tsx ./src/scripts/backfill-postings.ts",
     "build": "node build.mjs",
     "clean": "rm -rf dist .turbo lambda.zip",
     "lint": "eslint",

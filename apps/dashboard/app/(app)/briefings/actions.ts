@@ -6,6 +6,7 @@ import { getBriefingInvoker } from "@/lib/briefing-runs/invoke-worker"
 import { createRunActions } from "@/lib/briefing-runs/run-actions"
 import { createCoverLetterActions } from "@/lib/cover-letters/cover-letter-actions"
 import { getPrisma } from "@/lib/db"
+import { createPostingActions } from "@/lib/postings/posting-actions"
 import { getCoverLetterStore, getResumeStore } from "@/lib/storage"
 import { refresh } from "next/cache"
 
@@ -36,6 +37,11 @@ const runActions = createRunActions({
   getUser: getCurrentUser,
   getPrisma,
   getInvoker: getBriefingInvoker,
+})
+
+const postingActions = createPostingActions({
+  getUser: getCurrentUser,
+  getPrisma,
 })
 
 /**
@@ -93,6 +99,30 @@ export async function saveCoverLetterAction(
   formData: FormData
 ): Promise<ActionState> {
   const result = await actions.saveCoverLetter(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Set where one application stands.
+ *
+ * `refresh()` on success for the reason the draft above gives, with one extra
+ * consequence worth naming: `/briefings` is `force-dynamic` and
+ * `staleTimes.dynamic` lets the client router reuse the segment for 30 seconds,
+ * so a status set in *another* tab can look stale there for that long. This call
+ * covers the tab that made the change, which is the one whose user is watching.
+ *
+ * The select is optimistic, so what this refresh actually settles is everything
+ * the new status feeds that the control does not hold itself — the `status`
+ * sort order, and any later reader of the row.
+ */
+export async function setPostingStatusAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await postingActions.setPostingStatus(state, formData)
 
   if (result.status === "success") refresh()
 

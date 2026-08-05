@@ -3,8 +3,8 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
-import type { Findings } from "@workspace/agents"
-import type { Artifact, ClaimedSlot, DueJob } from "@workspace/db"
+import { postingId, type Findings } from "@workspace/agents"
+import type { Artifact, ClaimedSlot, DueJob, NewPosting } from "@workspace/db"
 import type { BriefStore, NewBrief, StoredBrief } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -114,14 +114,17 @@ function writerReturning(markdown: string) {
 let briefs: BriefStore
 let recordArtifact: (runId: string, objectKey: string) => Promise<Artifact>
 let recordFindings: (runId: string, findings: Findings) => Promise<void>
+let recordPostings: (runId: string, postings: NewPosting[]) => Promise<void>
 let puts: NewBrief[]
 let recorded: Array<{ runId: string; objectKey: string }>
 let kept: Array<{ runId: string; findings: Findings }>
+let tracked: Array<{ runId: string; postings: NewPosting[] }>
 
 beforeEach(() => {
   puts = []
   recorded = []
   kept = []
+  tracked = []
   streamOptions.length = 0
   // Restored first: spying on an already-spied method hands back the existing
   // spy, whose call log would otherwise accumulate across tests.
@@ -159,6 +162,13 @@ beforeEach(() => {
   recordFindings = async (runId: string, findings: Findings): Promise<void> => {
     kept.push({ runId, findings })
   }
+
+  recordPostings = async (
+    runId: string,
+    postings: NewPosting[]
+  ): Promise<void> => {
+    tracked.push({ runId, postings })
+  }
 })
 
 function run(overrides: Partial<Parameters<typeof runBriefing>[0]> = {}) {
@@ -168,6 +178,7 @@ function run(overrides: Partial<Parameters<typeof runBriefing>[0]> = {}) {
     briefs,
     recordArtifact,
     recordFindings,
+    recordPostings,
     createScout: scoutReturning(JSON.stringify(FINDINGS)),
     createWriter: writerReturning("# Roles for you\n\nOne match."),
     ...overrides,
@@ -301,6 +312,97 @@ describe("runBriefing", () => {
             event.step === "findings"
         )
       ).toMatchObject({ detail: "not recorded — the runs row is gone" })
+      expect(events.at(-1)).toMatchObject({
+        type: "run",
+        phase: "end",
+        outcome: "success",
+      })
+    })
+  })
+
+  /**
+   * The cumulative record — the one a Posting, and the status a person set on
+   * it, outlives an individual run through. The trade is the findings' trade,
+   * one step later: the brief is the product, so losing the accessory record
+   * costs a warning rather than the run.
+   */
+  describe("postings", () => {
+    it("records what the scout found, attributed to the run", async () => {
+      const report = await run()
+
+      expect(tracked).toEqual([
+        {
+          runId: SLOT.runId,
+          postings: [
+            {
+              // The id the agents package derives, not one this file invents.
+              postingId: postingId({ url: "https://example.com/jobs/1" }),
+              title: "Senior Backend Engineer",
+              company: "Acme",
+              location: "Sydney",
+              url: "https://example.com/jobs/1",
+              payload: FINDINGS.postings[0],
+            },
+          ],
+        },
+      ])
+      expect(report.warnings).toBeUndefined()
+    })
+
+    it("succeeds with a warning when they cannot be recorded", async () => {
+      const report = await run({
+        recordPostings: async () => {
+          throw new Error("the postings table is gone")
+        },
+      })
+
+      // The brief exists, is recorded, and the findings were kept — so the run
+      // succeeded. The loss is carried as a structured warning, which `runTick`
+      // passes to `finishRun`: `succeeded` with a non-empty `failure`.
+      expect(report.outcome).toBe("success")
+      expect(recorded).toHaveLength(1)
+      expect(kept).toHaveLength(1)
+      expect(report.warnings).toEqual({
+        postings: { message: "the postings table is gone" },
+      })
+    })
+
+    it("carries both losses when neither record could be written", async () => {
+      const report = await run({
+        recordFindings: async () => {
+          throw new Error("the runs row is gone")
+        },
+        recordPostings: async () => {
+          throw new Error("the postings table is gone")
+        },
+      })
+
+      // Two independent writes, so one warning must not overwrite the other.
+      expect(report.outcome).toBe("success")
+      expect(report.warnings).toEqual({
+        findings: { message: "the runs row is gone" },
+        postings: { message: "the postings table is gone" },
+      })
+    })
+
+    it("reports the failed write as a step that still ended", async () => {
+      const events: TraceEvent[] = []
+
+      await run({
+        trace: (event) => events.push(event),
+        recordPostings: async () => {
+          throw new Error("the postings table is gone")
+        },
+      })
+
+      expect(
+        events.find(
+          (event) =>
+            event.type === "step" &&
+            event.phase === "end" &&
+            event.step === "postings"
+        )
+      ).toMatchObject({ detail: "not recorded — the postings table is gone" })
       expect(events.at(-1)).toMatchObject({
         type: "run",
         phase: "end",
@@ -488,6 +590,7 @@ describe("runBriefing", () => {
         "upload",
         "record",
         "findings",
+        "postings",
       ])
     })
 

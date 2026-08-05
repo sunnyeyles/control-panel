@@ -20,14 +20,19 @@ import {
   latestArtifactForJob,
   latestRunPerJob,
   pauseJob,
+  POSTING_STATUSES,
   recordArtifact,
+  recordPostings,
   recordRunFindings,
   resumeJob,
   runningRunForJob,
   saveCoverLetterInstructions,
+  setPostingStatus,
   startAdHocRun,
   updateJobSchedule,
   type DueJob,
+  type NewPosting,
+  type PostingStatus,
   type PrismaClient,
 } from "./index.ts"
 
@@ -441,6 +446,277 @@ describeWithDatabase("against a real database", () => {
       expect((await latestArtifactForJob(prisma, job.id))?.objectKey).toBe(
         latestKey
       )
+    })
+  })
+
+  describe("postings", () => {
+    /**
+     * One briefing to hang the fixture Runs off. A Posting names a Run for
+     * provenance, so every case here needs at least one — but which briefing
+     * found it is not part of its identity, so one job serves them all.
+     */
+    let postingsJobId: string
+
+    beforeAll(async () => {
+      const job = await createJob(prisma, {
+        userId,
+        name: "postings-fixture",
+        scheduleCron: "0 9 * * *",
+      })
+      postingsJobId = job.id
+    })
+
+    async function aRun(): Promise<string> {
+      return (await startAdHocRun(prisma, postingsJobId)).id
+    }
+
+    /** Sixteen lowercase hex characters — the shape `postingId()` produces. */
+    function derivedId(): string {
+      return randomUUID().replaceAll("-", "").slice(0, 16)
+    }
+
+    function aPosting(overrides: Partial<NewPosting> = {}): NewPosting {
+      return {
+        postingId: derivedId(),
+        title: "Senior Backend Engineer",
+        company: "Example Pty Ltd",
+        location: "Melbourne VIC",
+        url: "https://example.com/jobs/1",
+        payload: {
+          highlights: ["fully remote"],
+          matchReason: "Go and Postgres",
+        },
+        ...overrides,
+      }
+    }
+
+    const FIRST_SIGHTING = new Date("2026-08-01T09:00:00.000Z")
+    const SECOND_SIGHTING = new Date("2026-08-02T09:00:00.000Z")
+
+    async function readBack(postingId: string) {
+      return prisma.posting.findFirst({ where: { userId, postingId } })
+    }
+
+    it("accepts each of the three statuses and refuses a fourth", async () => {
+      const runId = await aRun()
+      const posting = aPosting()
+      await recordPostings(prisma, {
+        userId,
+        runId,
+        seenAt: FIRST_SIGHTING,
+        postings: [posting],
+      })
+
+      for (const status of POSTING_STATUSES) {
+        expect(
+          await setPostingStatus(prisma, userId, posting.postingId, status)
+        ).toBe(true)
+      }
+
+      // The compiler forbids a fourth, so the cast is what makes this a test of
+      // the CHECK rather than of the type.
+      const fourth = "archived" as string as PostingStatus
+
+      await expect(
+        setPostingStatus(prisma, userId, posting.postingId, fourth)
+      ).rejects.toThrow()
+
+      expect((await readBack(posting.postingId))?.status).toBe("rejected")
+    })
+
+    it("refuses an id that is not the shape a derived posting id takes", async () => {
+      const runId = await aRun()
+
+      // The column is an object key segment — a letter lives at
+      // `…/cover-letters/{posting_id}.md` — so a value that cannot be one must
+      // not be storable in the first place.
+      for (const malformed of [
+        "",
+        "not-hex",
+        "../../etc/passwd",
+        "ABCDEF0123456789",
+      ]) {
+        await expect(
+          recordPostings(prisma, {
+            userId,
+            runId,
+            seenAt: FIRST_SIGHTING,
+            postings: [aPosting({ postingId: malformed })],
+          })
+        ).rejects.toThrow()
+      }
+    })
+
+    it("updates the one row on a second sighting, moving only the last-seen values", async () => {
+      const discovered = await aRun()
+      const refound = await aRun()
+      const posting = aPosting()
+
+      expect(
+        await recordPostings(prisma, {
+          userId,
+          runId: discovered,
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+      ).toBe(1)
+
+      expect(
+        await recordPostings(prisma, {
+          userId,
+          runId: refound,
+          seenAt: SECOND_SIGHTING,
+          postings: [{ ...posting, title: "Staff Backend Engineer" }],
+        })
+      ).toBe(1)
+
+      const rows = await prisma.posting.findMany({
+        where: { userId, postingId: posting.postingId },
+      })
+      expect(rows).toHaveLength(1)
+
+      const row = rows[0]
+      expect(row?.title).toBe("Staff Backend Engineer")
+      expect(row?.firstSeenRunId).toBe(discovered)
+      expect(row?.lastSeenRunId).toBe(refound)
+      expect(row?.firstSeenAt.toISOString()).toBe(FIRST_SIGHTING.toISOString())
+      expect(row?.lastSeenAt.toISOString()).toBe(SECOND_SIGHTING.toISOString())
+    })
+
+    it("leaves a status the user set alone when a later run re-reports it", async () => {
+      // The whole point of the feature: `status` is absent from the upsert's
+      // `DO UPDATE SET` list, and this is what notices if anyone adds it.
+      const discovered = await aRun()
+      const refound = await aRun()
+      const posting = aPosting()
+
+      await recordPostings(prisma, {
+        userId,
+        runId: discovered,
+        seenAt: FIRST_SIGHTING,
+        postings: [posting],
+      })
+
+      expect(
+        await setPostingStatus(prisma, userId, posting.postingId, "applied")
+      ).toBe(true)
+
+      await recordPostings(prisma, {
+        userId,
+        runId: refound,
+        seenAt: SECOND_SIGHTING,
+        postings: [posting],
+      })
+
+      const row = await readBack(posting.postingId)
+      expect(row?.status).toBe("applied")
+      expect(row?.statusChangedAt).not.toBeNull()
+      // …and the sighting was still recorded, so this is not a no-op upsert.
+      expect(row?.lastSeenRunId).toBe(refound)
+    })
+
+    it("does not drag the last-seen values backwards for an older sighting", async () => {
+      const recent = await aRun()
+      const backdated = await aRun()
+      const posting = aPosting()
+
+      await recordPostings(prisma, {
+        userId,
+        runId: recent,
+        seenAt: SECOND_SIGHTING,
+        postings: [posting],
+      })
+
+      // The backfill walks Runs oldest-first beside live traffic, so this
+      // arrives after a newer sighting as a matter of course.
+      expect(
+        await recordPostings(prisma, {
+          userId,
+          runId: backdated,
+          seenAt: FIRST_SIGHTING,
+          postings: [{ ...posting, title: "Stale title" }],
+        })
+      ).toBe(0)
+
+      const row = await readBack(posting.postingId)
+      expect(row?.lastSeenAt.toISOString()).toBe(SECOND_SIGHTING.toISOString())
+      expect(row?.lastSeenRunId).toBe(recent)
+      expect(row?.title).toBe(posting.title)
+    })
+
+    it("merges a batch that normalises two postings to one id", async () => {
+      const runId = await aRun()
+      const shared = derivedId()
+
+      // Postgres raises 21000 if one statement affects a row twice, and the
+      // same advertisement reached with and without a `?ref=` is exactly what
+      // `postingId()` exists to merge.
+      const best = aPosting({
+        postingId: shared,
+        url: "https://example.com/jobs/9",
+      })
+      const alsoBest = aPosting({
+        postingId: shared,
+        title: "Same job, second link",
+        url: "https://example.com/jobs/9?ref=seek",
+      })
+
+      await expect(
+        recordPostings(prisma, {
+          userId,
+          runId,
+          seenAt: FIRST_SIGHTING,
+          postings: [best, alsoBest],
+        })
+      ).resolves.toBe(1)
+
+      const rows = await prisma.posting.findMany({
+        where: { userId, postingId: shared },
+      })
+      expect(rows).toHaveLength(1)
+      // Findings arrive best-match first, so the first one wins.
+      expect(rows[0]?.title).toBe(best.title)
+      expect(rows[0]?.url).toBe(best.url)
+    })
+
+    it("reports no match when the posting belongs to someone else", async () => {
+      const runId = await aRun()
+      const posting = aPosting()
+      await recordPostings(prisma, {
+        userId,
+        runId,
+        seenAt: FIRST_SIGHTING,
+        postings: [posting],
+      })
+
+      const stranger = await ensureUserForAuth(prisma, `auth_${randomUUID()}`)
+
+      expect(
+        await setPostingStatus(
+          prisma,
+          stranger.id,
+          posting.postingId,
+          "rejected"
+        )
+      ).toBe(false)
+
+      const row = await readBack(posting.postingId)
+      expect(row?.status).toBe("new")
+      expect(row?.statusChangedAt).toBeNull()
+    })
+
+    it("refuses to delete a run a posting still names", async () => {
+      const runId = await aRun()
+      await recordPostings(prisma, {
+        userId,
+        runId,
+        seenAt: FIRST_SIGHTING,
+        postings: [aPosting()],
+      })
+
+      await expect(
+        admin.query(`delete from "${SCHEMA}".runs where id = $1`, [runId])
+      ).rejects.toThrow()
     })
   })
 

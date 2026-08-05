@@ -1,18 +1,22 @@
-import { latestPostingsForUser } from "@/lib/briefings/latest-postings"
 import { createDevPrisma } from "@/lib/dev/fake-prisma"
 import {
   DEV_JOB_ACTIVE_ID,
   DEV_JOB_PAUSED_ID,
   DEV_USER_ID,
 } from "@/lib/dev/fixtures"
+import { listPostings } from "@/lib/postings/list-postings"
+import { parsePostingQuery } from "@/lib/postings/posting-query"
 import {
   coverLetterInstructions,
   pauseJob,
   resumeJob,
   saveCoverLetterInstructions,
+  setPostingStatus,
   updateJobSchedule,
 } from "@workspace/db"
 import { describe, expect, it } from "vitest"
+
+const STRANGER = "00000000-0000-4000-8000-000000000999"
 
 /**
  * Driven through the real consumers, not raw Prisma calls: they are what talks
@@ -22,35 +26,147 @@ import { describe, expect, it } from "vitest"
  */
 
 describe("the DEV_AUTH_BYPASS fake database", () => {
-  it("scopes briefings to the user asking", async () => {
+  it("scopes postings to the user asking", async () => {
     const prisma = createDevPrisma()
+    const query = parsePostingQuery()
 
-    expect(await latestPostingsForUser(prisma, DEV_USER_ID)).not.toHaveLength(0)
     expect(
-      await latestPostingsForUser(
-        prisma,
-        "00000000-0000-4000-8000-000000000999"
-      )
-    ).toEqual([])
+      (await listPostings(prisma, DEV_USER_ID, query)).total
+    ).toBeGreaterThan(0)
+    expect(await listPostings(prisma, STRANGER, query)).toMatchObject({
+      total: 0,
+      postings: [],
+    })
   })
 
-  it("returns the newest succeeded run's findings, and only one", async () => {
+  /**
+   * The fixture is deliberately larger than one page, because a fake that
+   * ignored `skip` and `take` would make every page identical and look right.
+   */
+  it("pages the postings table", async () => {
     const prisma = createDevPrisma()
 
-    const briefings = await latestPostingsForUser(prisma, DEV_USER_ID)
-    const active = briefings.find(
-      (briefing) => briefing.briefingId === DEV_JOB_ACTIVE_ID
+    const first = await listPostings(prisma, DEV_USER_ID, parsePostingQuery())
+    const second = await listPostings(
+      prisma,
+      DEV_USER_ID,
+      parsePostingQuery({ page: "2" })
     )
 
-    expect(active?.latest.state).toBe("recorded")
+    expect(first.pageCount).toBeGreaterThan(1)
+    expect(first.postings).toHaveLength(first.pageSize)
+    expect(second.postings.length).toBeGreaterThan(0)
+    expect(second.postings.length).toBeLessThan(first.pageSize)
 
-    // Proves the nested `select` was honoured rather than the whole row handed
-    // back: `state: "recorded"` is only reachable when `findings` parsed.
-    if (active?.latest.state !== "recorded") throw new Error("unreachable")
-    expect(active.latest.postings.map((posting) => posting.company)).toEqual([
-      "Meridian Freight",
-      "Northwind Health",
-    ])
+    // No row on two pages, and none skipped between them.
+    const ids = [...first.postings, ...second.postings].map((row) => row.id)
+    expect(new Set(ids).size).toBe(first.total)
+  })
+
+  /**
+   * ⚠️ The property the fake was changed for. `orderBy` used to be ignored
+   * outright, which with sortable columns is a silent wrong-order bug in
+   * exactly the environment the table is built in.
+   */
+  it("orders the postings table for real, both ways", async () => {
+    const prisma = createDevPrisma()
+
+    const ascending = await listPostings(
+      prisma,
+      DEV_USER_ID,
+      parsePostingQuery({ sort: "title" })
+    )
+    const descending = await listPostings(
+      prisma,
+      DEV_USER_ID,
+      parsePostingQuery({ sort: "title", dir: "desc" })
+    )
+
+    const titles = ascending.postings.map((row) => row.title)
+    expect(titles).toEqual([...titles].sort((a, b) => a.localeCompare(b)))
+    expect(descending.postings[0]?.title).not.toBe(titles[0])
+
+    // A different column really is a different order, rather than the fixture
+    // agreeing with itself.
+    const byLastSeen = await listPostings(
+      prisma,
+      DEV_USER_ID,
+      parsePostingQuery()
+    )
+    expect(byLastSeen.postings.map((row) => row.title)).not.toEqual(titles)
+  })
+
+  /**
+   * ⚠️ The second property this fake had to be changed for. `select` used to be
+   * accepted and ignored — invisible while every field was a column, and a
+   * blank in the detail dialog the moment one was a relation.
+   */
+  it("resolves the briefing that last found each posting", async () => {
+    const prisma = createDevPrisma()
+
+    const active = await prisma.job.findUnique({
+      where: { id: DEV_JOB_ACTIVE_ID },
+    })
+    const paused = await prisma.job.findUnique({
+      where: { id: DEV_JOB_PAUSED_ID },
+    })
+
+    const pages = [
+      await listPostings(prisma, DEV_USER_ID, parsePostingQuery()),
+      await listPostings(prisma, DEV_USER_ID, parsePostingQuery({ page: "2" })),
+    ]
+    const named = new Set(
+      pages.flatMap((page) => page.postings.map((row) => row.briefing))
+    )
+
+    // Both fixture briefings and nothing else — no row degraded to the
+    // fallback, which is what a relation the fake did not answer would produce.
+    expect(named).toEqual(new Set([active?.name, paused?.name]))
+  })
+
+  /**
+   * Asked of Prisma directly rather than through a consumer, unlike everything
+   * above: the shape under test is the one *no* consumer asks for yet, and the
+   * claim is about what the next one meets — a named refusal, not a row with a
+   * hole in it.
+   */
+  it("refuses a relation select it cannot serve, by name", async () => {
+    const prisma = createDevPrisma()
+
+    await expect(
+      prisma.posting.findMany({
+        where: { userId: DEV_USER_ID },
+        select: { lastSeenRun: { select: { job: { select: { id: true } } } } },
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        name: "DevPrismaError",
+        message: expect.stringContaining(
+          "prisma.posting.findMany select.lastSeenRun"
+        ),
+      })
+    )
+  })
+
+  it("keeps a status change across reads, and refuses another user's row", async () => {
+    const prisma = createDevPrisma()
+    const [first] = (
+      await listPostings(prisma, DEV_USER_ID, parsePostingQuery())
+    ).postings
+
+    if (!first) throw new Error("expected a seeded posting")
+
+    expect(
+      await setPostingStatus(prisma, DEV_USER_ID, first.id, "applied")
+    ).toBe(true)
+    expect(await setPostingStatus(prisma, STRANGER, first.id, "applied")).toBe(
+      false
+    )
+
+    const reread = await listPostings(prisma, DEV_USER_ID, parsePostingQuery())
+    expect(reread.postings.find((row) => row.id === first.id)?.status).toBe(
+      "applied"
+    )
   })
 
   it("keeps a pause across reads", async () => {
@@ -76,9 +192,7 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
   it("returns undefined rather than throwing for a job that is gone", async () => {
     const prisma = createDevPrisma()
 
-    expect(
-      await pauseJob(prisma, "00000000-0000-4000-8000-000000000999")
-    ).toBeUndefined()
+    expect(await pauseJob(prisma, STRANGER)).toBeUndefined()
   })
 
   /** Fails loudly if the raw statement in packages/db/src/jobs.ts changes. */
@@ -121,17 +235,12 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
   it("has no instructions for a user who never saved any", async () => {
     const prisma = createDevPrisma()
 
-    expect(
-      await coverLetterInstructions(
-        prisma,
-        "00000000-0000-4000-8000-000000000999"
-      )
-    ).toBeUndefined()
+    expect(await coverLetterInstructions(prisma, STRANGER)).toBeUndefined()
   })
 
   it("creates a row on the first save and replaces it on the next", async () => {
     const prisma = createDevPrisma()
-    const stranger = "00000000-0000-4000-8000-000000000999"
+    const stranger = STRANGER
 
     await saveCoverLetterInstructions(prisma, stranger, {
       instructions: "Sign off with Kind regards.",
