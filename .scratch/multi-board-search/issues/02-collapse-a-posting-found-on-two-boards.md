@@ -2,12 +2,20 @@
 
 **What to build:** one advertisement, listed on SEEK and on Indeed, reads as one **Posting** in
 a **Brief** rather than two. Ticket 01 made this possible and therefore made it happen —
-employers list the same role on every board they pay for, so the more boards the scout gains,
+employers list the same role on every board they pay for, so the more boards the Scout gains,
 the more a brief repeats itself and the less a reader trusts the count.
 
-A pure function in `@workspace/agents`, beside `posting-id.ts`, run in `run-briefing.ts` after
-`parseFindings` and before the writer and storage. It takes the parsed postings and returns
-them grouped: one survivor per group, the rest recorded on it.
+A pure function in `@workspace/agents`, beside `posting-id.ts`. **It runs over the retrieval
+pool 05 built, before the Scout ranks** — not over `parseFindings` output. Grouping afterwards
+would let the model spend context reasoning about two copies of one advertisement and possibly
+select both, so the duplicate is paid for twice and removed once; and it would operate on the
+eight postings the model already chose rather than on the population where both copies are
+still present.
+
+What the Scout sees is one entry per advertisement, the other boards named in the rendered
+entry as text. It selects the survivor's URL like any other, and the worker reattaches the
+group to the selected Posting by that URL after `parseFindings`. The model neither reports
+provenance nor picks a survivor — it reads both as facts.
 
 **Identity does not change.** `postingId` stays URL-derived, stable across runs and valid as a
 `@workspace/user-storage` key segment. This groups _above_ the id; it does not compute a new
@@ -33,25 +41,61 @@ Three restraints, and they are the ticket rather than decoration:
   seeing the same pair agree on the URL and therefore on the id. Do not pick by description
   length or by whichever arrived first; both make the id a function of the weather.
 
-Deliberately not solved: a posting found on two boards this week and one board next week
-changes its canonical URL and its id. That follows from identity being URL-derived, it is
-already true today when a posting moves between boards, and the fixed order minimises it.
-Write it down in the docblock rather than leaving the next reader to discover it.
+## Where `alsoOn` is allowed to travel
 
-**Blocked by:** 01 — Search Indeed alongside SEEK.
+"`PostingSchema` is untouched" is true and is not the whole answer. `toNewPostings` passes each
+Posting **verbatim** into `postings.payload`, and `payload` is what the dashboard renders and
+what the **Letter Writer** is given. Decide this rather than discover it:
+
+- **Into the writer prompt: yes.** `toWriterPrompt` serialises the findings, and "also listed
+  on Indeed" is the kind of thing a brief should be able to say.
+- **Into `postings.payload`: yes, and optional.** A Posting found on one board has no `alsoOn`
+  and its payload stays byte-for-byte what it is today. Nothing reading the column may require
+  the field.
+- **Into `PostingSchema`: no.** That schema is the model's contract and the model does not
+  produce this. `ClusteredPosting` extends the parsed type in code.
+
+## Decide the status-loss question before shipping
+
+A posting found on SEEK and Indeed this week and only on Indeed next week changes its canonical
+URL, and therefore its id. An earlier draft filed this as an accepted limitation on the grounds
+that it is "already true today when a posting moves between boards" — technically true, and
+practically misleading: with one board there is nowhere to move. This ticket is what makes it
+reachable, and the common direction is the bad one, because SEEK advertisements expire while
+aggregator copies persist.
+
+What it costs is not a duplicate row. `postings` is keyed `(user_id, posting_id)` and `status`
+is the one column in that schema a person writes — `postings.ts` names the failure in as many
+words, "splitting one Posting into two rows and stranding the status a person set on the
+first". A user who marked something `applied` finds it back at `new`, with nothing recording
+that it happened.
+
+So this ticket owes an answer, not a docblock paragraph. The option to evaluate: have the write
+path resolve an existing row by **any** URL in the group rather than by the survivor's alone,
+so a run that loses the survivor reattaches to the row instead of minting a sibling. That is a
+`recordPostings` change and possibly a stored-alias column. Either implement it or write down
+why the exposure is acceptable — but do not ship the grouping with the question open.
+
+**Blocked by:** 05 — Retrieve postings in the worker. Grouping needs the pool, and grouping the
+Scout's output instead is the arrangement this ticket exists to avoid.
 
 **Status:** ready-for-agent
 
-- [ ] The same advertisement on SEEK and Indeed becomes one Posting, carrying the other board's
-      URL in `alsoOn`
+- [ ] The same advertisement on SEEK and Indeed reaches the Scout as one entry and reaches the
+      Brief as one Posting, carrying the other board's URL in `alsoOn`
+- [ ] Grouping happens before ranking; the Scout is never shown two entries for one
+      advertisement, and the group is reattached to the selected Posting by URL
 - [ ] Two postings from the **same** board are never grouped, however alike
 - [ ] A key matching two postings on one board leaves all of them ungrouped
-- [ ] The survivor is chosen by fixed board order; running the same findings twice gives the
-      same survivor and the same id
+- [ ] The survivor is chosen by fixed board order; running the same pool twice gives the same
+      survivor and the same id
 - [ ] `"Sydney NSW"` and `"Sydney, New South Wales, Australia"` group; `"Sydney"` and
       `"Melbourne"` do not
 - [ ] Company suffixes do not prevent a match — `"Atlassian"` and `"Atlassian Pty Ltd"` group
-- [ ] `PostingSchema` and `postingId` are unchanged; a brief with no duplicates is byte-for-byte
-      what it was before this ticket
+- [ ] `alsoOn` is optional in `postings.payload`; a Posting found on one board stores what it
+      stores today, byte for byte
+- [ ] The status-loss question above is answered in the pull request — implemented, or declined
+      with reasoning
+- [ ] `PostingSchema` and `postingId` are unchanged
 - [ ] Unit tests cover each restraint above, including the ambiguous case
 - [ ] Typecheck, lint (zero warnings) and `pnpm test` are clean
