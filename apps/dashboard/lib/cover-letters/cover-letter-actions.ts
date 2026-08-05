@@ -407,8 +407,11 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
    * Save an edited letter over the stored one.
    *
    * The counterpart to {@link draftCoverLetter}, and deliberately a different
-   * shape: no Run, no Findings, no model. A letter is addressed by
-   * `(user, Posting)` and the caller is editing something that already exists,
+   * shape: **no model.** It read "no Run, no Findings, no model" until drafting
+   * moved to the stored Posting's `payload` — the draft action names neither a
+   * Run nor Findings now either, so the model call is the one of the three
+   * still telling them apart. A letter is addressed by `(user, Posting)` and
+   * the caller is editing something that already exists,
    * so the Run that found the Posting is neither needed nor asked for — it is
    * already recorded in the letter's own provenance, and that is where it stays.
    *

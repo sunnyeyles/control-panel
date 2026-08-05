@@ -4,10 +4,11 @@ The single-user platform this repo is growing toward: a scheduled agent searches
 a job board on the user's behalf and writes up what it found, and the dashboard
 surfaces it. Today the scaffold, the deployed worker, the S3 storage layer, and
 one end-to-end briefing path exist. The dashboard manages **Documents** and
-**Briefings**, and shows the **Postings** a briefing's latest **Run** found — but
-it surfaces no **Brief** yet, and cannot: the markdown lives under an object-kind
-prefix the app holds no grant over. `OVERVIEW.md` §Not built yet is the current
-list.
+**Briefings**, and tracks every **Posting** those briefings have ever found —
+one row per advertisement, accumulating across **Runs** and carrying the
+**Posting Status** its owner set — but it surfaces no **Brief** yet, and cannot:
+the markdown lives under an object-kind prefix the app holds no grant over.
+`OVERVIEW.md` §Not built yet is the current list.
 
 ## Language
 
@@ -64,9 +65,13 @@ It gets **no database row**. `artifacts.run_id` is `NOT NULL` and references
 precedent is the **Document**, which has no row for the same reason. Provenance
 — the Run, the title, the company, the URL — rides in object metadata instead.
 
-Drafted from the dashboard by a button on each **Posting** on `/briefings`; the
-`letter` CLI still writes one to disk from a Findings file. No **Document Type**
-of the same name is involved — that label belongs to a letter the _user_
+Drafted from the dashboard by a button on each **Posting** on `/briefings`. Its
+source text is the stored Posting's `payload` — the validated advertisement as
+the Run that found it reported, re-read server-side off the row rather than out
+of that Run's **Findings**, and no part of what the button submitted; the
+letter's provenance still names a Run, carried off the row's `last_seen_run_id`.
+The `letter` CLI still writes one to disk from a Findings file. No **Document
+Type** of the same name is involved — that label belongs to a letter the _user_
 uploaded.
 _Avoid_: application, letter of introduction
 
@@ -116,12 +121,20 @@ validation is the point of keeping the two agents apart, because data can be
 checked and prose cannot. An empty findings list is a legitimate result.
 
 Findings outlive the run that produced them: `runs.findings` is a nullable JSONB
-column holding the validated record, and the dashboard's Briefings page renders
-the **Postings** out of it. It is written after the **Brief** exists and never
-fatally — a run that produced a brief succeeds whatever happens to this write,
-and a failure only adds a warning to the **Run**. NULL is an ordinary state
-rather than a fault: either a run that failed before the hand-off, or one that
-predates the column.
+column holding the validated record. It is written after the **Brief** exists
+and never fatally — a run that produced a brief succeeds whatever happens to
+this write, and a failure only adds a warning to the **Run**. NULL is an
+ordinary state rather than a fault: either a run that failed before the
+hand-off, or one that predates the column.
+
+**Findings are not the postings table, and neither replaces the other.**
+Findings are what one **Run** reported, kept against that Run and never revised.
+The `postings` table is the record of the search across every Run: one row per
+(**User**, **Posting**), accumulating, carrying the **Posting Status** its owner
+set. The dashboard reads the table and not this column — an advertisement the
+next Run does not re-find stays on the page, which a view assembled from the
+newest findings structurally cannot manage — and the same Run writes both, one
+after the other, each accessory and each losable with only a warning.
 
 **Posting**:
 One open job advertisement, with the URL a search actually returned. **Not** a
@@ -129,7 +142,35 @@ One open job advertisement, with the URL a search actually returned. **Not** a
 A URL the scout assembled rather than received is a fabrication: the schema
 rejects anything that is not a URL, and the worker separately rejects any URL
 that does not appear verbatim in a search result.
+
+Also a stored row, in `postings`, keyed `(user_id, posting_id)` with **no Run in
+it** — the same unit of identity a **Cover Letter**'s object key already uses,
+and for the same reason: `postingId()` derives the id from the advertisement's
+normalised URL, so two Runs a week apart that find it agree on one row rather
+than minting two. Runs are provenance, recorded as `first_seen_run_id` and
+`last_seen_run_id` instead of as part of the key. The row accumulates across
+every Run of every **Briefing** the user owns, which is what lets a **Posting
+Status** outlive the Run that found the advertisement.
 _Avoid_: job, listing, vacancy, opening
+
+**Posting Status**:
+Where the user has got to with one **Posting**: `new`, `applied` or `rejected`,
+held in `postings.status` behind a CHECK that admits nothing else. **`new` is
+the only one discovery writes** — it is the column's default, and `status` is
+the one column in this schema a _person_ writes.
+
+**A Run must never overwrite the other two**, and that is the whole feature. It
+lives in one place: the `DO UPDATE SET` list of `recordPostings`, which omits
+`status` and `status_changed_at` — as it omits the `first_seen_*` pair, for the
+neighbouring reason that a second sighting cannot change when something first
+appeared. Adding `status` back "for symmetry", or rewriting the upsert as a
+DELETE and an INSERT, reverts every Posting marked `applied` the next time a Run
+re-finds the advertisement: on a schedule, with no error and no trace.
+
+`status_changed_at` is NULL until somebody moves a row off `new`, so it answers
+"when did the user last touch this" and never "when was this last seen" — that
+question is `last_seen_at`, which a Run does write.
+_Avoid_: state, stage, application status, pipeline
 
 **Search Criteria**:
 What a candidate is looking for — titles, locations, keywords, exclusions,

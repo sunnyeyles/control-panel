@@ -16,11 +16,12 @@ The work a claimed job performs is a **briefing run**: a scout agent searches
 SEEK's live listings for postings matching the criteria in `jobs.config`, a
 writer agent turns those findings into markdown, the worker uploads it to
 private S3 through `@workspace/user-storage`, records the object key in
-`artifacts`, and keeps the findings themselves on the run row. Live listings
-rather than web search, deliberately: a search
-engine's index carries a board's browse pages, not its postings, and the
-posting URLs it does surface are often expired — the live inventory is what
-makes every URL in a brief a page someone can actually open.
+`artifacts`, keeps the findings themselves on the run row, and adds every
+posting it found to the cumulative `postings` record. Live listings rather than
+web search, deliberately: a search engine's index carries a board's browse
+pages, not its postings, and the posting URLs it does surface are often expired
+— the live inventory is what makes every URL in a brief a page someone can
+actually open.
 
 The two agents are joined by plain TypeScript rather than by a LangGraph
 fan-out. Fanning out across several scouts and merging their findings is a later
@@ -355,15 +356,25 @@ object rather than making a second one, and two runs can never collide on
 `artifacts.object_key`, which is UNIQUE. A 23:30 slot that finishes after
 midnight still files under the day its run row names.
 
-**The findings are kept last, and their loss is a warning rather than a
-failure.** `runs.findings` is written after the brief exists and its row is
-recorded, inside a `try`; a failure there puts
-`{ findings: { message } }` on `SuccessReport.warnings`, which `runTick()`
-hands to `finishRun()` as its third argument — `succeeded` with a non-empty
-`failure`, the rule `packages/db/src/types.ts` states. The rule this does _not_
-inherit is "a run with no successful search fails": that one guards against
-silent fabrication, and a run that produced a briefing succeeded whatever
-happened to the accessory record.
+**The two accessory records are kept last, and losing either is a warning rather
+than a failure.** `runs.findings` is written after the brief exists and its row
+is recorded, inside a `try`; the `postings` upsert follows it in a second one,
+projected by `src/postings.ts` and written by `recordPostings`. Whichever failed
+puts `{ findings: { message } }`, `{ postings: { message } }`, or both, on a
+single `SuccessReport.warnings` object — one object rather than a winner, so a
+run that lost both says so — which `runTick()` and `runAdHoc()` hand to
+`finishRun()` as its third argument: `succeeded` with a non-empty `failure`, the
+rule `packages/db/src/types.ts` states. The object is absent entirely when
+nothing went wrong, because `finishRun` reads an empty `failure` as a run with
+warnings. The rule this does _not_ inherit is "a run with no successful search
+fails": that one guards against silent fabrication, and a run that produced a
+briefing succeeded whatever happened to the accessory records.
+
+The two are not one record written twice. The findings are what _this_ run
+reported and the next run's findings are its own; `postings` is the cumulative
+one, which a posting — and the status a person set on it — outlives every
+individual run through. `recordPostings` never touches that status, so a failed
+upsert costs a sighting and never a decision.
 
 **Nothing else catches the throw.** `runBriefing()` emits its one-line report
 and rethrows, `runTick()` records the failure and rethrows after attempting

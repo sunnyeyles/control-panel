@@ -1,8 +1,10 @@
 # @workspace/db
 
 Postgres for **scheduling and provenance** — jobs, their runs, and pointers to
-what those runs produced. Neon behind Prisma Client, with domain helpers for the
-claim and schedule invariants that the model API cannot express alone.
+what those runs produced — plus the one record a person writes into: the
+cumulative `postings` table and the status they set on each Posting. Neon behind
+Prisma Client, with domain helpers for the claim and schedule invariants that
+the model API cannot express alone.
 
 ## The seam
 
