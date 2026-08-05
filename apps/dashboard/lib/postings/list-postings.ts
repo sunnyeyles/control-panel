@@ -346,7 +346,7 @@ function toStatus(status: string): PostingStatus {
 /**
  * A sighting as a string, resolved here rather than in a component.
  *
- * The same format `lib/cover-letters/list-cover-letters.ts` renders a drafting
+ * The same format `lib/cover-letters/cover-letter-rows.ts` renders a drafting
  * instant in, so the two kinds of provenance on this page agree with each
  * other: a fixed locale, because the server's default is whatever the platform
  * decides, and an explicit zone that is named in the output — UTC, because a

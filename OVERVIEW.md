@@ -155,9 +155,9 @@ flowchart TD
   redraft overwrites one object. The letter's key and the row's identity are the
   same `postingId()` value, which is what keeps a stored letter attached to the
   Posting it was written for. Listing and downloading (#85):
-  `list-cover-letters.ts` pays one `HeadObject` per letter because a listing
-  carries no user metadata, and `/api/cover-letters/{postingId}` hands the
-  Markdown back as a file. **Letter Instructions** — a per-user row in
+  `cover-letter-rows.ts` pays one `HeadObject` per visible Posting, because a
+  listing carries no user metadata, and `/api/cover-letters/{postingId}` hands
+  the Markdown back as a file. **Letter Instructions** — a per-user row in
   `cover_letter_instructions`, edited from `/settings` and composed onto the
   writer's prompt by `coverLetterSystemPrompt()` — make tone and structure
   settable, with an optional example letter fenced as a style reference and

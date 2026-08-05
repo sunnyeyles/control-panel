@@ -1,15 +1,14 @@
 /**
  * `Promise.allSettled`, but with a ceiling on how many calls are in flight.
  *
- * Its own module because there are now two listings that need it — documents
- * and cover letters — and both need it for the same reason: S3 user metadata is
- * not returned by a listing, so a display name costs one `head()` per item and
- * the fan-out is however many objects the user happens to have. See
- * `lib/documents/list-documents.ts` and `lib/cover-letters/list-cover-letters.ts`
- * for why that N+1 is deliberate in each.
+ * Its own module because documents and visible cover-letter rows both need
+ * bounded metadata reads. S3 listings carry no user metadata, while the
+ * postings table needs one `head()` per visible letter. See
+ * `lib/documents/list-documents.ts` and
+ * `lib/cover-letters/cover-letter-rows.ts`.
  *
  * Imports nothing, so a test can reach it — and, more to the point, so neither
- * listing has to carry its own copy. Two copies of a bounded fan-out is how one
+ * caller has to carry its own copy. Two copies of a bounded fan-out is how one
  * of them quietly gets a different bound.
  */
 

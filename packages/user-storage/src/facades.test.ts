@@ -295,7 +295,6 @@ describe("CoverLetterStore", () => {
     })
 
     expect(second.key).toBe(first.key)
-    expect(await letters.list("alice")).toHaveLength(1)
     expect(
       (await letters.get({ userId: "alice", postingId: POSTING_ID })).markdown
     ).toBe("Second draft")

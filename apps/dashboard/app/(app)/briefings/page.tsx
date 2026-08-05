@@ -2,7 +2,6 @@ import {
   BriefingStrip,
   type BriefingStripEntry,
 } from "@/components/briefings/briefing-strip"
-import { CoverLetterList } from "@/components/briefings/cover-letter-list"
 import { PostingTable } from "@/components/briefings/posting-table"
 import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
 import { requirePageUser } from "@/lib/auth/require-page-user"
@@ -12,9 +11,9 @@ import {
   type BriefingActivity,
 } from "@/lib/briefing-runs/run-activity"
 import {
-  listCoverLetters,
-  type CoverLetterSummary,
-} from "@/lib/cover-letters/list-cover-letters"
+  loadCoverLetterRows,
+  type CoverLetterRow,
+} from "@/lib/cover-letters/cover-letter-rows"
 import { getPrisma } from "@/lib/db"
 import { listPostings, type PostingPage } from "@/lib/postings/list-postings"
 import {
@@ -24,7 +23,6 @@ import {
 import type { BriefingCounts } from "@/lib/postings/postings-empty-state"
 import { getCoverLetterStore } from "@/lib/storage"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import Link from "next/link"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
@@ -33,13 +31,12 @@ export const dynamic = "force-dynamic"
  * Two database round trips for the table (a count and a page — see
  * `list-postings.ts` for why they are serial), one more for the strip, over a
  * pooled Neon endpoint that a cold serverless instance has to connect to first,
- * plus a listing of this user's cover letters and one `HeadObject` per letter —
- * see `lib/cover-letters/list-cover-letters.ts` for why that N+1 is the right
- * shape and why it is bounded.
+ * plus bounded metadata reads for the visible Postings' cover letters — see
+ * `lib/cover-letters/cover-letter-rows.ts`.
  *
- * Raised from 15 when the letters arrived. The S3 work is bounded but not
- * constant, and a page that renders postings correctly and then dies partway
- * through the letters is worse than a slow one.
+ * Raised from 15 when the letters arrived. The S3 work is bounded by the page
+ * size, and a page that renders postings correctly and then dies partway
+ * through its letters is worse than a slow one.
  */
 export const maxDuration = 30
 
@@ -54,7 +51,7 @@ export const maxDuration = 30
  *
  * The guard establishes who is asking. It does **not** scope rows — that is
  * `where: { userId }` inside `listPostings`, and the session's `userId` passed
- * to `listCoverLetters`, which is where the two user-isolation tests point.
+ * to `loadCoverLetterRows`, which is where the two user-isolation tests point.
  * Neither identifier is ever read from the URL or a form.
  *
  * ⚠️ **The guard runs before `searchParams` is touched.** The query string is
@@ -105,13 +102,17 @@ export default async function BriefingsPage({
   // Terraform apply away from the code that needs it — so "letters unreadable"
   // is a state this page will genuinely be in, and it must not take the
   // postings down with it.
-  let letters: CoverLetterSummary[] = []
+  let letters = new Map<string, CoverLetterRow>()
   let lettersFailed = false
 
   try {
-    letters = await listCoverLetters(user.userId, getCoverLetterStore())
+    letters = await loadCoverLetterRows(
+      user.userId,
+      postings.postings.map((posting) => posting.id),
+      getCoverLetterStore()
+    )
   } catch (error) {
-    console.error("cover-letters: could not list", error)
+    console.error("cover-letters: could not load", error)
     lettersFailed = true
   }
 
@@ -156,13 +157,6 @@ export default async function BriefingsPage({
   } catch (error) {
     console.error("briefings: could not load run activity", error)
   }
-
-  // Keyed so each row can ask about itself without scanning. Built here rather
-  // than in the component because it is derived from data the page already
-  // holds, and a component that builds it would rebuild it per render.
-  const lettersByPosting = new Map(
-    letters.map((letter) => [letter.postingId, letter])
-  )
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -218,6 +212,21 @@ export default async function BriefingsPage({
 
           <BriefingStrip briefings={strip} />
 
+          {/*
+            Beside the table rather than instead of it: letters live in S3 and
+            the dashboard's `prod:cover-letters` grant is a Terraform apply away
+            from the code that needs it. Without this alert a storage failure
+            looks identical to "no letter drafted", which is the wrong thing to
+            tell someone who already drafted one.
+          */}
+          {lettersFailed ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                Your cover letters could not be loaded. Try again in a moment.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {loadFailed ? (
             <Alert variant="destructive">
               <AlertDescription>
@@ -228,46 +237,9 @@ export default async function BriefingsPage({
             <PostingTable
               page={postings}
               query={query}
-              letters={lettersByPosting}
+              letters={letters}
               counts={counts}
             />
-          )}
-        </section>
-
-        <section className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <h2 className="font-medium">Your cover letters</h2>
-            <p className="text-sm text-muted-foreground">
-              Every letter you have drafted, newest first. Drafting again for
-              the same posting replaces the letter here.
-            </p>
-            {/*
-              The knob is on another page, and nothing else would say it exists
-              — the Draft button is here and what it obeys is set in Settings,
-              so a user who never visits Settings would assume the writer cannot
-              be told anything.
-            */}
-            <p className="text-sm text-muted-foreground">
-              How these are written — tone, wording, an example letter to
-              imitate — is set under{" "}
-              <Link
-                href="/settings"
-                className="underline underline-offset-4 hover:no-underline"
-              >
-                Settings
-              </Link>
-              .
-            </p>
-          </div>
-
-          {lettersFailed ? (
-            <Alert variant="destructive">
-              <AlertDescription>
-                Your cover letters could not be loaded. Try again in a moment.
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <CoverLetterList letters={letters} />
           )}
         </section>
       </div>

@@ -50,7 +50,6 @@ function storeOf(objects: StoredCoverLetter[]): CoverLetterStore & {
       throw new Error("not used")
     },
     delete: async () => {},
-    list: async () => [],
     get: async (ref: CoverLetterRef) => {
       askedFor.push(ref)
 

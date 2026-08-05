@@ -1,7 +1,7 @@
 import { PostingPagination } from "@/components/briefings/posting-pagination"
-import { PostingRow } from "@/components/briefings/posting-row"
 import { PostingSortHeader } from "@/components/briefings/posting-sort-header"
-import type { CoverLetterSummary } from "@/lib/cover-letters/list-cover-letters"
+import { PostingTableBody } from "@/components/briefings/posting-table-body"
+import type { CoverLetterRow } from "@/lib/cover-letters/cover-letter-rows"
 import type { PostingPage } from "@/lib/postings/list-postings"
 import type { PostingQuery } from "@/lib/postings/posting-query"
 import {
@@ -11,7 +11,6 @@ import {
 } from "@/lib/postings/postings-empty-state"
 import {
   Table,
-  TableBody,
   TableHead,
   TableHeader,
   TableRow,
@@ -20,8 +19,10 @@ import {
 /**
  * Every Posting this user's briefings have ever found, one row each.
  *
- * A server component throughout: sorting and paging are `<Link>`s, so there is
- * no table state on the client and nothing to keep in step with the URL.
+ * A server component for the shell: sorting and paging are `<Link>`s, so there
+ * is no table state on the client for those and nothing to keep in step with
+ * the URL. The body is a client boundary only so one posting can expand
+ * without turning every open/close into a navigation.
  *
  * "Ever found" is the change this whole feature is for. The cards this replaced
  * rendered one Run's findings, so an advertisement the next Run did not re-find
@@ -44,7 +45,7 @@ export function PostingTable({
    * letters could not be read — a storage failure degrades to rows with no
    * letter rather than to no table.
    */
-  letters?: ReadonlyMap<string, CoverLetterSummary>
+  letters?: ReadonlyMap<string, CoverLetterRow>
   /**
    * What the strip knows, for choosing among the three empty states.
    *
@@ -96,15 +97,14 @@ export function PostingTable({
             </TableRow>
           </TableHeader>
 
-          <TableBody>
-            {page.postings.map((posting) => (
-              <PostingRow
-                key={posting.id}
-                posting={posting}
-                letter={letters?.get(posting.id)}
-              />
-            ))}
-          </TableBody>
+          <PostingTableBody
+            rows={page.postings.map((posting) => {
+              const letter = letters?.get(posting.id)
+              if (!letter) return { posting }
+
+              return { posting, letter }
+            })}
+          />
         </Table>
       </div>
 
