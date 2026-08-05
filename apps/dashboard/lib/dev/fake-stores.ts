@@ -16,11 +16,10 @@ import {
  * by a `Map` each. Faked at the facade rather than at `UserObjectStore` below
  * it, so key building and `assertSegment()` keep their single implementation.
  *
- * ⚠️ **`list()` deliberately returns less than `head()` does**, because
- * ListObjectsV2 returns no user metadata — a listed resume has no
- * `originalFilename`, a listed letter an empty `provenance`. Supplying them
- * would make the `head()`-per-item loops in `list-documents.ts` and
- * `list-cover-letters.ts` look deletable.
+ * ⚠️ **`list()` deliberately returns less than `head()` does** for resumes,
+ * because ListObjectsV2 returns no user metadata — a listed resume has no
+ * `originalFilename`. Cover letters are addressed directly by Posting id, so
+ * their metadata is always read through `head()`.
  */
 
 /**
@@ -187,17 +186,6 @@ function createDevCoverLetterStore(): CoverLetterStore {
 
     async delete(ref: CoverLetterRef): Promise<void> {
       stored.delete(refKey(ref))
-    },
-
-    async list(userId: string): Promise<StoredCoverLetter[]> {
-      return (
-        [...stored.values()]
-          .filter((letter) => letter.userId === userId)
-          .sort((a, b) => b.draftedAt.getTime() - a.draftedAt.getTime())
-          // Empty provenance rather than absent, matching `toStoredCoverLetter` —
-          // the field is not optional, and a listing has nothing to put in it.
-          .map((letter) => ({ ...withoutMarkdown(letter), provenance: {} }))
-      )
     },
   }
 }

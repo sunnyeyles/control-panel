@@ -44,16 +44,28 @@ const postingActions = createPostingActions({
   getPrisma,
 })
 
+/** Create a manually written cover letter from the blank editor. */
+export async function createCoverLetterAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await actions.createCoverLetter(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
 /**
  * `refresh()` after a success, for the same reason the document actions call
  * it: `/briefings` is `force-dynamic` and `staleTimes.dynamic` lets the client
  * router reuse the segment for 30 seconds, so without this the page would keep
  * showing a state that predates the draft.
  *
- * The page does render a letter — the drafted-on line and the download link on
- * each Posting card, and the list above them — so this is load-bearing rather
- * than belt-and-braces: without it a first draft leaves the card still offering
- * a first draft.
+ * The page does render a letter — the Drafted column and the controls in an
+ * expanded posting's detail — so this is load-bearing rather than
+ * belt-and-braces: without it a first draft leaves the row still offering a
+ * first draft.
  */
 export async function draftCoverLetterAction(
   state: ActionState,
@@ -91,8 +103,9 @@ export async function triggerBriefingRunAction(
  *
  * `refresh()` for a narrower reason than the draft above: the letter's bytes
  * are fetched by the editor rather than rendered by the page, so what goes
- * stale here is only its `size` in the letters list. Cheap, and the alternative
- * is the one thing on this page that silently disagrees with storage.
+ * stale here is only metadata the expanded detail shows (drafted-on, size).
+ * Cheap, and the alternative is the one thing on this page that silently
+ * disagrees with storage.
  */
 export async function saveCoverLetterAction(
   state: ActionState,

@@ -1,0 +1,94 @@
+import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
+import { settleWithConcurrency } from "@/lib/settle-with-concurrency"
+import {
+  isUserStorageError,
+  type CoverLetterStore,
+  type StoredCoverLetter,
+} from "@workspace/user-storage"
+
+/** How many cover-letter metadata reads may be in flight at once. */
+const HEAD_CONCURRENCY = 8
+
+/**
+ * The cover-letter metadata rendered for one visible Posting.
+ *
+ * This crosses into the table's client boundary, so it contains only strings.
+ * It also contains only fields that the table actually renders: a draft time,
+ * an accessible name, and the address and filename the two controls need.
+ */
+export interface CoverLetterRow {
+  postingId: string
+  draftedAt: string
+  displayName: string
+  filename: string
+}
+
+/**
+ * Reads cover-letter metadata for exactly the Postings on one table page.
+ *
+ * A missing object is the ordinary undrafted state. Any other failure means
+ * the store could not be relied on, so it rejects for the page to show its
+ * existing storage-failure alert rather than claiming the affected rows are
+ * undrafted.
+ */
+export async function loadCoverLetterRows(
+  userId: string,
+  postingIds: readonly string[],
+  letters: CoverLetterStore
+): Promise<Map<string, CoverLetterRow>> {
+  const settled = await settleWithConcurrency(
+    postingIds,
+    HEAD_CONCURRENCY,
+    async (postingId) => {
+      try {
+        return await letters.head({ userId, postingId })
+      } catch (error) {
+        if (isUserStorageError(error) && error.code === "object_not_found") {
+          return undefined
+        }
+
+        throw error
+      }
+    }
+  )
+
+  const rejected = settled.find((result) => result.status === "rejected")
+  if (rejected?.status === "rejected") throw rejected.reason
+
+  const rows = settled.flatMap((result) =>
+    result.status === "fulfilled" && result.value
+      ? [[result.value.postingId, toCoverLetterRow(result.value)] as const]
+      : []
+  )
+
+  return new Map(rows)
+}
+
+function toCoverLetterRow(letter: StoredCoverLetter): CoverLetterRow {
+  const { postingId, draftedAt, provenance } = letter
+
+  return {
+    postingId,
+    draftedAt: formatDraftedAt(draftedAt),
+    displayName: provenance.title ?? postingId,
+    filename: coverLetterFilename({
+      postingId,
+      ...(provenance.title ? { title: provenance.title } : {}),
+      ...(provenance.company ? { company: provenance.company } : {}),
+    }),
+  }
+}
+
+/** The drafting instant rendered consistently with the table's sighting times. */
+function formatDraftedAt(date: Date): string {
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date)
+}

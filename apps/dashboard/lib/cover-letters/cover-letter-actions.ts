@@ -187,6 +187,65 @@ const saveSchema = z.object({
   markdown: z.string(),
 })
 
+type StoredPosting =
+  | { status: "found"; posting: Posting; lastSeenRunId: string }
+  | { status: "not-found" | "unreadable" | "failed" }
+
+/**
+ * Reads one owned Posting and validates the payload written by its producer.
+ *
+ * Both drafting and manual creation need the same ownership boundary and
+ * provenance. Keeping it here means a new path cannot accidentally accept
+ * title, company, URL, or a Run id from a form.
+ */
+async function loadStoredPosting(
+  prisma: PrismaClient,
+  userId: string,
+  postingId: string
+): Promise<StoredPosting> {
+  let row
+  try {
+    row = await prisma.posting.findUnique({
+      where: { userId_postingId: { userId, postingId } },
+      select: { payload: true, lastSeenRunId: true },
+    })
+  } catch (error) {
+    console.error("cover-letters: could not load the posting", error)
+    return { status: "failed" }
+  }
+
+  if (!row) return { status: "not-found" }
+
+  const parsed = PostingSchema.safeParse(row.payload)
+  if (!parsed.success) {
+    console.error("cover-letters: the stored posting is unreadable", postingId)
+    return { status: "unreadable" }
+  }
+
+  return {
+    status: "found",
+    posting: parsed.data,
+    lastSeenRunId: row.lastSeenRunId,
+  }
+}
+
+function storedPostingMessage(
+  result: Exclude<StoredPosting, { status: "found" }>
+): string {
+  switch (result.status) {
+    case "not-found":
+      return POSTING_NOT_FOUND
+    case "unreadable":
+      return POSTING_UNREADABLE
+    case "failed":
+      return "Something went wrong."
+    default: {
+      const _exhaustive: never = result.status
+      return _exhaustive
+    }
+  }
+}
+
 export interface CoverLetterActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
   getUser: () => Promise<CurrentUser>
@@ -252,46 +311,14 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
 
     if (!parsed.success) return fail(BAD_REQUEST)
 
-    let row
-    try {
-      // ⚠️ **`caller.userId` here is not a shortcut past an ownership check —
-      // it is half the natural key.** A Posting is not addressable without
-      // naming a user, so this `where` *is* the check rather than a query that
-      // skipped one: there is no loaded row whose owner a later line could
-      // forget to compare, and nothing can change between the check and the
-      // read because they are the same statement. Nothing from the form reaches
-      // the `userId` half.
-      row = await deps.getPrisma().posting.findUnique({
-        where: {
-          userId_postingId: {
-            userId: caller.userId,
-            postingId: parsed.data.postingId,
-          },
-        },
-        select: { payload: true, lastSeenRunId: true },
-      })
-    } catch (error) {
-      console.error("cover-letters: could not load the posting", error)
-      return fail("Something went wrong.")
-    }
+    const stored = await loadStoredPosting(
+      deps.getPrisma(),
+      caller.userId,
+      parsed.data.postingId
+    )
+    if (stored.status !== "found") return fail(storedPostingMessage(stored))
 
-    if (!row) return fail(POSTING_NOT_FOUND)
-
-    // The Posting, re-read server-side off the row a Run wrote. This is the
-    // line the first property above is about: `payload` is the validated
-    // advertisement its producer reported, and no submission can put anything
-    // there.
-    const stored = PostingSchema.safeParse(row.payload)
-
-    if (!stored.success) {
-      console.error(
-        "cover-letters: the stored posting is unreadable",
-        parsed.data.postingId
-      )
-      return fail(POSTING_UNREADABLE)
-    }
-
-    const posting: Posting = stored.data
+    const { posting, lastSeenRunId } = stored
 
     // Before the writer is constructed, so a user with nothing to write from
     // spends nothing. Since #86 this is also where a PDF or a DOCX is parsed —
@@ -384,7 +411,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
           // off the row rather than looked up. Provenance exactly as it was
           // when this action read a Run directly — "which Run found this" is
           // worth keeping, and it is still no part of the key.
-          runId: row.lastSeenRunId,
+          runId: lastSeenRunId,
           title: posting.title,
           company: posting.company,
           url: posting.url,
@@ -399,6 +426,78 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       message: `Drafted a cover letter for ${posting.title} at ${posting.company}. It is a first draft to edit — anything nobody supplied is left as a [bracketed placeholder].`,
       // A fresh value per success rather than the posting id: a redraft of the
       // same Posting is a second success and must read as one.
+      resetKey: newResetKey(),
+    }
+  }
+
+  /**
+   * Create a manually written cover letter for one owned Posting.
+   *
+   * Unlike {@link saveCoverLetter}, this is allowed to write the first object
+   * at an address. It earns that privilege by re-reading the Posting under the
+   * session's user id, so a direct POST cannot mint a letter for an arbitrary
+   * key or supply provenance from the browser. There is no model call and no
+   * candidate-background read: the editor contains the user's own words.
+   */
+  async function createCoverLetter(
+    state: ActionState,
+    formData: FormData
+  ): Promise<ActionState> {
+    const fail = (message: string) => carryResetKey(state, message)
+
+    const caller = await requireUser(deps.getUser, "cover-letters")
+    if (!caller.ok) return fail(caller.message)
+
+    const parsed = saveSchema.safeParse({
+      postingId: formData.get("postingId"),
+      markdown: formData.get("markdown"),
+    })
+    if (!parsed.success) return fail(BAD_REQUEST)
+
+    const markdown = parsed.data.markdown.replace(/\r\n/g, "\n").trim()
+    if (markdown.length === 0) return fail(EMPTY_LETTER)
+    if (markdown.length > MAX_LETTER_CHARS) return fail(LETTER_TOO_LONG)
+
+    const stored = await loadStoredPosting(
+      deps.getPrisma(),
+      caller.userId,
+      parsed.data.postingId
+    )
+    if (stored.status !== "found") return fail(storedPostingMessage(stored))
+
+    const ref = { userId: caller.userId, postingId: parsed.data.postingId }
+    const letters = deps.getCoverLetters()
+
+    try {
+      await letters.head(ref)
+      return fail(
+        "A cover letter already exists for that posting. Edit it instead."
+      )
+    } catch (error) {
+      if (!isUserStorageError(error) || error.code !== "object_not_found") {
+        return fail(storageMessage("read", error))
+      }
+    }
+
+    try {
+      await letters.put({
+        ...ref,
+        markdown,
+        draftedAt: now(),
+        provenance: {
+          runId: stored.lastSeenRunId,
+          title: stored.posting.title,
+          company: stored.posting.company,
+          url: stored.posting.url,
+        },
+      })
+    } catch (error) {
+      return fail(storageMessage("write", error))
+    }
+
+    return {
+      status: "success",
+      message: `Created a cover letter for ${stored.posting.title} at ${stored.posting.company}.`,
       resetKey: newResetKey(),
     }
   }
@@ -578,7 +677,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     return letter
   }
 
-  return { draftCoverLetter, saveCoverLetter }
+  return { createCoverLetter, draftCoverLetter, saveCoverLetter }
 }
 
 /**
