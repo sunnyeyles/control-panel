@@ -116,6 +116,30 @@ only on Indeed next week changes its canonical URL and therefore its id. That is
 today for a posting that moves between boards, it follows from identity being URL-derived, and
 the fixed preference order minimises rather than eliminates it.
 
+### Retrieval precedes ranking
+
+Today one model call chain decides which title/location pairs to search, what terms to use,
+when it has searched enough, and which returned listings make a Brief. The prompt asks for
+one focused search per title and location, but an instruction is not a query plan. On the
+current single-board path the result is commonly a few opaque Findings from a search that may
+have returned twenty newest listings; widening to three boards would multiply the candidate
+context while preserving that blind spot.
+
+Ticket 05 splits this into two responsibilities:
+
+- **The worker plans and retrieves.** It expands configured criteria into an explicit bounded
+  request set, calls source adapters, pools typed candidates, removes repeat canonical URLs
+  and applies only filters configuration can state exactly. It reports each count.
+- **The Scout ranks and explains.** It receives a bounded candidate set, selects only from its
+  URLs, and supplies the existing summary, match reason and quoted highlights. It cannot
+  silently decide a configured criterion was not worth searching.
+
+This does not turn relevance into a keyword substring test. Seniority, transferable skills and
+whether a description is genuinely suitable remain judgement calls, so they stay with the
+model. The code owns coverage, source provenance, bounded context and URL identity — things
+it can prove. Its evidence gate remains the rule that a selected URL must have come from a
+live search result.
+
 ### Budget
 
 Two things grow with board count and neither is free.

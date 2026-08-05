@@ -11,10 +11,13 @@ decision. The tickets below are vertical slices of it, in dependency order.
 | [01](issues/01-search-indeed-alongside-seek.md)           | Search Indeed alongside SEEK           | —          |
 | [02](issues/02-collapse-a-posting-found-on-two-boards.md) | Collapse a posting found on two boards | 01         |
 | [03](issues/03-search-linkedin-alongside-the-others.md)   | Search LinkedIn alongside the others   | 02         |
+| [05](issues/05-make-scout-retrieval-measurable.md)        | Make Scout retrieval measurable        | 03         |
 | [04](issues/04-sources-selects-the-boards-searched.md)    | `sources` selects the boards searched  | 03         |
 
-04 is optional and does not block anything. It exists because `sources` is currently a
-config field that looks like it selects boards and selects nothing.
+04 is optional and does not block anything. It exists because `sources` is currently a config
+field that looks like it selects boards and selects nothing. 05 is the quality baseline:
+adding sources is not a reason to preserve a Scout that chooses which criteria to search and
+which candidates to show without an inspectable retrieval step.
 
 ## The property that must not be lost
 
