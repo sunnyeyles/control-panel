@@ -47,16 +47,34 @@ export interface PostingView {
   firstSeen: string
   /** Already formatted, UTC, with the zone named. */
   lastSeen: string
+  /**
+   * The name of the Briefing that most recently found this advertisement —
+   * `lastSeenRun.job.name`, read through the relation.
+   *
+   * A plain string, like every other field here, because it crosses into a
+   * client component and the dialog renders it verbatim. **This table is
+   * cumulative across every Briefing a user has**, so without it someone with
+   * three of them cannot tell which one surfaced a given row — the superseded
+   * Posting card got that for free from the heading of the card it sat in.
+   *
+   * Never empty: a relation that could not name one degrades to
+   * {@link UNKNOWN_BRIEFING} rather than costing the row. See
+   * {@link briefingName}.
+   */
+  briefing: string
 }
 
 /**
- * ⚠️ **`lastSeenRunId` is deliberately not on {@link PostingView}.** The column
- * exists and is real provenance, but nothing this page renders needs it: the
+ * ⚠️ **`lastSeenRunId` is deliberately not on {@link PostingView}, even though
+ * {@link PostingView.briefing} is resolved through that very column.** The
+ * column is real provenance, but nothing this page renders needs the *id*: its
  * only reader was `DraftCoverLetterButton`, back when drafting re-read the
  * Posting out of `runs.findings` and had to name a Run. It reads
  * `postings.payload` now — and reads the run id off the row itself, server-side,
  * to record on the letter — so carrying the value out to a client component
- * would put an identifier on the wire that nothing sends back.
+ * would put an identifier on the wire that nothing sends back. The Briefing's
+ * *name* is the opposite kind of thing: it is the label a person reads, so it is
+ * resolved here and no client is ever handed a run id to make sense of.
  */
 
 export interface PostingPage {
@@ -129,13 +147,21 @@ export async function listPostings(
       payload: true,
       firstSeenAt: true,
       lastSeenAt: true,
+      // Which Briefing found it, asked for with the page rather than resolved
+      // row by row afterwards: `postings.last_seen_run_id` → `runs.job_id` →
+      // `jobs.name`. **`lastSeenRun`, not `firstSeenRun`** — the Briefing that
+      // most recently found the advertisement is the one whose criteria still
+      // match it, and it is the sighting the default sort orders on.
+      lastSeenRun: { select: { job: { select: { name: true } } } },
     },
   })
 
   let unreadable = 0
+  let unnamed = 0
   const postings = rows.map((row) => {
     const view = toView(row)
     if (view.summary === undefined) unreadable += 1
+    if (briefingName(row.lastSeenRun) === undefined) unnamed += 1
     return view
   })
 
@@ -147,6 +173,21 @@ export async function listPostings(
     console.error(
       "postings: could not read the stored payload for",
       unreadable,
+      "of",
+      rows.length,
+      "rows"
+    )
+  }
+
+  if (unnamed > 0) {
+    // Counted once per page for the reason above, and reported separately: an
+    // unreadable payload is the stored JSON drifting from the schema, while
+    // this is the relation itself answering nothing — a `select` that stopped
+    // asking for it, or a fake database that ignored the one it was handed.
+    // Different causes, so a single line covering both would name neither.
+    console.error(
+      "postings: could not read which briefing last found",
+      unnamed,
       "of",
       rows.length,
       "rows"
@@ -202,6 +243,20 @@ interface PostingRow {
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
+  /**
+   * The Briefing that most recently found this Posting, as the nested `select`
+   * asks for it.
+   *
+   * ⚠️ **Both halves are typed nullable although neither relation is optional
+   * in the schema.** `postings.last_seen_run_id` and `runs.job_id` are NOT NULL
+   * with `onDelete: Restrict`, so Postgres cannot answer with a hole — the
+   * nullability is not a claim about the database. It is what keeps a client
+   * that answered *less* than it was asked from taking the whole page down with
+   * a `TypeError` on `.job`: the `DEV_AUTH_BYPASS` fake did exactly that until
+   * it learned to apply `select`, and a future caller narrowing the projection
+   * would do it again.
+   */
+  lastSeenRun: { job: { name: string } | null } | null
 }
 
 /**
@@ -232,6 +287,7 @@ function toView(row: PostingRow): PostingView {
     status: toStatus(row.status),
     firstSeen: formatSeenAt(row.firstSeenAt),
     lastSeen: formatSeenAt(row.lastSeenAt),
+    briefing: briefingName(row.lastSeenRun) ?? UNKNOWN_BRIEFING,
     highlights: parsed.success ? (parsed.data.highlights ?? []) : [],
     ...(parsed.success && parsed.data.postedAt
       ? { postedAt: parsed.data.postedAt }
@@ -240,6 +296,31 @@ function toView(row: PostingRow): PostingView {
       ? { summary: parsed.data.summary, matchReason: parsed.data.matchReason }
       : {}),
   }
+}
+
+/** What the dialog shows when the relation could not name a Briefing. */
+const UNKNOWN_BRIEFING = "Unknown briefing"
+
+/**
+ * The Briefing's name as the relation answered, or `undefined` when it did not.
+ *
+ * Deliberately pure — no logging — because {@link listPostings} reports these
+ * once per page rather than once per row, and it needs this same rule to count
+ * them. Blank counts as no answer: `jobs.name` has no emptiness constraint, and
+ * an empty string renders as a missing value rather than as one.
+ *
+ * ⚠️ **The caller degrades rather than drops.** The row keeps its place with
+ * {@link UNKNOWN_BRIEFING} in place of the name, for the reason {@link toView}
+ * gives about an unreadable payload: which Briefing found an advertisement is
+ * provenance, and the advertisement is what the user came for. Losing the label
+ * must not look like a Posting nobody ever found.
+ */
+function briefingName(
+  lastSeenRun: PostingRow["lastSeenRun"]
+): string | undefined {
+  const name = lastSeenRun?.job?.name
+
+  return name === undefined || name === "" ? undefined : name
 }
 
 /**

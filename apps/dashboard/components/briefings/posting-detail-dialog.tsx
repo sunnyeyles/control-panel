@@ -20,8 +20,9 @@ import {
  * The table row carries only what is worth scanning — title, company, location,
  * status, the two sighting times. Everything the superseded Posting card
  * rendered and a row has no width for lives here: the summary, the highlights
- * copied from the advertisement, why it matched the user's criteria, when it
- * was first and last seen, and all three Cover Letter controls.
+ * copied from the advertisement, why it matched the user's criteria, which
+ * Briefing found it, when it was first and last seen, and all three Cover
+ * Letter controls.
  *
  * ⚠️ **Opening this costs no round trip, and that is a decision rather than an
  * oversight — do not "optimise" it into a fetch.** It takes the whole
@@ -174,8 +175,17 @@ export function PostingDetailDialog({
               accumulates across Runs, so "found once, weeks ago" and "still
               being re-found this morning" are different things, and only these
               two fields tell them apart.
+
+              The Briefing is here rather than in a column of its own because it
+              is the same kind of fact — provenance of the sighting, not
+              something to scan a page of rows for. It is stated at all because
+              this table is cumulative across *every* Briefing the user has: the
+              card this dialog replaced sat inside one, and got the answer for
+              free from that card's heading.
             */}
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              <dt>Found by</dt>
+              <dd>{posting.briefing}</dd>
               <dt>First seen</dt>
               <dd>{posting.firstSeen}</dd>
               <dt>Last seen</dt>

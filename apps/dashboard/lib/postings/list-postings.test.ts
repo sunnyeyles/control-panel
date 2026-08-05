@@ -19,7 +19,17 @@ interface PostingRow {
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
+  /**
+   * The Briefing that most recently found it, as the nested `select` asks for
+   * it. `null` is the case a real database cannot produce — both foreign keys
+   * are NOT NULL — and that this module must survive anyway, because a client
+   * that ignores `select` produces it too.
+   */
+  lastSeenRun: { job: { name: string } | null } | null
 }
+
+/** The Briefing every row here was found by unless a test says otherwise. */
+const DEFAULT_BRIEFING = "Sydney backend roles"
 
 function payload(overrides: Record<string, unknown> = {}) {
   return {
@@ -43,6 +53,12 @@ function payload(overrides: Record<string, unknown> = {}) {
  * also records every query it was handed, so a test can check the filter and
  * the tie-break reached the database rather than only that this implementation
  * applied them.
+ *
+ * `select` is not applied — the rows are seeded with the relation already on
+ * them, which is what a database honouring the projection would answer. That
+ * the projection was *asked for* is asserted against the recorded query
+ * instead, since a fake answering more than it was asked cannot otherwise tell
+ * a `select` that stopped naming the relation from one that still does.
  */
 class FakeDb {
   readonly rows: PostingRow[] = []
@@ -64,6 +80,7 @@ class FakeDb {
       payload: payload(),
       firstSeenAt: at,
       lastSeenAt: at,
+      lastSeenRun: { job: { name: DEFAULT_BRIEFING } },
       ...row,
     })
 
@@ -90,6 +107,7 @@ class FakeDb {
           orderBy: Record<string, "asc" | "desc">[]
           skip: number
           take: number
+          select: Record<string, unknown>
         }) => {
           this.queries.push(query)
 
@@ -280,6 +298,64 @@ describe("listPostings", () => {
       highlights: [],
     })
     expect(page.postings[0]?.summary).toBeUndefined()
+    expect(logged).toHaveBeenCalled()
+
+    logged.mockRestore()
+  })
+
+  /**
+   * The field the detail dialog needs and a row has no width for: this page is
+   * cumulative across every Briefing a user has, so the row alone does not say
+   * which one surfaced the advertisement.
+   */
+  it("names the briefing that last found a posting", async () => {
+    db.posting({
+      postingId: "a".repeat(16),
+      lastSeenRun: { job: { name: "Melbourne staff roles" } },
+    })
+
+    const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+
+    expect(page.postings[0]?.briefing).toBe("Melbourne staff roles")
+
+    // Not merely "this implementation produced a name": the relation was asked
+    // for, and it was `lastSeenRun` rather than `firstSeenRun`. A fake seeded
+    // with the relation already on its rows cannot tell the difference.
+    expect(db.queries.at(-1)).toMatchObject({
+      select: { lastSeenRun: { select: { job: { select: { name: true } } } } },
+    })
+  })
+
+  /**
+   * The same judgement as the unreadable payload above: which Briefing found an
+   * advertisement is provenance, and the advertisement is what the user came
+   * for. Neither foreign key is nullable, so a hole here is what a client
+   * answering less than it was asked looks like — the `DEV_AUTH_BYPASS` fake,
+   * until it learned to apply `select`.
+   */
+  it("degrades a briefing it cannot name rather than dropping the row", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    db.posting({
+      postingId: "a".repeat(16),
+      title: "Still here",
+      lastSeenRun: null,
+    }).posting({
+      postingId: "b".repeat(16),
+      title: "Also here",
+      lastSeenRun: { job: null },
+    })
+
+    const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+
+    expect(page.postings.map((row) => row.title)).toEqual([
+      "Also here",
+      "Still here",
+    ])
+    expect(page.postings.map((row) => row.briefing)).toEqual([
+      "Unknown briefing",
+      "Unknown briefing",
+    ])
     expect(logged).toHaveBeenCalled()
 
     logged.mockRestore()

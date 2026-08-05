@@ -96,6 +96,58 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
     expect(byLastSeen.postings.map((row) => row.title)).not.toEqual(titles)
   })
 
+  /**
+   * ⚠️ The second property this fake had to be changed for. `select` used to be
+   * accepted and ignored — invisible while every field was a column, and a
+   * blank in the detail dialog the moment one was a relation.
+   */
+  it("resolves the briefing that last found each posting", async () => {
+    const prisma = createDevPrisma()
+
+    const active = await prisma.job.findUnique({
+      where: { id: DEV_JOB_ACTIVE_ID },
+    })
+    const paused = await prisma.job.findUnique({
+      where: { id: DEV_JOB_PAUSED_ID },
+    })
+
+    const pages = [
+      await listPostings(prisma, DEV_USER_ID, parsePostingQuery()),
+      await listPostings(prisma, DEV_USER_ID, parsePostingQuery({ page: "2" })),
+    ]
+    const named = new Set(
+      pages.flatMap((page) => page.postings.map((row) => row.briefing))
+    )
+
+    // Both fixture briefings and nothing else — no row degraded to the
+    // fallback, which is what a relation the fake did not answer would produce.
+    expect(named).toEqual(new Set([active?.name, paused?.name]))
+  })
+
+  /**
+   * Asked of Prisma directly rather than through a consumer, unlike everything
+   * above: the shape under test is the one *no* consumer asks for yet, and the
+   * claim is about what the next one meets — a named refusal, not a row with a
+   * hole in it.
+   */
+  it("refuses a relation select it cannot serve, by name", async () => {
+    const prisma = createDevPrisma()
+
+    await expect(
+      prisma.posting.findMany({
+        where: { userId: DEV_USER_ID },
+        select: { lastSeenRun: { select: { job: { select: { id: true } } } } },
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        name: "DevPrismaError",
+        message: expect.stringContaining(
+          "prisma.posting.findMany select.lastSeenRun"
+        ),
+      })
+    )
+  })
+
   it("keeps a status change across reads, and refuses another user's row", async () => {
     const prisma = createDevPrisma()
     const [first] = (

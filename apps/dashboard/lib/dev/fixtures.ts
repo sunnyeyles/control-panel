@@ -206,6 +206,9 @@ export function devRuns(): Run[] {
  *   cannot be mistaken for each other on screen.
  * - **One row per status**, on the three hand-written Postings, so the status
  *   column is not thirty copies of `new`.
+ * - **Both Briefings are represented, on both pages.** The Run a row names is
+ *   what the detail dialog resolves into a Briefing name, so rows alternate
+ *   between the two — see the loop below.
  *
  * ⚠️ **The ids are derived by `postingId()`, never written out.** The seeded
  * cover letter is keyed by {@link DEV_DRAFTED_POSTING_ID}, which is derived the
@@ -229,17 +232,32 @@ export function devPostings(): PostingRow[] {
   )
 
   /**
-   * The rest, generated. They carry {@link DEV_RUN_ACTIVE_ID} like the first
-   * two, which is a small lie about which Run found them and no longer has any
-   * visible consequence: drafting reads `postings.payload`, which every row
-   * here has, so **Draft cover letter** works on a generated row and the run id
-   * only rides along as provenance on the letter. It used to be refused as no
-   * longer in the run, because the draft action re-read the Posting out of that
-   * Run's findings and they hold two Postings.
+   * The rest, generated, alternating between the two Runs.
+   *
+   * ⚠️ **Which Run a row names is no longer only bookkeeping.** The detail
+   * dialog resolves it to the Briefing that found the advertisement —
+   * `lastSeenRunId` → `runs.job_id` → `jobs.name` — so a fixture where every
+   * generated row named {@link DEV_RUN_ACTIVE_ID}, as they all once did, would
+   * put a single Briefing name on twenty-nine of the thirty rows and nothing
+   * but that name on the second page. Alternating puts both on both pages,
+   * which is what makes the point of the field — a table cumulative across
+   * Briefings — checkable by eye.
+   *
+   * It stays a lie about which Run *found* them, and a harmless one: drafting
+   * reads `postings.payload`, which every row here has, so **Draft cover
+   * letter** works on a generated row and the run id only rides along as
+   * provenance on the letter. It used to be refused as no longer in the run,
+   * because the draft action re-read the Posting out of that Run's findings and
+   * they hold two Postings.
    */
   for (let index = seeded.length; index < DEV_POSTING_COUNT; index++) {
     rows.push(
-      devPosting(index, generatedPosting(index), "new", DEV_RUN_ACTIVE_ID)
+      devPosting(
+        index,
+        generatedPosting(index),
+        "new",
+        index % 2 === 0 ? DEV_RUN_ACTIVE_ID : DEV_RUN_PAUSED_ID
+      )
     )
   }
 

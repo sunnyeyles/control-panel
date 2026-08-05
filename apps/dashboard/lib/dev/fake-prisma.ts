@@ -53,7 +53,8 @@ export function createDevPrisma(): PrismaClient {
     },
     /**
      * The Postings table, which is the one delegate here that is asked to
-     * **order and page for real** — see {@link DevDb.findManyPostings}.
+     * **order, page and project for real** — see {@link DevDb.findManyPostings}
+     * and {@link DevDb.projectPosting}.
      */
     posting: {
       count: async (query: PostingsForUser) => db.countPostings(query.where),
@@ -114,17 +115,32 @@ interface PostingsForUser {
 /**
  * What `listPostings()` asks for.
  *
- * `select` is accepted and deliberately **not** applied: the fake answers with
- * the whole row, which is a superset of what was asked for, and a caller that
- * reads only the fields it selected cannot tell the difference. Ordering and
- * paging are a different matter — those change *which* rows come back, so they
- * are honoured exactly.
+ * ⚠️ **`select` is applied for real, and it used not to be.** Answering the
+ * whole row was defensible while every selected field was a column: the answer
+ * was a superset of the question, and no caller could tell. It stopped being
+ * defensible the moment the `select` named a **relation** — a whole `postings`
+ * row does not carry `lastSeenRun`, so ignoring the `select` handed the page an
+ * `undefined` where a Briefing's name belonged and the dialog rendered a blank.
+ * Silently, in the one environment the dialog is built in. See
+ * {@link DevDb.projectPosting}, which throws on a shape it cannot serve rather
+ * than repeating that.
  */
 interface FindManyPostings extends PostingsForUser {
   orderBy?: PostingOrderBy[]
   skip?: number
   take?: number
-  select?: Record<string, boolean>
+  select?: PostingSelect
+}
+
+/**
+ * A `select` as this fake reads it: `true` for a column of `postings`, or a
+ * nested `select` for one of its relations.
+ */
+type PostingSelect = Record<string, boolean | NestedSelect>
+
+/** The relation half of a `select`, left `unknown` inside so it is checked. */
+interface NestedSelect {
+  select?: Record<string, unknown>
 }
 
 /** One `{ field: direction }` clause, as Prisma spells it. */
@@ -215,18 +231,108 @@ class DevDb {
    * `DEV_AUTH_BYPASS` — silently, correctly-looking, and wrong — in exactly the
    * environment the table is built in. `skip` and `take` are honoured for the
    * same reason: paging that did nothing would make every page identical.
+   *
+   * ⚠️ **`select` is honoured too, relations included** — see
+   * {@link projectPosting}. It was ignored until the table started asking which
+   * Briefing found a Posting, at which point ignoring it stopped being a
+   * harmless superset and became a blank in the dialog.
    */
-  findManyPostings(query: FindManyPostings): Posting[] {
+  findManyPostings(query: FindManyPostings): unknown[] {
     const ordered = sortPostings(
       this.mine(query.where.userId),
       query.orderBy ?? []
     )
     const from = query.skip ?? 0
 
-    return ordered.slice(
+    const page = ordered.slice(
       from,
       query.take === undefined ? undefined : from + query.take
     )
+
+    const select = query.select
+    if (select === undefined) return page
+
+    return page.map((row) => this.projectPosting(row, select))
+  }
+
+  /**
+   * One row as the `select` asked for it — columns copied across, relations
+   * resolved against the other fixtures.
+   *
+   * ⚠️ **Every branch here either answers or throws; none returns
+   * `undefined`.** That is the whole file's principle applied where the
+   * alternative is invisible: a projection that quietly skipped a field it did
+   * not understand would render a missing Briefing exactly like a Briefing
+   * whose name is blank, and the page would look like it worked.
+   *
+   * A query carrying no `select` at all is not a shape to handle here —
+   * {@link findManyPostings} answers those with whole rows, which is what
+   * Prisma does too.
+   */
+  private projectPosting(
+    row: Posting,
+    select: PostingSelect
+  ): Record<string, unknown> {
+    const projected: Record<string, unknown> = {}
+
+    for (const [field, wanted] of Object.entries(select)) {
+      if (wanted === false) continue
+
+      if (wanted === true) {
+        if (!(field in row)) {
+          throw new DevPrismaError(
+            `prisma.posting.findMany select.${field}`,
+            "That column is not on a Posting. Add it to lib/dev/fixtures.ts, or fix the select in lib/postings/list-postings.ts."
+          )
+        }
+
+        projected[field] = row[field as keyof Posting]
+        continue
+      }
+
+      if (field === "lastSeenRun" && isBriefingNameSelect(wanted)) {
+        projected[field] = { job: { name: this.briefingThatFound(row) } }
+        continue
+      }
+
+      throw new DevPrismaError(
+        `prisma.posting.findMany select.${field}`,
+        "The only relation understood here is `lastSeenRun: { select: { job: { select: { name: true } } } }`. Teach projectPosting() in this file the new shape — leaving it out would answer undefined and render a blank."
+      )
+    }
+
+    return projected
+  }
+
+  /**
+   * The name of the Briefing that most recently found a Posting, joined out of
+   * the fixtures rather than stored on the row: `lastSeenRunId` → `runs.job_id`
+   * → `jobs.name`, which is the join the real query makes.
+   *
+   * Joining beats denormalising it onto the fixture rows, for the reason
+   * {@link devPostings} derives its ids rather than writing them out: a name
+   * copied onto a Posting could disagree with the Briefing that fixture claims
+   * to have come from, and disagree silently.
+   *
+   * ⚠️ **A dangling reference throws.** Both foreign keys are NOT NULL with
+   * `ON DELETE RESTRICT`, so this is not a state the page has to survive — it
+   * is a fixture that has drifted, and it should say so by name here rather
+   * than reach `list-postings.ts` as an unnamed Briefing.
+   */
+  private briefingThatFound(row: Posting): string {
+    const run = this.runs.find(
+      (candidate) => candidate.id === row.lastSeenRunId
+    )
+    const job = run ? this.findJob(run.jobId) : null
+
+    if (!job) {
+      throw new DevPrismaError(
+        "prisma.posting.findMany select.lastSeenRun",
+        `No run ${row.lastSeenRunId} with a briefing behind it. Every posting in lib/dev/fixtures.ts must name a run from devRuns() whose job is in devJobs() — the foreign keys make that so in Postgres.`
+      )
+    }
+
+    return job.name
   }
 
   /**
@@ -521,6 +627,31 @@ function comparePostingField(
   throw new DevPrismaError(
     `prisma.posting.findMany orderBy.${field}`,
     `Only text and timestamp columns can be ordered by here, and ${field} is neither.`
+  )
+}
+
+/**
+ * Exactly `{ select: { job: { select: { name: true } } } }`, and nothing wider.
+ *
+ * Matched by shape rather than merely by the key `lastSeenRun`, in the spirit of
+ * {@link DevDb.executeRaw}: a caller that starts asking the relation for a
+ * second field gets a named refusal here, instead of a row missing whichever
+ * field this fake never learned to fill in.
+ */
+function isBriefingNameSelect(wanted: NestedSelect): boolean {
+  const runSelect = wanted.select
+
+  if (!isPlainObject(runSelect) || Object.keys(runSelect).length !== 1) {
+    return false
+  }
+
+  const job = runSelect.job
+  if (!isPlainObject(job) || !isPlainObject(job.select)) return false
+
+  const fields = Object.entries(job.select)
+
+  return (
+    fields.length === 1 && fields[0]?.[0] === "name" && fields[0]?.[1] === true
   )
 }
 
