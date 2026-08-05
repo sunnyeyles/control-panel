@@ -1,9 +1,9 @@
 import { CoverLetterDownloadLink } from "@/components/briefings/cover-letter-list"
 import { DraftCoverLetterButton } from "@/components/briefings/draft-cover-letter-button"
 import { EditCoverLetterButton } from "@/components/briefings/edit-cover-letter-button"
+import { PostingStatusSelect } from "@/components/briefings/posting-status-select"
 import type { CoverLetterSummary } from "@/lib/cover-letters/list-cover-letters"
 import type { PostingView } from "@/lib/postings/list-postings"
-import { POSTING_STATUS_LABELS } from "@/lib/postings/posting-status-labels"
 import { TableCell, TableRow } from "@workspace/ui/components/table"
 
 /**
@@ -16,7 +16,7 @@ import { TableCell, TableRow } from "@workspace/ui/components/table"
  * hydration mismatch rather than as the timezone bug it is.
  *
  * **This is where the client boundary sits.** The row itself renders on the
- * server; the three cover-letter controls in the last cell are client
+ * server; the status control and the three cover-letter controls are client
  * components, and they are the only interactive things on it.
  *
  * ⚠️ **The three letter controls live here as an interim, and ticket 06 moves
@@ -26,10 +26,6 @@ import { TableCell, TableRow } from "@workspace/ui/components/table"
  * that deletion would have removed the letter editor entirely. They belong in
  * the Posting detail dialog, which is ticket 06's work; until it lands they are
  * here so that drafting, editing and downloading all still work.
- *
- * The status is plain text for the same reason: **ticket 05 replaces it with a
- * `<Select>` and its Server Action.** Until then it is a label from
- * `posting-status-labels.ts` and nothing more.
  */
 export function PostingRow({
   posting,
@@ -69,7 +65,22 @@ export function PostingRow({
         {posting.location}
       </TableCell>
 
-      <TableCell>{POSTING_STATUS_LABELS[posting.status]}</TableCell>
+      <TableCell>
+        {/*
+          The one column on this row a person writes. Everything else is
+          whatever the last Run that saw the advertisement reported, which is
+          why `recordPostings` in `@workspace/db` leaves `status` alone on
+          conflict — a re-find must not undo an "applied".
+
+          The title is passed for the control's accessible label, so twenty-five
+          of these down the column are distinguishable to a screen reader.
+        */}
+        <PostingStatusSelect
+          postingId={posting.id}
+          status={posting.status}
+          title={posting.title}
+        />
+      </TableCell>
 
       <TableCell className="whitespace-nowrap text-muted-foreground">
         {posting.firstSeen}
