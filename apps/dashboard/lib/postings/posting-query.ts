@@ -44,20 +44,25 @@ export const PAGE_SIZE = 25
 export const MAX_PAGE = 10_000
 
 /**
- * The sortable columns, as the URL spells them.
+ * The orderable columns, as the URL spells them.
  *
  * Deliberately not the Prisma field names: `list-postings.ts` maps them, so
  * what a user sees in their address bar is not a database column they can probe
- * by editing it. Location is displayed and not sortable — one more header for a
- * field nobody orders by.
+ * by editing it.
+ *
+ * ⚠️ **Two of these are headings and one is not.** `title` and `company` are the
+ * sortable headings — see `POSTING_COLUMNS` in `posting-columns.ts`, which names
+ * per column why the other three do not sort. `lastSeen` has no heading and is
+ * here because it is {@link DEFAULT_SORT}: the order of the page nobody has
+ * sorted still has to be spellable.
+ *
+ * `firstSeen` and `status` were here while the table had a heading for each. The
+ * table narrowed to five columns and both moved into the expanded detail, which
+ * left two entries no control could ever produce — so they went. A URL still
+ * naming one is not an error: `SortSchema` catches it back to the default, the
+ * same as `?sort=salary` always did.
  */
-export const POSTING_SORTS = [
-  "lastSeen",
-  "firstSeen",
-  "title",
-  "company",
-  "status",
-] as const
+export const POSTING_SORTS = ["lastSeen", "title", "company"] as const
 
 export type PostingSort = (typeof POSTING_SORTS)[number]
 
@@ -72,10 +77,8 @@ export type SortDirection = "asc" | "desc"
  */
 const DEFAULT_DIRECTIONS = {
   lastSeen: "desc",
-  firstSeen: "desc",
   title: "asc",
   company: "asc",
-  status: "asc",
 } as const satisfies Record<PostingSort, SortDirection>
 
 /**

@@ -30,12 +30,19 @@ export interface CoverLetterRow {
  * the store could not be relied on, so it rejects for the page to show its
  * existing storage-failure alert rather than claiming the affected rows are
  * undrafted.
+ *
+ * ⚠️ **An array, not a `Map` keyed by Posting.** This result crosses the RSC
+ * boundary into the table's client components, where a `Map` is an awkward
+ * payload — so the page used to flatten one straight back to `.values()`. It is
+ * given exactly the ids being rendered, so it is bounded by `PAGE_SIZE`, and the
+ * per-row scan in `useCoverLetter` is bounded with it; the keying only paid for
+ * itself back when the page awaited this and looked rows up server-side.
  */
 export async function loadCoverLetterRows(
   userId: string,
   postingIds: readonly string[],
   letters: CoverLetterStore
-): Promise<Map<string, CoverLetterRow>> {
+): Promise<CoverLetterRow[]> {
   const settled = await settleWithConcurrency(
     postingIds,
     HEAD_CONCURRENCY,
@@ -55,13 +62,11 @@ export async function loadCoverLetterRows(
   const rejected = settled.find((result) => result.status === "rejected")
   if (rejected?.status === "rejected") throw rejected.reason
 
-  const rows = settled.flatMap((result) =>
+  return settled.flatMap((result) =>
     result.status === "fulfilled" && result.value
-      ? [[result.value.postingId, toCoverLetterRow(result.value)] as const]
+      ? [toCoverLetterRow(result.value)]
       : []
   )
-
-  return new Map(rows)
 }
 
 function toCoverLetterRow(letter: StoredCoverLetter): CoverLetterRow {

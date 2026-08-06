@@ -1,8 +1,9 @@
+import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
 import { PostingPagination } from "@/components/briefings/posting-pagination"
 import { PostingSortHeader } from "@/components/briefings/posting-sort-header"
 import { PostingTableBody } from "@/components/briefings/posting-table-body"
-import type { CoverLetterRow } from "@/lib/cover-letters/cover-letter-rows"
 import type { PostingPage } from "@/lib/postings/list-postings"
+import { POSTING_COLUMNS } from "@/lib/postings/posting-columns"
 import type { PostingQuery } from "@/lib/postings/posting-query"
 import {
   postingsEmptyState,
@@ -27,6 +28,11 @@ import {
  * "Ever found" is the change this whole feature is for. The cards this replaced
  * rendered one Run's findings, so an advertisement the next Run did not re-find
  * simply vanished — taking any status the user had set with it.
+ *
+ * **The headings come from `POSTING_COLUMNS` rather than being written out
+ * here.** They used to be seven literal `<TableHead>`s, with the detail row's
+ * `colSpan` kept in step by hand from a constant in a different file. See
+ * `lib/postings/posting-columns.ts`.
  */
 export function PostingTable({
   page,
@@ -37,15 +43,14 @@ export function PostingTable({
   page: PostingPage
   query: PostingQuery
   /**
-   * The letters this user has already drafted, keyed by Posting id.
+   * The user's drafted letters, still in flight.
    *
-   * Keyed rather than a list because the question each row asks is "is there
-   * one for *this* Posting", and a linear scan per row would make the page
-   * quadratic in a user's drafting history for no reason. Empty when the
-   * letters could not be read — a storage failure degrades to rows with no
-   * letter rather than to no table.
+   * ⚠️ **A promise, and it is not awaited anywhere on the way to the cells that
+   * need it.** Reading it here — or in the body — would put the whole table
+   * behind a page's worth of S3 round trips, which is exactly the wait this
+   * shape exists to remove. See `cover-letter-cell.tsx`.
    */
-  letters?: ReadonlyMap<string, CoverLetterRow>
+  letters: CoverLetterPromise
   /**
    * What the strip knows, for choosing among the three empty states.
    *
@@ -70,41 +75,32 @@ export function PostingTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <PostingSortHeader column="title" label="Title" query={query} />
-              <PostingSortHeader
-                column="company"
-                label="Company"
-                query={query}
-              />
               {/*
-                Displayed, not sortable. Nobody orders a job search by the
-                spelling of a suburb, and a header that sorts is a promise the
-                column has an order worth having.
+                The disclosure column. It has no heading worth reading aloud
+                twenty-five times, but an empty `<th>` leaves a screen reader
+                with an unnamed column — so it is named once here, and the
+                per-row chevrons carry each posting's own title.
               */}
-              <TableHead>Location</TableHead>
-              <PostingSortHeader column="status" label="Status" query={query} />
-              <PostingSortHeader
-                column="firstSeen"
-                label="First seen"
-                query={query}
-              />
-              <PostingSortHeader
-                column="lastSeen"
-                label="Last seen"
-                query={query}
-              />
-              <TableHead>Cover letter</TableHead>
+              <TableHead className="w-8">
+                <span className="sr-only">Expand</span>
+              </TableHead>
+
+              {POSTING_COLUMNS.map((column) =>
+                column.sort === undefined ? (
+                  <TableHead key={column.key}>{column.label}</TableHead>
+                ) : (
+                  <PostingSortHeader
+                    key={column.key}
+                    column={column.sort}
+                    label={column.label}
+                    query={query}
+                  />
+                )
+              )}
             </TableRow>
           </TableHeader>
 
-          <PostingTableBody
-            rows={page.postings.map((posting) => {
-              const letter = letters?.get(posting.id)
-              if (!letter) return { posting }
-
-              return { posting, letter }
-            })}
-          />
+          <PostingTableBody postings={page.postings} letters={letters} />
         </Table>
       </div>
 

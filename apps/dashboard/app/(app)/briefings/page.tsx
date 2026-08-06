@@ -1,7 +1,11 @@
+import { Suspense } from "react"
+
 import {
   BriefingStrip,
   type BriefingStripEntry,
 } from "@/components/briefings/briefing-strip"
+import { CoverLetterAlert } from "@/components/briefings/cover-letter-alert"
+import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
 import { PostingTable } from "@/components/briefings/posting-table"
 import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
 import { requirePageUser } from "@/lib/auth/require-page-user"
@@ -10,10 +14,7 @@ import {
   runActivityForUser,
   type BriefingActivity,
 } from "@/lib/briefing-runs/run-activity"
-import {
-  loadCoverLetterRows,
-  type CoverLetterRow,
-} from "@/lib/cover-letters/cover-letter-rows"
+import { loadCoverLetterRows } from "@/lib/cover-letters/cover-letter-rows"
 import { getPrisma } from "@/lib/db"
 import { listPostings, type PostingPage } from "@/lib/postings/list-postings"
 import {
@@ -79,6 +80,33 @@ export default async function BriefingsPage({
   const user = await requirePageUser()
   const query = parsePostingQuery(await searchParams)
 
+  // ⚠️ **Started here, awaited far below, and the gap is the point.** This
+  // answers a different question from the table — the latest Run of any status,
+  // rather than every Posting ever found — so it depends on neither of the other
+  // two loads. It used to sit behind both and wait for them; `06-fetching-data.md`
+  // is explicit that sequential `await`s in one component are sequential
+  // *requests*, however unrelated they are.
+  //
+  // Two queries rather than one because the strip needs both halves and neither
+  // supplies the other: `runActivityForUser` returns nothing at all for a
+  // briefing that has never run, and it carries no names. They share a promise
+  // because they are one feature — a strip with names and no status, or status
+  // and no names, is not worth rendering half of.
+  //
+  // ⚠️ **The `.catch()` is attached now, not at the `await`.** A rejection
+  // before anything is awaiting is an unhandled rejection, which in Node is a
+  // process-level event and not this page's problem to survive.
+  const activityPromise = Promise.all([
+    getPrisma().job.findMany({
+      where: { userId: user.userId },
+      orderBy: { createdAt: "desc" },
+    }),
+    runActivityForUser(getPrisma(), user.userId),
+  ]).catch((error) => {
+    console.error("briefings: could not load run activity", error)
+    return null
+  })
+
   // A database outage should say so rather than replacing the page with an
   // error boundary, matching how `/documents` degrades when S3 is unreachable.
   let postings: PostingPage = {
@@ -97,47 +125,44 @@ export default async function BriefingsPage({
     loadFailed = true
   }
 
-  // ⚠️ **Loaded separately, and failing separately.** The two sources are
-  // Postgres and S3, and the dashboard's `prod:cover-letters` grant is a
-  // Terraform apply away from the code that needs it — so "letters unreadable"
-  // is a state this page will genuinely be in, and it must not take the
-  // postings down with it.
-  let letters = new Map<string, CoverLetterRow>()
-  let lettersFailed = false
-
-  try {
-    letters = await loadCoverLetterRows(
-      user.userId,
-      postings.postings.map((posting) => posting.id),
-      getCoverLetterStore()
-    )
-  } catch (error) {
-    console.error("cover-letters: could not load", error)
-    lettersFailed = true
-  }
-
-  // ⚠️ **A third independent load, failing independently.** It answers a
-  // different question from the table — the latest Run of any status, rather
-  // than every Posting ever found — and a failure here must cost the strip
-  // above the table, not the table.
+  // ⚠️ **Not awaited, and that is the fix.** This is one S3 `head()` per visible
+  // Posting — twenty-five of them at concurrency 8 — and awaiting it here put
+  // every one of those round trips on the critical path of every sort click and
+  // every page click, before a byte of the table could stream. The promise goes
+  // down to the cells that need it, each behind its own `<Suspense>`, so the
+  // table paints and the letter column fills in. See `cover-letter-cell.tsx`,
+  // and `docs/cover-letter-existence-plan.md` for why this is a mitigation
+  // rather than a cure.
   //
-  // Two queries rather than one because the strip needs both halves and neither
-  // supplies the other: `runActivityForUser` returns nothing at all for a
-  // briefing that has never run, and it carries no names. They share a block
-  // because they are one feature — a strip with names and no status, or status
-  // and no names, is not worth rendering half of.
+  // ⚠️ **`null` on failure, never an empty list.** The two sources are Postgres
+  // and S3, and the dashboard's `prod:cover-letters` grant is a Terraform apply
+  // away from the code that needs it — so "letters unreadable" is a state this
+  // page will genuinely be in. Degrading it to "nothing drafted" would tell
+  // someone who has already written a letter that they have not.
+  //
+  // An array rather than a `Map` keyed by Posting, because this crosses the RSC
+  // boundary into client components and a `Map` is an awkward payload. It is
+  // bounded by the page size, so the per-row scan that replaces the keying is
+  // bounded too — see `lib/cover-letters/cover-letter-rows.ts`.
+  const lettersPromise: CoverLetterPromise = loadCoverLetterRows(
+    user.userId,
+    postings.postings.map((posting) => posting.id),
+    getCoverLetterStore()
+  ).catch((error) => {
+    console.error("cover-letters: could not load", error)
+    return null
+  })
+
+  // ⚠️ **A third independent load, failing independently.** A failure here must
+  // cost the strip above the table, not the table.
+  const loadedActivity = await activityPromise
+
   let activity: BriefingActivity[] = []
   let strip: BriefingStripEntry[] = []
   let counts: BriefingCounts | undefined
 
-  try {
-    const [briefings, loaded] = await Promise.all([
-      getPrisma().job.findMany({
-        where: { userId: user.userId },
-        orderBy: { createdAt: "desc" },
-      }),
-      runActivityForUser(getPrisma(), user.userId),
-    ])
+  if (loadedActivity !== null) {
+    const [briefings, loaded] = loadedActivity
 
     activity = loaded
     const activityByBriefing = new Map(
@@ -154,8 +179,6 @@ export default async function BriefingsPage({
     // "you have no briefings" is the wrong thing to tell someone whose
     // briefings simply could not be read.
     counts = { briefings: briefings.length, runs: activity.length }
-  } catch (error) {
-    console.error("briefings: could not load run activity", error)
   }
 
   return (
@@ -213,19 +236,15 @@ export default async function BriefingsPage({
           <BriefingStrip briefings={strip} />
 
           {/*
-            Beside the table rather than instead of it: letters live in S3 and
-            the dashboard's `prod:cover-letters` grant is a Terraform apply away
-            from the code that needs it. Without this alert a storage failure
-            looks identical to "no letter drafted", which is the wrong thing to
-            tell someone who already drafted one.
+            `fallback={null}` because there is nothing useful to say while the
+            storage reads are still in flight, and a placeholder here would
+            reserve space above the table for a message that almost never
+            arrives. The boundary exists so this component's `await` cannot hold
+            up the table beneath it.
           */}
-          {lettersFailed ? (
-            <Alert variant="destructive">
-              <AlertDescription>
-                Your cover letters could not be loaded. Try again in a moment.
-              </AlertDescription>
-            </Alert>
-          ) : null}
+          <Suspense fallback={null}>
+            <CoverLetterAlert letters={lettersPromise} />
+          </Suspense>
 
           {loadFailed ? (
             <Alert variant="destructive">
@@ -237,7 +256,7 @@ export default async function BriefingsPage({
             <PostingTable
               page={postings}
               query={query}
-              letters={letters}
+              letters={lettersPromise}
               counts={counts}
             />
           )}
