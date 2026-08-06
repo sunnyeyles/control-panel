@@ -302,7 +302,7 @@ function PostingRow({
           <TableCell
             id={detailId}
             colSpan={POSTING_COLSPAN}
-            className="whitespace-normal"
+            className="max-w-0 whitespace-normal break-words"
           >
             <PostingDetail posting={posting} letters={letters} />
           </TableCell>

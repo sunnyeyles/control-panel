@@ -63,7 +63,7 @@ export function PostingDetail({
   const detailUnreadable = posting.summary === undefined
 
   return (
-    <div className="flex flex-col gap-5 py-2">
+    <div className="flex min-w-0 flex-col gap-5 py-2 break-words">
       {/*
         A plain anchor, not `next/link`: this leaves the app entirely, and
         prefetching a third party's advertisement site is neither useful nor ours to
