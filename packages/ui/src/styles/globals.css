@@ -52,85 +52,234 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Calm OS — the app theme. Neutral and spacious, one iris accent.
+/* ═══════════════════════════════════════════════════════════════════════════
+   Two themes live below. Exactly one is uncommented at a time; swapping means
+   commenting this one and uncommenting the other, and nothing else in the app
+   changes. Each block is self-contained — :root, .dark, and its own typography
+   rule — because which face plays which role is part of the theme, not a
+   setting the theme happens to inherit.
 
-   Only the colors something renders are declared. A chart ramp (--chart-1…5)
-   and a warn/ok status pair lived here and were never referenced by any
-   utility class — and unlike a radius step, a missing color token has no
-   Tailwind default to fall back on, so the utility simply does not exist. A
-   palette nothing reads is a palette that silently stops matching the design.
-   Add them back beside the first component that uses them. */
+     OPTION A · Signal  — ACTIVE, immediately below
+     OPTION B · Dossier — commented out, at the foot of this section
+
+   Neither option declares a chart ramp, and that is the previous comment
+   here surviving intact: a missing color token has no Tailwind default to fall
+   back on, so `--color-chart-*` utilities would simply not exist, and a
+   palette nothing reads is one that silently stops matching the design. Add
+   the ramp, and its `@theme inline` mappings, beside the first component that
+   plots something.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* OPTION A · Signal — Calm OS carried into oklch, with three corrections.
+
+   This is a refinement of the theme already here, not a replacement for it:
+   same iris, same neutral-and-spacious intent, same sans body. What changes is
+   that the color space is perceptually uniform, so "one step lighter" becomes
+   arithmetic rather than a guess, and the neutrals carry a trace of the
+   accent's hue (277) instead of drifting warm. The accent then belongs to the
+   palette rather than sitting on top of it.
+
+   Three substantive fixes:
+
+   - --secondary and --muted were both #ececea, exactly. A secondary button and
+     a muted surface were therefore the same color, which leaves a secondary
+     button reading as a disabled one. They are two steps apart now.
+   - --muted-foreground was #6e7073 on a #f7f7f5 background, around 4.6:1 —
+     which passes for body text and does not for the small type it is mostly
+     used on. It steps down to roughly 5.6:1.
+   - --radius tightens from 0.625rem to 0.375rem. 0.625 is the shadcn stock
+     value rather than a choice made for this app, and a control panel reads
+     better slightly crisper. The ramp above multiplies it, so this is the only
+     number to touch.
+
+   Everything else is a faithful conversion of the hex palette this replaced.
+   If a value looks unfamiliar, check it against that hex before changing it. */
 :root {
   --sans: var(--font-hanken);
   --mono: var(--font-plex-mono);
   --display: var(--font-hanken);
-  --background: #f7f7f5;
-  --foreground: #191a1c;
-  --card: #ffffff;
-  --card-foreground: #191a1c;
-  --popover: #ffffff;
-  --popover-foreground: #191a1c;
-  --primary: #5b5bd6;
-  --primary-foreground: #ffffff;
-  --secondary: #ececea;
-  --secondary-foreground: #191a1c;
-  --muted: #ececea;
-  --muted-foreground: #6e7073;
-  --accent: #e9e9f7;
-  --accent-foreground: #4646b8;
-  --destructive: #c0392b;
-  --border: #e3e4e1;
-  --input: #d8d9d5;
-  --ring: #5b5bd6;
-  --radius: 0.625rem;
-  --sidebar: #f0f0ee;
-  --sidebar-foreground: #191a1c;
-  --sidebar-primary: #5b5bd6;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e9e9f7;
-  --sidebar-accent-foreground: #4646b8;
-  --sidebar-border: #e3e4e1;
-  --sidebar-ring: #5b5bd6;
+  --background: oklch(0.976 0.002 277);
+  --foreground: oklch(0.215 0.008 277);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.215 0.008 277);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.215 0.008 277);
+  --primary: oklch(0.53 0.19 277);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.945 0.004 277);
+  --secondary-foreground: oklch(0.215 0.008 277);
+  --muted: oklch(0.962 0.003 277);
+  --muted-foreground: oklch(0.505 0.012 277);
+  --accent: oklch(0.936 0.024 277);
+  --accent-foreground: oklch(0.43 0.17 277);
+  --destructive: oklch(0.53 0.19 27);
+  --border: oklch(0.912 0.004 277);
+  --input: oklch(0.872 0.006 277);
+  --ring: oklch(0.53 0.19 277);
+  --radius: 0.375rem;
+  --sidebar: oklch(0.955 0.004 277);
+  --sidebar-foreground: oklch(0.215 0.008 277);
+  --sidebar-primary: oklch(0.53 0.19 277);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.936 0.024 277);
+  --sidebar-accent-foreground: oklch(0.43 0.17 277);
+  --sidebar-border: oklch(0.912 0.004 277);
+  --sidebar-ring: oklch(0.53 0.19 277);
 }
 
 .dark {
-  --background: #18191b;
-  --foreground: #ececea;
-  --card: #202124;
-  --card-foreground: #ececea;
-  --popover: #202124;
-  --popover-foreground: #ececea;
-  --primary: #8687e8;
-  --primary-foreground: #17172e;
-  --secondary: #28292d;
-  --secondary-foreground: #ececea;
-  --muted: #242529;
-  --muted-foreground: #9b9da2;
-  --accent: #26263c;
-  --accent-foreground: #b3b4f2;
-  --destructive: #e26c5c;
-  --border: #2d2e32;
-  --input: #3a3b40;
-  --ring: #8687e8;
-  --sidebar: #1c1d20;
-  --sidebar-foreground: #ececea;
-  --sidebar-primary: #8687e8;
-  --sidebar-primary-foreground: #17172e;
-  --sidebar-accent: #26263c;
-  --sidebar-accent-foreground: #b3b4f2;
-  --sidebar-border: #2d2e32;
-  --sidebar-ring: #8687e8;
+  --background: oklch(0.202 0.005 277);
+  --foreground: oklch(0.945 0.003 277);
+  --card: oklch(0.246 0.006 277);
+  --card-foreground: oklch(0.945 0.003 277);
+  --popover: oklch(0.246 0.006 277);
+  --popover-foreground: oklch(0.945 0.003 277);
+  --primary: oklch(0.665 0.155 277);
+  --primary-foreground: oklch(0.21 0.055 277);
+  --secondary: oklch(0.295 0.007 277);
+  --secondary-foreground: oklch(0.945 0.003 277);
+  --muted: oklch(0.272 0.006 277);
+  --muted-foreground: oklch(0.715 0.012 277);
+  --accent: oklch(0.285 0.045 277);
+  --accent-foreground: oklch(0.775 0.105 277);
+  --destructive: oklch(0.665 0.155 27);
+  --border: oklch(0.315 0.007 277);
+  --input: oklch(0.375 0.008 277);
+  --ring: oklch(0.665 0.155 277);
+  --sidebar: oklch(0.225 0.005 277);
+  --sidebar-foreground: oklch(0.945 0.003 277);
+  --sidebar-primary: oklch(0.665 0.155 277);
+  --sidebar-primary-foreground: oklch(0.21 0.055 277);
+  --sidebar-accent: oklch(0.285 0.045 277);
+  --sidebar-accent-foreground: oklch(0.775 0.105 277);
+  --sidebar-border: oklch(0.315 0.007 277);
+  --sidebar-ring: oklch(0.665 0.155 277);
 }
 
+@layer base {
+  html {
+    @apply font-sans;
+  }
+}
+
+/* OPTION B · Dossier — INACTIVE. To switch, comment Option A above and
+   uncomment everything between here and END OPTION B. There are no comments
+   inside this block on purpose: CSS comments do not nest, so one would close
+   this one early and dump raw CSS into the sheet.
+
+   The other true reading of the product. What it produces is a briefing — a
+   written thing, read once a day, top to bottom. Dossier sets it as one: warm
+   paper, Merriweather for headings, Hanken Grotesk for body, and IBM Plex Mono
+   left for the job mono is genuinely best at, which is figures that have to
+   line up in a column. Three faces, three roles, no overlap.
+
+   All four families are already loaded in apps/dashboard/app/layout.tsx, and
+   --font-heading is already mapped to --display in the theme block above.
+   Today --display is Hanken, the same face as the body, so the heading token
+   resolves to something and distinguishes nothing — and Merriweather ships to
+   every visitor and renders nowhere. Option B is what that font was loaded
+   for.
+
+   The accent is ink blue rather than the iris. A brief is written, and this is
+   the color it would be written in. Destructive is oxblood, so the palette's
+   two warnings come from the same bottle.
+
+   Radius is 0.5rem here rather than Option A's 0.375rem: paper stock has soft
+   corners, and this direction is not pretending to be an instrument.
+
+   This is the larger swing. It changes the feel of every screen rather than
+   the accent alone, and it drops the iris that Calm OS was built around. It is
+   the wrong choice if the dense postings table is the part of the app you care
+   most about: serif headings over a data grid need real whitespace to work,
+   and opening that table up is not something this stylesheet can do on its
+   own.
+
+:root {
+  --sans: var(--font-hanken);
+  --mono: var(--font-plex-mono);
+  --display: var(--font-merriweather);
+  --background: oklch(0.982 0.008 85);
+  --foreground: oklch(0.215 0.014 62);
+  --card: oklch(0.996 0.004 85);
+  --card-foreground: oklch(0.215 0.014 62);
+  --popover: oklch(0.996 0.004 85);
+  --popover-foreground: oklch(0.215 0.014 62);
+  --primary: oklch(0.42 0.095 255);
+  --primary-foreground: oklch(0.985 0.006 85);
+  --secondary: oklch(0.941 0.012 82);
+  --secondary-foreground: oklch(0.29 0.018 62);
+  --muted: oklch(0.958 0.01 82);
+  --muted-foreground: oklch(0.505 0.017 70);
+  --accent: oklch(0.935 0.022 255);
+  --accent-foreground: oklch(0.34 0.07 255);
+  --destructive: oklch(0.505 0.16 25);
+  --border: oklch(0.898 0.011 80);
+  --input: oklch(0.872 0.013 80);
+  --ring: oklch(0.42 0.095 255);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.958 0.013 82);
+  --sidebar-foreground: oklch(0.29 0.018 62);
+  --sidebar-primary: oklch(0.42 0.095 255);
+  --sidebar-primary-foreground: oklch(0.985 0.006 85);
+  --sidebar-accent: oklch(0.918 0.024 255);
+  --sidebar-accent-foreground: oklch(0.34 0.07 255);
+  --sidebar-border: oklch(0.885 0.012 80);
+  --sidebar-ring: oklch(0.42 0.095 255);
+}
+
+.dark {
+  --background: oklch(0.185 0.01 68);
+  --foreground: oklch(0.94 0.012 85);
+  --card: oklch(0.232 0.012 68);
+  --card-foreground: oklch(0.94 0.012 85);
+  --popover: oklch(0.242 0.013 68);
+  --popover-foreground: oklch(0.94 0.012 85);
+  --primary: oklch(0.7 0.11 255);
+  --primary-foreground: oklch(0.2 0.03 255);
+  --secondary: oklch(0.298 0.013 68);
+  --secondary-foreground: oklch(0.94 0.012 85);
+  --muted: oklch(0.272 0.012 68);
+  --muted-foreground: oklch(0.735 0.016 78);
+  --accent: oklch(0.325 0.032 255);
+  --accent-foreground: oklch(0.945 0.012 85);
+  --destructive: oklch(0.63 0.17 25);
+  --border: oklch(0.315 0.012 68);
+  --input: oklch(0.375 0.013 68);
+  --ring: oklch(0.7 0.11 255);
+  --sidebar: oklch(0.205 0.011 68);
+  --sidebar-foreground: oklch(0.94 0.012 85);
+  --sidebar-primary: oklch(0.7 0.11 255);
+  --sidebar-primary-foreground: oklch(0.2 0.03 255);
+  --sidebar-accent: oklch(0.3 0.028 255);
+  --sidebar-accent-foreground: oklch(0.945 0.012 85);
+  --sidebar-border: oklch(0.315 0.012 68);
+  --sidebar-ring: oklch(0.7 0.11 255);
+}
+
+@layer base {
+  html {
+    @apply font-sans;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-heading;
+    letter-spacing: -0.011em;
+  }
+}
+
+   END OPTION B */
+
+/* Shared by both options. */
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
   }
 }
 
