@@ -299,10 +299,17 @@ function PostingRow({
 
       {expanded ? (
         <TableRow className="bg-muted/30 hover:bg-muted/30">
+          {/*
+            `max-w-0` is the table-layout trick that lets this colspan cell
+            wrap to the width the compact rows already set, instead of
+            growing the whole table to fit a long summary or match reason.
+            `whitespace-normal` alone is not enough: a cell's min-content
+            width still wins under `table-layout: auto`.
+          */}
           <TableCell
             id={detailId}
             colSpan={POSTING_COLSPAN}
-            className="whitespace-normal"
+            className="max-w-0 whitespace-normal break-words"
           >
             <PostingDetail posting={posting} letters={letters} />
           </TableCell>
