@@ -2,7 +2,7 @@ import type { PrismaClient } from "@workspace/db"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { formatSeenAgo, listPostings } from "./list-postings"
-import { PAGE_SIZE, parsePostingQuery } from "./posting-query"
+import { PAGE_SIZE, parsePostingQuery, POSTING_SORTS } from "./posting-query"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
@@ -239,13 +239,10 @@ describe("listPostings", () => {
   it("tie-breaks every order on the posting id", async () => {
     db.many(1)
 
-    for (const sort of [
-      "lastSeen",
-      "firstSeen",
-      "title",
-      "company",
-      "status",
-    ]) {
+    // Driven from the list itself rather than written out again: a sort added
+    // to `POSTING_SORTS` without a tie-break is exactly what this asserts
+    // against, and a hand-copied list here would simply not cover it.
+    for (const sort of POSTING_SORTS) {
       await listPostings(
         db.asPrisma(),
         USER_ID,

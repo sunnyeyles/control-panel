@@ -220,7 +220,7 @@ export async function listPostings(
  * The query string never names a database column: `sort=title` selects a branch
  * here, so the set of orderable fields is this function and not "whatever
  * `postings` happens to have". A `{ [field]: direction }` object would be the
- * same five lines with the column name arriving as a string, which is both
+ * same handful of lines with the column name arriving as a string, which is both
  * untypeable against Prisma's input and a shape a reader has to check by hand.
  *
  * **Every branch carries the `postingId` tie-break, in the same direction.**
@@ -234,17 +234,11 @@ function orderByFor(query: PostingQuery) {
     case "lastSeen":
       return [{ lastSeenAt: to }, { postingId: to }]
 
-    case "firstSeen":
-      return [{ firstSeenAt: to }, { postingId: to }]
-
     case "title":
       return [{ title: to }, { postingId: to }]
 
     case "company":
       return [{ company: to }, { postingId: to }]
-
-    case "status":
-      return [{ status: to }, { postingId: to }]
   }
 }
 

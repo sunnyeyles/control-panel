@@ -41,7 +41,14 @@ function isPostingStatus(value: string): value is PostingStatus {
 }
 
 /**
- * Where one application stands, as a control on its row.
+ * Where one application stands, as a control in the Posting's expanded detail.
+ *
+ * **Rendered at most once on a page, and it used to be twenty-five times.** It
+ * sat in a column of the compact row until the table narrowed to five columns:
+ * a select is a wide control to repeat down a page, and Radix sets
+ * `aria-expanded` on its trigger while open, which tripped the row highlight
+ * meant for the disclosure chevron. The two notes below survive that move for
+ * their own reasons, not because the column still exists.
  *
  * **There is no `<form>` here, and unlike `JobEnabledSwitch` there could not
  * be.** A Radix `Select` does not bubble a hidden input at all — the switch at
@@ -64,10 +71,10 @@ export function PostingStatusSelect({
   postingId: string
   status: PostingStatus
   /**
-   * Only for the accessible label. Twenty-five of these sit on one page and the
-   * trigger's own text is "New" or "Applied" repeated down the column, so a
-   * screen reader is told which advertisement each one belongs to — a bare
-   * "Status" twenty-five times names nothing.
+   * Only for the accessible label. The trigger's own text is "New" or "Applied"
+   * and the heading above it is "Status", so nothing in the control names the
+   * advertisement it belongs to — and the detail panel it sits in is one of
+   * twenty-five that can be opened, each with an identically labelled select.
    */
   title: string
 }) {
@@ -119,9 +126,10 @@ export function PostingStatusSelect({
       </Select>
 
       {/*
-        Beside the row that failed, never a banner at the top of the page: with
-        twenty-five rows on screen, a page-level message names no advertisement
-        and the one the user was looking at has already reverted underneath it.
+        Beside the control that failed, never a banner at the top of the page:
+        the detail panel is a scroll away from the top of a table of twenty-five,
+        so a page-level message names no advertisement and would sit off screen
+        while the control the user just used silently reverted.
       */}
       <ActionError state={state} />
     </div>

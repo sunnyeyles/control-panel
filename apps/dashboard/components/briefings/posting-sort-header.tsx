@@ -35,13 +35,11 @@ export function PostingSortHeader({
   column,
   label,
   query,
-  className,
 }: {
   column: PostingSort
   label: string
   /** The view currently rendered, which decides both arrow and destination. */
   query: PostingQuery
-  className?: string
 }) {
   const active = query.sort === column
 
@@ -54,7 +52,6 @@ export function PostingSortHeader({
             : "descending"
           : "none"
       }
-      className={className}
     >
       {/*
         `-ml-2.5` cancels the button's own left padding, so a sortable heading

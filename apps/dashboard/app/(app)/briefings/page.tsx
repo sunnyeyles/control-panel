@@ -140,20 +140,18 @@ export default async function BriefingsPage({
   // page will genuinely be in. Degrading it to "nothing drafted" would tell
   // someone who has already written a letter that they have not.
   //
-  // An array rather than the `Map` that `loadCoverLetterRows` builds, because
-  // this crosses the RSC boundary into client components and a `Map` is an
-  // awkward payload. The array is bounded by the page size, so the per-row
-  // lookup that replaces the `Map` is bounded too.
+  // An array rather than a `Map` keyed by Posting, because this crosses the RSC
+  // boundary into client components and a `Map` is an awkward payload. It is
+  // bounded by the page size, so the per-row scan that replaces the keying is
+  // bounded too — see `lib/cover-letters/cover-letter-rows.ts`.
   const lettersPromise: CoverLetterPromise = loadCoverLetterRows(
     user.userId,
     postings.postings.map((posting) => posting.id),
     getCoverLetterStore()
-  )
-    .then((rows) => Array.from(rows.values()))
-    .catch((error) => {
-      console.error("cover-letters: could not load", error)
-      return null
-    })
+  ).catch((error) => {
+    console.error("cover-letters: could not load", error)
+    return null
+  })
 
   // ⚠️ **A third independent load, failing independently.** A failure here must
   // cost the strip above the table, not the table.

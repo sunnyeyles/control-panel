@@ -60,7 +60,7 @@ describe("loadCoverLetterRows", () => {
 
     const rows = await loadCoverLetterRows(USER_ID, [visible], result.store)
 
-    expect([...rows.keys()]).toEqual([visible])
+    expect(rows.map((row) => row.postingId)).toEqual([visible])
     expect(result.headed).toEqual([{ userId: USER_ID, postingId: visible }])
   })
 
@@ -72,7 +72,7 @@ describe("loadCoverLetterRows", () => {
 
     await expect(
       loadCoverLetterRows(USER_ID, [postingId], result.store)
-    ).resolves.toEqual(new Map())
+    ).resolves.toEqual([])
   })
 
   it("returns only the metadata the table renders", async () => {
@@ -85,12 +85,14 @@ describe("loadCoverLetterRows", () => {
 
     const rows = await loadCoverLetterRows(USER_ID, [postingId], result.store)
 
-    expect(rows.get(postingId)).toEqual({
-      postingId,
-      draftedAt: expect.stringContaining("1 Aug 2026"),
-      displayName: "Backend Engineer",
-      filename: "Cover letter - Backend Engineer - Acme.md",
-    })
+    expect(rows).toEqual([
+      {
+        postingId,
+        draftedAt: expect.stringContaining("1 Aug 2026"),
+        displayName: "Backend Engineer",
+        filename: "Cover letter - Backend Engineer - Acme.md",
+      },
+    ])
   })
 
   it("reports an unavailable store instead of showing every Posting undrafted", async () => {

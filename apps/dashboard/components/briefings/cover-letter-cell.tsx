@@ -15,8 +15,8 @@ import { FileTextIcon, TriangleAlertIcon } from "lucide-react"
  * already written a letter that they have not, which is the exact failure the
  * page-level alert exists to prevent.
  *
- * An array rather than the `Map` that `loadCoverLetterRows` builds, because this
- * crosses the RSC boundary and a `Map` is an awkward payload.
+ * An array rather than a `Map` keyed by Posting, because this crosses the RSC
+ * boundary and a `Map` is an awkward payload.
  */
 export type CoverLetterPromise = Promise<readonly CoverLetterRow[] | null>
 
@@ -37,8 +37,7 @@ export type CoverLetterLookup =
  *
  * A linear scan, not a lookup map. The array holds letters for the visible page
  * only — `loadCoverLetterRows` is given exactly the ids being rendered — so it
- * is bounded by `PAGE_SIZE` and cannot grow with a user's drafting history,
- * which was the reason the awaited version keyed a `Map`.
+ * is bounded by `PAGE_SIZE` and cannot grow with a user's drafting history.
  */
 export function useCoverLetter(
   postingId: string,
