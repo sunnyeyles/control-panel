@@ -1,5 +1,6 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
+import { storageMessage } from "@/lib/actions/storage-message"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import { parseDocumentFile } from "@/lib/documents/document-ref"
 import {
@@ -15,7 +16,7 @@ import {
   saveCoverLetterInstructions,
   type PrismaClient,
 } from "@workspace/db"
-import { isUserStorageError, type ResumeStore } from "@workspace/user-storage"
+import { type ResumeStore } from "@workspace/user-storage"
 import { z } from "zod"
 
 import {
@@ -198,7 +199,7 @@ export function createLetterInstructionsActions(
       // two apart even in principle.
       documents = await listDocuments(caller.userId, resumes)
     } catch (error) {
-      return fail(storageMessage("list", error))
+      return fail(storageMessage("cover-letters: list failed", error))
     }
 
     const document = documents.find(
@@ -234,7 +235,7 @@ export function createLetterInstructionsActions(
 
       bytes = fetched.bytes ?? new Uint8Array()
     } catch (error) {
-      return fail(storageMessage("read", error))
+      return fail(storageMessage("cover-letters: read failed", error))
     }
 
     let extracted: string
@@ -356,33 +357,4 @@ function describeTooLongDocument(
   length: number
 ): string {
   return `${document.displayName} is ${length} characters, over the ${MAX_EXAMPLE_LETTER_CHARS} limit for an example letter. It is refused rather than trimmed — a letter half-copied is still a style reference, and nothing would say which half. Paste the part you want imitated into the box above.`
-}
-
-/**
- * A storage failure as something safe to show.
- *
- * Branches on `code`, never `instanceof`, for the reason `errors.ts` states: an
- * error crossing a bundler or package boundary can fail a prototype check while
- * carrying a perfectly good discriminant. Detail goes to the server log alone.
- */
-function storageMessage(operation: "list" | "read", error: unknown): string {
-  console.error(`cover-letters: ${operation} failed`, error)
-
-  if (!isUserStorageError(error)) return "Something went wrong."
-
-  switch (error.code) {
-    case "object_not_found":
-    case "object_ownership":
-      // Conflated, as everywhere else here: splitting them would say whether an
-      // object exists to someone who may not read it.
-      return DOCUMENT_NOT_FOUND
-
-    case "storage_unavailable":
-      // Where `AccessDenied` lands. If this appears consistently after a
-      // deploy, the cause is the IAM attachment rather than anything here.
-      return "Document storage is unavailable. Try again in a moment."
-
-    default:
-      return "Something went wrong."
-  }
 }

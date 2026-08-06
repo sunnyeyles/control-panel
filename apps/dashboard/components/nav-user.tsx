@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation"
 
-import { authClient } from "@/lib/auth/client"
+import { signOutAndRedirect } from "@/lib/auth/sign-out"
 import {
   Avatar,
   AvatarFallback,
@@ -11,7 +11,6 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -23,13 +22,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@workspace/ui/components/sidebar"
-import {
-  EllipsisVerticalIcon,
-  CircleUserRoundIcon,
-  CreditCardIcon,
-  BellIcon,
-  LogOutIcon,
-} from "lucide-react"
+import { EllipsisVerticalIcon, LogOutIcon } from "lucide-react"
 
 /**
  * Two letters for the avatar fallback, from the name if it has one and the
@@ -54,19 +47,6 @@ export function NavUser({
   const { isMobile } = useSidebar()
   const router = useRouter()
   const fallback = initials(user.name, user.email)
-
-  async function signOut() {
-    try {
-      await authClient.signOut()
-    } catch (cause) {
-      console.error("sign-out failed", cause)
-    } finally {
-      // Refresh before navigating, or the server components that read the
-      // session are served from the router cache still showing this user.
-      router.refresh()
-      router.push("/auth/sign-in")
-    }
-  }
 
   return (
     <SidebarMenu>
@@ -115,22 +95,7 @@ export function NavUser({
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <CircleUserRoundIcon />
-                Account
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <CreditCardIcon />
-                Billing
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <BellIcon />
-                Notifications
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={signOut}>
+            <DropdownMenuItem onSelect={() => void signOutAndRedirect(router)}>
               <LogOutIcon />
               Log out
             </DropdownMenuItem>

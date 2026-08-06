@@ -1,4 +1,7 @@
-import { settleWithConcurrency } from "@/lib/settle-with-concurrency"
+import {
+  HEAD_CONCURRENCY,
+  settleWithConcurrency,
+} from "@/lib/settle-with-concurrency"
 import type { DocumentType, ResumeStore } from "@workspace/user-storage"
 
 import { formatDocumentFile } from "./document-ref"
@@ -15,24 +18,6 @@ export interface DocumentSummary {
   /** `{resumeId}{extension}` — the download route's path segment. */
   file: string
 }
-
-/**
- * How many `head()` calls are in flight at once.
- *
- * `ResumeStore.list()` paginates ListObjectsV2 to exhaustion, so the number of
- * items here is however many documents the user has — there is no natural
- * ceiling on it. Fanning all of them out at once would hand the SDK an
- * unbounded burst, exhaust its socket pool, and time out a page whose
- * `maxDuration` is 30 seconds; and it would do so only for the user who had
- * uploaded the most, which is the worst possible distribution of the failure.
- *
- * Eight is chosen to be uninteresting: comfortably faster than serial for the
- * handful of documents this realistically holds, and bounded for the case
- * nobody planned for. Deliberately a concurrency cap and **not** a cap on rows
- * — truncating the list would hide documents the user could otherwise delete,
- * and it would look identical to having uploaded fewer.
- */
-const HEAD_CONCURRENCY = 8
 
 /**
  * Every document a user has, newest first.

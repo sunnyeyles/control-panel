@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/actions/require-user"
+import { storageMessage } from "@/lib/actions/storage-message"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   loadCandidateBackground,
@@ -15,7 +16,7 @@ import {
   toProfilePrompt,
 } from "@workspace/agents/profile-extractor"
 import { createLangfuseCallback } from "@workspace/langfuse"
-import { isUserStorageError, type ResumeStore } from "@workspace/user-storage"
+import { type ResumeStore } from "@workspace/user-storage"
 
 import type { CriteriaSuggestionState } from "./criteria-suggestion"
 
@@ -169,7 +170,7 @@ export function createSuggestCriteriaActions(
         deps.getResumes()
       )
     } catch (error) {
-      return fail(storageMessage("read", error))
+      return fail(storageMessage("briefings: read failed", error))
     }
 
     if (!background.ok)
@@ -388,41 +389,5 @@ function describeUnextractable(error: UndraftableError, displayName: string) {
       const _exhaustive: never = error.reason
       return _exhaustive
     }
-  }
-}
-
-/**
- * A storage failure as something safe to show.
- *
- * Branches on `code`, never `instanceof`, for the reason `errors.ts` states: an
- * error crossing a bundler or package boundary can fail a prototype check while
- * carrying a perfectly good discriminant. Detail goes to the server log alone —
- * a bucket name, a key or an AWS request id in a rendered message tells the
- * person reading it nothing and tells anyone else rather too much.
- *
- * The `operation` parameter takes only `"read"` here, because this action never
- * writes. It is kept as a parameter rather than folded away so the log line
- * stays identical in shape to its two siblings; grepping `briefings: read
- * failed` should find the same thing it finds for documents and letters.
- */
-function storageMessage(operation: "read", error: unknown): string {
-  console.error(`briefings: ${operation} failed`, error)
-
-  if (!isUserStorageError(error)) return "Something went wrong."
-
-  switch (error.code) {
-    case "object_not_found":
-    case "object_ownership":
-      // Conflated, as everywhere else: splitting them would say whether an
-      // object exists to someone who may not read it.
-      return "That document no longer exists."
-
-    case "storage_unavailable":
-      // Where `AccessDenied` lands. If this appears consistently after a
-      // deploy, the cause is the IAM attachment rather than the code.
-      return "Document storage is unavailable. Try again in a moment."
-
-    default:
-      return "Something went wrong."
   }
 }

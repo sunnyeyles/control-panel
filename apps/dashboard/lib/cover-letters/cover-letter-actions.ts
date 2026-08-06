@@ -1,5 +1,7 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
+import { storageMessage } from "@/lib/actions/storage-message"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   loadCandidateBackground,
@@ -91,16 +93,13 @@ import { z } from "zod"
 /**
  * One message for "no such Posting" and "someone else's Posting".
  *
- * The two are indistinguishable to this action by construction — the lookup
- * names the caller as half its key, so a stranger's advertisement comes back as
- * the same absent row — and that identity is load-bearing rather than tidy.
- * Posting ids are derived from an advertisement's URL, so anybody reading the
- * same job board can produce one; two messages would turn that into an oracle
- * for whether a stranger has been shown it. `lib/postings/posting-actions.ts`
- * gives the same reasoning for its own copy, and the two are stated separately
- * because they guard two independent submissions rather than one shared check.
+ * Re-exported from `lib/actions/not-found.ts` so posting-actions and tests share
+ * one string. The two cases are indistinguishable to this action by construction —
+ * the lookup names the caller as half its key — and that identity is load-bearing:
+ * Posting ids are derived from an advertisement's URL, so two messages would turn
+ * a form into an oracle for whether a stranger has been shown it.
  */
-export const POSTING_NOT_FOUND = "That posting could not be found."
+export { POSTING_NOT_FOUND }
 
 /** Reachable only by posting a form directly; the buttons always send it. */
 const BAD_REQUEST = "That posting could not be identified."
@@ -331,7 +330,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         deps.getResumes()
       )
     } catch (error) {
-      return fail(storageMessage("read", error))
+      return fail(storageMessage(`cover-letters: read failed`, error))
     }
 
     if (!background.ok)
@@ -418,7 +417,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         },
       })
     } catch (error) {
-      return fail(storageMessage("write", error))
+      return fail(storageMessage(`cover-letters: write failed`, error))
     }
 
     return {
@@ -475,7 +474,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       )
     } catch (error) {
       if (!isUserStorageError(error) || error.code !== "object_not_found") {
-        return fail(storageMessage("read", error))
+        return fail(storageMessage(`cover-letters: read failed`, error))
       }
     }
 
@@ -492,7 +491,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         },
       })
     } catch (error) {
-      return fail(storageMessage("write", error))
+      return fail(storageMessage(`cover-letters: write failed`, error))
     }
 
     return {
@@ -598,7 +597,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       // Anything else is the bucket being unreachable, which must not be
       // reported as "you have not drafted this" — that would tell a user their
       // letter is gone during an outage.
-      return fail(storageMessage("read", error))
+      return fail(storageMessage(`cover-letters: read failed`, error))
     }
 
     try {
@@ -609,7 +608,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         provenance: existing.provenance,
       })
     } catch (error) {
-      return fail(storageMessage("write", error))
+      return fail(storageMessage(`cover-letters: write failed`, error))
     }
 
     return {
@@ -745,35 +744,5 @@ function describeUndraftable(error: UndraftableError, displayName: string) {
       const _exhaustive: never = error.reason
       return _exhaustive
     }
-  }
-}
-
-/**
- * A storage failure as something safe to show.
- *
- * Branches on `code`, never `instanceof`, for the reason `errors.ts` states: an
- * error crossing a bundler or package boundary can fail a prototype check while
- * carrying a perfectly good discriminant. Detail goes to the server log alone.
- */
-function storageMessage(operation: "read" | "write", error: unknown): string {
-  console.error(`cover-letters: ${operation} failed`, error)
-
-  if (!isUserStorageError(error)) return "Something went wrong."
-
-  switch (error.code) {
-    case "object_not_found":
-    case "object_ownership":
-      // Conflated, as everywhere else here: splitting them would say whether an
-      // object exists to someone who may not read it.
-      return "That document no longer exists."
-
-    case "storage_unavailable":
-      // Where `AccessDenied` lands. If this appears consistently after a
-      // deploy, the cause is the IAM attachment — `prod:cover-letters` is a
-      // grant that has to be applied, not only declared.
-      return "Document storage is unavailable. Try again in a moment."
-
-    default:
-      return "Something went wrong."
   }
 }

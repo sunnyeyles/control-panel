@@ -1,4 +1,5 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { BRIEFING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import { requireOwnedJob } from "@/lib/jobs/owned-job"
@@ -36,11 +37,13 @@ import { staleBefore } from "./staleness"
  */
 
 /**
- * One message for "no such briefing" and "someone else's briefing", matching
- * `lib/jobs/job-actions.ts`. Distinct messages would turn a form that takes a
- * uuid into an oracle for whether another user's row exists.
+ * One message for "no such briefing" and "someone else's briefing".
+ *
+ * Shared with job-actions via `lib/actions/not-found.ts`. Distinct messages
+ * would turn a form that takes a uuid into an oracle for whether another user's
+ * row exists.
  */
-const NOT_FOUND = "That briefing could not be found."
+const NOT_FOUND = BRIEFING_NOT_FOUND
 
 /**
  * Refusing a second run while one is going is the spend control on this button.

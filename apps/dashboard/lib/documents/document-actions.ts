@@ -1,10 +1,10 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { DOCUMENT_GONE, storageMessage } from "@/lib/actions/storage-message"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   acceptedResumeExtensions,
   isDocumentType,
-  isUserStorageError,
   type DocumentType,
   type ResumeStore,
 } from "@workspace/user-storage"
@@ -176,7 +176,12 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         ...(documentType ? { documentType } : {}),
       })
     } catch (error) {
-      return fail(storageMessage("upload", error))
+      return fail(
+        storageMessage("documents: upload failed", error, {
+          invalidObjectKey:
+            "That file couldn't be stored. Check the file name and type.",
+        })
+      )
     }
 
     // The reset key is the new object's id: unique per success by construction, so
@@ -216,7 +221,12 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         extension: extension.data,
       })
     } catch (error) {
-      return { status: "error", message: storageMessage("delete", error) }
+      return {
+        status: "error",
+        message: storageMessage("documents: delete failed", error, {
+          invalidObjectKey: DOCUMENT_GONE,
+        }),
+      }
     }
 
     // Recoverable rather than destructive, which is why exposing this at all is
@@ -231,64 +241,4 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
   }
 
   return { uploadDocument, deleteDocument }
-}
-
-/**
- * A storage failure as something safe to show.
- *
- * Branches on `code`, never `instanceof` — `errors.ts` says so explicitly, and
- * the reason is real: an error crossing a bundler or package boundary can fail
- * a prototype check while carrying a perfectly good discriminant.
- *
- * Detail goes to the server log and nowhere else, matching `chat-handler.ts`.
- */
-function storageMessage(
-  // Narrowed from `string` because a branch below turns on it, and a typo in a
-  // call site would silently pick the delete wording for an upload.
-  operation: "upload" | "delete",
-  error: unknown
-): string {
-  console.error(`documents: ${operation} failed`, error)
-
-  if (!isUserStorageError(error)) return "Something went wrong."
-
-  switch (error.code) {
-    case "invalid_object_key":
-      // Two very different situations behind one code, so the copy follows the
-      // operation rather than the error.
-      //
-      // On an upload it is reachable, and not only through a bad extension:
-      // `cleanFilename` in the resume store throws when a filename has no
-      // representable ASCII left at all, which `checkUpload` does not catch
-      // because the extension is fine. "Check the file name" is the right
-      // advice, and the user has a file in front of them to check.
-      //
-      // On a delete there is no file and no name to check — the id came from a
-      // hidden field the user never saw. `resumeIdSchema` should have caught it
-      // first, so reaching here means the row is unaddressable, which is the
-      // same thing as gone as far as anyone can act on it.
-      return operation === "upload"
-        ? "That file couldn't be stored. Check the file name and type."
-        : "That document no longer exists."
-
-    case "object_not_found":
-    case "object_ownership":
-      // **The same message, deliberately.** `errors.ts` says a caller that must
-      // not learn whether an object exists should conflate the two, and that
-      // the choice should be visible where it is made rather than buried in the
-      // error class. Splitting these would turn a delete form into an oracle
-      // for whether another user's document id is real.
-      return "That document no longer exists."
-
-    case "storage_unavailable":
-      // Where `AccessDenied` lands, which matters for diagnosis more than for
-      // the user: a broken IAM attachment or a mismatched OIDC subject surfaces
-      // here as a transient-sounding message, not as a 404. If this appears
-      // consistently on a fresh deploy, read the function logs — the cause is
-      // in the AssumeRoleWithWebIdentity call, not in this app.
-      return "Document storage is unavailable. Try again in a moment."
-
-    default:
-      return "Something went wrong."
-  }
 }
