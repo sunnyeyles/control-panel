@@ -24,6 +24,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Repairing worktree env symlink",
+            "timeout": 15,
+            "command": "r=\".claude/hooks/repair-worktree-env-symlink.sh\"; s=\"${CLAUDE_PROJECT_DIR:-.}/$r\"; [ -f \"$s\" ] || { g=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); s=\"${g%/.git}/$r\"; }; [ -f \"$s\" ] && bash \"$s\" || true"
+          }
+        ]
+      }
     ]
   }
 }
