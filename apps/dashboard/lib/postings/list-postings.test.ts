@@ -1,6 +1,12 @@
 import type { PrismaClient } from "@workspace/db"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import {
+  compareNullity,
+  comparePostingValues,
+  type PostingOrderBy,
+} from "@/lib/dev/fake-prisma"
+
 import { formatSeenAgo, listPostings } from "./list-postings"
 import { PAGE_SIZE, parsePostingQuery, POSTING_SORTS } from "./posting-query"
 
@@ -16,6 +22,8 @@ interface PostingRow {
   location: string
   url: string
   status: string
+  /** NULL when the advertisement stated no date, or stated a non-date. */
+  postedAt: Date | null
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
@@ -77,6 +85,7 @@ class FakeDb {
       location: "Sydney",
       url: `https://www.seek.com.au/job/${this.rows.length + 1}`,
       status: "new",
+      postedAt: null,
       payload: payload(),
       firstSeenAt: at,
       lastSeenAt: at,
@@ -104,7 +113,7 @@ class FakeDb {
         },
         findMany: async (query: {
           where: { userId: string }
-          orderBy: Record<string, "asc" | "desc">[]
+          orderBy: PostingOrderBy[]
           skip: number
           take: number
           select: Record<string, unknown>
@@ -114,13 +123,28 @@ class FakeDb {
           const ordered = [...this.mine(query.where.userId)].sort(
             (left, right) => {
               for (const clause of query.orderBy) {
-                for (const [field, direction] of Object.entries(clause)) {
+                for (const [field, spec] of Object.entries(clause)) {
+                  const direction = typeof spec === "string" ? spec : spec.sort
+                  const nulls =
+                    typeof spec === "string" ? undefined : spec.nulls
+
                   const a = left[field as keyof PostingRow]
                   const b = right[field as keyof PostingRow]
-                  const compared =
-                    a instanceof Date && b instanceof Date
-                      ? a.getTime() - b.getTime()
-                      : String(a).localeCompare(String(b))
+
+                  // Nullity is decided before the direction is applied, as
+                  // Postgres decides it: `nulls: "last"` means last whichever
+                  // way the values run. Flipping it with the direction is
+                  // exactly the bug the tests below would then fail to catch.
+                  // `compareNullity` is the same rule `lib/dev/fake-prisma.ts`
+                  // applies for its own fake `prisma.posting`, reused here
+                  // rather than restated so the two fakes cannot disagree.
+                  const byNullity = compareNullity(a, b, direction, nulls)
+                  if (byNullity !== undefined) {
+                    if (byNullity !== 0) return byNullity
+                    continue
+                  }
+
+                  const compared = comparePostingValues(field, a, b)
 
                   if (compared !== 0) {
                     return direction === "desc" ? -compared : compared
@@ -271,6 +295,132 @@ describe("listPostings", () => {
       "Alpaca Herder",
       "Zebra Wrangler",
     ])
+  })
+
+  /**
+   * The Posted column is the only nullable thing this table orders by, and NULL
+   * there does not mean "long ago" — it means the advertisement did not state a
+   * date, or stated something the write path would not read as one.
+   *
+   * ⚠️ **Both directions are asserted, and that is the whole test.** Postgres
+   * defaults to NULLS FIRST under `DESC`, so a clause that merely said
+   * `{ postedAt: "desc" }` would put every undated row above every dated one —
+   * passing an ascending-only test and being visibly wrong on the first click.
+   */
+  describe("ordering on the posting date", () => {
+    function seedDatedAndUndated() {
+      db.posting({
+        postingId: "a".repeat(16),
+        title: "Older",
+        postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      })
+        .posting({
+          postingId: "b".repeat(16),
+          title: "Newer",
+          postedAt: new Date("2026-08-01T00:00:00.000Z"),
+        })
+        .posting({ postingId: "c".repeat(16), title: "Undated" })
+    }
+
+    it("puts the newest first and the undated last", async () => {
+      seedDatedAndUndated()
+
+      const page = await listPostings(
+        db.asPrisma(),
+        USER_ID,
+        parsePostingQuery({ sort: "posted" })
+      )
+
+      expect(page.postings.map((row) => row.title)).toEqual([
+        "Newer",
+        "Older",
+        "Undated",
+      ])
+    })
+
+    it("keeps the undated last when the order is reversed", async () => {
+      seedDatedAndUndated()
+
+      const page = await listPostings(
+        db.asPrisma(),
+        USER_ID,
+        parsePostingQuery({ sort: "posted", dir: "asc" })
+      )
+
+      expect(page.postings.map((row) => row.title)).toEqual([
+        "Older",
+        "Newer",
+        "Undated",
+      ])
+    })
+
+    it("asks the database for nulls last rather than doing it afterwards", async () => {
+      db.many(1)
+
+      await listPostings(
+        db.asPrisma(),
+        USER_ID,
+        parsePostingQuery({ sort: "posted" })
+      )
+
+      // Paging is offset-based, so a rule applied to the page in memory would
+      // only order the twenty-five rows that already came back.
+      expect(db.queries.at(-1)).toMatchObject({
+        orderBy: [
+          { postedAt: { sort: "desc", nulls: "last" } },
+          { postingId: "desc" },
+        ],
+      })
+    })
+  })
+
+  describe("the Posted cell", () => {
+    it("formats the column when the write path read a date", async () => {
+      db.posting({
+        postingId: "a".repeat(16),
+        postedAt: new Date("2026-07-30T00:00:00.000Z"),
+        payload: payload({ postedAt: "2026-07-30" }),
+      })
+
+      const [row] = (
+        await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+      ).postings
+
+      // `en-AU` spells the month out even under `month: "short"`, exactly as
+      // `formatSeenAt` already renders a sighting — the two agree because they
+      // pin the same locale and the same zone.
+      expect(row?.postedAt).toBe("30 July 2026")
+    })
+
+    /**
+     * The fallback, and it is deliberate: an advertisement that said "3 days
+     * ago" keeps saying it rather than degrading to an em-dash. The row sorts
+     * last either way, and a phrase is visibly not a date, so what is on screen
+     * cannot appear to contradict the order it sits in.
+     */
+    it("keeps the advertisement's own words when it did not", async () => {
+      db.posting({
+        postingId: "a".repeat(16),
+        postedAt: null,
+        payload: payload({ postedAt: "3 days ago" }),
+      })
+
+      const [row] = (
+        await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+      ).postings
+
+      expect(row?.postedAt).toBe("3 days ago")
+    })
+
+    it("says nothing when the advertisement said nothing", async () => {
+      db.posting({ postingId: "a".repeat(16), postedAt: null })
+
+      const [row] = (
+        await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+      ).postings
+
+      expect(row?.postedAt).toBeUndefined()
+    })
   })
 
   /**

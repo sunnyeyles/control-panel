@@ -124,8 +124,16 @@ model Posting {
   company         String
   location        String
   url             String
+  // When the advertisement said the role was posted. NULL when it said nothing,
+  // and NULL when what it said is not a date — the scout copies the page's own
+  // words, so "3 days ago" is an ordinary answer and not a failure.
+  //
+  // Unlike the four columns above this one is *derived* rather than copied:
+  // `parsePostedAt()` in `apps/briefing-worker/src/postings.ts` is the only rule
+  // that produces it, and the backfill in `0006` restates that rule in SQL.
+  postedAt        DateTime? @map("posted_at") @db.Timestamptz(6)
   // The validated Posting as its producer wrote it, opaque here exactly as
-  // `runs.findings` and `jobs.config` are. The four columns above are the
+  // `runs.findings` and `jobs.config` are. The five columns above are the
   // projection this table sorts and displays on.
   payload         Json
   // text + CHECK in migration SQL rather than a Postgres enum, as `runs.status`

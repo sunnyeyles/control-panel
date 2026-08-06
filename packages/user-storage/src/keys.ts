@@ -92,6 +92,38 @@ const EXTENSION_PATTERN = new RegExp(`^${EXTENSION_SOURCE}$`)
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 
 /**
+ * Whether a `YYYY-MM-DD` string names a real calendar date.
+ *
+ * `new Date("2026-02-30")` does not fail — it rolls forward to 2 March.
+ * Rebuilding the date from its own digits via `Date.UTC` and comparing back
+ * through `toISOString` is what actually rejects an impossible day; a plain
+ * parse does not on its own. Timezone-independent by construction, unlike a
+ * check on how the whole string happened to parse.
+ *
+ * Exported so a caller elsewhere in the monorepo checking the same
+ * `YYYY-MM-DD` shape doesn't restate the technique — see
+ * `apps/briefing-worker/src/postings.ts`'s `parsePostedAt`, which applies the
+ * identical rule to the date embedded in a scouted posting's ISO timestamp.
+ */
+export function isRealCalendarDate(value: string): boolean {
+  const match = DATE_PATTERN.exec(value)
+  if (!match) return false
+
+  const [, year, month, day] = match as unknown as [
+    string,
+    string,
+    string,
+    string,
+  ]
+
+  const rebuilt = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day))
+  )
+
+  return rebuilt.toISOString().slice(0, 10) === value
+}
+
+/**
  * Build the key an object is stored under.
  *
  * Validates every part first. That is not defensive tidiness — an unvalidated
@@ -268,14 +300,7 @@ function assertCalendarDate(value: string): {
     string,
   ]
 
-  // `new Date("2026-02-31")` is not an error, it is the 3rd of March. Round-
-  // tripping through toISOString is what actually rejects an impossible date.
-  const parsed = new Date(`${value}T00:00:00.000Z`)
-
-  if (
-    Number.isNaN(parsed.getTime()) ||
-    parsed.toISOString().slice(0, 10) !== value
-  ) {
+  if (!isRealCalendarDate(value)) {
     throw new InvalidObjectKeyError(`"${value}" is not a real calendar date.`)
   }
 

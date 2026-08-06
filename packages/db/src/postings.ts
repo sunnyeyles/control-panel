@@ -37,6 +37,16 @@ export interface NewPosting {
   company: string
   location: string
   url: string
+  /**
+   * When the advertisement said the role was posted, parsed.
+   *
+   * Absent when it said nothing and absent when what it said is not a date —
+   * the producer decides which, and this package does not know the rule. It is
+   * a `Date` rather than the string the payload carries precisely so that it
+   * cannot be: a column the table orders by has to be a point in time before it
+   * gets here.
+   */
+  postedAt?: Date
   payload: PostingPayload
 }
 
@@ -110,6 +120,7 @@ export async function recordPostings(
       ${posting.company},
       ${posting.location},
       ${posting.url},
+      ${posting.postedAt ?? null}::timestamptz,
       ${JSON.stringify(posting.payload)}::jsonb,
       ${seen.seenAt}::timestamptz,
       ${seen.seenAt}::timestamptz,
@@ -120,7 +131,7 @@ export async function recordPostings(
 
   return prisma.$executeRaw(Prisma.sql`
     INSERT INTO postings (
-      user_id, posting_id, title, company, location, url, payload,
+      user_id, posting_id, title, company, location, url, posted_at, payload,
       first_seen_at, last_seen_at, first_seen_run_id, last_seen_run_id
     )
     VALUES ${Prisma.join(rows)}
@@ -129,6 +140,7 @@ export async function recordPostings(
       company = EXCLUDED.company,
       location = EXCLUDED.location,
       url = EXCLUDED.url,
+      posted_at = EXCLUDED.posted_at,
       payload = EXCLUDED.payload,
       last_seen_at = EXCLUDED.last_seen_at,
       last_seen_run_id = EXCLUDED.last_seen_run_id

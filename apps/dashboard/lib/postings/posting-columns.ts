@@ -31,13 +31,18 @@ export interface PostingColumn {
    *
    * Location has no order worth having — nobody sorts a job search by the
    * spelling of a suburb, and a heading that sorts is a promise the column does.
-   * `postedAt` cannot sort even in principle: it lives inside `postings.payload`
-   * as whatever the advertisement said, so there is no column to order by.
-   * `source` cannot either, for the neighbouring reason: it is derived from the
-   * URL's host at read time and stored nowhere, so there is no column for an
-   * `ORDER BY` to name — see `posting-source.ts` for why that is the design
-   * rather than an omission. The letter column is answered from S3 after the
-   * rows are chosen, which is later than an `ORDER BY` can be decided.
+   * The letter column is answered from S3 after the rows are chosen, which is
+   * later than an `ORDER BY` can be decided.
+   *
+   * `postedAt` did not sort either, and for a reason that was true until
+   * `0006_posting_posted_at` stopped it being: the value lived only inside
+   * `postings.payload`, so there was nothing for an `ORDER BY` to name. It is a
+   * column now, and the heading sorts.
+   *
+   * `source` cannot sort, and not for that reason: it is derived from the URL's
+   * host at read time and stored nowhere, so there is no column for an
+   * `ORDER BY` to name at all — see `posting-source.ts` for why that is the
+   * design rather than an omission this migration could also fix.
    */
   sort?: PostingSort
 }
@@ -46,7 +51,7 @@ export const POSTING_COLUMNS: readonly PostingColumn[] = [
   { key: "title", label: "Title", sort: "title" },
   { key: "company", label: "Company", sort: "company" },
   { key: "location", label: "Location" },
-  { key: "postedAt", label: "Posted" },
+  { key: "postedAt", label: "Posted", sort: "posted" },
   { key: "source", label: "Source" },
   { key: "letter", label: "Cover letter" },
 ]

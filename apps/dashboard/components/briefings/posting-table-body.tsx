@@ -83,6 +83,15 @@ export function PostingTableBody({
  * `PostingView` goes down as props — the page already holds every field, so
  * opening the detail costs no query.
  *
+ * **The whole row is the target, and the controls inside it handle themselves.**
+ * The `<tr>` toggles the detail, so aiming at the company or the date works as
+ * well as aiming at the chevron. The row shares that space with three real
+ * controls — the selection checkbox, the chevron, and the delete trigger — each
+ * of which keeps its own `onClick`, and the row's handler ignores any click that
+ * came from inside one. That single guard is what a `stopPropagation` on every
+ * control would otherwise have to do, in one place instead of three, and it
+ * still holds when a fourth control lands in the row.
+ *
  * Local to this file rather than a module of its own. It renders a pair of
  * sibling `<tr>`s and is the only thing that ever will, and splitting it out is
  * what previously put the detail row's `colSpan` in a different file from the
@@ -106,11 +115,42 @@ function PostingRow({
   return (
     <>
       {/*
+        The click target is the whole row, so aiming at the company or the date
+        opens the detail exactly as aiming at the chevron does. `TableRow`
+        already carries `hover:bg-muted/50`, so only the cursor is missing.
         `data-state` rather than a class of our own: the shared `TableRow`
         already styles `data-[state=selected]:bg-muted`, and `TableCell` already
         tightens the padding of a cell holding a checkbox.
+
+        Two gestures must not toggle, and both are handled here rather than by a
+        `stopPropagation` in each control:
+
+        ⚠️ **A click that landed on a control belongs to that control.** The
+        checkbox and the delete trigger both render as `<button>`s *inside* this
+        `<tr>`, so without this guard ticking a row for deletion, or opening its
+        confirmation, would also expand the detail underneath it. `closest`
+        rather than a check on `currentTarget`, because the click lands on the
+        icon inside the button as often as on the button itself.
+
+        Selecting text is the other: releasing a drag fires a click on the row,
+        and having the panel open every time someone highlights a company name
+        to copy it makes the table hostile to read. A collapsed selection is a
+        click; anything else is a drag.
       */}
-      <TableRow data-state={selected ? "selected" : undefined}>
+      <TableRow
+        data-state={selected ? "selected" : undefined}
+        className="cursor-pointer"
+        onClick={(event) => {
+          // `Element` and not `HTMLElement`: a click on the chevron lands on
+          // the `<svg>` inside the button, which is an `SVGElement`. `closest`
+          // is defined on `Element`, so it covers both.
+          if ((event.target as Element).closest("button, input, a, label")) {
+            return
+          }
+          if (window.getSelection()?.isCollapsed === false) return
+          onToggle()
+        }}
+      >
         <TableCell className="w-8">
           <Checkbox
             checked={selected}
@@ -120,14 +160,19 @@ function PostingRow({
         </TableCell>
 
         {/*
-          The disclosure control. A chevron and not the title, because an
-          underlined title means "this navigates" and it does not — it expands
-          the row underneath.
+          The disclosure control, and the row's accessibility in one place: it
+          is the focusable thing, it names what it does, and it is what a screen
+          reader is told about. It keeps its own `onClick`: the row's handler
+          ignores clicks that came from inside a control, so the chevron — a
+          control like the two beside it — has to answer for its own, and that
+          is also what makes Enter and Space on the focused button work.
 
           ⚠️ `aria-expanded` has to stay on a control *inside* the row: the
           shared `TableRow` highlights an open row with
           `has-aria-expanded:bg-muted/50`, which is a `:has()` selector looking
-          for exactly this attribute.
+          for exactly this attribute. Moving it onto the `<tr>` — which now
+          looks like the natural home for it — silently drops that highlight,
+          because `:has()` matches descendants.
         */}
         <TableCell className="w-8">
           <Button
@@ -151,22 +196,16 @@ function PostingRow({
         </TableCell>
 
         {/*
-          The title toggles the same detail, because a row's name is what people
-          aim at. `h-auto`, `py-0` and `whitespace-normal` undo the button
-          defaults: a long advertisement title has to wrap inside the cell
-          rather than stretch the column to fit on one line.
+          Plain text. It was a `variant="link"` button, which underlined on
+          hover — and an underline means "this navigates", which it never did:
+          it expanded the row underneath, exactly as every other cell now does.
+          `whitespace-normal` is what the removed button was supplying, and it
+          is still needed: `TableCell` defaults to `whitespace-nowrap`, so a
+          long advertisement title would otherwise stretch the column rather
+          than wrap inside it.
         */}
-        <TableCell className="max-w-xs font-medium">
-          <Button
-            type="button"
-            variant="link"
-            aria-expanded={expanded}
-            aria-controls={expanded ? detailId : undefined}
-            onClick={onToggle}
-            className="h-auto px-0 py-0 text-left font-medium whitespace-normal text-foreground"
-          >
-            {posting.title}
-          </Button>
+        <TableCell className="max-w-xs font-medium whitespace-normal">
+          {posting.title}
         </TableCell>
 
         <TableCell>{posting.company}</TableCell>
@@ -176,11 +215,11 @@ function PostingRow({
         </TableCell>
 
         {/*
-          Whatever the advertisement said, verbatim — free text inside
-          `postings.payload`, not a date the app parsed, so there is nothing to
-          format and nothing to order by. The scout is instructed to omit rather
-          than estimate, so an em-dash means the advertisement did not say, not
-          that anything failed.
+          The parsed `postings.posted_at` formatted, or the advertisement's own
+          words when the write path could not read a date out of them — one
+          string either way, resolved in `lib/postings/list-postings.ts`. The
+          scout is instructed to omit rather than estimate, so an em-dash means
+          the advertisement did not say, not that anything failed.
         */}
         <TableCell className="text-muted-foreground">
           {posting.postedAt ?? (

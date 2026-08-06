@@ -1,6 +1,7 @@
 import { DeleteDocumentButton } from "@/components/documents/delete-document-button"
 import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import type { DocumentSummary } from "@/lib/documents/list-documents"
+import { formatCalendarDate } from "@/lib/format-calendar-date"
 import { Badge } from "@workspace/ui/components/badge"
 import {
   Table,
@@ -91,7 +92,7 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
               </TableCell>
 
               <TableCell className="text-muted-foreground">
-                {formatDate(document.uploadedAt)}
+                {formatCalendarDate(document.uploadedAt)}
               </TableCell>
 
               <TableCell>
@@ -113,16 +114,4 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatDate(date: Date): string {
-  // A fixed locale and timezone, not the runtime's. The server's default locale
-  // is whatever the platform decides, which is neither stable across deploys
-  // nor the user's.
-  return new Intl.DateTimeFormat("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(date)
 }

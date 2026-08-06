@@ -5,6 +5,8 @@ import {
   type PrismaClient,
 } from "@workspace/db"
 
+import { formatCalendarDate } from "@/lib/format-calendar-date"
+
 import { PAGE_SIZE, type PostingQuery } from "./posting-query"
 import { postingSource, type PostingSource } from "./posting-source"
 
@@ -37,6 +39,21 @@ export interface PostingView {
   url: string
   status: PostingStatus
   /**
+   * What the Posted cell shows: the parsed `postings.posted_at` formatted, or —
+   * when that is NULL because the advertisement stated a date the write path
+   * would not read as one — the advertisement's own words, verbatim.
+   *
+   * Absent only when it said nothing at all.
+   *
+   * ⚠️ **The two cases are deliberately one field, and the fallback is not a
+   * mistake.** A row that says "3 days ago" keeps saying it rather than
+   * degrading to an em-dash, and the column orders NULLs last so such a row sits
+   * at the bottom under either direction. A phrase is visibly not a date, so the
+   * value on screen and the order it sits in cannot appear to contradict each
+   * other. See {@link toView}.
+   */
+  postedAt?: string
+  /**
    * Which job board this came from, derived from {@link PostingView.url} rather
    * than stored — see `posting-source.ts` for why there is no column.
    *
@@ -44,8 +61,6 @@ export interface PostingView {
    * from a host no board claims: that still answers, with the hostname.
    */
   source?: PostingSource
-  /** Whatever the advertisement said, verbatim. Absent when it did not say. */
-  postedAt?: string
   /** Lines copied from the advertisement. Empty when it carried none. */
   highlights: string[]
   /** Absent when the stored payload could not be read — see {@link toView}. */
@@ -164,6 +179,7 @@ export async function listPostings(
       location: true,
       url: true,
       status: true,
+      postedAt: true,
       payload: true,
       firstSeenAt: true,
       lastSeenAt: true,
@@ -235,6 +251,15 @@ export async function listPostings(
  * **Every branch carries the `postingId` tie-break, in the same direction.**
  * See {@link listPostings} for why a page boundary without it shows one row
  * twice and skips another.
+ *
+ * ⚠️ **`posted` is NULLS LAST in *both* directions, and that asymmetry is the
+ * point.** It is the one nullable column here, and NULL does not mean "long
+ * ago": it means the advertisement did not state a date, or stated one the
+ * write path would not read as a date. Postgres would default to NULLS FIRST
+ * under `DESC`, which puts every row that says nothing above every row that
+ * says something — the opposite of what someone clicking "Posted" is asking
+ * for. Sorting ascending does not make those rows interesting either, so they
+ * stay at the bottom whichever way the column runs.
  */
 function orderByFor(query: PostingQuery) {
   const to = query.direction
@@ -248,6 +273,14 @@ function orderByFor(query: PostingQuery) {
 
     case "company":
       return [{ company: to }, { postingId: to }]
+
+    case "posted":
+      // `as const` so `nulls` narrows to `Prisma.NullsOrder` rather than
+      // widening to `string`, which the generated input type refuses.
+      return [
+        { postedAt: { sort: to, nulls: "last" as const } },
+        { postingId: to },
+      ]
   }
 }
 
@@ -259,6 +292,8 @@ interface PostingRow {
   location: string
   url: string
   status: string
+  /** NULL when the advertisement stated no date, or stated a non-date. */
+  postedAt: Date | null
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
@@ -315,9 +350,20 @@ function toView(row: PostingRow, now: Date): PostingView {
     lastSeenExact: formatSeenAt(row.lastSeenAt),
     briefing: briefingName(row.lastSeenRun) ?? UNKNOWN_BRIEFING,
     highlights: parsed.success ? (parsed.data.highlights ?? []) : [],
-    ...(parsed.success && parsed.data.postedAt
-      ? { postedAt: parsed.data.postedAt }
-      : {}),
+    // The column when the write path could read a date out of the
+    // advertisement, the advertisement's own words when it could not, and
+    // nothing when it said nothing. See {@link PostingView.postedAt} for why
+    // the second case is kept rather than blanked.
+    //
+    // No time and no zone name, unlike {@link formatSeenAt}: the source is a
+    // date the advertisement stated, so any time of day in it is an artefact
+    // of the ISO string rather than something the page said, and printing
+    // "00:00 UTC" beside every row would be precision the value does not have.
+    ...(row.postedAt
+      ? { postedAt: formatCalendarDate(row.postedAt) }
+      : parsed.success && parsed.data.postedAt
+        ? { postedAt: parsed.data.postedAt }
+        : {}),
     ...(parsed.success
       ? { summary: parsed.data.summary, matchReason: parsed.data.matchReason }
       : {}),

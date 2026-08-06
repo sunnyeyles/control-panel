@@ -50,6 +50,22 @@ describe("parsePostingQuery", () => {
     })
   })
 
+  /**
+   * A date's interesting end is the recent one, which is why the Posted column
+   * runs the same way `lastSeen` does rather than the way the two name columns
+   * beside it do.
+   */
+  it("reads the posting date sort, newest first by default", () => {
+    expect(parsePostingQuery({ sort: "posted" })).toEqual({
+      sort: "posted",
+      direction: "desc",
+      page: 1,
+    })
+    expect(parsePostingQuery({ sort: "posted", dir: "asc" }).direction).toBe(
+      "asc"
+    )
+  })
+
   it("falls back on an unknown sort while keeping a valid page", () => {
     expect(parsePostingQuery({ sort: "salary", page: "3" })).toEqual({
       sort: "lastSeen",
@@ -103,8 +119,12 @@ describe("postingsHref", () => {
     )
   })
 
-  it("round-trips through the parser", () => {
-    const view = { sort: "company", direction: "desc", page: 3 } as const
+  it.each([
+    { sort: "company", direction: "desc", page: 3 },
+    // The reversed posting-date order: a sort whose default direction is `desc`
+    // and a `dir` that therefore has to survive the round trip.
+    { sort: "posted", direction: "asc", page: 1 },
+  ] as const)("round-trips $sort/$direction through the parser", (view) => {
     expect(
       parsePostingQuery(
         Object.fromEntries(
