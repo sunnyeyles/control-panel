@@ -117,10 +117,10 @@ interface FindManyJobs {
  *
  * `postingId.in` is what `ownedPostingIds()` and `deletePostings()` add. Only
  * the `in` form is understood; a bare string or any other operator falls
- * through to {@link DevDb.matchesPostingWhere}, which throws by name rather
- * than quietly matching everything and deleting a page.
+ * through to {@link matchesPostingWhere}, which throws by name rather than
+ * quietly matching everything and deleting a page.
  */
-interface PostingWhere {
+export interface PostingWhere {
   userId: string
   postingId?: { in: string[] }
 }
@@ -393,43 +393,11 @@ class DevDb {
    * a reassignment would leave `findPosting` looking at the old rows.
    */
   deletePostings(where: PostingWhere): { count: number } {
-    const doomed = new Set(this.matching(where))
-    if (doomed.size === 0) return { count: 0 }
-
-    for (let index = this.postings.length - 1; index >= 0; index -= 1) {
-      const row = this.postings[index]
-      if (row !== undefined && doomed.has(row)) this.postings.splice(index, 1)
-    }
-
-    return { count: doomed.size }
+    return { count: removeMatchingPostings(this.postings, where).length }
   }
 
   private matching(where: PostingWhere): Posting[] {
-    return this.postings.filter((row) => this.matchesPostingWhere(row, where))
-  }
-
-  /**
-   * ⚠️ **Throws on a filter it does not understand, rather than ignoring it.**
-   *
-   * The whole file's principle, and nowhere does it matter more than here: this
-   * predicate now decides what `deleteMany` removes, so a clause quietly
-   * dropped would not merely widen a listing — it would delete every Posting
-   * the dev user has, in the one environment the delete is built in.
-   */
-  private matchesPostingWhere(row: Posting, where: PostingWhere): boolean {
-    if (row.userId !== where.userId) return false
-
-    const byId = where.postingId
-    if (byId === undefined) return true
-
-    if (!Array.isArray(byId.in)) {
-      throw new DevPrismaError(
-        "prisma.posting where.postingId",
-        "The only filter understood here is `postingId: { in: [...] }`. Teach matchesPostingWhere() in this file the new shape — ignoring it would widen a delete to every posting the dev user has."
-      )
-    }
-
-    return byId.in.includes(row.postingId)
+    return this.postings.filter((row) => matchesPostingWhere(row, where))
   }
 
   findJob(id: string): Job | null {
@@ -642,6 +610,71 @@ class DevDb {
       failure: run.failure,
     }))
   }
+}
+
+/** The two columns every Postings filter in this app is written against. */
+interface PostingKey {
+  userId: string
+  postingId: string
+}
+
+/**
+ * ⚠️ **Throws on a filter it does not understand, rather than ignoring it.**
+ *
+ * The whole file's principle, and nowhere does it matter more than here: this
+ * predicate decides what `deleteMany` removes, so a clause quietly dropped
+ * would not merely widen a listing — it would delete every Posting the dev user
+ * has, in the one environment the delete is built in.
+ *
+ * Module-level and exported rather than a method, because
+ * `lib/postings/posting-actions.test.ts` builds its own `posting` double and had
+ * copied this rule out. Two spellings of "which rows does this `where` name" is
+ * one more than the number that can be wrong without anyone noticing — sharing
+ * the predicate is not code thrift, it is the only way a divergence shows up as
+ * a failing test rather than as a fake that agrees with nothing.
+ */
+export function matchesPostingWhere(
+  row: PostingKey,
+  where: PostingWhere
+): boolean {
+  if (row.userId !== where.userId) return false
+
+  const byId = where.postingId
+  if (byId === undefined) return true
+
+  if (!Array.isArray(byId.in)) {
+    throw new DevPrismaError(
+      "prisma.posting where.postingId",
+      "The only filter understood here is `postingId: { in: [...] }`. Teach matchesPostingWhere() in this file the new shape — ignoring it would widen a delete to every posting the dev user has."
+    )
+  }
+
+  return byId.in.includes(row.postingId)
+}
+
+/**
+ * Delete in place and answer with the rows that went, in the order they sat in.
+ *
+ * Splices out of the caller's array rather than handing back a new one, because
+ * every holder of a `posting` double keeps its rows in a `readonly` field that
+ * the rest of the double reads through — a reassignment would leave the other
+ * methods looking at rows that are supposed to be gone.
+ */
+export function removeMatchingPostings<Row extends PostingKey>(
+  rows: Row[],
+  where: PostingWhere
+): Row[] {
+  const removed: Row[] = []
+
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]
+    if (row !== undefined && matchesPostingWhere(row, where)) {
+      rows.splice(index, 1)
+      removed.push(row)
+    }
+  }
+
+  return removed.reverse()
 }
 
 /**

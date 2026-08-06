@@ -10,6 +10,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
+import {
+  matchesPostingWhere,
+  removeMatchingPostings,
+  type PostingWhere,
+} from "@/lib/dev/fake-prisma"
 import { PAGE_SIZE } from "@/lib/postings/posting-query"
 import { createPostingActions } from "./posting-actions"
 
@@ -55,6 +60,13 @@ interface PostingRow {
  *
  * Every call is recorded, so "refused before anything is queried" can be checked
  * as a fact about the store rather than inferred from a message.
+ *
+ * **The `where` is read by the same predicate the dev fake reads it with** —
+ * `matchesPostingWhere` and `removeMatchingPostings` from `lib/dev/fake-prisma`.
+ * The rows and the call log are this file's own, and deliberately so: the seeded
+ * dev database knows one user, and these tests need a stranger. What is shared
+ * is only the rule for which rows a `where` names, because two hand-written
+ * spellings of an ownership filter can drift apart while both keep passing.
  */
 class FakeDb {
   readonly rows: PostingRow[] = []
@@ -103,44 +115,21 @@ class FakeDb {
           return { count: matched.length }
         },
 
-        findMany: async (query: {
-          where: { userId: string; postingId: { in: string[] } }
-        }) =>
-          this.matching(query.where).map((row) => ({
-            postingId: row.postingId,
-          })),
+        findMany: async (query: { where: PostingWhere }) =>
+          this.rows
+            .filter((row) => matchesPostingWhere(row, query.where))
+            .map((row) => ({ postingId: row.postingId })),
 
-        deleteMany: async (query: {
-          where: { userId: string; postingId: { in: string[] } }
-        }) => {
+        deleteMany: async (query: { where: PostingWhere }) => {
           this.deletes.push(query)
 
-          const doomed = new Set(this.matching(query.where))
+          const removed = removeMatchingPostings(this.rows, query.where)
+          for (const row of removed) this.log.push(`row:${row.postingId}`)
 
-          for (let index = this.rows.length - 1; index >= 0; index -= 1) {
-            const row = this.rows[index]
-            if (row !== undefined && doomed.has(row)) {
-              this.log.push(`row:${row.postingId}`)
-              this.rows.splice(index, 1)
-            }
-          }
-
-          return { count: doomed.size }
+          return { count: removed.length }
         },
       },
     } as unknown as PrismaClient
-  }
-
-  /** Filters on **both** halves of the natural key, as the real query does. */
-  private matching(where: {
-    userId: string
-    postingId: { in: string[] }
-  }): PostingRow[] {
-    return this.rows.filter(
-      (row) =>
-        row.userId === where.userId &&
-        where.postingId.in.includes(row.postingId)
-    )
   }
 
   find(postingId: string): PostingRow | undefined {
