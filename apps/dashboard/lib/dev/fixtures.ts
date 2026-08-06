@@ -201,9 +201,13 @@ export function devRuns(): Run[] {
  *   `PAGE_SIZE = 25` the second page holds five rows, which also proves the
  *   last page is not padded.
  * - **Every sort visibly differs.** Titles and companies run down the alphabet
- *   in the opposite order to the dates, and `firstSeenAt` and `lastSeenAt` are
- *   spread over different spans, so "sorted by title" and "sorted by last seen"
- *   cannot be mistaken for each other on screen.
+ *   in the opposite order to the dates, `firstSeenAt` and `lastSeenAt` are
+ *   spread over different spans, and the posting dates are scattered against
+ *   both — so no two of "sorted by title", "sorted by last seen" and "sorted by
+ *   posted" can be mistaken for each other on screen.
+ * - **A third of the rows have no posting date**, which is what makes the
+ *   Posted column's NULLS-LAST order checkable: they must sit at the bottom
+ *   under *both* directions, not float to the top when it is reversed.
  * - **One row per status**, on the three hand-written Postings, so the status
  *   column is not thirty copies of `new`.
  * - **Both Briefings are represented, on both pages.** The Run a row names is
@@ -218,17 +222,38 @@ export function devRuns(): Run[] {
  */
 export function devPostings(): PostingRow[] {
   const seeded = [
-    { posting: MERIDIAN, status: "applied", runId: DEV_RUN_ACTIVE_ID },
-    { posting: NORTHWIND, status: "new", runId: DEV_RUN_ACTIVE_ID },
-    { posting: CORVUS, status: "rejected", runId: DEV_RUN_PAUSED_ID },
+    // `postedAt` in the payload is "2 days ago", which is not a date — so the
+    // column is NULL and the cell falls back to the advertisement's own words.
+    {
+      posting: MERIDIAN,
+      status: "applied",
+      runId: DEV_RUN_ACTIVE_ID,
+      postedOn: null,
+    },
+    // The advertisement said nothing, so there is nothing in either place.
+    {
+      posting: NORTHWIND,
+      status: "new",
+      runId: DEV_RUN_ACTIVE_ID,
+      postedOn: null,
+    },
+    // An ISO date the write path reads, so the column holds it and the cell
+    // renders it formatted.
+    {
+      posting: CORVUS,
+      status: "rejected",
+      runId: DEV_RUN_PAUSED_ID,
+      postedOn: new Date("2026-07-30T00:00:00.000Z"),
+    },
   ] as const satisfies readonly {
     posting: Posting
     status: PostingStatus
     runId: string
+    postedOn: Date | null
   }[]
 
   const rows = seeded.map((row, index) =>
-    devPosting(index, row.posting, row.status, row.runId)
+    devPosting(index, row.posting, row.status, row.runId, row.postedOn)
   )
 
   /**
@@ -256,7 +281,8 @@ export function devPostings(): PostingRow[] {
         index,
         generatedPosting(index),
         "new",
-        index % 2 === 0 ? DEV_RUN_ACTIVE_ID : DEV_RUN_PAUSED_ID
+        index % 2 === 0 ? DEV_RUN_ACTIVE_ID : DEV_RUN_PAUSED_ID,
+        generatedPostedOn(index)
       )
     )
   }
@@ -273,12 +299,21 @@ const DEV_POSTING_COUNT = 30
  * `lastSeenAt` walks backwards in hours and `firstSeenAt` in days, so the two
  * date sorts do not agree with each other — a fixture where they did would make
  * a wrong `orderBy` invisible.
+ *
+ * ⚠️ **`postedOn` is passed in rather than parsed out of `posting.postedAt`,
+ * deliberately.** The rule for reading a date out of what the scout copied lives
+ * in `parsePostedAt()` in `apps/briefing-worker/src/postings.ts`, and this app
+ * does not depend on the worker. Restating it here would be a third copy of a
+ * rule that already exists twice — the other being the SQL backfill in
+ * `0006_posting_posted_at` — so the caller supplies the answer as data instead,
+ * which is all a fixture ever needed to do.
  */
 function devPosting(
   index: number,
   posting: Posting,
   status: PostingStatus,
-  runId: string
+  runId: string,
+  postedOn: Date | null
 ): PostingRow {
   const lastSeenAt = new Date(RAN_AT.getTime() - index * 3_600_000)
   const firstSeenAt = new Date(
@@ -293,6 +328,7 @@ function devPosting(
     company: posting.company,
     location: posting.location,
     url: posting.url,
+    postedAt: postedOn,
     payload: posting,
     status,
     // NULL for everything nobody has moved off `new`, which is the state the
@@ -314,17 +350,48 @@ function devPosting(
 function generatedPosting(index: number): Posting {
   const letter = String.fromCharCode(65 + (index % 26))
   const number = index + 1
+  const postedOn = generatedPostedOn(index)
 
   return {
     title: `${letter}${number} Engineer`,
     company: `${letter}${number} Systems`,
     location: index % 3 === 0 ? "Remote (Australia)" : "Sydney, NSW",
     url: `https://www.seek.com.au/job/dev-fixture-generated-${number}`,
+    // The date as the advertisement stated it, which is where a real payload
+    // carries it. `devPostings` writes the same instant into the column through
+    // {@link generatedPostedOn}, so the two agree by construction rather than
+    // by both being edited.
+    ...(postedOn === null
+      ? {}
+      : { postedAt: postedOn.toISOString().slice(0, 10) }),
     summary: `A generated fixture posting, number ${number} of ${DEV_POSTING_COUNT}.`,
     matchReason: "Generated so the table has enough rows to paginate.",
     highlights: [`Fixture row ${number}`],
   }
 }
+
+/**
+ * When a generated advertisement says it was posted, or `null` for the third of
+ * them that say nothing.
+ *
+ * ⚠️ **Scattered rather than walked, on purpose.** Stepping seven days per row
+ * and wrapping at thirty puts these in an order that matches neither the
+ * alphabet the titles run down nor either sighting order, so a wrong `orderBy`
+ * on the Posted column cannot hide behind a fixture that happened to be in that
+ * order already.
+ *
+ * Midnight UTC, because that is what {@link generatedPosting} round-trips
+ * through a `YYYY-MM-DD` string and what `parsePostedAt()` would read back out
+ * of one.
+ */
+function generatedPostedOn(index: number): Date | null {
+  if (index % 3 === 0) return null
+
+  return new Date(POSTED_EPOCH.getTime() + ((index * 7) % 30) * 86_400_000)
+}
+
+/** The day the earliest generated posting date sits on. */
+const POSTED_EPOCH = new Date("2026-06-01T00:00:00.000Z")
 
 /**
  * What the fake worker "finds" when a run is triggered from the UI.

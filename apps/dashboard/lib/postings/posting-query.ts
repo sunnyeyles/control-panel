@@ -50,11 +50,11 @@ export const MAX_PAGE = 10_000
  * what a user sees in their address bar is not a database column they can probe
  * by editing it.
  *
- * ⚠️ **Two of these are headings and one is not.** `title` and `company` are the
- * sortable headings — see `POSTING_COLUMNS` in `posting-columns.ts`, which names
- * per column why the other three do not sort. `lastSeen` has no heading and is
- * here because it is {@link DEFAULT_SORT}: the order of the page nobody has
- * sorted still has to be spellable.
+ * ⚠️ **Three of these are headings and one is not.** `title`, `company` and
+ * `posted` are the sortable headings — see `POSTING_COLUMNS` in
+ * `posting-columns.ts`, which names per column why the other two do not sort.
+ * `lastSeen` has no heading and is here because it is {@link DEFAULT_SORT}: the
+ * order of the page nobody has sorted still has to be spellable.
  *
  * `firstSeen` and `status` were here while the table had a heading for each. The
  * table narrowed to five columns and both moved into the expanded detail, which
@@ -62,7 +62,7 @@ export const MAX_PAGE = 10_000
  * naming one is not an error: `SortSchema` catches it back to the default, the
  * same as `?sort=salary` always did.
  */
-export const POSTING_SORTS = ["lastSeen", "title", "company"] as const
+export const POSTING_SORTS = ["lastSeen", "title", "company", "posted"] as const
 
 export type PostingSort = (typeof POSTING_SORTS)[number]
 
@@ -79,6 +79,7 @@ const DEFAULT_DIRECTIONS = {
   lastSeen: "desc",
   title: "asc",
   company: "asc",
+  posted: "desc",
 } as const satisfies Record<PostingSort, SortDirection>
 
 /**

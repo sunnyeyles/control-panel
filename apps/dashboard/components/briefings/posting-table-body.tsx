@@ -79,6 +79,13 @@ export function PostingTableBody({
  * `PostingView` goes down as props — the page already holds every field, so
  * opening the detail costs no query.
  *
+ * **The whole row is the target, and there is exactly one handler.** It sits on
+ * the `<tr>`; the chevron is a real `<button>` that carries the accessibility of
+ * the control and no `onClick` of its own, so a pointer click and an Enter or
+ * Space on the focused button both arrive at the same place by bubbling. Two
+ * handlers with a `stopPropagation` between them would be the same behaviour
+ * with a double-toggle waiting behind any future change to either.
+ *
  * Local to this file rather than a module of its own. It renders a pair of
  * sibling `<tr>`s and is the only thing that ever will, and splitting it out is
  * what previously put the detail row's `colSpan` in a different file from the
@@ -99,16 +106,36 @@ function PostingRow({
 
   return (
     <>
-      <TableRow>
+      {/*
+        The click target is the whole row, so aiming at the company or the date
+        opens the detail exactly as aiming at the chevron does. `TableRow`
+        already carries `hover:bg-muted/50`, so only the cursor is missing.
+
+        Selecting text is the one gesture that must not toggle: releasing a
+        drag fires a click on the row, and having the panel open every time
+        someone highlights a company name to copy it makes the table hostile to
+        read. A collapsed selection is a click; anything else is a drag.
+      */}
+      <TableRow
+        className="cursor-pointer"
+        onClick={() => {
+          if (window.getSelection()?.isCollapsed === false) return
+          onToggle()
+        }}
+      >
         {/*
-          The disclosure control. A chevron and not the title, because an
-          underlined title means "this navigates" and it does not — it expands
-          the row underneath.
+          The disclosure control, and the row's accessibility in one place: it
+          is the focusable thing, it names what it does, and it is what a screen
+          reader is told about. It carries no `onClick` — the click it produces,
+          whether from a pointer or from Enter or Space, bubbles to the handler
+          on the row above.
 
           ⚠️ `aria-expanded` has to stay on a control *inside* the row: the
           shared `TableRow` highlights an open row with
           `has-aria-expanded:bg-muted/50`, which is a `:has()` selector looking
-          for exactly this attribute.
+          for exactly this attribute. Moving it onto the `<tr>` — which now
+          looks like the natural home for it — silently drops that highlight,
+          because `:has()` matches descendants.
         */}
         <TableCell className="w-8">
           <Button
@@ -117,7 +144,6 @@ function PostingRow({
             size="icon-sm"
             aria-expanded={expanded}
             aria-controls={expanded ? detailId : undefined}
-            onClick={onToggle}
           >
             <ChevronRightIcon
               aria-hidden="true"
@@ -132,22 +158,16 @@ function PostingRow({
         </TableCell>
 
         {/*
-          The title toggles the same detail, because a row's name is what people
-          aim at. `h-auto`, `py-0` and `whitespace-normal` undo the button
-          defaults: a long advertisement title has to wrap inside the cell
-          rather than stretch the column to fit on one line.
+          Plain text. It was a `variant="link"` button, which underlined on
+          hover — and an underline means "this navigates", which it never did:
+          it expanded the row underneath, exactly as every other cell now does.
+          `whitespace-normal` is what the removed button was supplying, and it
+          is still needed: `TableCell` defaults to `whitespace-nowrap`, so a
+          long advertisement title would otherwise stretch the column rather
+          than wrap inside it.
         */}
-        <TableCell className="max-w-xs font-medium">
-          <Button
-            type="button"
-            variant="link"
-            aria-expanded={expanded}
-            aria-controls={expanded ? detailId : undefined}
-            onClick={onToggle}
-            className="h-auto px-0 py-0 text-left font-medium whitespace-normal text-foreground"
-          >
-            {posting.title}
-          </Button>
+        <TableCell className="max-w-xs font-medium whitespace-normal">
+          {posting.title}
         </TableCell>
 
         <TableCell>{posting.company}</TableCell>
@@ -157,11 +177,11 @@ function PostingRow({
         </TableCell>
 
         {/*
-          Whatever the advertisement said, verbatim — free text inside
-          `postings.payload`, not a date the app parsed, so there is nothing to
-          format and nothing to order by. The scout is instructed to omit rather
-          than estimate, so an em-dash means the advertisement did not say, not
-          that anything failed.
+          The parsed `postings.posted_at` formatted, or the advertisement's own
+          words when the write path could not read a date out of them — one
+          string either way, resolved in `lib/postings/list-postings.ts`. The
+          scout is instructed to omit rather than estimate, so an em-dash means
+          the advertisement did not say, not that anything failed.
         */}
         <TableCell className="text-muted-foreground">
           {posting.postedAt ?? (

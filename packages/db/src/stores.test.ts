@@ -583,6 +583,56 @@ describeWithDatabase("against a real database", () => {
       expect(row?.lastSeenAt.toISOString()).toBe(SECOND_SIGHTING.toISOString())
     })
 
+    it("stores the posting date, and NULL when the caller supplied none", async () => {
+      const runId = await aRun()
+      const dated = aPosting({ postedAt: new Date("2026-07-30T00:00:00.000Z") })
+      const undated = aPosting()
+
+      await recordPostings(prisma, {
+        userId,
+        runId,
+        seenAt: FIRST_SIGHTING,
+        postings: [dated, undated],
+      })
+
+      expect((await readBack(dated.postingId))?.postedAt?.toISOString()).toBe(
+        "2026-07-30T00:00:00.000Z"
+      )
+      // NULL is the ordinary answer, not a defect: the scout omits the field
+      // rather than estimating, and what it does say is often not a date.
+      expect((await readBack(undated.postingId))?.postedAt).toBeNull()
+    })
+
+    it("re-reads the posting date on a later sighting, as it does the payload", async () => {
+      // It is derived from `payload`, so it belongs to the same group of
+      // columns a fresh sighting overwrites — unlike `status`, below.
+      const discovered = await aRun()
+      const refound = await aRun()
+      const posting = aPosting({
+        postedAt: new Date("2026-07-30T00:00:00.000Z"),
+      })
+
+      await recordPostings(prisma, {
+        userId,
+        runId: discovered,
+        seenAt: FIRST_SIGHTING,
+        postings: [posting],
+      })
+
+      await recordPostings(prisma, {
+        userId,
+        runId: refound,
+        seenAt: SECOND_SIGHTING,
+        postings: [
+          { ...posting, postedAt: new Date("2026-08-02T00:00:00.000Z") },
+        ],
+      })
+
+      expect((await readBack(posting.postingId))?.postedAt?.toISOString()).toBe(
+        "2026-08-02T00:00:00.000Z"
+      )
+    })
+
     it("leaves a status the user set alone when a later run re-reports it", async () => {
       // The whole point of the feature: `status` is absent from the upsert's
       // `DO UPDATE SET` list, and this is what notices if anyone adds it.

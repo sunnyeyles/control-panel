@@ -35,7 +35,20 @@ export interface PostingView {
   location: string
   url: string
   status: PostingStatus
-  /** Whatever the advertisement said, verbatim. Absent when it did not say. */
+  /**
+   * What the Posted cell shows: the parsed `postings.posted_at` formatted, or —
+   * when that is NULL because the advertisement stated a date the write path
+   * would not read as one — the advertisement's own words, verbatim.
+   *
+   * Absent only when it said nothing at all.
+   *
+   * ⚠️ **The two cases are deliberately one field, and the fallback is not a
+   * mistake.** A row that says "3 days ago" keeps saying it rather than
+   * degrading to an em-dash, and the column orders NULLs last so such a row sits
+   * at the bottom under either direction. A phrase is visibly not a date, so the
+   * value on screen and the order it sits in cannot appear to contradict each
+   * other. See {@link toView}.
+   */
   postedAt?: string
   /** Lines copied from the advertisement. Empty when it carried none. */
   highlights: string[]
@@ -155,6 +168,7 @@ export async function listPostings(
       location: true,
       url: true,
       status: true,
+      postedAt: true,
       payload: true,
       firstSeenAt: true,
       lastSeenAt: true,
@@ -226,6 +240,15 @@ export async function listPostings(
  * **Every branch carries the `postingId` tie-break, in the same direction.**
  * See {@link listPostings} for why a page boundary without it shows one row
  * twice and skips another.
+ *
+ * ⚠️ **`posted` is NULLS LAST in *both* directions, and that asymmetry is the
+ * point.** It is the one nullable column here, and NULL does not mean "long
+ * ago": it means the advertisement did not state a date, or stated one the
+ * write path would not read as a date. Postgres would default to NULLS FIRST
+ * under `DESC`, which puts every row that says nothing above every row that
+ * says something — the opposite of what someone clicking "Posted" is asking
+ * for. Sorting ascending does not make those rows interesting either, so they
+ * stay at the bottom whichever way the column runs.
  */
 function orderByFor(query: PostingQuery) {
   const to = query.direction
@@ -239,6 +262,14 @@ function orderByFor(query: PostingQuery) {
 
     case "company":
       return [{ company: to }, { postingId: to }]
+
+    case "posted":
+      // `as const` so `nulls` narrows to `Prisma.NullsOrder` rather than
+      // widening to `string`, which the generated input type refuses.
+      return [
+        { postedAt: { sort: to, nulls: "last" as const } },
+        { postingId: to },
+      ]
   }
 }
 
@@ -250,6 +281,8 @@ interface PostingRow {
   location: string
   url: string
   status: string
+  /** NULL when the advertisement stated no date, or stated a non-date. */
+  postedAt: Date | null
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
@@ -301,9 +334,15 @@ function toView(row: PostingRow, now: Date): PostingView {
     lastSeenExact: formatSeenAt(row.lastSeenAt),
     briefing: briefingName(row.lastSeenRun) ?? UNKNOWN_BRIEFING,
     highlights: parsed.success ? (parsed.data.highlights ?? []) : [],
-    ...(parsed.success && parsed.data.postedAt
-      ? { postedAt: parsed.data.postedAt }
-      : {}),
+    // The column when the write path could read a date out of the
+    // advertisement, the advertisement's own words when it could not, and
+    // nothing when it said nothing. See {@link PostingView.postedAt} for why
+    // the second case is kept rather than blanked.
+    ...(row.postedAt
+      ? { postedAt: formatPostedOn(row.postedAt) }
+      : parsed.success && parsed.data.postedAt
+        ? { postedAt: parsed.data.postedAt }
+        : {}),
     ...(parsed.success
       ? { summary: parsed.data.summary, matchReason: parsed.data.matchReason }
       : {}),
@@ -374,6 +413,30 @@ function formatSeenAt(date: Date): string {
     hour12: false,
     timeZone: "UTC",
     timeZoneName: "short",
+  }).format(date)
+}
+
+/**
+ * The day an advertisement was posted, for a column a page of rows is scanned
+ * down.
+ *
+ * The same fixed locale and explicit zone as {@link formatSeenAt}, and resolved
+ * on the server for the same reason — a `Date` formatted in the browser uses
+ * the browser's locale and zone, which React reports as a hydration mismatch
+ * rather than as the timezone bug it is.
+ *
+ * **No time and no zone name, unlike a sighting.** The source is a date the
+ * advertisement stated, so any time of day in it is an artefact of the ISO
+ * string rather than something the page said; printing "00:00 UTC" beside every
+ * row would be precision the value does not have. It is also a column rather
+ * than a `title` attribute, and twenty-five stamps down a page is noise.
+ */
+function formatPostedOn(date: Date): string {
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
   }).format(date)
 }
 
