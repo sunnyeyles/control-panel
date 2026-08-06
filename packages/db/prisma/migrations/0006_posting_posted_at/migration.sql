@@ -39,10 +39,20 @@
 -- column, which is the one outcome the scout's "omit rather than estimate"
 -- instruction exists to prevent. An ISO-8601 prefix is what SEEK's
 -- `publishDateISO` produces and what the scout passes through, and it is the
--- only shape either side accepts. A space between the date and the time is
--- refused by both for a further reason: Postgres would read that form in the
--- database's zone and `new Date` in the machine's, so it is the one shape the
--- two rules could not agree on.
+-- only shape either side accepts.
+--
+-- **A datetime must name its own offset, and a bare date is read as UTC.** Both
+-- halves of that are about the same hazard, which is that neither side reads an
+-- unqualified local time the same way. Postgres reads `2026-08-01T09:30` in the
+-- database's `TimeZone` and `new Date` reads it in the machine's, so both rules
+-- refuse it — as they refuse the space-separated form, for the same reason and
+-- not a different one. `YYYY-MM-DD` alone is the single exception, because
+-- JavaScript pins a date-only string to UTC by specification; a bare
+-- `'2026-08-01'::timestamptz` would instead be midnight in the session's zone,
+-- so the cast below goes through `timestamp` and is stamped UTC explicitly.
+-- Neon runs UTC, which is what keeps this latent rather than live — but the
+-- column renders and orders in UTC, so on any other setting these rows would
+-- show and sort a day early against everything the worker wrote.
 --
 -- **The cast still goes through a trapping wrapper, because the regex admits
 -- dates that do not exist.** `2026-02-30` is ISO-shaped and uncastable, and
@@ -61,6 +71,14 @@ ALTER TABLE "postings" ADD COLUMN "posted_at" TIMESTAMPTZ(6);
 
 CREATE FUNCTION pg_temp.try_timestamptz(value text) RETURNS timestamptz AS $$
 BEGIN
+  -- A date with no time carries no offset to honour, and the WHERE clause has
+  -- already established that every other accepted shape names one. `::timestamp
+  -- AT TIME ZONE 'UTC'` is what makes the first case agree with `parsePostedAt`:
+  -- a plain `::timestamptz` would read it in the session's zone instead.
+  IF length(value) = 10 THEN
+    RETURN value::timestamp AT TIME ZONE 'UTC';
+  END IF;
+
   RETURN value::timestamptz;
 EXCEPTION WHEN others THEN
   RETURN NULL;
@@ -69,4 +87,4 @@ $$ LANGUAGE plpgsql;
 
 UPDATE "postings"
 SET "posted_at" = pg_temp.try_timestamptz("payload"->>'postedAt')
-WHERE "payload"->>'postedAt' ~ '^\d{4}-\d{2}-\d{2}(T|$)';
+WHERE "payload"->>'postedAt' ~ '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})|$)';

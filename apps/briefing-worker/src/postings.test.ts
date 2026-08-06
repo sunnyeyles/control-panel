@@ -153,13 +153,28 @@ describe("parsePostedAt", () => {
     expect(parsePostedAt("2026-02-30T09:00:00.000Z")).toBeUndefined()
   })
 
+  it("takes a datetime at an offset other than UTC", () => {
+    expect(parsePostedAt("2026-08-01T09:30:00+10:00")).toEqual(
+      new Date("2026-07-31T23:30:00.000Z")
+    )
+    expect(parsePostedAt("2026-08-01T09:30Z")).toEqual(
+      new Date("2026-08-01T09:30:00.000Z")
+    )
+  })
+
   /**
-   * The one shape the two sides could not agree on: `new Date` reads it in the
-   * machine's zone and Postgres in the database's, so both refuse it rather
-   * than storing a day that depends on where the code ran.
+   * ⚠️ Neither shape names an offset, so `new Date` reads it in the machine's
+   * zone and Postgres in the database's — the same hazard twice, and the reason
+   * both are refused rather than stored as a day that depends on where the code
+   * ran. The `T` form is the one that looks acceptable and is not: it is
+   * ISO-shaped, it parses, and on a laptop in `Australia/Sydney` it would put
+   * an advertisement that said 1 August onto 31 July.
    */
-  it("refuses a datetime separated by a space rather than a T", () => {
+  it("refuses a datetime that names no offset", () => {
     expect(parsePostedAt("2026-08-01 09:30")).toBeUndefined()
+    expect(parsePostedAt("2026-08-01T09:30")).toBeUndefined()
+    expect(parsePostedAt("2026-08-01T09:30:00")).toBeUndefined()
+    expect(parsePostedAt("2026-08-01T09:30:00.000")).toBeUndefined()
   })
 
   it("refuses an absent value", () => {

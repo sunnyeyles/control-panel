@@ -82,11 +82,23 @@ export function toNewPostings(findings: Findings): NewPosting[] {
  * re-found.
  */
 export function parsePostedAt(value: string | undefined): Date | undefined {
-  // A bare `YYYY-MM-DD` or an ISO datetime, and nothing else. A space between
-  // the date and the time is deliberately not accepted: `new Date` reads that
-  // form in the *local* zone and Postgres reads it in the database's, so the
-  // one shape the two sides would disagree about is refused by both.
-  if (value === undefined || !/^\d{4}-\d{2}-\d{2}(T|$)/.test(value)) {
+  // A bare `YYYY-MM-DD`, or a datetime that names its own offset, and nothing
+  // else.
+  //
+  // ⚠️ **The offset is not optional, and that is the whole reason for the
+  // second half of this pattern.** `new Date` reads a date-*time* carrying no
+  // offset in the machine's zone and Postgres reads it in the database's, so
+  // `2026-08-01T09:30` is a different instant depending on which side wrote the
+  // row — a worker run from a laptop in `Australia/Sydney` would store 31 July
+  // for an advertisement that said 1 August. Both offset-less forms are refused
+  // for that reason: the space-separated one, and the `T` one. A bare date is
+  // the only exception and needs none, because both sides read it as UTC.
+  if (
+    value === undefined ||
+    !/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})|$)/.test(
+      value
+    )
+  ) {
     return undefined
   }
 
