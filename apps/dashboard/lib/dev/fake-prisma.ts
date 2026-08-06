@@ -171,8 +171,11 @@ interface NestedSelect {
  * cannot be null, and `{ field: { sort: "desc", nulls: "last" } }` for one that
  * can. `postings.posted_at` is the only nullable column this table orders by,
  * and it uses the second — see `orderByFor` in `lib/postings/list-postings.ts`.
+ *
+ * Exported so `list-postings.test.ts`'s own `FakeDb` can type its `orderBy`
+ * against the same shape instead of restating it under a different name.
  */
-type PostingOrderBy = Record<string, SortDirection | NullableSort>
+export type PostingOrderBy = Record<string, SortDirection | NullableSort>
 
 type SortDirection = "asc" | "desc"
 
@@ -753,8 +756,15 @@ function readPostingField(row: Posting, field: string): unknown {
  * database it stands in for — which is the one thing it must not do.
  * `list-postings.ts` pins `nulls: "last"` on the Posted column precisely so
  * that the direction stops deciding it.
+ *
+ * Exported so `list-postings.test.ts`'s own `FakeDb` — a narrower double that
+ * simulates only the query shapes `listPostings()` sends, rather than the
+ * whole of `prisma.posting` this file stands in for — applies the identical
+ * rule instead of restating it, the same way `posting-actions.test.ts` already
+ * reuses {@link matchesPostingWhere} and {@link removeMatchingPostings} from
+ * here rather than reimplementing them.
  */
-function compareNullity(
+export function compareNullity(
   a: unknown,
   b: unknown,
   direction: SortDirection,
@@ -771,8 +781,20 @@ function compareNullity(
   return (aEmpty ? 1 : -1) * (last ? 1 : -1)
 }
 
-/** Two present values of a column, compared in ascending order. */
-function comparePostingValues(field: string, a: unknown, b: unknown): number {
+/**
+ * Two present values of a column, compared in ascending order.
+ *
+ * Exported alongside {@link compareNullity} so `list-postings.test.ts`'s
+ * `FakeDb` shares this half of the sort rule too, rather than a second inline
+ * comparator that could silently fall back to comparing something neither a
+ * `Date` nor a `string` — which this one refuses, on the file's own principle
+ * that an unimplemented case should throw rather than answer `undefined`.
+ */
+export function comparePostingValues(
+  field: string,
+  a: unknown,
+  b: unknown
+): number {
   if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
   if (typeof a === "string" && typeof b === "string") return a.localeCompare(b)
 

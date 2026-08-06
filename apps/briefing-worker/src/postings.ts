@@ -1,5 +1,6 @@
 import { postingId, type Findings } from "@workspace/agents"
 import type { NewPosting } from "@workspace/db"
+import { isRealCalendarDate } from "@workspace/user-storage/keys"
 
 /**
  * What the scout found, as rows the cumulative record can hold.
@@ -52,7 +53,7 @@ export function toNewPostings(findings: Findings): NewPosting[] {
       company: posting.company,
       location: posting.location,
       url: posting.url,
-      ...(postedAt === undefined ? {} : { postedAt }),
+      postedAt,
       payload: posting,
     }
   })
@@ -102,21 +103,12 @@ export function parsePostedAt(value: string | undefined): Date | undefined {
     return undefined
   }
 
-  const day = value.slice(0, 10)
-  const rebuilt = new Date(
-    Date.UTC(
-      Number(day.slice(0, 4)),
-      Number(day.slice(5, 7)) - 1,
-      Number(day.slice(8, 10))
-    )
-  )
-
   // ⚠️ `new Date("2026-02-30")` does not fail — it rolls forward to 2 March.
   // Inventing a day the advertisement never named is precisely what this
   // function exists to prevent, and the parse alone does not catch it, so the
-  // day is rebuilt from its own digits and compared back. Timezone-independent
-  // by construction, unlike a check on how the whole string happened to parse.
-  if (rebuilt.toISOString().slice(0, 10) !== day) return undefined
+  // day is checked against `@workspace/user-storage`'s `isRealCalendarDate`
+  // rather than a second copy of the same rebuild-and-compare technique.
+  if (!isRealCalendarDate(value.slice(0, 10))) return undefined
 
   const parsed = new Date(value)
 

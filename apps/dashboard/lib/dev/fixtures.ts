@@ -282,13 +282,15 @@ export function devPostings(): PostingRow[] {
    * they hold two Postings.
    */
   for (let index = seeded.length; index < DEV_POSTING_COUNT; index++) {
+    const postedOn = generatedPostedOn(index)
+
     rows.push(
       devPosting(
         index,
-        generatedPosting(index),
+        generatedPosting(index, postedOn),
         "new",
         index % 2 === 0 ? DEV_RUN_ACTIVE_ID : DEV_RUN_PAUSED_ID,
-        generatedPostedOn(index)
+        postedOn
       )
     )
   }
@@ -370,11 +372,15 @@ const GENERATED_HOSTS: readonly [string, ...string[]] = [
  * The title and company letters run *up* the alphabet as the dates run *down*,
  * so no two sorts produce the same order. The host cycles independently of
  * both — no column sorts on it, so it is free to vary.
+ *
+ * `postedOn` is the caller's {@link generatedPostedOn} result, passed in
+ * rather than recomputed here — the same value also becomes the row's
+ * `postedAt` column in `devPostings`, so the two are one computation shared
+ * through a parameter rather than two calls that merely happen to agree.
  */
-function generatedPosting(index: number): Posting {
+function generatedPosting(index: number, postedOn: Date | null): Posting {
   const letter = String.fromCharCode(65 + (index % 26))
   const number = index + 1
-  const postedOn = generatedPostedOn(index)
   // A modulo index cannot be out of range; `noUncheckedIndexedAccess` types it
   // as optional anyway, so the fallback narrows rather than defends — and the
   // tuple type above is what makes the first element a definite `string`.
@@ -387,9 +393,7 @@ function generatedPosting(index: number): Posting {
     location: index % 3 === 0 ? "Remote (Australia)" : "Sydney, NSW",
     url: `${host}${number}`,
     // The date as the advertisement stated it, which is where a real payload
-    // carries it. `devPostings` writes the same instant into the column through
-    // {@link generatedPostedOn}, so the two agree by construction rather than
-    // by both being edited.
+    // carries it.
     ...(postedOn === null
       ? {}
       : { postedAt: postedOn.toISOString().slice(0, 10) }),

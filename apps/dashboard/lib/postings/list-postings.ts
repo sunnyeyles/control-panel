@@ -5,6 +5,8 @@ import {
   type PrismaClient,
 } from "@workspace/db"
 
+import { formatCalendarDate } from "@/lib/format-calendar-date"
+
 import { PAGE_SIZE, type PostingQuery } from "./posting-query"
 import { postingSource, type PostingSource } from "./posting-source"
 
@@ -352,8 +354,13 @@ function toView(row: PostingRow, now: Date): PostingView {
     // advertisement, the advertisement's own words when it could not, and
     // nothing when it said nothing. See {@link PostingView.postedAt} for why
     // the second case is kept rather than blanked.
+    //
+    // No time and no zone name, unlike {@link formatSeenAt}: the source is a
+    // date the advertisement stated, so any time of day in it is an artefact
+    // of the ISO string rather than something the page said, and printing
+    // "00:00 UTC" beside every row would be precision the value does not have.
     ...(row.postedAt
-      ? { postedAt: formatPostedOn(row.postedAt) }
+      ? { postedAt: formatCalendarDate(row.postedAt) }
       : parsed.success && parsed.data.postedAt
         ? { postedAt: parsed.data.postedAt }
         : {}),
@@ -427,30 +434,6 @@ function formatSeenAt(date: Date): string {
     hour12: false,
     timeZone: "UTC",
     timeZoneName: "short",
-  }).format(date)
-}
-
-/**
- * The day an advertisement was posted, for a column a page of rows is scanned
- * down.
- *
- * The same fixed locale and explicit zone as {@link formatSeenAt}, and resolved
- * on the server for the same reason — a `Date` formatted in the browser uses
- * the browser's locale and zone, which React reports as a hydration mismatch
- * rather than as the timezone bug it is.
- *
- * **No time and no zone name, unlike a sighting.** The source is a date the
- * advertisement stated, so any time of day in it is an artefact of the ISO
- * string rather than something the page said; printing "00:00 UTC" beside every
- * row would be precision the value does not have. It is also a column rather
- * than a `title` attribute, and twenty-five stamps down a page is noise.
- */
-function formatPostedOn(date: Date): string {
-  return new Intl.DateTimeFormat("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
   }).format(date)
 }
 

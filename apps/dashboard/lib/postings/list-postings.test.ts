@@ -1,6 +1,12 @@
 import type { PrismaClient } from "@workspace/db"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import {
+  compareNullity,
+  comparePostingValues,
+  type PostingOrderBy,
+} from "@/lib/dev/fake-prisma"
+
 import { formatSeenAgo, listPostings } from "./list-postings"
 import { PAGE_SIZE, parsePostingQuery, POSTING_SORTS } from "./posting-query"
 
@@ -32,20 +38,6 @@ interface PostingRow {
 
 /** The Briefing every row here was found by unless a test says otherwise. */
 const DEFAULT_BRIEFING = "Sydney backend roles"
-
-/**
- * One `orderBy` clause, in either spelling Prisma uses.
- *
- * `{ field: "desc" }` for a column that cannot be null, and
- * `{ field: { sort, nulls } }` for one that can — `postedAt` is the only such
- * column here. A fake that read the second as a direction string would sort
- * ascending silently, which is why this is typed rather than left as
- * `Record<string, string>`.
- */
-type OrderByClause = Record<
-  string,
-  "asc" | "desc" | { sort: "asc" | "desc"; nulls?: "first" | "last" }
->
 
 function payload(overrides: Record<string, unknown> = {}) {
   return {
@@ -121,7 +113,7 @@ class FakeDb {
         },
         findMany: async (query: {
           where: { userId: string }
-          orderBy: OrderByClause[]
+          orderBy: PostingOrderBy[]
           skip: number
           take: number
           select: Record<string, unknown>
@@ -143,21 +135,16 @@ class FakeDb {
                   // Postgres decides it: `nulls: "last"` means last whichever
                   // way the values run. Flipping it with the direction is
                   // exactly the bug the tests below would then fail to catch.
-                  if (a === null || b === null) {
-                    if (a === null && b === null) continue
-
-                    const last =
-                      nulls === undefined
-                        ? direction === "asc"
-                        : nulls === "last"
-
-                    return (a === null ? 1 : -1) * (last ? 1 : -1)
+                  // `compareNullity` is the same rule `lib/dev/fake-prisma.ts`
+                  // applies for its own fake `prisma.posting`, reused here
+                  // rather than restated so the two fakes cannot disagree.
+                  const byNullity = compareNullity(a, b, direction, nulls)
+                  if (byNullity !== undefined) {
+                    if (byNullity !== 0) return byNullity
+                    continue
                   }
 
-                  const compared =
-                    a instanceof Date && b instanceof Date
-                      ? a.getTime() - b.getTime()
-                      : String(a).localeCompare(String(b))
+                  const compared = comparePostingValues(field, a, b)
 
                   if (compared !== 0) {
                     return direction === "desc" ? -compared : compared

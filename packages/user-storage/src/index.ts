@@ -79,6 +79,7 @@ export {
   buildObjectKey,
   dateSegments,
   isObjectKeySegment,
+  isRealCalendarDate,
   kindPrefix,
   parseObjectKey,
   toGeneratedOn,
