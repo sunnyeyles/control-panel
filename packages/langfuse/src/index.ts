@@ -17,7 +17,6 @@ export interface LangfuseCallbackOptions {
 export interface LangfuseTraceOptions extends LangfuseCallbackOptions {
   name: string
   input: unknown
-  metadata?: Record<string, unknown>
 }
 
 let provider: NodeTracerProvider | undefined
@@ -94,11 +93,18 @@ export async function runWithLangfuseTrace<T>(
         async () => {
           trace.update({
             input: options.input,
-            metadata: options.metadata,
+            metadata: options.traceMetadata,
           })
 
           try {
-            const result = await run(createLangfuseCallback(options))
+            const result = await run(
+              createLangfuseCallback({
+                userId: options.userId,
+                sessionId: options.sessionId,
+                tags: options.tags,
+                traceMetadata: options.traceMetadata,
+              })
+            )
             trace.update({ output: result })
             return result
           } catch (error) {

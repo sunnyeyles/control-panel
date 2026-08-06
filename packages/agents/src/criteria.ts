@@ -1,5 +1,7 @@
 import * as z from "zod"
 
+import { parseJsonAgainstSchema, schemaDescription } from "./parse-json.ts"
+
 /**
  * The contract between the profile extractor and whatever runs a search.
  *
@@ -58,22 +60,8 @@ export type SearchCriteria = z.infer<typeof SearchCriteriaSchema>
  * shape {@link parseSearchCriteria} enforces — add a field here and the prompt
  * asks for it with no second edit.
  */
-export const criteriaSchemaDescription: string = JSON.stringify(
-  z.toJSONSchema(SearchCriteriaSchema),
-  null,
-  2
-)
-
-/**
- * Models like to wrap JSON in a fenced block despite being asked not to. That
- * is a formatting habit rather than a failure to follow the instruction, so it
- * is stripped rather than rejected — unlike an empty `titles` list or a missing
- * field, which are substantive and do reject.
- */
-function stripCodeFence(text: string): string {
-  const fenced = text.trim().match(/^```(?:json)?\s*\n([\s\S]*?)\n?```$/)
-  return (fenced?.[1] ?? text).trim()
-}
+export const criteriaSchemaDescription: string =
+  schemaDescription(SearchCriteriaSchema)
 
 /**
  * Parse and validate the extractor's final message.
@@ -87,22 +75,8 @@ function stripCodeFence(text: string): string {
  * extraction can simply be run again.
  */
 export function parseSearchCriteria(text: string): SearchCriteria {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(stripCodeFence(text))
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw new Error(
-      `The profile extractor's final message was not JSON (${message}). It began: ${text.slice(0, 200)}`
-    )
-  }
-
-  const result = SearchCriteriaSchema.safeParse(parsed)
-  if (!result.success) {
-    throw new Error(
-      `The profile extractor returned JSON that does not match the search-criteria schema: ${z.prettifyError(result.error)}`
-    )
-  }
-
-  return result.data
+  return parseJsonAgainstSchema(SearchCriteriaSchema, text, {
+    producer: "profile extractor",
+    schemaName: "search-criteria",
+  })
 }

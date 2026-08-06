@@ -45,8 +45,8 @@ const result = await agent.invoke({
 console.log(result.messages.at(-1)?.text)
 ```
 
-Requires `OPENAI_API_KEY` in the environment (or pass `apiKey` to
-`createModel()` and hand the model to `createAgent({ model })`).
+Requires `OPENAI_API_KEY` in the environment (or pass `apiKey` via
+`createModel({ apiKey })` and hand the model to `createAgent({ model })`).
 
 `tools` defaults to none — omit it and you get a plain chat model with no tool
 calling, which is occasionally what you want and otherwise a bug.

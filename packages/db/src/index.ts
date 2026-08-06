@@ -28,15 +28,6 @@
  */
 export { createPrismaClient, type PrismaClient } from "./client.ts"
 
-export { Prisma } from "./generated/prisma/client.ts"
-
-export {
-  readDatabaseConfig,
-  DATABASE_URL,
-  DATABASE_URL_UNPOOLED,
-  type DatabaseConfig,
-} from "./config.ts"
-
 export { ensureUserForAuth } from "./users.ts"
 
 export {
@@ -65,14 +56,9 @@ export {
   runningRunForJob,
   startAdHocRun,
   type ClaimedRun,
-  type RunSummary,
 } from "./runs.ts"
 
-export {
-  artifactsForRun,
-  latestArtifactForJob,
-  recordArtifact,
-} from "./artifacts.ts"
+export { recordArtifact } from "./artifacts.ts"
 
 export {
   deletePostings,
@@ -84,7 +70,7 @@ export {
   type SeenPostings,
 } from "./postings.ts"
 
-export { computeNextRunAt, isValidSchedule } from "./schedule.ts"
+export { computeNextRunAt } from "./schedule.ts"
 
 export type {
   Artifact,
@@ -92,19 +78,9 @@ export type {
   Job,
   JobConfig,
   Posting,
-  PostingPayload,
   PostingStatus,
   Run,
   RunFailure,
-  RunFindings,
-  RunStatus,
-  User,
 } from "./types.ts"
 
-export {
-  DbError,
-  InvalidScheduleError,
-  isDbError,
-  isUniqueViolation,
-  type DbErrorCode,
-} from "./errors.ts"
+export { InvalidScheduleError, isDbError, isUniqueViolation } from "./errors.ts"

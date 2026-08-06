@@ -1,5 +1,7 @@
 import * as z from "zod"
 
+import { parseJsonAgainstSchema, schemaDescription } from "./parse-json.ts"
+
 /**
  * The contract between the scout and the writer.
  *
@@ -69,22 +71,8 @@ export type Findings = z.infer<typeof FindingsSchema>
  * hand-written so the shape the scout is asked for stays identical to the shape
  * {@link parseFindings} enforces.
  */
-export const jobScoutSchemaDescription: string = JSON.stringify(
-  z.toJSONSchema(FindingsSchema),
-  null,
-  2
-)
-
-/**
- * Models like to wrap JSON in a fenced block despite being asked not to. That
- * is a formatting habit rather than a failure to follow the instruction, so it
- * is stripped rather than rejected — unlike a malformed URL or a missing field,
- * which are substantive and do reject.
- */
-function stripCodeFence(text: string): string {
-  const fenced = text.trim().match(/^```(?:json)?\s*\n([\s\S]*?)\n?```$/)
-  return (fenced?.[1] ?? text).trim()
-}
+export const jobScoutSchemaDescription: string =
+  schemaDescription(FindingsSchema)
 
 /**
  * Parse and validate the scout's final message.
@@ -95,22 +83,8 @@ function stripCodeFence(text: string): string {
  * worse than a failed run.
  */
 export function parseFindings(text: string): Findings {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(stripCodeFence(text))
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw new Error(
-      `The scout's final message was not JSON (${message}). It began: ${text.slice(0, 200)}`
-    )
-  }
-
-  const result = FindingsSchema.safeParse(parsed)
-  if (!result.success) {
-    throw new Error(
-      `The scout returned JSON that does not match the findings schema: ${z.prettifyError(result.error)}`
-    )
-  }
-
-  return result.data
+  return parseJsonAgainstSchema(FindingsSchema, text, {
+    producer: "scout",
+    schemaName: "findings",
+  })
 }

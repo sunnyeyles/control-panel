@@ -256,11 +256,6 @@ export async function runBriefing(
         runId: slot.runId,
         scheduledFor: slot.scheduledFor.toISOString(),
       },
-      metadata: {
-        jobId: job.id,
-        runId: slot.runId,
-        scheduledFor: slot.scheduledFor.toISOString(),
-      },
     },
     async (callback) => {
       trace({
