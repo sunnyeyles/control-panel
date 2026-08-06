@@ -90,6 +90,51 @@ the other. When a page fetcher is eventually added it goes on a different agent
 that never sees the profile.
 _Avoid_: applicant agent, cover-letter bot
 
+**Tailored Resume**:
+The candidate's own CV rewritten for one **Posting** by the **Resume Tailor** —
+the relevant experience led with, the irrelevant cut, the wording turned towards
+the advertisement. **A rearrangement, never an addition**: every line must have a
+counterpart in the source **Document**, so no employer, date, metric,
+qualification or technology appears that was not already there. Unlike a **Cover
+Letter** it carries no `[bracketed placeholder]` — a resume is read as a list of
+facts, and a gap marker in one is a broken document rather than a visible
+omission, so anything unknown is simply left out.
+
+Stored under its own object kind, `tailored-resumes`, at
+`{environment}/{userId}/tailored-resumes/{postingId}.md` — **keyed on the
+Posting, exactly as a Cover Letter is**, so re-generating overwrites one object
+and the previous one survives as a non-current version. Retention is the
+`resumes` posture, never expiring. It gets **no database row**, for the reason a
+Cover Letter gets none. Provenance rides in object metadata, and carries one
+field a letter's does not: **which Document it was rewritten from**, because the
+selection rule takes the newest one labelled Resume and that answer changes
+silently the moment another is uploaded.
+
+Generated from a button on each Posting on `/briefings`, beside the Cover Letter
+controls, from the same `postings.payload` and the same `loadCandidateBackground`
+— so a letter and a resume for one advertisement are always drawn from the same
+CV. Downloaded as markdown, or as a **PDF rendered in the browser**: there is no
+PDF on the server and no second stored object.
+
+⚠️ **A fourth meaning of "resume" — read the **Document** entry below first.**
+The kind `resumes` is the shelf uploads go on; the **Document Type** `resume` is
+what a user calls one of those uploads; and this is neither. It is generated, it
+is addressed by Posting, and it never appears in the Documents list.
+_Avoid_: generated resume, CV variant, resume draft
+
+**Resume Tailor**:
+The agent that writes a **Tailored Resume**. Like the **Letter Writer** it has no
+tools, and for the identical reason: it holds the candidate's whole CV in its
+context while a Posting's `highlights` — text whoever paid for the advertisement
+wrote — reach its prompt verbatim. Its prompt is fixed and takes no per-user
+extension; there is no resume counterpart to **Letter Instructions**.
+
+The prompt is the only place the no-invention rule exists — the output is
+markdown and the source is markdown, so nothing downstream can tell a reordered
+CV from an embellished one. What the dashboard side can do, and does, is refuse
+to call the model when the source document would not support an honest answer.
+_Avoid_: resume writer, CV generator, resume builder
+
 **Letter Instructions**:
 What the user tells the **Letter Writer** about how they want their letters
 written — held per **User** in `cover_letter_instructions`, edited from
@@ -332,8 +377,8 @@ Something the user uploaded themselves — a CV, a cover letter, whatever they w
 kept beside their job search. The dashboard section is called **Documents**, and
 it is the user-facing word for the whole shelf.
 
-⚠️ **Three different meanings of "resume" collide here, and one of them is a key
-segment.** The storage _kind_ is `resumes`, so an object key reads
+⚠️ **Four different meanings of "resume" collide here, and two of them are key
+segments.** The storage _kind_ is `resumes`, so an object key reads
 `prod/{userId}/resumes/{id}.pdf` no matter what the document actually is; a cover
 letter is stored under `resumes` too. Meanwhile **Resume** is also one of the five
 selectable **Document Types**. The kind is not renamed because a kind is a key
@@ -341,6 +386,14 @@ segment, an object tag and a file-type allowlist at once — the tag is what the
 lifecycle rules filter on, so renaming it would orphan every existing object's
 retention. Read `resumes` as "the shelf uploads go on", not as "these are all
 CVs".
+
+The fourth is the **Tailored Resume**, and it is deliberately _not_ on this
+shelf. It is generated rather than uploaded, addressed by **Posting** rather than
+by an id this app minted for a file it did not produce, and it wants one file
+type where `resumes` accepts seven — so it has a kind of its own,
+`tailored-resumes`, and never appears in the Documents list. The one thing the
+two share is that a Tailored Resume is always _rewritten from_ a Document on this
+shelf, and records which one.
 _Avoid_: file, attachment, upload (as a noun)
 
 **Document Type**:

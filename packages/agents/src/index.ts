@@ -42,6 +42,18 @@ export {
 } from "./profile-extractor.ts"
 
 export {
+  createResumeTailor,
+  RESUME_TAILOR_SYSTEM_PROMPT,
+  type CreateResumeTailorOptions,
+} from "./resume-tailor.ts"
+
+export {
+  TailoredResumeRequestSchema,
+  toTailoredResumePrompt,
+  type TailoredResumeRequest,
+} from "./tailored-resume.ts"
+
+export {
   createJobScout,
   JOB_SCOUT_MAX_LLM_CALLS,
   JOB_SCOUT_SEARCH_TOOLS,

@@ -117,6 +117,29 @@ flowchart TD
     F -.->|optional, keys permitting| LF[Langfuse trace: generate-briefing]
 ```
 
+What a person then does with a **Posting** happens entirely in the dashboard, off
+the row rather than off a Run — two documents, both addressed by
+`(user, Posting)`, both written from the newest **Document** labelled Resume:
+
+```mermaid
+flowchart TD
+    PT[(postings — payload, last_seen_run_id)] --> BR[/briefings — expanded posting/]
+    DOC[(S3 — resumes: the user's uploaded CV)] --> BG[loadCandidateBackground]
+    BG --> BR
+    BR -->|Draft cover letter| LW[Letter Writer]
+    BR -->|Generate tailored resume| RT[Resume Tailor]
+    LW --> CL[(S3 — cover-letters/postingId.md)]
+    RT --> TR[(S3 — tailored-resumes/postingId.md)]
+    TR --> PDF[PDF rendered in the browser]
+```
+
+Both agents hold the CV and read the advertisement verbatim, so both have
+`tools: []`; neither writes a database row. The difference is what they produce
+from the CV: the **Letter Writer** writes _about_ it and leaves a
+`[bracketed placeholder]` wherever a fact was not supplied, while the **Resume
+Tailor** rewrites _it_ and may leave nothing out of nothing — every line it emits
+must have a counterpart in the source.
+
 ## Not built yet
 
 The pipeline above runs end to end. These are the parts of the intended product
@@ -184,11 +207,12 @@ flowchart TD
   creating one. Delivery has no code at all.
 
 - **A viewer for the Brief itself, and that gap is structural rather than
-  merely unbuilt.** The dashboard's IAM grants are `prod:resumes` and
-  `prod:cover-letters` while a brief lives under `prod:briefs`, so the app
-  cannot read one without an infrastructure change. Widening the grant for cover
-  letters (#84) deliberately did not widen it here —
-  `tests/vercel_dashboard.tftest.hcl` asserts the exact key set, and that the
+  merely unbuilt.** The dashboard's IAM grants are `prod:resumes`,
+  `prod:cover-letters` and `prod:tailored-resumes` while a brief lives under
+  `prod:briefs`, so the app cannot read one without an infrastructure change.
+  Neither the cover-letter grant nor the tailored-resume one widened it here —
+  `tests/vercel_dashboard.tftest.hcl` asserts the exact key set, so a third kind
+  had to be argued for in that test, and it asserts separately that the
   dashboard's and the worker's grants stay disjoint.
 
   What `/briefings` does show is what the runs have _found_ — every **Posting**
@@ -215,12 +239,13 @@ flowchart TD
 - The scheduled worker runs on AWS Lambda, triggered hourly by EventBridge
   Scheduler. The tick is the same for every job, so a job's own cadence is a row
   in Postgres rather than anything in Terraform.
-- S3 privately stores generated markdown briefs, uploaded documents and drafted
-  cover letters. IAM is least-privilege and bounded by a permissions boundary;
-  grants are per environment and kind, so the worker holds `prod:briefs` and the
-  dashboard's Vercel OIDC role holds `prod:resumes` and `prod:cover-letters`,
-  and the two roles' grants are disjoint — the dashboard cannot forge or delete
-  a briefing.
+- S3 privately stores generated markdown briefs, uploaded documents, drafted
+  cover letters and tailored resumes. IAM is least-privilege and bounded by a
+  permissions boundary; grants are per environment and kind, so the worker holds
+  `prod:briefs` and the dashboard's Vercel OIDC role holds `prod:resumes`,
+  `prod:cover-letters` and `prod:tailored-resumes`, and the two roles' grants are
+  disjoint — the dashboard cannot forge or delete a briefing, and the worker
+  cannot touch anything a person wrote or generated.
 - Secrets are AWS Secrets Manager shells whose values are set by hand —
   Terraform provisions containers it can never read.
 - All AWS infrastructure is Terraform under `infra/aws/`, which Turborepo does

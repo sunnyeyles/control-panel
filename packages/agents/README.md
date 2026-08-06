@@ -104,6 +104,38 @@ a document that asserts things about a person.
 recipient — where nobody supplied it, the prompt requires a visible gap. A
 plausible invention attributed to the user is a lie; a gap is a draft.
 
+## The tailored resume, and the one rule it does not share
+
+`src/tailored-resume.ts` and `src/resume-tailor.ts` are the same pair one more
+time — a pure contract with `TailoredResumeRequestSchema` and
+`toTailoredResumePrompt()`, and a zero-tool agent that consumes it. **`tools: []`
+for the identical reason**, and the case is if anything stronger: this agent
+holds the whole CV and its output is a rewrite of that CV, with the
+advertisement's `highlights` reaching the prompt verbatim beside it.
+
+**The bounds are reused, not restated.** `assertDraftable()` and
+`UndraftableError` come from `cover-letter.ts`; the guard takes a structural
+`{ background }` for exactly this, and the question it answers is the same one —
+is there enough of this person's own document to work from? A second copy of
+`MIN_BACKGROUND_CHARS` would be a second number to keep in step with the first.
+
+What differs is the honesty rule, and it inverts:
+
+- The Letter Writer writes _about_ the CV, and leaves a `[bracketed placeholder]`
+  wherever a fact nobody supplied would otherwise be invented.
+- The Resume Tailor rewrites _the CV itself_, and **may leave nothing in it that
+  is not already there**: every line must have a counterpart in the source, so no
+  employer, date, metric, qualification or technology may be added and no claim
+  upgraded. It writes **no placeholders at all** — a resume is read as a list of
+  facts, and `[metric]` sitting in an experience bullet is a broken document
+  rather than a visible gap, so anything unknown is simply left out.
+
+The prompt is the only place that rule exists: the output is markdown and the
+source is markdown, so nothing downstream can tell a reordered CV from an
+embellished one. `resume-tailor.test.ts` therefore asserts the clauses
+individually, so dropping one is a test failure rather than a quietly worse
+document.
+
 ## Where this sits
 
 ```

@@ -67,6 +67,17 @@ variable "object_kinds" {
       noncurrent_version_expiration_days = 365
     }
 
+    # Generated once, for one advertisement, out of the user's own CV — and
+    # they may already have applied with it. Same posture as `cover-letters`
+    # for the same reason: a brief is regenerated daily and expiring a year of
+    # them is housekeeping, while deleting this is data loss. Superseded
+    # versions are kept a year, which is what makes re-generating for a Posting
+    # non-destructive.
+    tailored-resumes = {
+      expiration_days                    = null
+      noncurrent_version_expiration_days = 365
+    }
+
     # The user's own upload. Never expired automatically; superseded versions
     # are kept a year so a mistaken re-upload is recoverable.
     resumes = {

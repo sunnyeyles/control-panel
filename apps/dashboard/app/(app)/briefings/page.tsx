@@ -14,6 +14,7 @@ import {
   runActivityForUser,
   type BriefingActivity,
 } from "@/lib/briefing-runs/run-activity"
+import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import { loadCoverLetterRows } from "@/lib/cover-letters/cover-letter-rows"
 import { getPrisma } from "@/lib/db"
 import { listPostings, type PostingPage } from "@/lib/postings/list-postings"
@@ -22,7 +23,8 @@ import {
   type SearchParams,
 } from "@/lib/postings/posting-query"
 import type { BriefingCounts } from "@/lib/postings/postings-empty-state"
-import { getCoverLetterStore } from "@/lib/storage"
+import { getCoverLetterStore, getTailoredResumeStore } from "@/lib/storage"
+import { loadTailoredResumeRows } from "@/lib/tailored-resumes/tailored-resume-rows"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 
 /** Required of any server component reading the session — it depends on cookies. */
@@ -38,6 +40,9 @@ export const dynamic = "force-dynamic"
  * Raised from 15 when the letters arrived. The S3 work is bounded by the page
  * size, and a page that renders postings correctly and then dies partway
  * through its letters is worse than a slow one.
+ *
+ * The tailored resumes added one more S3 call and not one more per row — a
+ * single `ListObjectsV2` — so this did not move again for them.
  */
 export const maxDuration = 30
 
@@ -59,13 +64,15 @@ export const maxDuration = 30
  * the app's first untrusted GET input; establishing who is asking before
  * reading anything they sent keeps the order the rest of the app has.
  *
- * ⚠️ **Three independent loads, three independent failures, and none of them
- * may blank the other two.** The postings are Postgres, the letters are S3, and
- * the run activity is a third query answering a different question — the latest
- * Run of any status rather than the rows a briefing has ever produced. The
- * dashboard's `prod:cover-letters` grant is a Terraform apply away from the code
- * that needs it, so "letters unreadable" is a state this page will genuinely be
- * in.
+ * ⚠️ **Four independent loads, four independent failures, and none of them may
+ * blank the other three.** The postings are Postgres; the letters and the
+ * tailored resumes are S3, read by different means and therefore able to fail
+ * separately; and the run activity is a fourth query answering a different
+ * question — the latest Run of any status rather than the rows a briefing has
+ * ever produced. Each of the dashboard's storage grants is a Terraform apply
+ * away from the code that needs it, so "unreadable" is a state this page will
+ * genuinely be in — and `prod:tailored-resumes` is the newest of them, so it is
+ * the one most likely to be missing.
  *
  * `searchParams` is typed inline rather than with the generated `PageProps`
  * helper, which only exists once `next typegen` has written `.next/types/` —
@@ -150,6 +157,25 @@ export default async function BriefingsPage({
     getCoverLetterStore()
   ).catch((error) => {
     console.error("cover-letters: could not load", error)
+    return null
+  })
+
+  // ⚠️ **A fourth independent load, and deliberately a cheaper shape than the
+  // one above it.** This is a single `ListObjectsV2` over one prefix rather than
+  // a `head()` per visible Posting — see `lib/tailored-resumes/tailored-resume-rows.ts`,
+  // and `docs/cover-letter-existence-plan.md` for the cost the letters still pay
+  // and the fix this is. It takes no posting ids for the same reason: what comes
+  // back is everything this user has generated, not a page of it.
+  //
+  // Not awaited, `.catch()` attached now rather than at the `await`, and `null`
+  // on failure never an empty list — all three for the reasons the letters give
+  // one comment up. Degrading this one to "nothing generated" would offer to
+  // spend a model call replacing a document the page simply could not see.
+  const tailoredResumesPromise: TailoredResumePromise = loadTailoredResumeRows(
+    user.userId,
+    getTailoredResumeStore()
+  ).catch((error) => {
+    console.error("tailored-resumes: could not load", error)
     return null
   })
 
@@ -257,6 +283,7 @@ export default async function BriefingsPage({
               page={postings}
               query={query}
               letters={lettersPromise}
+              tailoredResumes={tailoredResumesPromise}
               counts={counts}
             />
           )}

@@ -16,7 +16,11 @@ import type {
   Run,
 } from "@workspace/db/types"
 import { contentTypeFor } from "@workspace/user-storage/kinds"
-import type { NewCoverLetter, NewResume } from "@workspace/user-storage"
+import type {
+  NewCoverLetter,
+  NewResume,
+  NewTailoredResume,
+} from "@workspace/user-storage"
 
 /**
  * The world `DEV_AUTH_BYPASS=1` renders.
@@ -524,6 +528,38 @@ export function devCoverLetters(): NewCoverLetter[] {
   ]
 }
 
+/**
+ * Tailored resumes as they arrive at `TailoredResumeStore.put()`.
+ *
+ * ⚠️ **Exactly one, and it is on the Posting that already has a cover letter.**
+ * That is what makes the two states checkable side by side without generating
+ * anything: the Meridian row shows a tailored resume with its download, PDF,
+ * replace and edit controls, and every other row on the page shows the
+ * un-generated state. Seeding more would leave nothing to compare against.
+ *
+ * The markdown is deliberately {@link DEV_CV_MARKDOWN} rearranged rather than
+ * rewritten — Kestrel first, the payments work cut, no employer or metric that
+ * is not in the CV. It is the fixture *and* the worked example of the rule the
+ * Resume Tailor's prompt is trying to hold.
+ */
+export function devTailoredResumes(): NewTailoredResume[] {
+  return [
+    {
+      userId: DEV_USER_ID,
+      postingId: DEV_DRAFTED_POSTING_ID,
+      markdown: DEV_TAILORED_RESUME_MARKDOWN,
+      generatedAt: new Date("2026-08-03T10:22:00.000Z"),
+      provenance: {
+        runId: DEV_RUN_ACTIVE_ID,
+        title: MERIDIAN.title,
+        company: MERIDIAN.company,
+        url: MERIDIAN.url,
+        sourceDocument: "dev-user-cv.md",
+      },
+    },
+  ]
+}
+
 /** The media type the real store would have derived from the extension. */
 export function devContentType(kind: "resumes", extension: string): string {
   return contentTypeFor(kind, extension) ?? "application/octet-stream"
@@ -574,6 +610,36 @@ like to do that work here.
 
 Kind regards,
 Dev User
+`
+
+/**
+ * {@link DEV_CV_MARKDOWN}, rearranged for the Meridian advertisement.
+ *
+ * ⚠️ **Check it against the CV rather than reading it as filler.** Every
+ * employer, date, number and technology here appears in `DEV_CV_MARKDOWN`: the
+ * logistics role leads, the billing role is shortened to one line, the skills
+ * are reordered so the ones the advertisement names come first, and the payments
+ * half of the summary is dropped because this advertisement is not about
+ * payments. Nothing is added, nothing is upgraded, and there is no bracketed
+ * placeholder anywhere — which is exactly the difference from
+ * {@link DEV_LETTER_MARKDOWN} beneath it.
+ */
+const DEV_TAILORED_RESUME_MARKDOWN = `# Dev User
+
+Backend engineer, Sydney. Eight years across logistics.
+
+## Experience
+
+**Senior Engineer, Kestrel Logistics** (2022–present)
+Owned the dispatch service — TypeScript, Postgres, AWS. Took its p99 from
+1.8s to 240ms by moving the hot path off a synchronous fan-out.
+
+**Engineer, Tessellate** (2018–2022)
+Built and ran the billing pipeline.
+
+## Skills
+
+TypeScript, Postgres, AWS, Terraform, Go.
 `
 
 const DEV_LETTER_MARKDOWN = `# Senior Backend Engineer — Meridian Freight

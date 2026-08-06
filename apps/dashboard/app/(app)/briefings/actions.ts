@@ -7,7 +7,12 @@ import { createRunActions } from "@/lib/briefing-runs/run-actions"
 import { createCoverLetterActions } from "@/lib/cover-letters/cover-letter-actions"
 import { getPrisma } from "@/lib/db"
 import { createPostingActions } from "@/lib/postings/posting-actions"
-import { getCoverLetterStore, getResumeStore } from "@/lib/storage"
+import {
+  getCoverLetterStore,
+  getResumeStore,
+  getTailoredResumeStore,
+} from "@/lib/storage"
+import { createTailoredResumeActions } from "@/lib/tailored-resumes/tailored-resume-actions"
 import { refresh } from "next/cache"
 
 /**
@@ -39,10 +44,18 @@ const runActions = createRunActions({
   getInvoker: getBriefingInvoker,
 })
 
+const tailoredResumeActions = createTailoredResumeActions({
+  getUser: getCurrentUser,
+  getPrisma,
+  getResumes: getResumeStore,
+  getTailoredResumes: getTailoredResumeStore,
+})
+
 const postingActions = createPostingActions({
   getUser: getCurrentUser,
   getPrisma,
   getCoverLetters: getCoverLetterStore,
+  getTailoredResumes: getTailoredResumeStore,
 })
 
 /** Create a manually written cover letter from the blank editor. */
@@ -120,6 +133,47 @@ export async function saveCoverLetterAction(
 }
 
 /**
+ * Rewrite the user's CV for one Posting.
+ *
+ * `refresh()` on success for the reason the draft above gives, and it is
+ * load-bearing here in the same way: the expanded detail renders "Generated
+ * <date>" plus a download, a PDF button and an editor, and without this a first
+ * generation would leave the panel still offering a first one.
+ */
+export async function generateTailoredResumeAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await tailoredResumeActions.generateTailoredResume(
+    state,
+    formData
+  )
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Save an edited tailored resume.
+ *
+ * `refresh()` for the narrower reason `saveCoverLetterAction` gives: the bytes
+ * are fetched by the editor rather than rendered by the page, so what goes stale
+ * is only the metadata the panel shows. Cheap, and the alternative is a panel
+ * that silently disagrees with storage.
+ */
+export async function saveTailoredResumeAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await tailoredResumeActions.saveTailoredResume(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
  * Set where one application stands.
  *
  * `refresh()` on success for the reason the draft above gives, with one extra
@@ -144,11 +198,11 @@ export async function setPostingStatusAction(
 }
 
 /**
- * Delete the selected Postings, and the cover letter each one carries.
+ * Delete the selected Postings, and the documents each one carries.
  *
  * One export for both the per-row trash icon and the bulk bar — the field
  * repeats, so a row submits a list of one. See `lib/postings/posting-actions.ts`
- * for why the letter is deleted before the row.
+ * for why the cover letter and the tailored resume are deleted before the row.
  *
  * `refresh()` is the whole of what puts the page back in step here, and unlike
  * the status action there is no optimistic control holding the new state in the

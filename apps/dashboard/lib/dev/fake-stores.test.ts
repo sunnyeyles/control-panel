@@ -2,6 +2,7 @@ import { createDevPrisma } from "@/lib/dev/fake-prisma"
 import {
   getDevCoverLetterStore,
   getDevResumeStore,
+  getDevTailoredResumeStore,
 } from "@/lib/dev/fake-stores"
 import { DEV_USER_ID } from "@/lib/dev/fixtures"
 import { listPostings } from "@/lib/postings/list-postings"
@@ -26,12 +27,13 @@ beforeAll(() => {
 /**
  * The `DEV_AUTH_BYPASS=1` composition, driven end to end.
  *
- * Everything here goes through the **real** dev fakes — `createDevPrisma()` and
- * `getDevCoverLetterStore()`, the same two `lib/db.ts` and `lib/storage.ts` hand
- * out under the flag — rather than the hand-rolled doubles in
- * `lib/postings/posting-actions.test.ts`. Those prove the action's branches;
- * this proves the wiring they sit in, which is the half nothing else covers and
- * the half a person would otherwise only find by clicking.
+ * Everything here goes through the **real** dev fakes — `createDevPrisma()`,
+ * `getDevCoverLetterStore()` and `getDevTailoredResumeStore()`, the same three
+ * `lib/db.ts` and `lib/storage.ts` hand out under the flag — rather than the
+ * hand-rolled doubles in `lib/postings/posting-actions.test.ts`. Those prove the
+ * action's branches; this proves the wiring they sit in, which is the half
+ * nothing else covers and the half a person would otherwise only find by
+ * clicking.
  */
 describe("deleting a posting under DEV_AUTH_BYPASS", () => {
   function actions() {
@@ -39,6 +41,7 @@ describe("deleting a posting under DEV_AUTH_BYPASS", () => {
       getUser: async () => DEV_USER,
       getPrisma: () => createDevPrisma(),
       getCoverLetters: getDevCoverLetterStore,
+      getTailoredResumes: getDevTailoredResumeStore,
     })
   }
 

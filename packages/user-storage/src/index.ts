@@ -63,6 +63,15 @@ export {
   type StoredResume,
 } from "./resume-store.ts"
 
+export {
+  createTailoredResumeStore,
+  type NewTailoredResume,
+  type StoredTailoredResume,
+  type TailoredResumeProvenance,
+  type TailoredResumeRef,
+  type TailoredResumeStore,
+} from "./tailored-resume-store.ts"
+
 export { readUserStorageConfig, type UserStorageConfig } from "./config.ts"
 
 export {
