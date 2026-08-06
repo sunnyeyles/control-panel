@@ -4,6 +4,7 @@ import type { CurrentUser } from "@/lib/auth/current-user"
 import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
 import { PAGE_SIZE } from "@/lib/postings/posting-query"
 import { POSTING_STATUS_LABELS } from "@/lib/postings/posting-status-labels"
+import { settleWithConcurrency } from "@/lib/settle-with-concurrency"
 import {
   deletePostings,
   ownedPostingIds,
@@ -65,6 +66,17 @@ const INVALID_STATUS = "Choose New, Applied or Rejected."
  * anyone with a session can make arbitrarily large.
  */
 const TOO_MANY_POSTINGS = `Delete at most ${PAGE_SIZE} postings at a time.`
+
+/**
+ * How many cover-letter deletes may be in flight at once.
+ *
+ * The same bound `list-documents.ts` and `cover-letter-rows.ts` use, through the
+ * same helper, and matched to them on purpose: `S3UserObjectStore.delete()` is a
+ * `HeadObject` followed by a `DeleteObject`, so a full-page selection run one at
+ * a time is fifty sequential round trips inside one Server Action — and most of
+ * those heads miss, because most Postings have no letter.
+ */
+const DELETE_CONCURRENCY = 8
 
 /**
  * Every letter failed, so nothing was deleted.
@@ -277,33 +289,36 @@ export function createPostingActions(deps: PostingActionsDeps) {
     if (owned.length === 0) return fail(POSTING_NOT_FOUND)
 
     const letters = deps.getCoverLetters()
-    const removable: string[] = []
 
-    for (const postingId of owned) {
-      try {
-        // The key is built from the session's user id, never from the form, so
-        // a tampered field can only ever address something in the caller's own
-        // prefix.
-        await letters.delete({ userId: caller.userId, postingId })
-        removable.push(postingId)
-      } catch (error) {
-        // Most Postings have no letter, so a miss is the ordinary case and not
-        // a failure. Branching on `code` rather than `instanceof`, per
-        // `errors.ts`: an error crossing a bundler boundary can fail a
-        // prototype check while carrying a perfectly good discriminant.
-        //
-        // `object_ownership` deliberately does *not* land here. At a key built
-        // from the caller's own id it should be unreachable, and treating it as
-        // "nothing to delete" would turn the one signal that the key shape is
-        // wrong into a silent success.
-        if (isUserStorageError(error) && error.code === "object_not_found") {
-          removable.push(postingId)
-          continue
-        }
+    // The key is built from the session's user id, never from the form, so a
+    // tampered field can only ever address something in the caller's own prefix.
+    const settled = await settleWithConcurrency(
+      owned,
+      DELETE_CONCURRENCY,
+      (postingId) => letters.delete({ userId: caller.userId, postingId })
+    )
 
-        console.error("postings: could not delete the cover letter", error)
+    const removable = owned.filter((_postingId, index) => {
+      const result = settled[index]
+      if (result === undefined || result.status === "fulfilled") return true
+
+      // Most Postings have no letter, so a miss is the ordinary case and not a
+      // failure. Branching on `code` rather than `instanceof`, per `errors.ts`:
+      // an error crossing a bundler boundary can fail a prototype check while
+      // carrying a perfectly good discriminant.
+      //
+      // `object_ownership` deliberately does *not* land here. At a key built
+      // from the caller's own id it should be unreachable, and treating it as
+      // "nothing to delete" would turn the one signal that the key shape is
+      // wrong into a silent success.
+      const error: unknown = result.reason
+      if (isUserStorageError(error) && error.code === "object_not_found") {
+        return true
       }
-    }
+
+      console.error("postings: could not delete the cover letter", error)
+      return false
+    })
 
     if (removable.length === 0) return fail(LETTERS_UNAVAILABLE)
 
@@ -339,9 +354,9 @@ export function createPostingActions(deps: PostingActionsDeps) {
  * otherwise would read as a UI that had not refreshed.
  */
 function deleteMessage(removed: number, attempted: number): string {
-  const noun = removed === 1 ? "posting" : "postings"
+  if (removed < attempted) {
+    return `Deleted ${removed} of ${attempted} postings — the rest were left alone because their cover letters could not be deleted.`
+  }
 
-  return removed === attempted
-    ? `Deleted ${removed} ${noun}.`
-    : `Deleted ${removed} of ${attempted} postings — the rest were left alone because their cover letters could not be deleted.`
+  return `Deleted ${removed} ${removed === 1 ? "posting" : "postings"}.`
 }
