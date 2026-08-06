@@ -1,13 +1,14 @@
 import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
-import { settleWithConcurrency } from "@/lib/settle-with-concurrency"
+import { formatUtcDateTime } from "@/lib/format-utc-datetime"
+import {
+  HEAD_CONCURRENCY,
+  settleWithConcurrency,
+} from "@/lib/settle-with-concurrency"
 import {
   isUserStorageError,
   type CoverLetterStore,
   type StoredCoverLetter,
 } from "@workspace/user-storage"
-
-/** How many cover-letter metadata reads may be in flight at once. */
-const HEAD_CONCURRENCY = 8
 
 /**
  * The cover-letter metadata rendered for one visible Posting.
@@ -74,7 +75,7 @@ function toCoverLetterRow(letter: StoredCoverLetter): CoverLetterRow {
 
   return {
     postingId,
-    draftedAt: formatDraftedAt(draftedAt),
+    draftedAt: formatUtcDateTime(draftedAt),
     displayName: provenance.title ?? postingId,
     filename: coverLetterFilename({
       postingId,
@@ -82,18 +83,4 @@ function toCoverLetterRow(letter: StoredCoverLetter): CoverLetterRow {
       ...(provenance.company ? { company: provenance.company } : {}),
     }),
   }
-}
-
-/** The drafting instant rendered consistently with the table's sighting times. */
-function formatDraftedAt(date: Date): string {
-  return new Intl.DateTimeFormat("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC",
-    timeZoneName: "short",
-  }).format(date)
 }

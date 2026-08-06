@@ -1,5 +1,4 @@
 import {
-  CircleHelpIcon,
   FileTextIcon,
   MessageSquareIcon,
   NewspaperIcon,
@@ -51,20 +50,17 @@ export const navMain: readonly NavItem[] = [
 
 export const navSecondary: readonly NavItem[] = [
   { title: "Settings", url: "/settings", icon: Settings2Icon },
-  { title: "Get Help", url: "#", icon: CircleHelpIcon },
 ]
 
 /**
  * The heading for a pathname, falling back to the app name.
  *
- * Exact match rather than a prefix match: `"#"` is a real entry in
- * `navSecondary` and a prefix test would let it match nothing usefully, while a
- * `startsWith` on `"/"` would match every route in the app and make every page
- * "Assistant".
+ * Exact match rather than a prefix match: a `startsWith` on `"/"` would match
+ * every route in the app and make every page "Assistant".
  */
 export function titleForPathname(pathname: string): string {
   const match = [...navMain, ...navSecondary].find(
-    (item) => item.url !== "#" && item.url === pathname
+    (item) => item.url === pathname
   )
 
   return match?.title ?? "Control Panel"

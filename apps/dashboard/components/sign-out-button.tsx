@@ -3,15 +3,14 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 
-import { authClient } from "@/lib/auth/client"
+import { signOutAndRedirect } from "@/lib/auth/sign-out"
 import { Button } from "@workspace/ui/components/button"
 
 /**
  * Sign out, then land on the sign-in page.
  *
- * `router.refresh()` before navigating so the server components that read the
- * session are re-rendered rather than served from the client router cache —
- * without it the sidebar keeps showing the person who just left.
+ * Sequence lives in `signOutAndRedirect` so `NavUser` cannot drift from this
+ * button.
  */
 export function SignOutButton({
   className,
@@ -25,14 +24,7 @@ export function SignOutButton({
 
   async function signOut() {
     setPending(true)
-    try {
-      await authClient.signOut()
-    } catch (cause) {
-      console.error("sign-out failed", cause)
-    } finally {
-      router.refresh()
-      router.push("/auth/sign-in")
-    }
+    await signOutAndRedirect(router)
   }
 
   return (

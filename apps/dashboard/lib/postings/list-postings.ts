@@ -6,6 +6,7 @@ import {
 } from "@workspace/db"
 
 import { formatCalendarDate } from "@/lib/format-calendar-date"
+import { formatUtcDateTime } from "@/lib/format-utc-datetime"
 
 import { PAGE_SIZE, type PostingQuery } from "./posting-query"
 import { postingSource, type PostingSource } from "./posting-source"
@@ -345,9 +346,9 @@ function toView(row: PostingRow, now: Date): PostingView {
     status: toStatus(row.status),
     ...(source ? { source } : {}),
     firstSeen: formatSeenAgo(row.firstSeenAt, now),
-    firstSeenExact: formatSeenAt(row.firstSeenAt),
+    firstSeenExact: formatUtcDateTime(row.firstSeenAt),
     lastSeen: formatSeenAgo(row.lastSeenAt, now),
-    lastSeenExact: formatSeenAt(row.lastSeenAt),
+    lastSeenExact: formatUtcDateTime(row.lastSeenAt),
     briefing: briefingName(row.lastSeenRun) ?? UNKNOWN_BRIEFING,
     highlights: parsed.success ? (parsed.data.highlights ?? []) : [],
     // The column when the write path could read a date out of the
@@ -355,7 +356,7 @@ function toView(row: PostingRow, now: Date): PostingView {
     // nothing when it said nothing. See {@link PostingView.postedAt} for why
     // the second case is kept rather than blanked.
     //
-    // No time and no zone name, unlike {@link formatSeenAt}: the source is a
+    // No time and no zone name, unlike {@link formatUtcDateTime}: the source is a
     // date the advertisement stated, so any time of day in it is an artefact
     // of the ISO string rather than something the page said, and printing
     // "00:00 UTC" beside every row would be precision the value does not have.
@@ -413,28 +414,6 @@ function toStatus(status: string): PostingStatus {
   }
 
   return known
-}
-
-/**
- * A sighting as a string, resolved here rather than in a component.
- *
- * The same format `lib/cover-letters/cover-letter-rows.ts` renders a drafting
- * instant in, so the two kinds of provenance on this page agree with each
- * other: a fixed locale, because the server's default is whatever the platform
- * decides, and an explicit zone that is named in the output — UTC, because a
- * time with no zone beside it reads as local and is wrong by hours.
- */
-function formatSeenAt(date: Date): string {
-  return new Intl.DateTimeFormat("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC",
-    timeZoneName: "short",
-  }).format(date)
 }
 
 /**

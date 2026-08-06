@@ -1,4 +1,5 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { BRIEFING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
@@ -38,10 +39,11 @@ import { MAX_CRITERIA_ITEMS, searchCriteriaSchema } from "./search-criteria"
 /**
  * One message for "no such job" and "someone else's job".
  *
- * Distinct messages would turn a form that takes a uuid into an oracle for
- * whether another user's row exists.
+ * Shared with run-actions via `lib/actions/not-found.ts`. Distinct messages
+ * would turn a form that takes a uuid into an oracle for whether another user's
+ * row exists.
  */
-const NOT_FOUND = "That briefing could not be found."
+const NOT_FOUND = BRIEFING_NOT_FOUND
 
 /**
  * Only reachable by posting the form directly — the picker offers four values

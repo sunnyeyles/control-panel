@@ -1,4 +1,5 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
@@ -32,22 +33,6 @@ import { z } from "zod"
  * asymmetry is why this file exists at all, and why `recordPostings` in
  * `@workspace/db` leaves the column alone on conflict.
  */
-
-/**
- * One message for "no such Posting" and "someone else's Posting".
- *
- * Identical on purpose, and the identity is load-bearing rather than tidy: a
- * form that takes a Posting id would otherwise be an oracle for whether a
- * *stranger's* advertisement exists, and the ids are derived from the
- * advertisement's URL, so anyone reading the same job board can produce one. The
- * two cases are also indistinguishable to this action by construction — see the
- * note on the `setPostingStatus` call below — so there is no branch here that
- * could be "improved" into telling them apart.
- *
- * A malformed id shares the message for the reason `job-actions.ts` gives about
- * its own: a value that cannot address a Posting has not found one.
- */
-const POSTING_NOT_FOUND = "That posting could not be found."
 
 /**
  * Only reachable by posting to the action directly — the select offers the
