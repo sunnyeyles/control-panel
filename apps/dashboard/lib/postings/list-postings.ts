@@ -26,7 +26,18 @@ import { postingSource, type PostingSource } from "./posting-source"
  * once each, carrying the status the user set.
  */
 
-/** One Posting, flattened to what the table and the dialog render. */
+/**
+ * One Posting, flattened to what the table renders.
+ *
+ * ⚠️ **`summary`, `matchReason` and `highlights` are deliberately not here.**
+ * They are the expanded row's content, they are the largest fields a Posting
+ * has, and at most one row is expanded at a time — so carrying them for all
+ * twenty-five put roughly a page's worth of prose nobody was reading into the
+ * RSC payload of every sort click. They now come from
+ * `load-posting-detail.ts` when a row is actually opened. Everything below is
+ * what the compact row, the delete dialog and the letter controls read, and it
+ * is all short.
+ */
 export interface PostingView {
   /**
    * The derived Posting id — sixteen hex characters — which is the row's
@@ -62,12 +73,6 @@ export interface PostingView {
    * from a host no board claims: that still answers, with the hostname.
    */
   source?: PostingSource
-  /** Lines copied from the advertisement. Empty when it carried none. */
-  highlights: string[]
-  /** Absent when the stored payload could not be read — see {@link toView}. */
-  summary?: string
-  /** Absent for the same reason `summary` is. */
-  matchReason?: string
   /**
    * How long ago this advertisement was first found, as "3 weeks ago".
    *
@@ -133,12 +138,28 @@ export interface PostingPage {
  * rather than a shortcut past one, and `list-postings.test.ts` asserts against a
  * second user's rows.
  *
- * ⚠️ **Count first, then clamp, then fetch — two serial round trips, and the
- * order is the point.** `?page=99` on a three-page table must render the last
- * page, not an empty one with working controls underneath it. Clamping needs
- * the total, and the total needs its own query, so the two cannot be merged
- * without giving up the behaviour. `total === 0` short-circuits the second
- * query rather than asking for a slice of nothing.
+ * ⚠️ **The count and the page are asked for together, and the re-fetch below is
+ * what keeps that safe.** `?page=99` on a three-page table must render the last
+ * page, not an empty one with working controls underneath it — so the page
+ * still has to be clamped against a total only the count knows. Doing that in
+ * order meant two serial round trips on *every* render to pay for a case that
+ * almost never happens. Asking for both at once and re-fetching only when the
+ * requested page really did overshoot costs one round trip in the common case
+ * and the original two in the rare one. The clamp itself is unchanged, and
+ * `list-postings.test.ts` asserts it from the outside.
+ *
+ * The price is a query that is sometimes wasted: an empty table and an
+ * overshooting page both issue a fetch whose result is discarded. Neither costs
+ * wall-clock, because it ran alongside the count either way — and an empty
+ * table is the cheapest query this schema has.
+ *
+ * ⚠️ **A hand-typed `?page=9999` now reaches `skip` before the clamp, and that
+ * is survivable rather than an oversight.** `OFFSET` can only discard rows that
+ * exist, so the work is bounded by how many Postings the *user* has and not by
+ * the number they typed — a huge offset over a small table scans the same index
+ * entries and returns nothing. `MAX_PAGE` in `posting-query.ts` is still what
+ * keeps the value finite, and it is now the only bound in front of this query
+ * rather than the outer of two.
  *
  * ⚠️ **`orderBy` is tie-broken on `postingId`, and that is a correctness fix,
  * not a nicety.** Offset pagination over a non-unique key — every sort here but
@@ -159,7 +180,11 @@ export async function listPostings(
   userId: string,
   query: PostingQuery
 ): Promise<PostingPage> {
-  const total = await prisma.posting.count({ where: { userId } })
+  const [total, requested] = await Promise.all([
+    prisma.posting.count({ where: { userId } }),
+    findPage(prisma, userId, query, query.page),
+  ])
+
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   if (total === 0) {
@@ -168,30 +193,13 @@ export async function listPostings(
 
   const page = Math.min(query.page, pageCount)
 
-  const rows = await prisma.posting.findMany({
-    where: { userId },
-    orderBy: orderByFor(query),
-    skip: (page - 1) * PAGE_SIZE,
-    take: PAGE_SIZE,
-    select: {
-      postingId: true,
-      title: true,
-      company: true,
-      location: true,
-      url: true,
-      status: true,
-      postedAt: true,
-      payload: true,
-      firstSeenAt: true,
-      lastSeenAt: true,
-      // Which Briefing found it, asked for with the page rather than resolved
-      // row by row afterwards: `postings.last_seen_run_id` → `runs.job_id` →
-      // `jobs.name`. **`lastSeenRun`, not `firstSeenRun`** — the Briefing that
-      // most recently found the advertisement is the one whose criteria still
-      // match it, and it is the sighting the default sort orders on.
-      lastSeenRun: { select: { job: { select: { name: true } } } },
-    },
-  })
+  // The speculative fetch was for the page that was asked for. When that was
+  // past the end it returned nothing and is discarded, and the clamped page is
+  // fetched properly — the only path that still pays two round trips.
+  const rows =
+    page === query.page
+      ? requested
+      : await findPage(prisma, userId, query, page)
 
   // One instant for the whole page, read once rather than per row, so twenty-five
   // sightings a few milliseconds apart cannot be described relative to twenty-five
@@ -201,17 +209,26 @@ export async function listPostings(
   let unreadable = 0
   let unnamed = 0
   const postings = rows.map((row) => {
-    const view = toView(row, now)
-    if (view.summary === undefined) unreadable += 1
+    // ⚠️ **Parsed here and handed down, rather than asked of the view
+    // afterwards.** The count used to be `view.summary === undefined`, which
+    // worked only while `summary` came from the payload and lived on
+    // `PostingView`; it comes from `load-posting-detail.ts` now. Doing the
+    // parse in this one place keeps the reporting honest without parsing every
+    // payload twice.
+    const parsed = PostingSchema.safeParse(row.payload)
+
+    if (!parsed.success) unreadable += 1
     if (briefingName(row.lastSeenRun) === undefined) unnamed += 1
-    return view
+
+    return toView(row, parsed, now)
   })
 
   if (unreadable > 0) {
     // Once per page rather than once per row: a payload the schema stopped
     // matching is a contract drift, and one line naming how many rows it hit is
-    // the signal. Without it the detail simply goes missing and the table looks
-    // like a table of advertisements that carried no description.
+    // the signal. The rows still render — from their projected columns — so
+    // without this line the drift is invisible until someone opens one of them
+    // and is told the detail could not be read.
     console.error(
       "postings: could not read the stored payload for",
       unreadable,
@@ -237,6 +254,49 @@ export async function listPostings(
   }
 
   return { postings, total, page, pageCount, pageSize: PAGE_SIZE }
+}
+
+/**
+ * One slice of `postings`, in the order the query asks for.
+ *
+ * Split out of {@link listPostings} because it is now issued from two places —
+ * speculatively for the page that was asked for, and again for the clamped page
+ * when that overshot. The projection has to be identical in both, which is what
+ * having one function guarantees.
+ *
+ * `page` is a parameter rather than being read off `query`, precisely because
+ * the two disagree in the case this exists to serve.
+ */
+function findPage(
+  prisma: PrismaClient,
+  userId: string,
+  query: PostingQuery,
+  page: number
+) {
+  return prisma.posting.findMany({
+    where: { userId },
+    orderBy: orderByFor(query),
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
+    select: {
+      postingId: true,
+      title: true,
+      company: true,
+      location: true,
+      url: true,
+      status: true,
+      postedAt: true,
+      payload: true,
+      firstSeenAt: true,
+      lastSeenAt: true,
+      // Which Briefing found it, asked for with the page rather than resolved
+      // row by row afterwards: `postings.last_seen_run_id` → `runs.job_id` →
+      // `jobs.name`. **`lastSeenRun`, not `firstSeenRun`** — the Briefing that
+      // most recently found the advertisement is the one whose criteria still
+      // match it, and it is the sighting the default sort orders on.
+      lastSeenRun: { select: { job: { select: { name: true } } } },
+    },
+  })
 }
 
 /**
@@ -324,15 +384,23 @@ interface PostingRow {
  * match reason — and not the advertisement itself. Dropping the row would make
  * a contract drift look like a Posting nobody ever found.
  *
+ * `parsed` arrives as an argument rather than being computed here, because the
+ * caller counts the failures for its once-per-page report and neither of them
+ * should pay for the parse twice. The payload is read for exactly one field
+ * now — see `postedAt` below.
+ *
  * Every `Date` becomes a string here, on the server. A `Date` crossing into a
  * client component is formatted with the browser's locale and timezone, and
  * React reports the disagreement as a hydration mismatch rather than as the
  * timezone bug it is — the same boundary `components/documents/document-list.tsx`
  * describes.
  */
-function toView(row: PostingRow, now: Date): PostingView {
-  const parsed = PostingSchema.safeParse(row.payload)
-  // Independent of the parse above, deliberately: `url` is a projected column
+function toView(
+  row: PostingRow,
+  parsed: ReturnType<typeof PostingSchema.safeParse>,
+  now: Date
+): PostingView {
+  // Independent of the parse, deliberately: `url` is a projected column
   // written by the same statement as the payload, so a Posting whose payload
   // the schema no longer matches still knows which board it came from.
   const source = postingSource(row.url)
@@ -350,7 +418,6 @@ function toView(row: PostingRow, now: Date): PostingView {
     lastSeen: formatSeenAgo(row.lastSeenAt, now),
     lastSeenExact: formatUtcDateTime(row.lastSeenAt),
     briefing: briefingName(row.lastSeenRun) ?? UNKNOWN_BRIEFING,
-    highlights: parsed.success ? (parsed.data.highlights ?? []) : [],
     // The column when the write path could read a date out of the
     // advertisement, the advertisement's own words when it could not, and
     // nothing when it said nothing. See {@link PostingView.postedAt} for why
@@ -365,9 +432,6 @@ function toView(row: PostingRow, now: Date): PostingView {
       : parsed.success && parsed.data.postedAt
         ? { postedAt: parsed.data.postedAt }
         : {}),
-    ...(parsed.success
-      ? { summary: parsed.data.summary, matchReason: parsed.data.matchReason }
-      : {}),
   }
 }
 

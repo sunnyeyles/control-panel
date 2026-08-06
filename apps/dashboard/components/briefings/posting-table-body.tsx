@@ -1,13 +1,17 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useCallback, useRef, useState } from "react"
 
+import { loadPostingDetailAction } from "@/app/(app)/briefings/actions"
 import {
   CoverLetterCell,
   type CoverLetterPromise,
 } from "@/components/briefings/cover-letter-cell"
 import { DeletePostingsDialog } from "@/components/briefings/delete-postings-dialog"
-import { PostingDetail } from "@/components/briefings/posting-detail"
+import {
+  PostingDetail,
+  type PostingDetailState,
+} from "@/components/briefings/posting-detail"
 import { usePostingSelection } from "@/components/briefings/posting-selection"
 import type { PostingView } from "@/lib/postings/list-postings"
 import { POSTING_COLSPAN } from "@/lib/postings/posting-columns"
@@ -48,6 +52,7 @@ export function PostingTableBody({
   letters: CoverLetterPromise
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const { details, warm } = usePostingDetails()
 
   return (
     <TableBody>
@@ -56,17 +61,102 @@ export function PostingTableBody({
           key={posting.id}
           posting={posting}
           letters={letters}
+          detail={details[posting.id] ?? PENDING}
+          onWarm={() => warm(posting.id)}
           expanded={expandedId === posting.id}
-          onToggle={() =>
+          onToggle={() => {
+            // Before the state change rather than in an effect after it: the
+            // request and the expansion start in the same tick, so a row whose
+            // hover never happened (keyboard, touch) still begins loading the
+            // moment it is opened rather than a render later.
+            warm(posting.id)
             setExpandedId((current) =>
               current === posting.id ? null : posting.id
             )
-          }
+          }}
         />
       ))}
     </TableBody>
   )
 }
+
+/**
+ * The detail for every row that has been opened or pointed at, kept for as long
+ * as the page is.
+ *
+ * ⚠️ **The cache is what makes an on-demand fetch acceptable.** Closing and
+ * reopening a row, or opening the same one twice while comparing it against
+ * another, must not be a second request — and this state lives in the body,
+ * which outlives any one row's expansion.
+ *
+ * ⚠️ **`asked` is a ref, not state, and that is deliberate.** It guards against
+ * a second request for a row already being fetched — hover then click is the
+ * ordinary case, and both call {@link warm} — and it must be consulted and
+ * updated within one synchronous call. A `useState` set would not be visible to
+ * the click that follows the hover in the same tick, and the row would ask
+ * twice.
+ *
+ * A failure removes its entry from `asked`, so pointing at the row again
+ * retries. Nothing else does: there is no retry button, because the gesture that
+ * opened the panel is the gesture that retries it.
+ */
+function usePostingDetails() {
+  const [details, setDetails] = useState<Record<string, PostingDetailState>>({})
+  const asked = useRef<Set<string>>(new Set())
+
+  const warm = useCallback((postingId: string) => {
+    if (asked.current.has(postingId)) return
+    asked.current.add(postingId)
+
+    setDetails((current) => ({
+      ...current,
+      [postingId]: { status: "loading" },
+    }))
+
+    loadPostingDetailAction(postingId)
+      .then((result) => {
+        if (result.status === "success") {
+          setDetails((current) => ({
+            ...current,
+            [postingId]: { status: "ready", view: result.detail },
+          }))
+          return
+        }
+
+        asked.current.delete(postingId)
+        setDetails((current) => ({
+          ...current,
+          [postingId]: { status: "failed", message: result.message },
+        }))
+      })
+      .catch((error: unknown) => {
+        // A Server Action that rejects rather than returning its union — the
+        // network went away, or the deployment did. The action's own failures
+        // all come back through the branch above.
+        console.error("postings: could not load the detail", error)
+        asked.current.delete(postingId)
+        setDetails((current) => ({
+          ...current,
+          [postingId]: {
+            status: "failed",
+            message: "Those details could not be loaded.",
+          },
+        }))
+      })
+  }, [])
+
+  return { details, warm }
+}
+
+/**
+ * A row nobody has asked about yet reads as `loading`.
+ *
+ * Not a fourth state, deliberately: the only way a detail is looked at is by
+ * expanding the row, and expanding it asks. "Never asked" and "asked, waiting"
+ * are the same thing from the panel's side, and a distinct `idle` would be a
+ * branch in `posting-detail.tsx` that nothing could ever render.
+ */
+const PENDING: PostingDetailState = { status: "loading" }
 
 /**
  * One advertisement as a compact row, plus its expanded detail when open.
@@ -100,11 +190,23 @@ export function PostingTableBody({
 function PostingRow({
   posting,
   letters,
+  detail,
+  onWarm,
   expanded,
   onToggle,
 }: {
   posting: PostingView
   letters: CoverLetterPromise
+  /** This row's fetched detail, or where that fetch has got to. */
+  detail: PostingDetailState
+  /**
+   * Start fetching the detail without opening anything.
+   *
+   * Bound to pointer-enter and focus, so the request for a row someone is about
+   * to click is usually finished before they click it. Idempotent — see
+   * `usePostingDetails` — so a row hovered five times is fetched once.
+   */
+  onWarm: () => void
   expanded: boolean
   onToggle: () => void
 }) {
@@ -140,6 +242,19 @@ function PostingRow({
       <TableRow
         data-state={selected ? "selected" : undefined}
         className="cursor-pointer"
+        /*
+          Warming the detail, not opening it. Expanding a row costs one small
+          request now — see `lib/postings/load-posting-detail.ts` — and this is
+          what usually hides it: by the time a click lands, the reply is in.
+
+          Both events, because they are different people. `onPointerEnter` is
+          the mouse; `onFocusCapture` is a keyboard tabbing through the row's
+          controls, which never fires a pointer event and would otherwise be the
+          only user who watches the skeleton. Capture rather than bubble because
+          focus does not bubble.
+        */
+        onPointerEnter={onWarm}
+        onFocusCapture={onWarm}
         onClick={(event) => {
           // `Element` and not `HTMLElement`: a click on the chevron lands on
           // the `<svg>` inside the button, which is an `SVGElement`. `closest`
@@ -302,9 +417,13 @@ function PostingRow({
           <TableCell
             id={detailId}
             colSpan={POSTING_COLSPAN}
-            className="max-w-0 whitespace-normal break-words"
+            className="max-w-0 break-words whitespace-normal"
           >
-            <PostingDetail posting={posting} letters={letters} />
+            <PostingDetail
+              posting={posting}
+              detail={detail}
+              letters={letters}
+            />
           </TableCell>
         </TableRow>
       ) : null}

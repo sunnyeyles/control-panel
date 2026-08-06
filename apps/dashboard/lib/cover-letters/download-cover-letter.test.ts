@@ -49,6 +49,9 @@ function storeOf(objects: StoredCoverLetter[]): CoverLetterStore & {
     head: async () => {
       throw new Error("not used")
     },
+    list: async () => {
+      throw new Error("not used")
+    },
     delete: async () => {},
     get: async (ref: CoverLetterRef) => {
       askedFor.push(ref)

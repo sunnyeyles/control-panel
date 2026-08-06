@@ -47,6 +47,19 @@ interface PostingRow {
   postingId: string
   status: string
   statusChangedAt: Date | null
+  /** Only `loadPostingDetail` reads it; the three writers leave it alone. */
+  payload?: unknown
+}
+
+/** A payload the schema accepts, for the detail loader below. */
+const PAYLOAD = {
+  title: "Platform Engineer",
+  company: "Acme",
+  location: "Sydney",
+  url: "https://www.seek.com.au/job/1",
+  summary: "Building services.",
+  matchReason: "Matches the criteria.",
+  highlights: ["Kubernetes", "Go"],
 }
 
 /**
@@ -72,6 +85,7 @@ class FakeDb {
   readonly rows: PostingRow[] = []
   readonly updates: unknown[] = []
   readonly deletes: unknown[] = []
+  readonly reads: unknown[] = []
   /** Times the client itself was asked for — a query cannot precede this. */
   handedOut = 0
   /**
@@ -119,6 +133,26 @@ class FakeDb {
           this.rows
             .filter((row) => matchesPostingWhere(row, query.where))
             .map((row) => ({ postingId: row.postingId })),
+
+        /**
+         * Filters on **both** halves of the natural key, like `updateMany`
+         * above and for the same reason: that filter is the ownership check,
+         * so a fake that ignored `userId` would let the stranger test pass
+         * over an implementation that had stopped scoping.
+         */
+        findFirst: async (query: {
+          where: { userId: string; postingId: string }
+        }) => {
+          this.reads.push(query)
+
+          const found = this.rows.find(
+            (row) =>
+              row.userId === query.where.userId &&
+              row.postingId === query.where.postingId
+          )
+
+          return found ? { payload: found.payload } : null
+        },
 
         deleteMany: async (query: { where: PostingWhere }) => {
           this.deletes.push(query)
@@ -189,8 +223,12 @@ let letters: FakeLetters
 
 beforeEach(() => {
   store = new FakeDb()
-    .posting({ postingId: POSTING_ID })
-    .posting({ postingId: OTHERS_POSTING_ID, userId: OTHER_USER_ID })
+    .posting({ postingId: POSTING_ID, payload: PAYLOAD })
+    .posting({
+      postingId: OTHERS_POSTING_ID,
+      userId: OTHER_USER_ID,
+      payload: { ...PAYLOAD, summary: "A stranger's advertisement." },
+    })
 
   letters = new FakeLetters(store.log)
 
@@ -726,6 +764,94 @@ describe("deleting postings", () => {
         status: "error",
         message: expect.any(String),
       })
+    })
+  })
+})
+
+/**
+ * The read among the writes.
+ *
+ * ⚠️ **A read reachable by direct POST is still a read someone can aim at
+ * another user's rows.** `"use server"` makes this an endpoint whether or not a
+ * chevron is what usually calls it, so it gets the same two checks the writers
+ * get — the caller from the session, and the Posting id against the shape
+ * `postingId()` produces — and the same test for the stranger's row.
+ */
+describe("loadPostingDetail", () => {
+  it("returns the prose the compact row does not carry", async () => {
+    const result = await actionsFor(SIGNED_IN).loadPostingDetail(POSTING_ID)
+
+    expect(result).toEqual({
+      status: "success",
+      detail: {
+        summary: "Building services.",
+        matchReason: "Matches the criteria.",
+        highlights: ["Kubernetes", "Go"],
+      },
+    })
+  })
+
+  it("refuses a stranger's Posting the same way it refuses a missing one", async () => {
+    const strangers =
+      await actionsFor(SIGNED_IN).loadPostingDetail(OTHERS_POSTING_ID)
+    const missing =
+      await actionsFor(SIGNED_IN).loadPostingDetail(MISSING_POSTING_ID)
+
+    // Indistinguishable on purpose: telling the two apart would confirm that a
+    // Posting with that id exists and belongs to somebody.
+    expect(strangers).toEqual(missing)
+    expect(strangers).toMatchObject({ status: "error" })
+  })
+
+  it("refuses before anything is queried when nobody is signed in", async () => {
+    for (const user of [ANONYMOUS, REFUSED]) {
+      const result = await actionsFor(user).loadPostingDetail(POSTING_ID)
+
+      expect(result).toEqual({ status: "error", message: NOT_AUTHORIZED })
+    }
+
+    expect(store.handedOut).toBe(0)
+  })
+
+  it("refuses an id that could not address a Posting, before querying", async () => {
+    const result =
+      await actionsFor(SIGNED_IN).loadPostingDetail("../../etc/passwd")
+
+    expect(result).toMatchObject({ status: "error" })
+    expect(store.handedOut).toBe(0)
+  })
+
+  /**
+   * ⚠️ **A drifted payload is not a failed request, and the panel says
+   * different things about them.** `listPostings` makes the same judgement
+   * about the same rows: the advertisement is what the user came for, so the
+   * detail going missing must not read as the row going missing.
+   */
+  it("answers with empty detail when the stored payload no longer parses", async () => {
+    const mine = store.find(POSTING_ID)
+    if (mine) mine.payload = { ...PAYLOAD, url: "not a url" }
+
+    const result = await actionsFor(SIGNED_IN).loadPostingDetail(POSTING_ID)
+
+    expect(result).toEqual({ status: "success", detail: { highlights: [] } })
+  })
+
+  it("reports a database failure as a failure, not as an empty detail", async () => {
+    const actions = createPostingActions({
+      getUser: async () => SIGNED_IN,
+      getPrisma: () =>
+        ({
+          posting: {
+            findFirst: async () => {
+              throw new Error("connection reset")
+            },
+          },
+        }) as unknown as PrismaClient,
+      getCoverLetters: () => letters.asStore(),
+    })
+
+    await expect(actions.loadPostingDetail(POSTING_ID)).resolves.toMatchObject({
+      status: "error",
     })
   })
 })
