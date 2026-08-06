@@ -424,6 +424,123 @@ describe("runBriefing", () => {
     })
   })
 
+  describe("when a search did not return one of the reported URLs", () => {
+    /** One search result carrying exactly these URLs, one per stanza. */
+    function returning(...urls: string[]): ToolMessage {
+      return new ToolMessage({
+        content: urls
+          .map((url, index) => `${index + 1}. A role — A company\n   ${url}`)
+          .join("\n\n"),
+        tool_call_id: "call_1",
+        name: "linkedin_search",
+        status: "success",
+      })
+    }
+
+    const REAL = FINDINGS.postings[0]!
+    const INVENTED = { ...REAL, url: "https://example.com/jobs/999" }
+
+    /** A run reporting one posting a search returned and one it did not. */
+    function runWithOneInvented() {
+      return run({
+        createScout: scoutReturning(
+          JSON.stringify({ postings: [REAL, INVENTED] }),
+          [returning(REAL.url)]
+        ),
+      })
+    }
+
+    it("still writes the brief from the postings that survived", async () => {
+      const report = await runWithOneInvented()
+
+      // The whole point of the change: one bad URL among several is a
+      // transcription slip, and throwing the run away over it threw away the
+      // other postings, the brief, and the cumulative record with them.
+      expect(report.outcome).toBe("success")
+      expect(report.postings).toBe(1)
+      expect(puts).toHaveLength(1)
+      expect(kept[0]?.findings.postings).toEqual([REAL])
+      expect(tracked[0]?.postings).toHaveLength(1)
+    })
+
+    it("says what it left out, since nothing else ever will", async () => {
+      const report = await runWithOneInvented()
+
+      // The brief does not mention what is missing from it and the run
+      // succeeded, so without this the drop is invisible in production.
+      expect(report.warnings).toEqual({
+        postingUrls: {
+          message:
+            "1 posting left out of the brief: no search returned the URL the scout gave.",
+          urls: [INVENTED.url],
+        },
+      })
+    })
+
+    it("reports the drop as a hand-off step detail", async () => {
+      const events: TraceEvent[] = []
+      await run({
+        trace: (event) => events.push(event),
+        createScout: scoutReturning(
+          JSON.stringify({ postings: [REAL, INVENTED] }),
+          [returning(REAL.url)]
+        ),
+      })
+
+      expect(
+        events.find(
+          (event) =>
+            event.type === "step" &&
+            event.phase === "end" &&
+            event.step === "handoff"
+        )
+      ).toMatchObject({
+        detail: "1 posting dropped — no search returned the URL",
+      })
+    })
+
+    it("stays quiet about a hand-off that dropped nothing", async () => {
+      const events: TraceEvent[] = []
+      await run({ trace: (event) => events.push(event) })
+
+      // The `handoff` event already carries the findings; a detail restating
+      // their count would be the same fact twice.
+      expect(
+        events.find(
+          (event) =>
+            event.type === "step" &&
+            event.phase === "end" &&
+            event.step === "handoff"
+        )
+      ).not.toHaveProperty("detail")
+    })
+
+    it("keeps a posting whose per-search decoration the scout mistyped", async () => {
+      // The production failure this was written for: a real LinkedIn posting
+      // reported with `position=59` where the search returned `position=58`.
+      // `posting-urls.test.ts` covers the rule; this covers the run keeping
+      // going, and linking to what LinkedIn issued rather than what was typed.
+      //
+      // A `linkedin.com` host, not the `example.com` the other fixtures use,
+      // and that is the rule rather than a detail: `job-boards.ts` scopes
+      // `position` to the board known to stamp it, so on any other host it is
+      // a parameter that might carry identity and is kept.
+      const found = "https://au.linkedin.com/jobs/view/engineer-at-acme-443814"
+      const issued = `${found}?position=58&trackingId=vwiYgy%3D%3D`
+      const mistyped = { ...REAL, url: `${found}?position=59` }
+
+      const report = await run({
+        createScout: scoutReturning(JSON.stringify({ postings: [mistyped] }), [
+          returning(issued),
+        ]),
+      })
+
+      expect(report.outcome).toBe("success")
+      expect(report.warnings).toBeUndefined()
+      expect(kept[0]?.findings.postings[0]?.url).toBe(issued)
+    })
+  })
+
   describe("refuses to produce a brief when", () => {
     it("the job config cannot be read", async () => {
       const job = { ...JOB, config: { titles: [] } }
@@ -448,10 +565,12 @@ describe("runBriefing", () => {
       expect(puts).toHaveLength(0)
     })
 
-    it("the scout reported a URL no search returned", async () => {
-      // Every field valid, every URL well-formed — and one of them never came
-      // back from a search. The verbatim check is what turns "the model made
-      // up a plausible link" into a failed run instead of a broken brief.
+    it("no posting the scout reported came from a search", async () => {
+      // Every field valid, every URL well-formed — and not one of them came
+      // back from a search. A single unaccounted-for URL is a transcription
+      // slip and costs that posting alone (see below); *all* of them is a
+      // scout that has stopped copying, and a brief built from the empty
+      // remainder would cite nothing at all.
       const invented = {
         postings: [
           { ...FINDINGS.postings[0], url: "https://example.com/jobs/999" },
@@ -460,7 +579,7 @@ describe("runBriefing", () => {
 
       await expect(
         run({ createScout: scoutReturning(JSON.stringify(invented)) })
-      ).rejects.toThrow(/no search returned/)
+      ).rejects.toThrow(/no search returned any of their URLs/)
       expect(puts).toHaveLength(0)
     })
 

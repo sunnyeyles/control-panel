@@ -145,8 +145,10 @@ after the other, each accessory and each losable with only a warning.
 One open job advertisement, with the URL a search actually returned. **Not** a
 `jobs` row — see **Job** below, which is the collision worth being careful about.
 A URL the scout assembled rather than received is a fabrication: the schema
-rejects anything that is not a URL, and the worker separately rejects any URL
-that does not appear verbatim in a search result.
+rejects anything that is not a URL, and the worker separately drops any posting
+no search returned. What "returned" means is the same normalised identity used
+below — `postingId()`, not the raw string — so a board's per-search tracking
+parameters may differ and an invented posting still cannot pass.
 
 Also a stored row, in `postings`, keyed `(user_id, posting_id)` with **no Run in
 it** — the same unit of identity a **Cover Letter**'s object key already uses,

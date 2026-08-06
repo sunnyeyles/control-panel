@@ -266,7 +266,7 @@ flowchart TD
         B1["EventBridge Tick, hourly"] --> B2["run-tick.ts<br/>dueJobs → claimJob"]
         B2 --> B3["createJobScout → find-postings"]
         B3 --> B4["successfulSearchResults<br/>zero searches fails the Run"]
-        B4 --> B5["parseFindings<br/>+ verbatim-URL check"]
+        B4 --> B5["parseFindings<br/>+ verifyPostingUrls"]
         B5 --> B6["createBriefWriter → write-brief"]
         B6 --> B7["S3 object → artifacts row → runs.findings"]
     end
@@ -295,8 +295,11 @@ Two invariants the worker enforces, both of which exist because a plausible
 fabrication is worse than an empty result:
 
 - **URLs are copied, never composed.** The Scout is told never to invent or
-  repair one, and the worker independently rejects any URL that did not appear
-  verbatim in a search result.
+  repair one, and `posting-urls.ts` independently drops any posting no search
+  returned — comparing on `postingId()`, so that a LinkedIn URL's per-search
+  tracking parameters can be mistyped without costing a real posting, while an
+  invented one is still caught. The Run survives a drop and carries a warning
+  naming it; only a Run with nothing left at all fails.
 - **A Run with no successful search fails.** This is why
   `JOB_SCOUT_SEARCH_TOOLS` is exported at all: `search-results.ts` counts
   evidence against the Scout's real tool set rather than a list maintained
