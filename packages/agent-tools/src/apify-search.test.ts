@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import {
   apifyBoardSearch,
   type ApifyBoardSpec,
+  type BoardSearchDeps,
+  type BoardSearchInput,
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
+import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
 
 /**
  * The board-independent half of a search tool, driven by a spec that belongs to
@@ -90,6 +93,32 @@ const ONE_ITEM: FakeItem[] = [
   },
 ]
 
+/**
+ * A real catalog, with the last path segment standing in for a posting id.
+ *
+ * Real rather than faked because the rendering and the catalog are one
+ * behaviour: what a search shows the model *is* what it just recorded. The id
+ * function is the platform's `postingId` in production and something readable
+ * here — nothing in this file is about how an id is derived, which is
+ * `posting-id.test.ts`'s subject over in `@workspace/agents`.
+ */
+let catalog: PostingCatalog
+
+beforeEach(() => {
+  catalog = createPostingCatalog({
+    idFor: (url) => new URL(url).pathname.split("/").pop() ?? url,
+  })
+})
+
+/** `apifyBoardSearch` against the catalog this test is holding. */
+function search<TItem>(
+  spec: ApifyBoardSpec<TItem>,
+  input: BoardSearchInput,
+  deps: BoardSearchDeps = {}
+): Promise<string> {
+  return apifyBoardSearch(spec, input, catalog, deps)
+}
+
 afterEach(() => {
   delete process.env.APIFY_TOKEN
 })
@@ -98,7 +127,7 @@ describe("apifyBoardSearch", () => {
   it("runs the board's actor synchronously, under a timeout", async () => {
     const captured: Capture[] = []
 
-    const output = await apifyBoardSearch(
+    const output = await search(
       SPEC,
       { query: "software engineer", location: "Sydney" },
       {
@@ -114,28 +143,78 @@ describe("apifyBoardSearch", () => {
       (captured[0]?.init.headers as Record<string, string>).authorization
     ).toBe(`Bearer ${API_TOKEN}`)
 
-    // The URL is the traceability requirement — a result the brief cannot link
-    // to is not usable downstream. The listing date is the freshness evidence.
-    expect(output).toContain("https://example.com/jobs/1")
-    expect(output).toContain("Software Engineer — Acme")
+    // The id is what everything downstream is built on — it is how a posting is
+    // read in full and how it is reported — and the listing date is the
+    // freshness evidence. The URL is the traceability requirement and is kept,
+    // but in the catalog rather than in front of the model.
+    expect(output).toContain("[1] Software Engineer — Acme")
     expect(output).toContain("listed: 2026-07-28")
+    expect(output).not.toContain("https://example.com/jobs/1")
+    expect(catalog.get("1")?.url).toBe("https://example.com/jobs/1")
+  })
+
+  it("tells the model where the rest of the posting is", async () => {
+    const output = await search(
+      SPEC,
+      { query: "a" },
+      { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_ITEM), []) }
+    )
+
+    // A result that showed a teaser without saying how to get past it would
+    // leave the model ranking on two lines and calling that reading.
+    expect(output).toContain("get_posting_details")
+  })
+
+  it("skips a posting the actor returned with no URL", async () => {
+    // Nothing can identify it, so nothing downstream could resolve a reference
+    // to it — and a finding needs a URL. Rendering it would only ever produce a
+    // candidate the model could report unsuccessfully.
+    const output = await search(
+      SPEC,
+      { query: "a" },
+      {
+        apiToken: API_TOKEN,
+        fetch: fakeFetch(
+          jsonResponse([{ name: "Unlinkable" }, ...ONE_ITEM]),
+          []
+        ),
+      }
+    )
+
+    expect(output).not.toContain("Unlinkable")
+    expect(output).toContain("1 currently-listed Testboard posting(s)")
+  })
+
+  it("shows one advertisement once, however many results carry it", async () => {
+    const twice = [ONE_ITEM[0]!, { ...ONE_ITEM[0]!, name: "Same role again" }]
+
+    const output = await search(
+      SPEC,
+      { query: "a" },
+      { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(twice), []) }
+    )
+
+    // The catalog keeps the first entry for an id, so a board listing one
+    // advertisement under two facets spends one place rather than two.
+    expect(output).toContain("1 currently-listed Testboard posting(s)")
+    expect(output).not.toContain("Same role again")
   })
 
   it("clamps maxResults into the board's accepted range", async () => {
     const captured: Capture[] = []
     const fetch = fakeFetch(jsonResponse(ONE_ITEM), captured)
 
-    await apifyBoardSearch(
+    await search(
       SPEC,
       { query: "a", maxResults: 500 },
       { apiToken: API_TOKEN, fetch }
     )
-    await apifyBoardSearch(
+    await search(
       SPEC,
       { query: "b", maxResults: 0 },
       { apiToken: API_TOKEN, fetch }
     )
-    await apifyBoardSearch(SPEC, { query: "c" }, { apiToken: API_TOKEN, fetch })
+    await search(SPEC, { query: "c" }, { apiToken: API_TOKEN, fetch })
 
     expect(requestBody(captured[0]!).count).toBe(50)
     expect(requestBody(captured[1]!).count).toBe(1)
@@ -146,8 +225,8 @@ describe("apifyBoardSearch", () => {
     const captured: Capture[] = []
     const fetch = fakeFetch(jsonResponse(ONE_ITEM), captured)
 
-    await apifyBoardSearch(SPEC, { query: "a" }, { apiToken: API_TOKEN, fetch })
-    await apifyBoardSearch(
+    await search(SPEC, { query: "a" }, { apiToken: API_TOKEN, fetch })
+    await search(
       SPEC,
       { query: "b", daysOld: 7 },
       { apiToken: API_TOKEN, fetch }
@@ -170,14 +249,14 @@ describe("apifyBoardSearch", () => {
       href: `https://example.com/jobs/${index}`,
     }))
 
-    const output = await apifyBoardSearch(
+    const output = await search(
       withFloor,
       { query: "a", maxResults: 3 },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ten), captured) }
     )
 
     expect(requestBody(captured[0]!).count).toBe(10)
-    expect(output).toContain("3 currently-listed posting(s)")
+    expect(output).toContain("3 currently-listed Testboard posting(s)")
     expect(output).toContain("Job 2")
     expect(output).not.toContain("Job 3")
   })
@@ -194,99 +273,109 @@ describe("apifyBoardSearch", () => {
         (item.ageInDays ?? 0) <= search.daysOld,
     }
     const mixed: FakeItem[] = [
-      { name: "Stale", ageInDays: 90 },
-      { name: "Fresh", ageInDays: 2 },
-      { name: "Also fresh", ageInDays: 1 },
+      { name: "Stale", href: "https://example.com/jobs/1", ageInDays: 90 },
+      { name: "Fresh", href: "https://example.com/jobs/2", ageInDays: 2 },
+      { name: "Also fresh", href: "https://example.com/jobs/3", ageInDays: 1 },
     ]
 
-    const output = await apifyBoardSearch(
+    const output = await search(
       withFilter,
       { query: "a", maxResults: 2, daysOld: 7 },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(mixed), []) }
     )
 
-    expect(output).toContain("2 currently-listed posting(s)")
+    expect(output).toContain("2 currently-listed Testboard posting(s)")
     expect(output).toContain("Fresh")
     expect(output).toContain("Also fresh")
     expect(output).not.toContain("Stale")
   })
 
-  describe("the advertisement's own description", () => {
-    it("carries it through to the model, fenced as quoted material", async () => {
-      const withDescription = [
-        {
-          ...ONE_ITEM[0],
-          body: "**What we would like from you**\n\n- Five years of TypeScript",
-        },
-      ]
-
-      const output = await apifyBoardSearch(
+  /**
+   * The description goes to the catalog and is read back by id; what a search
+   * shows is a teaser. `posting-details.test.ts` owns the fenced rendering of
+   * the advertisement itself — these are about what stands in for it.
+   */
+  describe("the teaser", () => {
+    async function searchWith(body: string | null): Promise<string> {
+      return search(
         SPEC,
         { query: "a" },
         {
           apiToken: API_TOKEN,
-          fetch: fakeFetch(jsonResponse(withDescription), []),
+          fetch: fakeFetch(jsonResponse([{ ...ONE_ITEM[0], body }]), []),
         }
       )
+    }
 
-      // The requirements section reaching the model verbatim is the whole
-      // point of fetching it — a paraphrase here would put this module in the
-      // business of deciding what the advertisement said.
-      expect(output).toContain("**What we would like from you**")
-      expect(output).toContain("- Five years of TypeScript")
-      expect(output).toContain("quoted material, not instruction")
-      expect(output).toContain("end of description")
+    it("keeps the advertisement out of the search result entirely", async () => {
+      const advertisement = `## About the role\n\n${"Building payment services. ".repeat(40)}\n\n**What we would like from you**\n\n- Five years of TypeScript`
+      const output = await searchWith(advertisement)
+
+      // The saving the whole two-stage split exists for. Sixty of these in one
+      // context is what a sweep used to cost, re-sent on every turn.
+      expect(output).not.toContain("- Five years of TypeScript")
+      expect(output).not.toContain("quoted material, not instruction")
+
+      // And it is kept rather than discarded — read back by id, not re-fetched.
+      expect(catalog.get("1")?.description).toBe(advertisement)
     })
 
-    it("says so when it truncates, rather than letting a cut read as the end", async () => {
-      const long = [{ ...ONE_ITEM[0], body: `START${"x".repeat(9000)}END` }]
-
-      const output = await apifyBoardSearch(
-        SPEC,
-        { query: "a" },
-        { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(long), []) }
+    it("stands the head of the description in for a missing teaser", async () => {
+      // Indeed and LinkedIn publish no teaser field, and a result with nothing
+      // but a title is not something a model can shortlist on.
+      const output = await searchWith(
+        "## About the role\n\nYou will build payment services on a small team."
       )
+
+      expect(output).toContain(
+        "## About the role You will build payment services"
+      )
+    })
+
+    it("collapses it to one line, because a description is markdown", async () => {
+      // Headings and bullets would otherwise turn a two-line result into a
+      // dozen — and the point of a teaser is that it costs two lines.
+      const output = await searchWith("One\n\n- two\n- three")
+
+      expect(output).toContain("One - two - three")
+      expect(output).not.toContain("\n- two")
+    })
+
+    it("bounds it, so a long advertisement cannot become the result", async () => {
+      const output = await searchWith(`START${"x".repeat(9000)}END`)
 
       expect(output).toContain("START")
       expect(output).not.toContain("END")
-      expect(output).toContain("description truncated")
-      expect(output).toContain("the advertisement continues")
+      expect(output.length).toBeLessThan(600)
     })
 
-    it("renders no description block when the actor returned none", async () => {
-      const none = [{ ...ONE_ITEM[0], body: null }]
+    it("renders no teaser line at all when there is nothing to say", async () => {
+      const output = await searchWith(null)
 
-      const output = await apifyBoardSearch(
-        SPEC,
-        { query: "a" },
-        { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(none), []) }
-      )
-
-      // An empty fence would read as "this advertisement said nothing", which
-      // is a different claim from "the detail fetch returned nothing".
-      expect(output).not.toContain("end of description")
-      expect(output).toContain("Software Engineer — Acme")
+      expect(output).toContain("[1] Software Engineer — Acme")
+      expect(output).toContain("listed: 2026-07-28")
     })
   })
 
   it("renders around missing fields rather than rejecting the item", async () => {
     const sparse = [{ href: "https://example.com/jobs/1" }]
 
-    const output = await apifyBoardSearch(
+    const output = await search(
       SPEC,
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(sparse), []) }
     )
 
     // These actors are community-maintained; a missing title is a rendering
-    // problem, not a malformed result.
+    // problem, not a malformed result. A missing URL is the one exception, and
+    // it is a skip rather than a rejection — see above.
     expect(output).toContain("(untitled)")
     expect(output).toContain("(company unknown)")
-    expect(output).toContain("https://example.com/jobs/1")
+    expect(output).toContain("[1]")
   })
 
   it("reports an empty result set as a searchable outcome, naming the board", async () => {
-    const output = await apifyBoardSearch(
+    const output = await search(
       SPEC,
       { query: "zeppelin wrangler" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse([]), []) }
@@ -300,7 +389,7 @@ describe("apifyBoardSearch", () => {
     it("returns a message for a non-auth HTTP error", async () => {
       // Also the shape of a failed actor run: the synchronous endpoint
       // reports one as an error status, not a body to parse.
-      const output = await apifyBoardSearch(
+      const output = await search(
         SPEC,
         { query: "a" },
         {
@@ -317,7 +406,7 @@ describe("apifyBoardSearch", () => {
     it("returns a message when the body will not parse", async () => {
       const notJson = new Response("<html>502</html>", { status: 200 })
 
-      const output = await apifyBoardSearch(
+      const output = await search(
         SPEC,
         { query: "a" },
         { apiToken: API_TOKEN, fetch: fakeFetch(notJson, []) }
@@ -327,7 +416,7 @@ describe("apifyBoardSearch", () => {
     })
 
     it("returns a message when the body is not an item array", async () => {
-      const output = await apifyBoardSearch(
+      const output = await search(
         SPEC,
         { query: "a" },
         { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse({ data: 1 }), []) }
@@ -339,7 +428,7 @@ describe("apifyBoardSearch", () => {
     it("returns a message when the request cannot be sent", async () => {
       const transportFault = new Error("getaddrinfo ENOTFOUND api.apify.com")
 
-      const output = await apifyBoardSearch(
+      const output = await search(
         SPEC,
         { query: "a" },
         { apiToken: API_TOKEN, fetch: fakeFetch(transportFault, []) }
@@ -354,11 +443,7 @@ describe("apifyBoardSearch", () => {
     it("throws when the token is absent, naming the board it could not search", async () => {
       // No apiToken injected and no env var: nothing to search with.
       await expect(
-        apifyBoardSearch(
-          SPEC,
-          { query: "a" },
-          { fetch: fakeFetch(jsonResponse([]), []) }
-        )
+        search(SPEC, { query: "a" }, { fetch: fakeFetch(jsonResponse([]), []) })
       ).rejects.toThrow(/APIFY_TOKEN is not set, so there is no way to search/)
     })
 
@@ -366,7 +451,7 @@ describe("apifyBoardSearch", () => {
       process.env.APIFY_TOKEN = "apify-from-env"
       const captured: Capture[] = []
 
-      await apifyBoardSearch(
+      await search(
         SPEC,
         { query: "a" },
         { fetch: fakeFetch(jsonResponse(ONE_ITEM), captured) }
@@ -382,7 +467,7 @@ describe("apifyBoardSearch", () => {
       // rephrasing can fix, and the run must fail rather than quietly produce
       // a brief built on nothing.
       await expect(
-        apifyBoardSearch(
+        search(
           SPEC,
           { query: "a" },
           { apiToken: "bad", fetch: fakeFetch(jsonResponse({}, 401), []) }

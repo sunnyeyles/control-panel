@@ -233,11 +233,14 @@ describe("toProfilePrompt", () => {
    * The inverse of the system-prompt assertion above, and it locks in a
    * decision rather than describing an accident.
    *
-   * The schema belongs in the system prompt and appears there once — the same
-   * arrangement `job-scout.ts` uses, where `jobScoutSchemaDescription` sits in
-   * `JOB_SCOUT_SYSTEM_PROMPT` and `toSearchBrief` says nothing about the shape.
-   * Repeating it here would put the same JSON Schema in the context twice on
-   * every call, for a document that is already the largest thing in it.
+   * The schema belongs in the system prompt and appears there once. Repeating
+   * it here would put the same JSON Schema in the context twice on every call,
+   * for a document that is already the largest thing in it.
+   *
+   * `job-scout.ts` used to be arranged the same way and no longer needs to be:
+   * its hand-off is a `submit_findings` tool call, so the provider renders the
+   * schema and its prompt carries none of it. This agent still answers in a
+   * final message, so the schema has to reach it somehow.
    */
   it("does not repeat the schema the system prompt already carries", () => {
     expect(toProfilePrompt(BACKGROUND)).not.toContain(criteriaSchemaDescription)

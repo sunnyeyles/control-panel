@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 import {
   countBySource,
   SEARCH_TOOL_NAMES,
-  successfulSearchResults,
+  successfulSearches,
 } from "./search-results.ts"
 
 /**
@@ -35,28 +35,33 @@ function failed(name: string, id = "call_1"): ToolMessage {
 }
 
 describe("SEARCH_TOOL_NAMES", () => {
-  it("is derived from the tools the scout actually carries", () => {
-    // Not a hand-written list: the point of deriving it is that adding a board
-    // cannot leave this looking for a name nothing emits.
+  it("names the boards the scout actually carries", () => {
+    // Taken from `@workspace/agents` rather than written out here: the point is
+    // that adding a board cannot leave this looking for a name nothing emits.
     expect(SEARCH_TOOL_NAMES).toContain("seek_search")
     expect(SEARCH_TOOL_NAMES.every((name) => name.length > 0)).toBe(true)
   })
+
+  it("does not count reading a posting back as searching for one", () => {
+    // `get_posting_details` answers out of the catalog and reaches no board, so
+    // a run that only ever read would otherwise look like a run that searched.
+    expect(SEARCH_TOOL_NAMES).not.toContain("get_posting_details")
+    expect(SEARCH_TOOL_NAMES).not.toContain("submit_findings")
+  })
 })
 
-describe("successfulSearchResults", () => {
+describe("successfulSearches", () => {
   it("counts a result from any of the scout's search tools", () => {
-    const results = successfulSearchResults(
+    const searches = successfulSearches(
       [result("indeed_search", "an Indeed posting")],
       BOARDS
     )
 
-    expect(results).toEqual([
-      { tool: "indeed_search", text: "an Indeed posting" },
-    ])
+    expect(searches).toEqual(["indeed_search"])
   })
 
   it("keeps results from every source that answered", () => {
-    const results = successfulSearchResults(
+    const searches = successfulSearches(
       [
         result("seek_search", "seek posting", "call_1"),
         result("indeed_search", "indeed posting", "call_2"),
@@ -64,13 +69,13 @@ describe("successfulSearchResults", () => {
       BOARDS
     )
 
-    expect(results.map((r) => r.tool)).toEqual(["seek_search", "indeed_search"])
+    expect(searches).toEqual(["seek_search", "indeed_search"])
   })
 
   it("skips a search that errored, and keeps one that did not", () => {
-    // One board down, the other working. What survives is what the hand-off
-    // checks posting URLs against, so a dead board must not erase a live one.
-    const results = successfulSearchResults(
+    // One board down, the other working. This is what the run's "something
+    // actually searched" gate reads, so a dead board must not erase a live one.
+    const searches = successfulSearches(
       [
         failed("indeed_search", "call_1"),
         result("seek_search", "ok", "call_2"),
@@ -78,23 +83,21 @@ describe("successfulSearchResults", () => {
       BOARDS
     )
 
-    expect(results).toEqual([{ tool: "seek_search", text: "ok" }])
+    expect(searches).toEqual(["seek_search"])
   })
 
   it("ignores a tool that is not a search tool", () => {
     // A clock answering successfully is not evidence that anyone searched.
-    const results = successfulSearchResults(
+    const searches = successfulSearches(
       [result("get_current_time", "12:00")],
       BOARDS
     )
 
-    expect(results).toEqual([])
+    expect(searches).toEqual([])
   })
 
   it("ignores messages that are not tool results", () => {
-    expect(
-      successfulSearchResults([new AIMessage("thinking")], BOARDS)
-    ).toEqual([])
+    expect(successfulSearches([new AIMessage("thinking")], BOARDS)).toEqual([])
   })
 })
 
@@ -103,7 +106,7 @@ describe("countBySource", () => {
     // The key has to be present to be read. An absent entry cannot be told
     // apart from a board nobody asked about.
     const counts = countBySource(
-      successfulSearchResults([result("seek_search")], BOARDS),
+      successfulSearches([result("seek_search")], BOARDS),
       BOARDS
     )
 
@@ -112,11 +115,7 @@ describe("countBySource", () => {
 
   it("counts repeated searches on the same board", () => {
     const counts = countBySource(
-      [
-        { tool: "seek_search", text: "one" },
-        { tool: "seek_search", text: "two" },
-        { tool: "indeed_search", text: "three" },
-      ],
+      ["seek_search", "seek_search", "indeed_search"],
       BOARDS
     )
 

@@ -52,19 +52,30 @@ picks worse as the list grows.
 
 ## The Posting contract
 
-`src/findings.ts` holds the schema the scout produces and the writer consumes,
-and it is a single source in a strict sense: `jobScoutSchemaDescription` renders
-that same schema — descriptions and all — into the scout's system prompt. Adding
-a field to `PostingSchema` is therefore the whole change. The scout starts
-asking for it with no prompt edit, and `parseFindings` starts accepting it.
+`src/findings.ts` holds two shapes that differ by one field. The scout reports a
+`ScoutPosting`, which names a posting by the `id` a search gave it; the worker
+resolves that id against the run's posting catalog and stores a `Posting`, which
+carries the `url` the board issued. Everything downstream reads the second and
+has never heard of the first.
 
-Two field-level rules the schema exists to hold:
+Both extend one definition of the composed fields, so adding a field to
+`PostingFieldsSchema` is the whole change — the scout starts being asked for it
+and the stored record starts carrying it. `ScoutFindingsSchema` _is_ the argument
+schema of the `submit_findings` tool, so the provider validates the hand-off:
+a model that gets the shape wrong is told so in a tool result and corrects it,
+where a malformed final message used to fail the entire run.
 
-- **`url` and `highlights` are copied, never composed.** A URL the scout
-  assembled is a fabrication; a bullet point it summarised rather than
-  reproduced is the same fabrication in different clothes. `highlights` is
-  optional so that omitting it stays the honest answer — and so every Findings
-  record written before the field existed still parses.
+Three field-level rules the schemas exist to hold:
+
+- **The scout never sees a URL.** A URL it cannot read is a URL it cannot
+  mistype, and mistyping one cost seven production runs over 2026-08-05/06 —
+  the evidence is in the worker's `resolve-postings.ts`. It reports an id, and
+  an id no search returned resolves to nothing, so fabrication is structural
+  rather than caught by comparison.
+- **`highlights` is copied, never composed.** A bullet point the scout
+  summarised rather than reproduced is a fabrication. It is optional so that
+  omitting it stays the honest answer — and so every Findings record written
+  before the field existed still parses.
 - **`summary` and `matchReason` are composed**, and nothing derived from a
   Posting should be built out of them.
 

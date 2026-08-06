@@ -13,11 +13,12 @@ import { boardForHost } from "@workspace/agents/job-boards"
  * every sighting. Deriving also means every row written before this existed
  * carries a label, with no migration and nothing to backfill.
  *
- * The scout is not asked for it either. A `source` field on `PostingSchema`
- * would be the cheapest diff and the wrong one: it makes provenance a claim the
- * model makes, which is the class of thing the worker's returned-URL check
- * (`apps/briefing-worker/src/posting-urls.ts`) exists to refuse. A hostname is
- * evidence; a model's assertion about a hostname is not.
+ * The scout is not asked for it either. A `source` field on the reported
+ * posting would be the cheapest diff and the wrong one: it makes provenance a
+ * claim the model makes, which is the class of thing the worker's id resolution
+ * (`apps/briefing-worker/src/resolve-postings.ts`) exists to refuse — the URL a
+ * row carries is the one the board issued, looked up rather than reported. A
+ * hostname is evidence; a model's assertion about a hostname is not.
  *
  * ⚠️ **This is presentation, and it lives here rather than in
  * `packages/agents/src/job-boards.ts` on purpose.** That module's own doc says

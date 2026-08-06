@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import { apifySeekSearch } from "./seek-search.ts"
+import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
+import { apifySeekSearch, type SeekSearchDeps } from "./seek-search.ts"
 
 /**
  * What is true of SEEK and of no other board: the actor it runs, the request
@@ -57,6 +58,35 @@ const ONE_JOB = [
   },
 ]
 
+/**
+ * The run's catalog, handing out `id1`, `id2`, … in the order postings arrive.
+ *
+ * Readable ids rather than the platform's hashes: how an id is derived is
+ * `posting-id.test.ts`'s subject in `@workspace/agents`, and what matters here
+ * is that this board's URL reaches the catalog and its description with it.
+ */
+let catalog: PostingCatalog
+let ids: Map<string, string>
+
+beforeEach(() => {
+  ids = new Map()
+  catalog = createPostingCatalog({
+    idFor: (url) => {
+      const held = ids.get(url) ?? `id${ids.size + 1}`
+      ids.set(url, held)
+      return held
+    },
+  })
+})
+
+/** `apifySeekSearch` against the catalog this test is holding. */
+function seekSearch(
+  input: Parameters<typeof apifySeekSearch>[0],
+  deps: SeekSearchDeps
+): Promise<string> {
+  return apifySeekSearch(input, catalog, deps)
+}
+
 afterEach(() => {
   delete process.env.APIFY_TOKEN
 })
@@ -65,7 +95,7 @@ describe("apifySeekSearch", () => {
   it("sends the query to SEEK's actor and renders its fields", async () => {
     const captured: Capture[] = []
 
-    const output = await apifySeekSearch(
+    const output = await seekSearch(
       { query: "software engineer TypeScript", location: "Sydney NSW" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -81,20 +111,28 @@ describe("apifySeekSearch", () => {
     expect(body.country).toBe("AU")
     expect(body.sortMode).toBe("ListedDate")
 
-    // The URL is the traceability requirement — a result the brief cannot link
-    // to is not usable downstream. The listing date is the freshness evidence.
-    expect(output).toContain("https://www.seek.com.au/job/79834521")
-    expect(output).toContain("Software Engineer — Acme")
+    expect(output).toContain("[id1] Software Engineer — Acme")
     expect(output).toContain("listed: 2026-07-28")
     expect(output).toContain("Sydney NSW · Full time · Hybrid · $120k – $140k")
     expect(output).toContain("Build TypeScript services")
-    expect(output).toContain("• TypeScript")
+
+    // The URL is the traceability requirement — a result the brief cannot link
+    // to is not usable downstream — and it is kept in the catalog rather than
+    // put in front of the model. The bullets go the same way: they are what a
+    // `highlights` line is copied from, and copying happens after shortlisting.
+    expect(output).not.toContain("https://www.seek.com.au/job/79834521")
+    expect(output).not.toContain("• TypeScript")
+    expect(catalog.get("id1")).toMatchObject({
+      board: "SEEK",
+      url: "https://www.seek.com.au/job/79834521",
+      bullets: ["TypeScript", "Postgres"],
+    })
   })
 
   it("never sends the actor's notification fields", async () => {
     const captured: Capture[] = []
 
-    await apifySeekSearch(
+    await seekSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -112,11 +150,8 @@ describe("apifySeekSearch", () => {
     const captured: Capture[] = []
     const fetch = fakeFetch(jsonResponse(ONE_JOB), captured)
 
-    await apifySeekSearch({ query: "a" }, { apiToken: API_TOKEN, fetch })
-    await apifySeekSearch(
-      { query: "b", daysOld: 7 },
-      { apiToken: API_TOKEN, fetch }
-    )
+    await seekSearch({ query: "a" }, { apiToken: API_TOKEN, fetch })
+    await seekSearch({ query: "b", daysOld: 7 }, { apiToken: API_TOKEN, fetch })
 
     // Unlike Indeed's actor, SEEK's takes a freshness bound directly, so the
     // tool needs no post-fetch filter.
@@ -127,7 +162,7 @@ describe("apifySeekSearch", () => {
   it("asks the actor for detail pages", async () => {
     const captured: Capture[] = []
 
-    await apifySeekSearch(
+    await seekSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -138,45 +173,57 @@ describe("apifySeekSearch", () => {
     expect(requestBody(captured[0]!).fetchDetails).toBe(true)
   })
 
-  it("prefers the markdown description and falls back to the plain one", async () => {
-    const both = [
-      {
-        ...ONE_JOB[0],
-        descriptionMarkdown: "**What we would like from you**",
-        descriptionText: "What we would like from you",
-      },
-    ]
-    const textOnly = [
-      {
-        ...ONE_JOB[0],
-        descriptionMarkdown: null,
-        descriptionText: "We need someone who has shipped Postgres migrations.",
-      },
-    ]
-
-    // Markdown first: the headings and bullets are what make a requirements
-    // section findable, and the plain rendering flattens them.
-    expect(
-      await apifySeekSearch(
+  /**
+   * Asserted on the catalog rather than on the output, because that is where a
+   * description goes now — `get_posting_details` reads it back from here, and a
+   * search shows a teaser drawn from it.
+   *
+   * One search per case: the catalog keeps the first entry it is given for an
+   * id, so running both against one catalog would only ever read the first.
+   */
+  describe("the description it stores", () => {
+    async function describedBy(
+      job: Record<string, unknown>
+    ): Promise<string | null | undefined> {
+      await seekSearch(
         { query: "a" },
-        { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(both), []) }
+        {
+          apiToken: API_TOKEN,
+          fetch: fakeFetch(jsonResponse([{ ...ONE_JOB[0], ...job }]), []),
+        }
       )
-    ).toContain("**What we would like from you**")
+      return catalog.get("id1")?.description
+    }
 
-    // First non-empty rather than first non-null: the actor returns `null` for
-    // a description it did not fetch and `""` for one that came back blank.
-    expect(
-      await apifySeekSearch(
-        { query: "a" },
-        { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(textOnly), []) }
-      )
-    ).toContain("shipped Postgres migrations")
+    it("prefers the markdown rendering", async () => {
+      // The headings and bullets are what make a requirements section findable,
+      // and the plain rendering flattens them.
+      expect(
+        await describedBy({
+          descriptionMarkdown: "**What we would like from you**",
+          descriptionText: "What we would like from you",
+        })
+      ).toBe("**What we would like from you**")
+    })
+
+    it("falls back to the plain one, on empty rather than on null", async () => {
+      // The actor returns `null` for a description it did not fetch and `""`
+      // for one that came back blank, so falling through both is what makes the
+      // plain rendering a real fallback.
+      expect(
+        await describedBy({
+          descriptionMarkdown: "",
+          descriptionText:
+            "We need someone who has shipped Postgres migrations.",
+        })
+      ).toContain("shipped Postgres migrations")
+    })
   })
 
   it("omits workType rather than sending null, and defaults the location", async () => {
     const captured: Capture[] = []
 
-    await apifySeekSearch(
+    await seekSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -187,7 +234,7 @@ describe("apifySeekSearch", () => {
   })
 
   it("names SEEK when there is nothing to report", async () => {
-    const output = await apifySeekSearch(
+    const output = await seekSearch(
       { query: "zeppelin wrangler" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse([]), []) }
     )

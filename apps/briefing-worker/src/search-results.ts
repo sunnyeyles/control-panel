@@ -1,5 +1,5 @@
 import { ToolMessage, type BaseMessage } from "@langchain/core/messages"
-import { JOB_SCOUT_SEARCH_TOOLS } from "@workspace/agents"
+import { JOB_SCOUT_SEARCH_TOOL_NAMES } from "@workspace/agents"
 
 /**
  * Which of a scout's tool results count as searches, and how many came from
@@ -7,39 +7,36 @@ import { JOB_SCOUT_SEARCH_TOOLS } from "@workspace/agents"
  *
  * Its own module because the question is one thing and `run-briefing.ts` asks
  * it once: what did the scout actually look up, as opposed to what did it say?
- * Everything downstream — the count in the run report, the "nothing came from a
- * live search" gate, the check that every posting URL was really returned —
- * reads the answer this gives.
+ * The count in the run report and the "nothing came from a live search" gate
+ * both read the answer this gives.
  */
 
 /**
- * Every search tool the scout carries, by name, derived from the tools
- * themselves so that adding a board is one edit in `@workspace/agents` rather
- * than two edits in two packages, the second of which nothing would catch.
+ * Every search tool the scout carries, by name, taken from `@workspace/agents`
+ * so that adding a board is one edit over there rather than two edits in two
+ * packages, the second of which nothing would catch.
  */
-export const SEARCH_TOOL_NAMES: readonly string[] = JOB_SCOUT_SEARCH_TOOLS.map(
-  (tool) => tool.name
-)
-
-/** One search that ran and came back, and which tool it came back from. */
-export interface SearchResult {
-  tool: string
-  text: string
-}
+export const SEARCH_TOOL_NAMES: readonly string[] = JOB_SCOUT_SEARCH_TOOL_NAMES
 
 /**
- * Every search result that actually worked.
+ * Every search that actually worked, as the name of the board tool it ran on.
+ *
+ * The name is the whole answer now. It used to carry the rendered result text
+ * beside it, because the URL check re-extracted every URL a search had returned
+ * from that text; the run's posting catalog holds those directly, so what is
+ * left of this question is how many searches ran and on which boards.
  *
  * Two exclusions, and they mean different things. An error result proves
  * nothing ran — the tool was called and did not answer. A result from a tool
  * that is not a search tool is not evidence anyone searched at all, which is
  * why widening this from one name to a set must not widen it to "any tool the
- * scout happens to be holding".
+ * scout happens to be holding": `get_posting_details` answers out of the
+ * catalog and would otherwise count as a search that never happened.
  */
-export function successfulSearchResults(
+export function successfulSearches(
   messages: BaseMessage[],
   toolNames: readonly string[] = SEARCH_TOOL_NAMES
-): SearchResult[] {
+): string[] {
   // `flatMap` rather than filter-then-map: a type predicate cannot carry the
   // `name !== undefined` narrowing across into the map, and the alternative is
   // asserting a name the filter already proved.
@@ -48,7 +45,7 @@ export function successfulSearchResults(
     message.name !== undefined &&
     toolNames.includes(message.name) &&
     message.status !== "error"
-      ? [{ tool: message.name, text: message.text }]
+      ? [message.name]
       : []
   )
 }
@@ -62,14 +59,14 @@ export function successfulSearchResults(
  * two.
  */
 export function countBySource(
-  results: SearchResult[],
+  searches: readonly string[],
   toolNames: readonly string[] = SEARCH_TOOL_NAMES
 ): Record<string, number> {
   const counts: Record<string, number> = Object.fromEntries(
     toolNames.map((name) => [name, 0])
   )
 
-  for (const { tool } of results) counts[tool] = (counts[tool] ?? 0) + 1
+  for (const tool of searches) counts[tool] = (counts[tool] ?? 0) + 1
 
   return counts
 }

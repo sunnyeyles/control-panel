@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  FindingsSchema,
-  jobScoutSchemaDescription,
   parseFindings,
   PostingSchema,
+  ScoutFindingsSchema,
+  ScoutPostingSchema,
 } from "./findings.ts"
 import { JOB_SCOUT_SYSTEM_PROMPT } from "./job-scout.ts"
 
@@ -99,45 +99,73 @@ describe("parseFindings", () => {
 })
 
 /**
- * The point of `jobScoutSchemaDescription` is that the scout's prompt is not a
- * second copy of the contract. These assertions are what makes "add a field and
- * the scout asks for it" true rather than hoped for — nothing below names
- * `highlights` in a prompt string, and yet the prompt asks for it.
+ * The reported and the stored shape differ by one field, and everything else
+ * about them is one definition. These assertions are what makes "add a field and
+ * both halves get it" true rather than hoped for.
  */
-describe("jobScoutSchemaDescription", () => {
-  it("is derived from the schema, so a new field needs no prompt edit", () => {
-    const rendered = JSON.parse(jobScoutSchemaDescription) as {
-      properties: {
-        postings: { items: { properties: Record<string, { type?: string }> } }
-      }
-    }
+describe("the two posting shapes", () => {
+  const composed = [
+    "title",
+    "company",
+    "location",
+    "postedAt",
+    "summary",
+    "matchReason",
+    "highlights",
+  ]
 
-    const posting = rendered.properties.postings.items.properties
+  it("differ by exactly the field that names the posting", () => {
+    const scout = Object.keys(ScoutPostingSchema.shape).sort()
+    const stored = Object.keys(PostingSchema.shape).sort()
 
-    expect(Object.keys(posting).sort()).toEqual(
-      Object.keys(FindingsSchema.shape.postings.element.shape).sort()
-    )
-    expect(posting.highlights?.type).toBe("array")
+    expect(scout).toEqual([...composed, "id"].sort())
+    expect(stored).toEqual([...composed, "url"].sort())
   })
 
-  it("carries each field's description into the scout's prompt verbatim", () => {
+  it("never shows the scout a URL, which is the point of the split", () => {
+    // A URL the model cannot see is a URL it cannot mistype. The seven runs
+    // lost to mistyping one are recorded in the worker's `resolve-postings.ts`.
+    expect(ScoutPostingSchema.shape).not.toHaveProperty("url")
+    expect(JSON.stringify(ScoutFindingsSchema.shape)).not.toMatch(/https?:/)
+  })
+
+  it("describes each composed field once, so the two cannot drift", () => {
+    for (const field of composed) {
+      const scout = ScoutPostingSchema.shape[field as "title"].description
+      const stored = PostingSchema.shape[field as "title"].description
+
+      expect(scout).toBe(stored)
+      expect(scout).not.toBe("")
+    }
+  })
+
+  it("tells the scout an id must be one a search returned", () => {
+    const description = ScoutPostingSchema.shape.id.description ?? ""
+
+    expect(description).toMatch(/a search returned/i)
+    expect(description).toMatch(/dropped/i)
+  })
+})
+
+/**
+ * The prompt is no longer a second copy of the contract, and this is what says
+ * so. It used to carry the whole schema rendered as JSON Schema, because the
+ * hand-off was JSON in a message and nothing else would tell the model what to
+ * write. `submit_findings` carries it now — the provider renders the tool's
+ * arguments — so a prompt naming a field would be the drift the rendering
+ * existed to prevent.
+ */
+describe("JOB_SCOUT_SYSTEM_PROMPT", () => {
+  it("does not restate the findings schema", () => {
     const description = PostingSchema.shape.highlights.description ?? ""
 
     expect(description).not.toBe("")
-    expect(jobScoutSchemaDescription).toContain(description)
-    expect(JOB_SCOUT_SYSTEM_PROMPT).toContain(description)
+    expect(JOB_SCOUT_SYSTEM_PROMPT).not.toContain(description)
+    expect(JOB_SCOUT_SYSTEM_PROMPT).not.toContain("matchReason")
   })
 
-  it("marks highlights optional, so the scout may omit it honestly", () => {
-    const rendered = JSON.parse(jobScoutSchemaDescription) as {
-      properties: {
-        postings: { items: { required?: string[] } }
-      }
-    }
-
-    expect(rendered.properties.postings.items.required).not.toContain(
-      "highlights"
-    )
-    expect(rendered.properties.postings.items.required).toContain("url")
+  it("names the three passes and the tool that ends them", () => {
+    expect(JOB_SCOUT_SYSTEM_PROMPT).toContain("get_posting_details")
+    expect(JOB_SCOUT_SYSTEM_PROMPT).toContain("submit_findings")
   })
 })

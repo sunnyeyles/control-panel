@@ -6,10 +6,10 @@ import {
 import {
   createBriefWriter,
   createJobScout,
-  JOB_SCOUT_SEARCH_TOOLS,
-  parseFindings,
+  JOB_SCOUT_SEARCH_TOOL_NAMES,
   type Findings,
-  type Posting,
+  type ScoutFindings,
+  type ScoutPosting,
 } from "@workspace/agents"
 import type { Artifact, Job, NewPosting, RunFailure } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
@@ -20,13 +20,13 @@ import {
   scoutLlmCallBudget,
   toSearchBrief,
 } from "./job-search-config.ts"
-import { verifyPostingUrls } from "./posting-urls.ts"
 import { toNewPostings } from "./postings.ts"
+import { resolvePostings, type PostingLookup } from "./resolve-postings.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
 import {
   countBySource,
   SEARCH_TOOL_NAMES,
-  successfulSearchResults,
+  successfulSearches,
 } from "./search-results.ts"
 import { createTracer, type TraceSink } from "./trace.ts"
 
@@ -138,6 +138,22 @@ export interface RunOccurrence {
   scheduledFor: Date
 }
 
+/**
+ * The slice of a scout session a run actually drives.
+ *
+ * Structural on purpose, exactly like {@link AgentLike} and for the same
+ * reason: a real `JobScoutSession` satisfies it, and so does a hand-rolled fake,
+ * which is what lets a run be exercised with no provider key and no network.
+ * The two fields beside the agent are the run's whole reason for holding a
+ * session rather than an agent — findings arrive as ids, and only the catalog
+ * knows what an id names.
+ */
+export interface ScoutSessionLike {
+  agent: AgentLike
+  catalog: PostingLookup
+  findings(): ScoutFindings | undefined
+}
+
 export interface RunBriefingInput {
   /**
    * `Job` rather than `DueJob`: this function reads `id`, `name`, `config` and
@@ -189,11 +205,11 @@ export interface RunBriefingInput {
    * inside the run, never at module scope: building an agent constructs a model,
    * which reads `OPENAI_API_KEY`.
    *
-   * Typed as {@link AgentLike} rather than `Agent` — the run drives one method,
-   * so that is what it asks for. A compiled agent from `@workspace/agents`
-   * satisfies it.
+   * Typed as {@link ScoutSessionLike} rather than `JobScoutSession` — the run
+   * drives one method of the agent and two of the session, so that is what it
+   * asks for. A session from `@workspace/agents` satisfies it.
    */
-  createScout?: (options: { maxLlmCalls: number }) => AgentLike
+  createScout?: (options: { maxLlmCalls: number }) => ScoutSessionLike
   createWriter?: () => AgentLike
   /**
    * Where to send the step-by-step transcript. Omitted in production, where the
@@ -275,6 +291,11 @@ export async function runBriefing(
             `${plural(parsed.titles.length, "title")}, ${plural(parsed.locations.length, "location")}`
         )
 
+        // Held across both steps: the scout writes its findings and its catalog
+        // into the session, and the hand-off reads both back out.
+        // The session comes back out of the step beside the outcome, because
+        // the hand-off needs both and neither is derivable from the other: the
+        // messages say what the scout did, the session holds what it found.
         const scouted = await trace.step(
           "scout",
           async () => {
@@ -284,14 +305,15 @@ export async function runBriefing(
             // Sized to the config rather than to a constant: a sweep is
             // titles × locations × boards, and a scout that runs out of turns
             // mid-search still answers with something well-formed.
-            const scout = (input.createScout ?? createJobScout)({
+            const session = (input.createScout ?? createJobScout)({
               maxLlmCalls: scoutLlmCallBudget(
                 config,
-                JOB_SCOUT_SEARCH_TOOLS.length
+                JOB_SCOUT_SEARCH_TOOL_NAMES.length
               ),
             })
-            return runAgent(
-              scout,
+
+            const outcome = await runAgent(
+              session.agent,
               "scout",
               { messages: [new HumanMessage(prompt)] },
               trace,
@@ -306,27 +328,34 @@ export async function runBriefing(
                 tags: ["briefing", "scout"],
               }
             )
+
+            return { ...outcome, session }
           },
           (result) => plural(result.llmCalls, "model call")
         )
 
         llmCalls += scouted.llmCalls
-        const searchResults = successfulSearchResults(
+        const searchesRun = successfulSearches(
           scouted.messages,
           SEARCH_TOOL_NAMES
         )
-        searches = searchResults.length
-        searchesBySource = countBySource(searchResults)
+        searches = searchesRun.length
+        searchesBySource = countBySource(searchesRun)
 
         // Postings the scout reported that no search stands behind. Read after
-        // the step, where the warning is assembled — see `verifyPostingUrls`
-        // on why one bad URL costs a posting and not the run.
-        let unverified: Posting[] = []
+        // the step, where the warning is assembled — see `resolve-postings.ts`
+        // on why one unresolvable id costs a posting and not the run.
+        let unresolved: ScoutPosting[] = []
 
         const findings = await trace.step(
           "handoff",
           async () => {
-            const scoutAnswer = finalAnswer(scouted.messages, "scout")
+            // Not `finalAnswer`: the findings are captured by the
+            // `submit_findings` tool as it validates them, so a scout that
+            // reported and then ran out of turns has still reported. What that
+            // check used to catch — a budget halt — is now only a failure when
+            // the halt came *first*, which is exactly the case below.
+            const reported = scouted.session.findings()
 
             // No successful search means the findings, however well-formed, came
             // from the model rather than a live search. Better a failed run than a
@@ -337,39 +366,47 @@ export async function runBriefing(
               )
             }
 
-            const parsed = parseFindings(scoutAnswer)
-
-            // The schema has already said every URL *parses*; this says every
-            // URL was *returned*. `posting-urls.ts` owns the comparison and
-            // documents why it is on posting identity rather than on bytes.
-            const verified = verifyPostingUrls(parsed, searchResults)
-            unverified = verified.dropped
-
-            // Nothing left is a different failure from something left: a scout
-            // that reported postings and cannot account for a single one of
-            // them has stopped copying URLs altogether, and a brief built from
-            // the empty remainder would cite nothing at all. An honestly empty
-            // result still passes — it had nothing to account for.
-            if (
-              parsed.postings.length > 0 &&
-              verified.findings.postings.length === 0
-            ) {
+            // Distinct from an empty list, and the distinction is the point: a
+            // scout that submits no postings has reported a result, and one that
+            // never submits at all has reported nothing. Only the second is a
+            // failed run.
+            if (reported === undefined) {
               throw new Error(
-                `The scout reported ${plural(parsed.postings.length, "posting")} and no search returned any of their URLs, the first being ${parsed.postings[0]?.url}. Every posting must be one a search returned.`
+                `The scout ran ${plural(searches, "search")} and never called submit_findings, so it produced no findings at all. It may have exhausted its model call budget.`
               )
             }
 
-            trace({ type: "handoff", findings: verified.findings })
-            return verified.findings
+            // The schema has already said every posting names an id; this says
+            // the id names a posting some search returned. `resolve-postings.ts`
+            // owns the lookup and documents what it replaced.
+            const resolved = resolvePostings(reported, scouted.session.catalog)
+            unresolved = resolved.dropped
+
+            // Nothing left is a different failure from something left: a scout
+            // that reported postings and cannot account for a single one of
+            // them has stopped citing real ids altogether, and a brief built
+            // from the empty remainder would cite nothing at all. An honestly
+            // empty result still passes — it had nothing to account for.
+            if (
+              reported.postings.length > 0 &&
+              resolved.findings.postings.length === 0
+            ) {
+              throw new Error(
+                `The scout reported ${plural(reported.postings.length, "posting")} and no search returned any of their ids, the first being ${reported.postings[0]?.id}. Every posting must be one a search returned.`
+              )
+            }
+
+            trace({ type: "handoff", findings: resolved.findings })
+            return resolved.findings
           },
           // A summary only when something was dropped. The `handoff` event
           // above already carries the findings that survived, so a detail
           // restating their count is the same fact twice — but what was *left
           // out* appears nowhere else in the transcript.
           () =>
-            unverified.length === 0
+            unresolved.length === 0
               ? undefined
-              : `${plural(unverified.length, "posting")} dropped — no search returned the URL`
+              : `${plural(unresolved.length, "posting")} dropped — no search returned the id`
         )
 
         const written = await trace.step(
@@ -490,15 +527,15 @@ export async function runBriefing(
         // entirely when nothing did, because `finishRun` reads an empty
         // `failure` as a run with warnings.
         //
-        // `postingUrls` is not a lost write like the other two: it is the one
-        // thing a person cannot find out any other way. The brief never
+        // `unresolvedPostings` is not a lost write like the other two: it is the
+        // one thing a person cannot find out any other way. The brief never
         // mentions what was left out of it, and the run succeeded — so without
         // this the only trace of a dropped posting is a trace nobody is
         // watching in production.
         const warnings: RunFailure | undefined =
           findingsNotRecorded === undefined &&
           postingsNotRecorded === undefined &&
-          unverified.length === 0
+          unresolved.length === 0
             ? undefined
             : {
                 ...(findingsNotRecorded === undefined
@@ -507,12 +544,19 @@ export async function runBriefing(
                 ...(postingsNotRecorded === undefined
                   ? {}
                   : { postings: { message: postingsNotRecorded } }),
-                ...(unverified.length === 0
+                ...(unresolved.length === 0
                   ? {}
                   : {
-                      postingUrls: {
-                        message: `${plural(unverified.length, "posting")} left out of the brief: no search returned the URL the scout gave.`,
-                        urls: unverified.map((posting) => posting.url),
+                      unresolvedPostings: {
+                        message: `${plural(unresolved.length, "posting")} left out of the brief: no search returned the id the scout gave.`,
+                        // The id and the title, because an id alone identifies
+                        // nothing to a person reading a warning — and the title
+                        // is the scout's own, which is the point when what is
+                        // being diagnosed is a posting it may have invented.
+                        postings: unresolved.map(({ id, title }) => ({
+                          id,
+                          title,
+                        })),
                       },
                     }),
               }
@@ -568,7 +612,7 @@ function plural(count: number, noun: string): string {
  * re-interpret what was found — and so the one instruction that matters, that
  * URLs are copied rather than composed, is about a field it can see.
  */
-function toWriterPrompt(findings: ReturnType<typeof parseFindings>): string {
+function toWriterPrompt(findings: Findings): string {
   return [
     "Write the brief from these findings.",
     "",
@@ -582,8 +626,13 @@ function toWriterPrompt(findings: ReturnType<typeof parseFindings>): string {
  * Structural, never a judgement on the prose. A budget halt is what this
  * catches most often: the `halt` node answers every outstanding tool call with
  * an error before going to END, so an agent that gave up ends on a ToolMessage
- * rather than an AI message — which would otherwise reach `parseFindings` as a
- * confusing JSON error instead of the truth, that the scout ran out of turns.
+ * rather than an AI message.
+ *
+ * The writer's only, now. The scout's answer is not its final message any more
+ * — `submit_findings` captures it as it validates it — so a scout that reported
+ * and then hit its budget has still reported, and failing it for how it ended
+ * would throw away a perfectly good brief. What replaces this check over there
+ * is stricter about the thing that matters: findings or no findings.
  */
 function finalAnswer(messages: BaseMessage[], who: string): string {
   const final = messages.at(-1)
