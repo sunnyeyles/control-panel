@@ -3,10 +3,10 @@
 A scheduled worker turns a candidate's search criteria into a private, per-user
 job-search brief.
 
-Each run: read the criteria → query SEEK's live listings for matching postings →
-validate the findings → compose markdown → upload to private S3 → record the
-object key and the findings in Neon → add every posting found to the cumulative
-`postings` record.
+Each run: read the criteria → query each job board's live listings for matching
+postings → validate the findings → compose markdown → upload to private S3 →
+record the object key and the findings in Neon → add every posting found to the
+cumulative `postings` record.
 
 Vocabulary is in `CONTEXT.md`, and it is worth reading first — in particular
 **Job** means "a row in `jobs`, a thing that runs on a cadence" and never an
@@ -34,14 +34,18 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                            |
 | EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                            |
 
-**The tool catalog is three modules and there is no fetch tool.**
-`seek-search.ts` queries SEEK's live inventory through an Apify actor,
-`web-search.ts` is a general Tavily search, and `time.ts` answers what the
-current time is. Nothing retrieves an arbitrary URL, and nothing should acquire
-that ability casually — a fetcher is a security surface (SSRF, redirect chains,
-response size, prompt injection from a page the model then acts on). The scout
-carries `seek_search` alone; the dashboard's assistant carries `allTools`, which
-is `get_current_time` and `web_search` — `seekSearch` is deliberately not in it.
+**The tool catalog is five tools and there is no fetch tool.**
+`seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` each query one job
+board's live inventory through its own Apify actor, over the shared runner in
+`apify-search.ts` — which is machinery rather than a tool, and is what makes a
+board an actor id, a request body and a field mapping instead of a fourth
+implementation. `web-search.ts` is a general Tavily search, and `time.ts`
+answers what the current time is. Nothing retrieves an arbitrary URL, and
+nothing should acquire that ability casually — a fetcher is a security surface
+(SSRF, redirect chains, response size, prompt injection from a page the model
+then acts on). The scout carries the three board tools and nothing else; the
+dashboard's assistant carries `allTools`, which is `get_current_time` and
+`web_search` — the board tools are deliberately not in it.
 
 ## Rules
 
@@ -89,8 +93,12 @@ flowchart TD
     B2 -->|async invoke, names the run| F
     F --> D[(Neon Postgres — jobs, runs, via Prisma)]
     D -->|due job + criteria| G[Scout agent]
-    G --> T[seek_search tool → Apify SEEK actor]
-    T --> X[seek.com.au live listings]
+    G --> T1[seek_search → Apify SEEK actor]
+    G --> T2[indeed_search → Apify Indeed actor]
+    G --> T3[linkedin_search → Apify LinkedIn actor]
+    T1 --> X1[seek.com.au live listings]
+    T2 --> X2[indeed.com live listings]
+    T3 --> X3[linkedin.com live listings]
     G -->|Findings JSON, validated| L[Brief writer agent]
     L --> Z[Markdown]
     Z --> U[Upload to private S3]

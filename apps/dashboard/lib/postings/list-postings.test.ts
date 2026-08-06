@@ -293,11 +293,60 @@ describe("listPostings", () => {
     expect(page.postings[0]).toMatchObject({
       title: "Still here",
       highlights: [],
+      // The board is read off the `url` column, which the same statement wrote
+      // — so an unreadable payload costs the detail and not the badge.
+      source: { label: "SEEK", recognised: true },
     })
     expect(page.postings[0]?.summary).toBeUndefined()
     expect(logged).toHaveBeenCalled()
 
     logged.mockRestore()
+  })
+
+  /**
+   * The board is derived from `postings.url` rather than stored, so the answer
+   * is whatever the column holds — which is why a row written long before this
+   * field existed still carries one. `posting-source.test.ts` pins the
+   * derivation itself; this pins that the page applies it.
+   */
+  it("carries the board each posting's url names", async () => {
+    db.posting({
+      postingId: "a".repeat(16),
+      url: "https://au.linkedin.com/jobs/view/4123456789",
+    })
+    db.posting({
+      postingId: "b".repeat(16),
+      url: "https://boards.greenhouse.io/acme/jobs/7",
+    })
+
+    const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+
+    // Most recently seen first, which is the default order — so the Greenhouse
+    // row, seeded second and therefore later, leads.
+    expect(page.postings.map((posting) => posting.source)).toEqual([
+      { label: "boards.greenhouse.io", recognised: false },
+      { label: "LinkedIn", recognised: true },
+    ])
+  })
+
+  /**
+   * ⚠️ `postings.url` is `TEXT NOT NULL` with no CHECK, unlike `posting_id`, so
+   * the column can hold a value that will not parse. The same judgement as the
+   * unreadable payload above: the advertisement is what the user came for, and
+   * losing its badge must not look like a Posting nobody ever found.
+   */
+  it("degrades a url it cannot read rather than dropping the row", async () => {
+    db.posting({
+      postingId: "a".repeat(16),
+      title: "Still here",
+      url: "not a url",
+    })
+
+    const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+
+    expect(page.postings).toHaveLength(1)
+    expect(page.postings[0]).toMatchObject({ title: "Still here" })
+    expect(page.postings[0]?.source).toBeUndefined()
   })
 
   /**
