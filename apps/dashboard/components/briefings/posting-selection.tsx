@@ -2,11 +2,25 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useMemo,
   useState,
   type ReactNode,
 } from "react"
+
+/**
+ * The empty selection, as one value rather than a fresh `Set` per clear.
+ *
+ * ⚠️ **Shared so that clearing an already-empty selection is a real no-op.**
+ * React bails out of a re-render only when the next state is `Object.is` the
+ * current one, and `new Set()` never is — so a `clear()` that minted its own
+ * would re-render, hand every consumer new callback identities, and let an
+ * effect keyed on one of them call `clear()` again, forever. That loop is
+ * currently unreachable by luck rather than by design; this is the half of the
+ * fix that does not depend on how a caller writes its dependencies.
+ */
+const NOTHING: ReadonlySet<string> = new Set()
 
 /**
  * Which Postings are ticked, for the bulk bar and the row checkboxes to share.
@@ -55,45 +69,61 @@ export function PostingSelectionProvider({
 }) {
   // Everything ever ticked, including ids no longer on the page. `selected`
   // below is what callers act on, and it can only ever name a visible row.
-  const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set())
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(NOTHING)
 
   const selected = useMemo(
     () => ids.filter((id) => ticked.has(id)),
     [ids, ticked]
   )
 
-  const value = useMemo<PostingSelection>(() => {
-    const allSelected = ids.length > 0 && selected.length === ids.length
+  // ⚠️ **The three mutators are stable, and that is not a micro-optimisation.**
+  // `clear` is passed to `DeletePostingsDialog` as `onDeleted`, which reads it
+  // in an effect's dependency list — so an identity that changed with every
+  // tick would re-fire that effect on the render its own call caused. Each one
+  // takes the functional updater form, so none of them needs to close over
+  // `ticked` to be correct.
+  const toggle = useCallback((postingId: string) => {
+    setTicked((current) => {
+      const next = new Set(current)
 
-    return {
+      if (!next.delete(postingId)) next.add(postingId)
+
+      return next
+    })
+  }, [])
+
+  const toggleAll = useCallback(() => {
+    setTicked((current) => {
+      // Recomputed from `current` rather than read off the render that built
+      // this callback, which is what lets it depend on `ids` alone.
+      const all = ids.length > 0 && ids.every((id) => current.has(id))
+      const next = new Set(current)
+
+      for (const id of ids) {
+        if (all) next.delete(id)
+        else next.add(id)
+      }
+
+      return next
+    })
+  }, [ids])
+
+  // Clears everything, not only the visible page. A delete succeeded and the
+  // user is done with the selection; leaving invisible ticks behind would make
+  // the bar reappear on a page they have not touched.
+  const clear = useCallback(() => setTicked(NOTHING), [])
+
+  const value = useMemo<PostingSelection>(
+    () => ({
       selected,
-      allSelected,
+      allSelected: ids.length > 0 && selected.length === ids.length,
       isSelected: (postingId) => ticked.has(postingId),
-      toggle: (postingId) =>
-        setTicked((current) => {
-          const next = new Set(current)
-
-          if (!next.delete(postingId)) next.add(postingId)
-
-          return next
-        }),
-      toggleAll: () =>
-        setTicked((current) => {
-          const next = new Set(current)
-
-          for (const id of ids) {
-            if (allSelected) next.delete(id)
-            else next.add(id)
-          }
-
-          return next
-        }),
-      // Clears everything, not only the visible page. A delete succeeded and
-      // the user is done with the selection; leaving invisible ticks behind
-      // would make the bar reappear on a page they have not touched.
-      clear: () => setTicked(new Set()),
-    }
-  }, [ids, selected, ticked])
+      toggle,
+      toggleAll,
+      clear,
+    }),
+    [ids, selected, ticked, toggle, toggleAll, clear]
+  )
 
   return (
     <PostingSelectionContext value={value}>{children}</PostingSelectionContext>

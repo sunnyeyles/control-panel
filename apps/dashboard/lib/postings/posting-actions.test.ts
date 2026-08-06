@@ -688,6 +688,37 @@ describe("deleting postings", () => {
       })
     })
 
+    it("says the letters are gone when the rows fail after them", async () => {
+      letters.withLetter(POSTING_ID)
+
+      const actions = createPostingActions({
+        getUser: async () => SIGNED_IN,
+        getPrisma: () =>
+          ({
+            posting: {
+              findMany: async () => [{ postingId: POSTING_ID }],
+              deleteMany: async () => {
+                throw new Error("connection terminated")
+              },
+            },
+          }) as unknown as PrismaClient,
+        getCoverLetters: () => letters.asStore(),
+        now: () => NOW,
+        newResetKey: () => RESET_KEY,
+      })
+
+      const result = await actions.deletePostings(IDLE, deleteForm(POSTING_ID))
+
+      // The letter is already gone by the time the rows are attempted — that
+      // is what deleting it first buys everywhere else — so this is the one
+      // failure the message must not round off to "something went wrong".
+      expect(letters.deleted).toHaveLength(1)
+      expect(result).toMatchObject({
+        status: "error",
+        message: expect.stringContaining("already been deleted"),
+      })
+    })
+
     it("does not carry a previous success's reset key through a failure", async () => {
       const previous: ActionState = {
         status: "success",

@@ -76,6 +76,26 @@ const TOO_MANY_POSTINGS = `Delete at most ${PAGE_SIZE} postings at a time.`
 const LETTERS_UNAVAILABLE =
   "Those postings were left alone — their cover letters could not be deleted. Try again in a moment."
 
+/**
+ * The letters went and the rows did not — the one failure this action cannot
+ * undo, so it is the one it must not describe as "something went wrong".
+ *
+ * ⚠️ **Deleting the letter first is what makes an S3 failure safe, and it is
+ * also what makes *this* failure lossy.** By the time the `deleteMany` runs,
+ * every letter the selection carried is already gone; a Postgres failure here
+ * therefore leaves Postings on the page that no longer have the letters the
+ * table will now report they never had. A generic message would read as "no
+ * harm done" and send the user looking for letters that are not coming back
+ * from the UI.
+ *
+ * Retrying is safe and is the way out: the letters are already absent, so the
+ * second attempt takes the `object_not_found` path and removes the rows. What
+ * is lost is the letter *bodies*, recoverable only from the bucket's noncurrent
+ * versions, which `cover-letters` retains for a year.
+ */
+const POSTINGS_NOT_REMOVED =
+  "Those postings could not be removed, and any cover letters drafted for them have already been deleted. Try again in a moment to remove the postings."
+
 export interface PostingActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
   getUser: () => Promise<CurrentUser>
@@ -222,16 +242,20 @@ export function createPostingActions(deps: PostingActionsDeps) {
     const caller = await requireUser(deps.getUser, "postings")
     if (!caller.ok) return fail(caller.message)
 
-    // `getAll`, because the field repeats. Parsed as a list of ids and bounded
-    // before either half becomes a query: the ids go into an `IN (…)` and each
-    // one becomes an S3 key segment.
-    const parsed = z
-      .array(postingIdSchema)
-      .min(1)
-      .safeParse(formData.getAll("postingId"))
+    // `getAll`, because the field repeats. The ids go into an `IN (…)` and each
+    // one becomes an S3 key segment, so both halves are bounded before either
+    // becomes a query.
+    //
+    // ⚠️ **Counted before it is parsed, and the order is deliberate.** Zod
+    // validates every element before reporting the array's length, so checking
+    // the bound afterwards means regex-testing a hundred thousand fields in
+    // order to refuse them. The count is free; the parse is not.
+    const submitted = formData.getAll("postingId")
+    if (submitted.length > PAGE_SIZE) return fail(TOO_MANY_POSTINGS)
+
+    const parsed = z.array(postingIdSchema).min(1).safeParse(submitted)
 
     if (!parsed.success) return fail(POSTING_NOT_FOUND)
-    if (parsed.data.length > PAGE_SIZE) return fail(TOO_MANY_POSTINGS)
 
     // A duplicated id is harmless to both statements but would make the counts
     // in the success message lie about how many rows the user removed.
@@ -289,7 +313,7 @@ export function createPostingActions(deps: PostingActionsDeps) {
       removed = await deletePostings(deps.getPrisma(), caller.userId, removable)
     } catch (error) {
       console.error("postings: could not delete the postings", error)
-      return fail("Something went wrong.")
+      return fail(POSTINGS_NOT_REMOVED)
     }
 
     if (removed === 0) return fail(POSTING_NOT_FOUND)
