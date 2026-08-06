@@ -7,6 +7,7 @@ import {
   type BriefingSummary,
 } from "@/lib/jobs/briefing-summary"
 import { Badge } from "@workspace/ui/components/badge"
+import { Empty, EmptyDescription } from "@workspace/ui/components/empty"
 
 /**
  * The Briefings section of the settings page.
@@ -35,11 +36,11 @@ export async function BriefingSection({ userId }: { userId: string }) {
 
       {briefings.length === 0 ? (
         <>
-          <div className="rounded-lg border border-dashed p-8 text-center">
-            <p className="text-sm text-muted-foreground">
+          <Empty>
+            <EmptyDescription>
               No briefings yet. Create one below to start receiving them.
-            </p>
-          </div>
+            </EmptyDescription>
+          </Empty>
           <CreateBriefingForm />
         </>
       ) : (

@@ -5,7 +5,7 @@ import { StarsIcon } from "lucide-react"
 
 import { draftCoverLetterAction } from "@/app/(app)/briefings/actions"
 import { ActionAlert } from "@/components/forms/action-alert"
-import { SubmitButton } from "@/components/forms/submit-button"
+import { SubmitButton } from "@workspace/ui/components/submit-button"
 import { IDLE } from "@/lib/actions/action-state"
 
 /**

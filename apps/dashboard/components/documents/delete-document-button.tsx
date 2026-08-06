@@ -2,31 +2,30 @@
 
 import { useActionState, useState } from "react"
 import { ActionError } from "@/components/forms/action-error"
-import { SubmitButton } from "@/components/forms/submit-button"
 
 import { deleteDocumentAction } from "@/app/(app)/documents/actions"
 import { IDLE } from "@/lib/actions/action-state"
 import { Button } from "@workspace/ui/components/button"
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@workspace/ui/components/dialog"
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@workspace/ui/components/alert-dialog"
+import { SubmitButton } from "@workspace/ui/components/submit-button"
 import { Trash2Icon } from "lucide-react"
 
 /**
  * Delete one document, behind a confirmation.
  *
- * A plain `Dialog` rather than `alert-dialog`, which this repo's `packages/ui`
- * does not have. Proportionate: the bucket is versioned, so this writes a
- * delete marker and the previous version survives until the 365-day
- * noncurrent-expiry rule removes it. The confirmation is here to prevent a
- * misclick, not to guard something irreversible.
+ * Proportionate: the bucket is versioned, so this writes a delete marker and
+ * the previous version survives until the 365-day noncurrent-expiry rule
+ * removes it. The confirmation is here to prevent a misclick, not to guard
+ * something irreversible.
  */
 export function DeleteDocumentButton({
   resumeId,
@@ -44,8 +43,8 @@ export function DeleteDocumentButton({
   const [open, setOpen] = useState(false)
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
@@ -54,16 +53,16 @@ export function DeleteDocumentButton({
         >
           <Trash2Icon />
         </Button>
-      </DialogTrigger>
+      </AlertDialogTrigger>
 
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete this document?</DialogTitle>
-          <DialogDescription>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete this document?</AlertDialogTitle>
+          <AlertDialogDescription>
             {displayName} will be removed from your documents. Previous versions
             are retained for a year.
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
 
         <form action={formAction}>
           {/*
@@ -77,20 +76,16 @@ export function DeleteDocumentButton({
 
           <ActionError state={state} className="mb-4" />
 
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Cancel
-              </Button>
-            </DialogClose>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
             <SubmitButton
               pending={pending}
               variant="destructive"
               label="Delete"
             />
-          </DialogFooter>
+          </AlertDialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

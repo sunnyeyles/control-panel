@@ -13,6 +13,7 @@ import {
   POSTINGS_EMPTY_MESSAGES,
   type BriefingCounts,
 } from "@/lib/postings/postings-empty-state"
+import { Empty, EmptyDescription } from "@workspace/ui/components/empty"
 import {
   Table,
   TableHead,
@@ -64,11 +65,11 @@ export function PostingTable({
 }) {
   if (page.total === 0) {
     return (
-      <div className="rounded-lg border border-dashed p-8 text-center">
-        <p className="text-sm text-muted-foreground">
+      <Empty>
+        <EmptyDescription>
           {POSTINGS_EMPTY_MESSAGES[postingsEmptyState(counts)]}
-        </p>
-      </div>
+        </EmptyDescription>
+      </Empty>
     )
   }
 

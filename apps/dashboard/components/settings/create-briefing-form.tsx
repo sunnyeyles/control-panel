@@ -5,7 +5,7 @@ import { StarsIcon } from "lucide-react"
 
 import { ActionAlert } from "@/components/forms/action-alert"
 import { ActionError } from "@/components/forms/action-error"
-import { SubmitButton } from "@/components/forms/submit-button"
+import { SubmitButton } from "@workspace/ui/components/submit-button"
 
 import {
   createJobAction,
