@@ -156,11 +156,18 @@ function safely(sink: TraceSink): TraceSink {
  */
 export interface Tracer {
   (event: TraceEventBody): void
-  /** Time a step and emit both of its events. Returns whatever `body` returns. */
+  /**
+   * Time a step and emit both of its events. Returns whatever `body` returns.
+   *
+   * `detail` may answer `undefined` as well as be omitted, and the two mean the
+   * same thing — no line worth printing. A step that has something to say only
+   * sometimes (the hand-off, which reports what it dropped and stays quiet when
+   * it dropped nothing) would otherwise have to print a line saying nothing.
+   */
   step<T>(
     step: TraceStep,
     body: () => Promise<T>,
-    detail?: (result: T) => string
+    detail?: (result: T) => string | undefined
   ): Promise<T>
 }
 
@@ -179,7 +186,7 @@ export function createTracer(sink?: TraceSink): Tracer {
   emit.step = async function step<T>(
     name: TraceStep,
     body: () => Promise<T>,
-    detail?: (result: T) => string
+    detail?: (result: T) => string | undefined
   ): Promise<T> {
     emit({ type: "step", phase: "start", step: name })
     const startedAt = Date.now()
@@ -188,13 +195,14 @@ export function createTracer(sink?: TraceSink): Tracer {
     // the run's own `end` event carries the error, and inventing a synthetic
     // "ended, badly" here would put the same fact in two places.
     const result = await body()
+    const line = detail?.(result)
 
     emit({
       type: "step",
       phase: "end",
       step: name,
       durationMs: Date.now() - startedAt,
-      ...(detail ? { detail: detail(result) } : {}),
+      ...(line === undefined ? {} : { detail: line }),
     })
 
     return result

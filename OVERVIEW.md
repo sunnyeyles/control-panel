@@ -70,7 +70,14 @@ dashboard's assistant carries `allTools`, which is `get_current_time` and
   calls inside it. It carries one tool, so this is structural.
 - **URLs are copied, never composed.** Every posting must carry a URL a search
   actually returned; the findings schema rejects anything that is not a URL, and
-  the worker rejects any URL that does not appear verbatim in a search result.
+  the worker separately drops any posting no search returned. "Returned" is
+  measured by `postingId()` rather than byte-for-byte, because a board's
+  per-search tracking parameters are not part of a posting's identity — see
+  `apps/briefing-worker/src/posting-urls.ts`.
+- **A dropped posting costs the posting, not the Run.** The brief is written
+  from what survived, and the Run succeeds carrying a `postingUrls` warning that
+  names what was left out. A Run where _every_ reported posting is unaccounted
+  for still fails: that is a scout that has stopped copying URLs at all.
 - **A run with no successful search fails.** Well-formed findings that never
   touched a live search would produce a confident brief citing postings nobody
   looked up — worse than no brief.

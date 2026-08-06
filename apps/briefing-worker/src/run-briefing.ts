@@ -9,6 +9,7 @@ import {
   JOB_SCOUT_SEARCH_TOOLS,
   parseFindings,
   type Findings,
+  type Posting,
 } from "@workspace/agents"
 import type { Artifact, Job, NewPosting, RunFailure } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
@@ -19,6 +20,7 @@ import {
   scoutLlmCallBudget,
   toSearchBrief,
 } from "./job-search-config.ts"
+import { verifyPostingUrls } from "./posting-urls.ts"
 import { toNewPostings } from "./postings.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
 import {
@@ -321,6 +323,11 @@ export async function runBriefing(
         searches = searchResults.length
         searchesBySource = countBySource(searchResults)
 
+        // Postings the scout reported that no search stands behind. Read after
+        // the step, where the warning is assembled — see `verifyPostingUrls`
+        // on why one bad URL costs a posting and not the run.
+        let unverified: Posting[] = []
+
         const findings = await trace.step(
           "handoff",
           async () => {
@@ -337,27 +344,37 @@ export async function runBriefing(
 
             const parsed = parseFindings(scoutAnswer)
 
-            // The schema has already said every URL *parses*; this says every URL
-            // was *returned*. Plain substring containment against the raw search
-            // results, because that is the exact claim the prompt makes — copied
-            // verbatim, never assembled — and a fabricated URL that survives it
-            // would have to appear, byte for byte, in a result that arrived over
-            // the network.
-            for (const posting of parsed.postings) {
-              if (
-                !searchResults.some(({ text }) => text.includes(posting.url))
-              ) {
-                throw new Error(
-                  `The scout reported a URL no search returned: ${posting.url}. Every posting URL must appear verbatim in a search result.`
-                )
-              }
+            // The schema has already said every URL *parses*; this says every
+            // URL was *returned*. `posting-urls.ts` owns the comparison and
+            // documents why it is on posting identity rather than on bytes.
+            const verified = verifyPostingUrls(parsed, searchResults)
+            unverified = verified.dropped
+
+            // Nothing left is a different failure from something left: a scout
+            // that reported postings and cannot account for a single one of
+            // them has stopped copying URLs altogether, and a brief built from
+            // the empty remainder would cite nothing at all. An honestly empty
+            // result still passes — it had nothing to account for.
+            if (
+              parsed.postings.length > 0 &&
+              verified.findings.postings.length === 0
+            ) {
+              throw new Error(
+                `The scout reported ${plural(parsed.postings.length, "posting")} and no search returned any of their URLs, the first being ${parsed.postings[0]?.url}. Every posting must be one a search returned.`
+              )
             }
 
-            trace({ type: "handoff", findings: parsed })
-            return parsed
-          }
-          // No summary: the `handoff` event above already carries the findings, and
-          // a step detail restating the count is the same fact twice.
+            trace({ type: "handoff", findings: verified.findings })
+            return verified.findings
+          },
+          // A summary only when something was dropped. The `handoff` event
+          // above already carries the findings that survived, so a detail
+          // restating their count is the same fact twice — but what was *left
+          // out* appears nowhere else in the transcript.
+          () =>
+            unverified.length === 0
+              ? undefined
+              : `${plural(unverified.length, "posting")} dropped — no search returned the URL`
         )
 
         const written = await trace.step(
@@ -473,12 +490,20 @@ export async function runBriefing(
               : `not recorded — ${postingsNotRecorded}`
         )
 
-        // One object holding whichever of the two went wrong, so a run that
-        // lost both says so once rather than picking a winner. Absent entirely
-        // when nothing did, because `finishRun` reads an empty `failure` as a
-        // run with warnings.
+        // One object holding whichever of the three went wrong, so a run that
+        // lost more than one says so once rather than picking a winner. Absent
+        // entirely when nothing did, because `finishRun` reads an empty
+        // `failure` as a run with warnings.
+        //
+        // `postingUrls` is not a lost write like the other two: it is the one
+        // thing a person cannot find out any other way. The brief never
+        // mentions what was left out of it, and the run succeeded — so without
+        // this the only trace of a dropped posting is a trace nobody is
+        // watching in production.
         const warnings: RunFailure | undefined =
-          findingsNotRecorded === undefined && postingsNotRecorded === undefined
+          findingsNotRecorded === undefined &&
+          postingsNotRecorded === undefined &&
+          unverified.length === 0
             ? undefined
             : {
                 ...(findingsNotRecorded === undefined
@@ -487,6 +512,14 @@ export async function runBriefing(
                 ...(postingsNotRecorded === undefined
                   ? {}
                   : { postings: { message: postingsNotRecorded } }),
+                ...(unverified.length === 0
+                  ? {}
+                  : {
+                      postingUrls: {
+                        message: `${plural(unverified.length, "posting")} left out of the brief: no search returned the URL the scout gave.`,
+                        urls: unverified.map((posting) => posting.url),
+                      },
+                    }),
               }
 
         trace({
