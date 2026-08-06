@@ -51,10 +51,20 @@ export const POSTING_COLUMNS: readonly PostingColumn[] = [
 ]
 
 /**
+ * The cells the table renders outside {@link POSTING_COLUMNS}: the selection
+ * checkbox, the disclosure chevron, and the row's delete control.
+ *
+ * Named rather than left as a literal in the sum below, because the number is
+ * the one thing in this file that has ever been wrong — and a bare `+ 3` says
+ * nothing about which cells it is counting or what would change it.
+ */
+const FIXED_CELLS = 3
+
+/**
  * How wide the expanded detail row is.
  *
- * The columns above plus the leading disclosure cell, which carries the chevron
- * and no heading text. Derived rather than written down, so a column added to
- * the array cannot leave the detail row behind.
+ * The columns above plus the {@link FIXED_CELLS} that carry controls and no
+ * heading text. Derived rather than written down, so a column added to the
+ * array cannot leave the detail row behind.
  */
-export const POSTING_COLSPAN = POSTING_COLUMNS.length + 1
+export const POSTING_COLSPAN = POSTING_COLUMNS.length + FIXED_CELLS

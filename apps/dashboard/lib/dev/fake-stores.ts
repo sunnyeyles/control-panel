@@ -126,8 +126,7 @@ function createDevResumeStore(): ResumeStore {
     },
 
     async delete(ref: ResumeRef): Promise<void> {
-      // Idempotent, like S3: removing what is gone is not an error.
-      stored.delete(refKey(ref))
+      mustDelete(stored, ref)
     },
 
     async list(userId: string): Promise<StoredResume[]> {
@@ -185,7 +184,7 @@ function createDevCoverLetterStore(): CoverLetterStore {
     },
 
     async delete(ref: CoverLetterRef): Promise<void> {
-      stored.delete(refKey(ref))
+      mustDelete(stored, ref)
     },
   }
 }
@@ -208,6 +207,30 @@ function mustGet<T>(
   const found = stored.get(refKey(ref))
   if (!found) throw new ObjectNotFoundError(refKey(ref))
   return found
+}
+
+/**
+ * ⚠️ **A delete of something that is not there throws, and this fake used to
+ * shrug** — "idempotent, like S3", which describes the `DeleteObject` API and
+ * not the store built on it. `S3UserObjectStore.delete()` deliberately HEADs
+ * first and raises {@link ObjectNotFoundError}, both so a caller deleting a
+ * typo is not told it worked and because the ownership check needs metadata
+ * only a read can supply.
+ *
+ * The divergence mattered most where it was least visible. Deleting a
+ * **Posting** removes its **Cover Letter** first, and most Postings have no
+ * letter — so `object_not_found` is the *ordinary* path there, and a fake that
+ * never raised it meant `DEV_AUTH_BYPASS=1` exercised the branch zero times.
+ * A missing branch would have looked perfect locally and refused every delete
+ * of a letterless Posting in production.
+ */
+function mustDelete(
+  stored: Map<string, unknown>,
+  ref: ResumeRef | CoverLetterRef
+): void {
+  if (!stored.delete(refKey(ref))) {
+    throw new ObjectNotFoundError(refKey(ref))
+  }
 }
 
 /**

@@ -65,6 +65,8 @@ export function createDevPrisma(): PrismaClient {
         where: { userId: string; postingId: string }
         data: Partial<Posting>
       }) => db.updatePostings(query.where, query.data),
+      deleteMany: async (query: { where: PostingWhere }) =>
+        db.deletePostings(query.where),
     },
     coverLetterInstructions: {
       findUnique: async (query: ByUserId) =>
@@ -105,11 +107,30 @@ interface FindManyJobs {
 }
 
 /**
+ * How the Postings table is filtered here: always by owner, sometimes by an
+ * explicit list of ids.
+ *
+ * **`userId` is not optional and must not become so.** A Posting is not
+ * addressable without naming a user — that is what makes filtering on the
+ * natural key an ownership check rather than a shortcut past one, in
+ * `@workspace/db` and here.
+ *
+ * `postingId.in` is what `ownedPostingIds()` and `deletePostings()` add. Only
+ * the `in` form is understood; a bare string or any other operator falls
+ * through to {@link matchesPostingWhere}, which throws by name rather than
+ * quietly matching everything and deleting a page.
+ */
+export interface PostingWhere {
+  userId: string
+  postingId?: { in: string[] }
+}
+
+/**
  * The whole of the row scoping the table applies, and the whole of what the
- * count is asked for. A Posting is not addressable without naming a user.
+ * count is asked for.
  */
 interface PostingsForUser {
-  where: { userId: string }
+  where: PostingWhere
 }
 
 /**
@@ -232,8 +253,8 @@ class DevDb {
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
   }
 
-  countPostings(where: { userId: string }): number {
-    return this.mine(where.userId).length
+  countPostings(where: PostingWhere): number {
+    return this.matching(where).length
   }
 
   /**
@@ -253,7 +274,7 @@ class DevDb {
    */
   findManyPostings(query: FindManyPostings): unknown[] {
     const ordered = sortPostings(
-      this.mine(query.where.userId),
+      this.matching(query.where),
       query.orderBy ?? []
     )
     const from = query.skip ?? 0
@@ -377,8 +398,20 @@ class DevDb {
     return { count: 1 }
   }
 
-  private mine(userId: string): Posting[] {
-    return this.postings.filter((row) => row.userId === userId)
+  /**
+   * The row count as the answer, which is how `deletePostings()` in
+   * `@workspace/db` reports how many Postings actually went.
+   *
+   * Splices out of the backing array rather than rebuilding it, because
+   * {@link postings} is `readonly` and every other method reads through it —
+   * a reassignment would leave `findPosting` looking at the old rows.
+   */
+  deletePostings(where: PostingWhere): { count: number } {
+    return { count: removeMatchingPostings(this.postings, where).length }
+  }
+
+  private matching(where: PostingWhere): Posting[] {
+    return this.postings.filter((row) => matchesPostingWhere(row, where))
   }
 
   findJob(id: string): Job | null {
@@ -591,6 +624,71 @@ class DevDb {
       failure: run.failure,
     }))
   }
+}
+
+/** The two columns every Postings filter in this app is written against. */
+interface PostingKey {
+  userId: string
+  postingId: string
+}
+
+/**
+ * ⚠️ **Throws on a filter it does not understand, rather than ignoring it.**
+ *
+ * The whole file's principle, and nowhere does it matter more than here: this
+ * predicate decides what `deleteMany` removes, so a clause quietly dropped
+ * would not merely widen a listing — it would delete every Posting the dev user
+ * has, in the one environment the delete is built in.
+ *
+ * Module-level and exported rather than a method, because
+ * `lib/postings/posting-actions.test.ts` builds its own `posting` double and had
+ * copied this rule out. Two spellings of "which rows does this `where` name" is
+ * one more than the number that can be wrong without anyone noticing — sharing
+ * the predicate is not code thrift, it is the only way a divergence shows up as
+ * a failing test rather than as a fake that agrees with nothing.
+ */
+export function matchesPostingWhere(
+  row: PostingKey,
+  where: PostingWhere
+): boolean {
+  if (row.userId !== where.userId) return false
+
+  const byId = where.postingId
+  if (byId === undefined) return true
+
+  if (!Array.isArray(byId.in)) {
+    throw new DevPrismaError(
+      "prisma.posting where.postingId",
+      "The only filter understood here is `postingId: { in: [...] }`. Teach matchesPostingWhere() in this file the new shape — ignoring it would widen a delete to every posting the dev user has."
+    )
+  }
+
+  return byId.in.includes(row.postingId)
+}
+
+/**
+ * Delete in place and answer with the rows that went, in the order they sat in.
+ *
+ * Splices out of the caller's array rather than handing back a new one, because
+ * every holder of a `posting` double keeps its rows in a `readonly` field that
+ * the rest of the double reads through — a reassignment would leave the other
+ * methods looking at rows that are supposed to be gone.
+ */
+export function removeMatchingPostings<Row extends PostingKey>(
+  rows: Row[],
+  where: PostingWhere
+): Row[] {
+  const removed: Row[] = []
+
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]
+    if (row !== undefined && matchesPostingWhere(row, where)) {
+      rows.splice(index, 1)
+      removed.push(row)
+    }
+  }
+
+  return removed.reverse()
 }
 
 /**

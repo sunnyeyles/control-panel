@@ -6,14 +6,17 @@ import {
   CoverLetterCell,
   type CoverLetterPromise,
 } from "@/components/briefings/cover-letter-cell"
+import { DeletePostingsDialog } from "@/components/briefings/delete-postings-dialog"
 import { PostingDetail } from "@/components/briefings/posting-detail"
+import { usePostingSelection } from "@/components/briefings/posting-selection"
 import type { PostingView } from "@/lib/postings/list-postings"
 import { POSTING_COLSPAN } from "@/lib/postings/posting-columns"
 import { Button } from "@workspace/ui/components/button"
+import { Checkbox } from "@workspace/ui/components/checkbox"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 import { TableBody, TableCell, TableRow } from "@workspace/ui/components/table"
 import { cn } from "@workspace/ui/lib/utils"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 
 /**
  * The table's body, and the client boundary that owns which posting is open.
@@ -79,12 +82,14 @@ export function PostingTableBody({
  * `PostingView` goes down as props — the page already holds every field, so
  * opening the detail costs no query.
  *
- * **The whole row is the target, and there is exactly one handler.** It sits on
- * the `<tr>`; the chevron is a real `<button>` that carries the accessibility of
- * the control and no `onClick` of its own, so a pointer click and an Enter or
- * Space on the focused button both arrive at the same place by bubbling. Two
- * handlers with a `stopPropagation` between them would be the same behaviour
- * with a double-toggle waiting behind any future change to either.
+ * **The whole row is the target, and the controls inside it handle themselves.**
+ * The `<tr>` toggles the detail, so aiming at the company or the date works as
+ * well as aiming at the chevron. The row shares that space with three real
+ * controls — the selection checkbox, the chevron, and the delete trigger — each
+ * of which keeps its own `onClick`, and the row's handler ignores any click that
+ * came from inside one. That single guard is what a `stopPropagation` on every
+ * control would otherwise have to do, in one place instead of three, and it
+ * still holds when a fourth control lands in the row.
  *
  * Local to this file rather than a module of its own. It renders a pair of
  * sibling `<tr>`s and is the only thing that ever will, and splitting it out is
@@ -103,6 +108,8 @@ function PostingRow({
   onToggle: () => void
 }) {
   const detailId = `posting-detail-${posting.id}`
+  const { isSelected, toggle } = usePostingSelection()
+  const selected = isSelected(posting.id)
 
   return (
     <>
@@ -110,25 +117,54 @@ function PostingRow({
         The click target is the whole row, so aiming at the company or the date
         opens the detail exactly as aiming at the chevron does. `TableRow`
         already carries `hover:bg-muted/50`, so only the cursor is missing.
+        `data-state` rather than a class of our own: the shared `TableRow`
+        already styles `data-[state=selected]:bg-muted`, and `TableCell` already
+        tightens the padding of a cell holding a checkbox.
 
-        Selecting text is the one gesture that must not toggle: releasing a
-        drag fires a click on the row, and having the panel open every time
-        someone highlights a company name to copy it makes the table hostile to
-        read. A collapsed selection is a click; anything else is a drag.
+        Two gestures must not toggle, and both are handled here rather than by a
+        `stopPropagation` in each control:
+
+        ⚠️ **A click that landed on a control belongs to that control.** The
+        checkbox and the delete trigger both render as `<button>`s *inside* this
+        `<tr>`, so without this guard ticking a row for deletion, or opening its
+        confirmation, would also expand the detail underneath it. `closest`
+        rather than a check on `currentTarget`, because the click lands on the
+        icon inside the button as often as on the button itself.
+
+        Selecting text is the other: releasing a drag fires a click on the row,
+        and having the panel open every time someone highlights a company name
+        to copy it makes the table hostile to read. A collapsed selection is a
+        click; anything else is a drag.
       */}
       <TableRow
+        data-state={selected ? "selected" : undefined}
         className="cursor-pointer"
-        onClick={() => {
+        onClick={(event) => {
+          // `Element` and not `HTMLElement`: a click on the chevron lands on
+          // the `<svg>` inside the button, which is an `SVGElement`. `closest`
+          // is defined on `Element`, so it covers both.
+          if ((event.target as Element).closest("button, input, a, label")) {
+            return
+          }
           if (window.getSelection()?.isCollapsed === false) return
           onToggle()
         }}
       >
+        <TableCell className="w-8">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => toggle(posting.id)}
+            aria-label={`Select ${posting.title}`}
+          />
+        </TableCell>
+
         {/*
           The disclosure control, and the row's accessibility in one place: it
           is the focusable thing, it names what it does, and it is what a screen
-          reader is told about. It carries no `onClick` — the click it produces,
-          whether from a pointer or from Enter or Space, bubbles to the handler
-          on the row above.
+          reader is told about. It keeps its own `onClick`: the row's handler
+          ignores clicks that came from inside a control, so the chevron — a
+          control like the two beside it — has to answer for its own, and that
+          is also what makes Enter and Space on the focused button work.
 
           ⚠️ `aria-expanded` has to stay on a control *inside* the row: the
           shared `TableRow` highlights an open row with
@@ -144,6 +180,7 @@ function PostingRow({
             size="icon-sm"
             aria-expanded={expanded}
             aria-controls={expanded ? detailId : undefined}
+            onClick={onToggle}
           >
             <ChevronRightIcon
               aria-hidden="true"
@@ -203,6 +240,34 @@ function PostingRow({
           <Suspense fallback={<Skeleton className="size-4" />}>
             <CoverLetterCell postingId={posting.id} letters={letters} />
           </Suspense>
+        </TableCell>
+
+        {/*
+          A list of one, through the same dialog and the same action the bulk
+          bar uses. There is no second delete path to keep honest.
+
+          ⚠️ Radix's `DialogTrigger` sets `aria-expanded` while the dialog is
+          open, and the shared `TableRow` carries `has-aria-expanded:bg-muted/50`
+          — so an open confirmation highlights its row. Harmless, matches what
+          the documents table already does, and not to be "fixed" by stripping
+          the attribute: the disclosure chevron above depends on that selector.
+        */}
+        <TableCell className="w-12">
+          <DeletePostingsDialog
+            postingIds={[posting.id]}
+            postingTitle={posting.title}
+            letters={letters}
+            trigger={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Delete ${posting.title}`}
+              >
+                <Trash2Icon />
+              </Button>
+            }
+          />
         </TableCell>
       </TableRow>
 
