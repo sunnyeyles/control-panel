@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@workspace/db"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { listPostings } from "./list-postings"
+import { formatSeenAgo, listPostings } from "./list-postings"
 import { PAGE_SIZE, parsePostingQuery } from "./posting-query"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
@@ -373,5 +373,58 @@ describe("listPostings", () => {
     })
     expect(db.counts).toHaveLength(1)
     expect(db.queries).toEqual([])
+  })
+})
+
+/**
+ * The sighting times as the detail panel renders them.
+ *
+ * Testable at all only because `now` is a parameter: a formatter that read the
+ * clock could only be asserted against relative to the moment the suite
+ * happened to run, which is the same expression under test.
+ */
+describe("formatSeenAgo", () => {
+  const NOW = new Date("2026-08-06T12:00:00.000Z")
+
+  function ago(milliseconds: number): string {
+    return formatSeenAgo(new Date(NOW.getTime() - milliseconds), NOW)
+  }
+
+  const SECOND = 1000
+  const MINUTE = 60 * SECOND
+  const HOUR = 60 * MINUTE
+  const DAY = 24 * HOUR
+
+  it("picks the largest unit that fits the gap", () => {
+    expect(ago(45 * SECOND)).toBe("45 seconds ago")
+    expect(ago(5 * MINUTE)).toBe("5 minutes ago")
+    expect(ago(3 * HOUR)).toBe("3 hours ago")
+    expect(ago(3 * DAY)).toBe("3 days ago")
+    expect(ago(3 * 7 * DAY)).toBe("3 weeks ago")
+    expect(ago(90 * DAY)).toBe("3 months ago")
+    expect(ago(2 * 365 * DAY)).toBe("2 years ago")
+  })
+
+  /**
+   * The reason for `numeric: "auto"`, and the whole point of using
+   * `Intl.RelativeTimeFormat` rather than assembling the string by hand: a
+   * posting re-found this morning should not read "0 days ago".
+   */
+  it("says yesterday and today rather than counting", () => {
+    expect(ago(0)).toBe("now")
+    expect(ago(30 * SECOND)).toBe("30 seconds ago")
+    expect(ago(DAY)).toBe("yesterday")
+  })
+
+  /**
+   * Both columns are written by a Run that has already finished, so this should
+   * not arise — but the worker and the web host are different machines, and a
+   * future sighting rendered as "just now" would hide a clock skew rather than
+   * show it.
+   */
+  it("does not clamp a future sighting", () => {
+    expect(formatSeenAgo(new Date(NOW.getTime() + 3 * DAY), NOW)).toBe(
+      "in 3 days"
+    )
   })
 })

@@ -43,10 +43,21 @@ export interface PostingView {
   summary?: string
   /** Absent for the same reason `summary` is. */
   matchReason?: string
-  /** Already formatted, UTC, with the zone named. */
+  /**
+   * How long ago this advertisement was first found, as "3 weeks ago".
+   *
+   * Relative rather than absolute because the question the detail panel is
+   * asked is *is this stale*, and a UTC stamp makes the reader do the
+   * subtraction. {@link firstSeenExact} is the stamp, carried alongside for the
+   * `title` attribute rather than instead of this.
+   */
   firstSeen: string
-  /** Already formatted, UTC, with the zone named. */
+  /** The same instant, formatted, UTC, with the zone named. */
+  firstSeenExact: string
+  /** How long ago it was most recently re-found. See {@link firstSeen}. */
   lastSeen: string
+  /** The same instant, formatted, UTC, with the zone named. */
+  lastSeenExact: string
   /**
    * The name of the Briefing that most recently found this advertisement —
    * `lastSeenRun.job.name`, read through the relation.
@@ -156,10 +167,15 @@ export async function listPostings(
     },
   })
 
+  // One instant for the whole page, read once rather than per row, so twenty-five
+  // sightings a few milliseconds apart cannot be described relative to twenty-five
+  // slightly different "now"s.
+  const now = new Date()
+
   let unreadable = 0
   let unnamed = 0
   const postings = rows.map((row) => {
-    const view = toView(row)
+    const view = toView(row, now)
     if (view.summary === undefined) unreadable += 1
     if (briefingName(row.lastSeenRun) === undefined) unnamed += 1
     return view
@@ -275,7 +291,7 @@ interface PostingRow {
  * timezone bug it is — the same boundary `components/documents/document-list.tsx`
  * describes.
  */
-function toView(row: PostingRow): PostingView {
+function toView(row: PostingRow, now: Date): PostingView {
   const parsed = PostingSchema.safeParse(row.payload)
 
   return {
@@ -285,8 +301,10 @@ function toView(row: PostingRow): PostingView {
     location: row.location,
     url: row.url,
     status: toStatus(row.status),
-    firstSeen: formatSeenAt(row.firstSeenAt),
-    lastSeen: formatSeenAt(row.lastSeenAt),
+    firstSeen: formatSeenAgo(row.firstSeenAt, now),
+    firstSeenExact: formatSeenAt(row.firstSeenAt),
+    lastSeen: formatSeenAgo(row.lastSeenAt, now),
+    lastSeenExact: formatSeenAt(row.lastSeenAt),
     briefing: briefingName(row.lastSeenRun) ?? UNKNOWN_BRIEFING,
     highlights: parsed.success ? (parsed.data.highlights ?? []) : [],
     ...(parsed.success && parsed.data.postedAt
@@ -363,4 +381,60 @@ function formatSeenAt(date: Date): string {
     timeZone: "UTC",
     timeZoneName: "short",
   }).format(date)
+}
+
+/**
+ * The largest unit worth describing a gap in, longest first.
+ *
+ * Each entry is the length of one of that unit in milliseconds; the first whose
+ * unit is smaller than the gap wins. Months and years are the usual approximate
+ * lengths, which is the right kind of wrong for a phrase like "2 months ago" —
+ * the reader is being told an order of magnitude, and
+ * {@link PostingView.lastSeenExact} carries the real instant for anyone who
+ * needs it.
+ */
+const RELATIVE_UNITS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 365 * 24 * 60 * 60 * 1000],
+  ["month", 30 * 24 * 60 * 60 * 1000],
+  ["week", 7 * 24 * 60 * 60 * 1000],
+  ["day", 24 * 60 * 60 * 1000],
+  ["hour", 60 * 60 * 1000],
+  ["minute", 60 * 1000],
+  ["second", 1000],
+]
+
+/**
+ * `numeric: "auto"` is what produces "yesterday" and "today" in place of
+ * "1 day ago" and "0 days ago", which is the whole reason to use
+ * `RelativeTimeFormat` rather than assembling the string by hand.
+ */
+const RELATIVE_FORMAT = new Intl.RelativeTimeFormat("en-AU", {
+  numeric: "auto",
+})
+
+/**
+ * A sighting as "3 weeks ago", relative to a caller-supplied instant.
+ *
+ * ⚠️ **`now` is an argument and not `new Date()`.** A function that reads the
+ * clock cannot be asserted against — every expectation would have to be written
+ * relative to the moment the test happened to run — and {@link listPostings}
+ * wants one instant for a whole page besides. This is the same reason
+ * `lib/briefing-runs/` takes its clock as a parameter.
+ *
+ * A future date formats as "in 3 weeks" rather than being clamped. It should not
+ * happen — both columns are written by a Run that has already finished — but a
+ * clock skew between the worker and the web host is a real thing, and silently
+ * rendering a future sighting as "just now" would hide it.
+ */
+export function formatSeenAgo(date: Date, now: Date): string {
+  const elapsed = date.getTime() - now.getTime()
+  const magnitude = Math.abs(elapsed)
+
+  // Never empty, and the last entry is the fallback: anything under a second
+  // rounds to "now" through the `second` unit.
+  const [unit, size] = RELATIVE_UNITS.find(
+    ([, length]) => magnitude >= length
+  ) ?? ["second", 1000]
+
+  return RELATIVE_FORMAT.format(Math.round(elapsed / size), unit)
 }

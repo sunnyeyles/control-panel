@@ -1,15 +1,18 @@
 import { pageHref, type PostingQuery } from "@/lib/postings/posting-query"
 import type { PostingPage } from "@/lib/postings/list-postings"
+import { Button, buttonVariants } from "@workspace/ui/components/button"
+import { cn } from "@workspace/ui/lib/utils"
 import Link from "next/link"
 
 /**
  * Which page of the table is on screen, and how to reach the others.
  *
- * **Hand-rolled, and deliberately not shadcn's `pagination`.** That component
- * is styled anchors: it computes no page numbers, decides nothing about the
- * boundaries, and knows nothing about a query string — so it would supply class
- * names and none of the three decisions this needs, while adding a component to
- * a shared package that exactly one page uses.
+ * **Deliberately not shadcn's `pagination`.** That component is styled anchors:
+ * it computes no page numbers, decides nothing about the boundaries, and knows
+ * nothing about a query string — so it would supply class names and none of the
+ * three decisions this needs, while adding a component to a shared package that
+ * exactly one page uses. The class names it would have supplied come from
+ * `buttonVariants` here instead, which is where the rest of the app gets them.
  *
  * **Plain `<Link>`s, no client state.** The page is in the URL, so it survives
  * a reload and can be shared, and every navigation re-renders on the server
@@ -59,6 +62,15 @@ export function PostingPagination({
   )
 }
 
+/**
+ * One end of the pager.
+ *
+ * At a boundary this is a `<span>` wearing the button's classes rather than a
+ * disabled link or a disabled `<button>`: a link that goes nowhere is still
+ * focusable and still announced as a link, and "Previous" on page one has no
+ * destination to give it. `buttonVariants` is used directly for exactly that
+ * reason — the element must not be a `Button`, only look like one.
+ */
 function Step({
   href,
   label,
@@ -70,18 +82,20 @@ function Step({
 }) {
   if (!enabled) {
     return (
-      <span className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground opacity-50">
+      <span
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "text-muted-foreground opacity-50"
+        )}
+      >
         {label}
       </span>
     )
   }
 
   return (
-    <Link
-      href={href}
-      className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-    >
-      {label}
-    </Link>
+    <Button variant="outline" size="sm" asChild>
+      <Link href={href}>{label}</Link>
+    </Button>
   )
 }
