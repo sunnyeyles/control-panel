@@ -48,12 +48,26 @@ interface PostingSelection {
    * makes an off-page tick unreachable rather than merely unlikely.
    */
   selected: readonly string[]
+  /**
+   * Answered from {@link PostingSelection.selected} and not from the underlying
+   * set, so there is one membership rule here rather than two. Reading the raw
+   * set would agree with it today only because a row is rendered for a visible
+   * id — an accident of the caller, not a property of this module, and the
+   * intersection above is too load-bearing to hold in only one of two places.
+   */
   isSelected: (postingId: string) => boolean
   toggle: (postingId: string) => void
   /** Tick every visible row, or clear them when they are all already ticked. */
   toggleAll: () => void
   /** Whether every visible row is ticked. False on an empty page. */
   allSelected: boolean
+  /**
+   * How many rows this page holds — what `allSelected` is measured against, and
+   * what the header checkbox names in its label. Here rather than passed down
+   * beside the provider, so the page's length reaches its two readers by one
+   * route instead of two that can disagree.
+   */
+  total: number
   clear: () => void
 }
 
@@ -76,12 +90,11 @@ export function PostingSelectionProvider({
     [ids, ticked]
   )
 
-  // ⚠️ **The three mutators are stable, and that is not a micro-optimisation.**
-  // `clear` is passed to `DeletePostingsDialog` as `onDeleted`, which reads it
-  // in an effect's dependency list — so an identity that changed with every
-  // tick would re-fire that effect on the render its own call caused. Each one
-  // takes the functional updater form, so none of them needs to close over
-  // `ticked` to be correct.
+  // The three mutators are stable because each takes the functional updater
+  // form and so needs to close over nothing. `clear` in particular is handed to
+  // `DeletePostingsDialog` as `onDeleted` and kept across renders; nothing
+  // reads it from an effect today, and holding the identity steady is what
+  // keeps that free to change.
   const toggle = useCallback((postingId: string) => {
     setTicked((current) => {
       const next = new Set(current)
@@ -113,17 +126,22 @@ export function PostingSelectionProvider({
   // the bar reappear on a page they have not touched.
   const clear = useCallback(() => setTicked(NOTHING), [])
 
-  const value = useMemo<PostingSelection>(
-    () => ({
+  const value = useMemo<PostingSelection>(() => {
+    // Built from `selected` rather than from `ticked`, which is what keeps the
+    // intersection the single answer to "is this row ticked". A `Set` because
+    // the lookup happens once per rendered row.
+    const visible = new Set(selected)
+
+    return {
       selected,
+      total: ids.length,
       allSelected: ids.length > 0 && selected.length === ids.length,
-      isSelected: (postingId) => ticked.has(postingId),
+      isSelected: (postingId) => visible.has(postingId),
       toggle,
       toggleAll,
       clear,
-    }),
-    [ids, selected, ticked, toggle, toggleAll, clear]
-  )
+    }
+  }, [ids, selected, toggle, toggleAll, clear])
 
   return (
     <PostingSelectionContext value={value}>{children}</PostingSelectionContext>

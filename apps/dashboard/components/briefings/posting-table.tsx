@@ -88,7 +88,7 @@ export function PostingTable({
           <Table>
             <TableHeader>
               <TableRow>
-                <PostingSelectAll total={page.postings.length} />
+                <PostingSelectAll />
 
                 {/*
                   The disclosure column. It has no heading worth reading aloud

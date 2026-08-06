@@ -22,8 +22,8 @@ import { TableHead } from "@workspace/ui/components/table"
  * A `<TableHead>` and not just the control, so the header row stays a list of
  * cells in `posting-table.tsx` rather than one cell built differently.
  */
-export function PostingSelectAll({ total }: { total: number }) {
-  const { allSelected, toggleAll } = usePostingSelection()
+export function PostingSelectAll() {
+  const { allSelected, toggleAll, total } = usePostingSelection()
 
   return (
     <TableHead className="w-8">
