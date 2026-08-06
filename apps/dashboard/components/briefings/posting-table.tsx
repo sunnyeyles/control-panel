@@ -1,5 +1,8 @@
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
+import { PostingBulkBar } from "@/components/briefings/posting-bulk-bar"
 import { PostingPagination } from "@/components/briefings/posting-pagination"
+import { PostingSelectAll } from "@/components/briefings/posting-select-all"
+import { PostingSelectionProvider } from "@/components/briefings/posting-selection"
 import { PostingSortHeader } from "@/components/briefings/posting-sort-header"
 import { PostingTableBody } from "@/components/briefings/posting-table-body"
 import type { PostingPage } from "@/lib/postings/list-postings"
@@ -70,41 +73,59 @@ export function PostingTable({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {/*
-                The disclosure column. It has no heading worth reading aloud
-                twenty-five times, but an empty `<th>` leaves a screen reader
-                with an unnamed column — so it is named once here, and the
-                per-row chevrons carry each posting's own title.
-              */}
-              <TableHead className="w-8">
-                <span className="sr-only">Expand</span>
-              </TableHead>
+    /*
+      The one client boundary this shell needs, and it wraps rather than
+      replaces the server-rendered table: the bulk bar sits above the `<Table>`
+      and the checkboxes sit inside it, so the selection they share cannot live
+      in either. Everything below is still rendered on the server and passed
+      through as children.
+    */
+    <PostingSelectionProvider ids={page.postings.map((posting) => posting.id)}>
+      <div className="flex flex-col gap-4">
+        <PostingBulkBar letters={letters} />
 
-              {POSTING_COLUMNS.map((column) =>
-                column.sort === undefined ? (
-                  <TableHead key={column.key}>{column.label}</TableHead>
-                ) : (
-                  <PostingSortHeader
-                    key={column.key}
-                    column={column.sort}
-                    label={column.label}
-                    query={query}
-                  />
-                )
-              )}
-            </TableRow>
-          </TableHeader>
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <PostingSelectAll total={page.postings.length} />
 
-          <PostingTableBody postings={page.postings} letters={letters} />
-        </Table>
+                {/*
+                  The disclosure column. It has no heading worth reading aloud
+                  twenty-five times, but an empty `<th>` leaves a screen reader
+                  with an unnamed column — so it is named once here, and the
+                  per-row chevrons carry each posting's own title.
+                */}
+                <TableHead className="w-8">
+                  <span className="sr-only">Expand</span>
+                </TableHead>
+
+                {POSTING_COLUMNS.map((column) =>
+                  column.sort === undefined ? (
+                    <TableHead key={column.key}>{column.label}</TableHead>
+                  ) : (
+                    <PostingSortHeader
+                      key={column.key}
+                      column={column.sort}
+                      label={column.label}
+                      query={query}
+                    />
+                  )
+                )}
+
+                {/* Named for the same reason the disclosure column is. */}
+                <TableHead className="w-12">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+
+            <PostingTableBody postings={page.postings} letters={letters} />
+          </Table>
+        </div>
+
+        <PostingPagination page={page} query={query} />
       </div>
-
-      <PostingPagination page={page} query={query} />
-    </div>
+    </PostingSelectionProvider>
   )
 }
