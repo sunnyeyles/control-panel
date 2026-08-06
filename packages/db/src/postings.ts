@@ -179,6 +179,71 @@ export async function setPostingStatus(
 }
 
 /**
+ * Which of these Posting ids this user actually owns, in no particular order.
+ *
+ * Exists so a caller can act on the *stored* Postings before deleting them —
+ * `apps/dashboard` removes each one's cover letter from S3 first, and needs to
+ * know which ids are real to avoid addressing objects for rows that never
+ * existed. It is also what lets a bulk delete report how many rows it found
+ * rather than only how many it removed.
+ *
+ * **This is not the ownership check, and {@link deletePostings} must not treat
+ * it as one.** It answers a question; the check is the `userId` in the delete's
+ * own `where`, exactly as it is in {@link setPostingStatus}. Two calls with a
+ * gap between them is a TOCTOU window, and the only thing that can happen in it
+ * is a Run re-recording an advertisement — which the delete then removes, which
+ * is what the user asked for.
+ */
+export async function ownedPostingIds(
+  prisma: DbClient,
+  userId: string,
+  postingIds: readonly string[]
+): Promise<string[]> {
+  if (postingIds.length === 0) return []
+
+  const rows = await prisma.posting.findMany({
+    where: { userId, postingId: { in: [...postingIds] } },
+    select: { postingId: true },
+  })
+
+  return rows.map((row) => row.postingId)
+}
+
+/**
+ * Remove Postings by their derived ids. Returns how many rows went.
+ *
+ * **`userId` in the `where` is the ownership check**, for the reason
+ * {@link setPostingStatus} sets out at length: a Posting is not addressable
+ * without naming a user, so filtering on both halves of the natural key *is*
+ * the check rather than a shortcut past one. It stays here whether or not the
+ * caller already narrowed the list with {@link ownedPostingIds} — a helper that
+ * borrowed its safety from an earlier call would be one refactor away from
+ * deleting a stranger's rows.
+ *
+ * ⚠️ **A deleted Posting is not gone for good, by design.**
+ * {@link recordPostings} upserts on `(user_id, posting_id)`, so the next Run
+ * that re-finds the same advertisement inserts it again at `status = 'new'`.
+ * There is no tombstone and adding one is a schema decision, not a tidy-up —
+ * anything that surfaces this needs to say so rather than promise finality.
+ *
+ * Nothing references a Posting, so no cascade is involved: all three of its
+ * relations point *out*, at `users` and `runs`, and every one is `Restrict`.
+ */
+export async function deletePostings(
+  prisma: DbClient,
+  userId: string,
+  postingIds: readonly string[]
+): Promise<number> {
+  if (postingIds.length === 0) return 0
+
+  const deleted = await prisma.posting.deleteMany({
+    where: { userId, postingId: { in: [...postingIds] } },
+  })
+
+  return deleted.count
+}
+
+/**
  * One row per `postingId`, first occurrence winning.
  *
  * Not defensive tidying. Postgres raises `21000` — *"ON CONFLICT DO UPDATE

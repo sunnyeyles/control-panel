@@ -8,6 +8,8 @@ import { listPostings } from "@/lib/postings/list-postings"
 import { parsePostingQuery } from "@/lib/postings/posting-query"
 import {
   coverLetterInstructions,
+  deletePostings,
+  ownedPostingIds,
   pauseJob,
   resumeJob,
   saveCoverLetterInstructions,
@@ -166,6 +168,60 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
     const reread = await listPostings(prisma, DEV_USER_ID, parsePostingQuery())
     expect(reread.postings.find((row) => row.id === first.id)?.status).toBe(
       "applied"
+    )
+  })
+
+  it("removes only the postings named, and only the caller's", async () => {
+    const prisma = createDevPrisma()
+    const before = await listPostings(prisma, DEV_USER_ID, parsePostingQuery())
+    const [first, second] = before.postings
+
+    if (!first || !second) throw new Error("expected two seeded postings")
+
+    expect(await ownedPostingIds(prisma, DEV_USER_ID, [first.id])).toEqual([
+      first.id,
+    ])
+    expect(await ownedPostingIds(prisma, STRANGER, [first.id])).toEqual([])
+
+    expect(await deletePostings(prisma, DEV_USER_ID, [first.id])).toBe(1)
+
+    const after = await listPostings(prisma, DEV_USER_ID, parsePostingQuery())
+
+    expect(after.total).toBe(before.total - 1)
+    expect(after.postings.map((row) => row.id)).toContain(second.id)
+    expect(after.postings.map((row) => row.id)).not.toContain(first.id)
+  })
+
+  it("deletes nothing for a stranger naming a real posting", async () => {
+    const prisma = createDevPrisma()
+    const before = await listPostings(prisma, DEV_USER_ID, parsePostingQuery())
+    const [first] = before.postings
+
+    if (!first) throw new Error("expected a seeded posting")
+
+    expect(await deletePostings(prisma, STRANGER, [first.id])).toBe(0)
+    expect(
+      (await listPostings(prisma, DEV_USER_ID, parsePostingQuery())).total
+    ).toBe(before.total)
+  })
+
+  /**
+   * Asked of Prisma directly, for the reason the relation-select case above
+   * gives — and here the stakes are the reason the fake throws at all: a `where`
+   * clause quietly ignored by `deleteMany` empties the table.
+   */
+  it("refuses a posting filter it cannot serve, by name", async () => {
+    const prisma = createDevPrisma()
+
+    await expect(
+      prisma.posting.deleteMany({
+        where: { userId: DEV_USER_ID, postingId: { startsWith: "0" } },
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        name: "DevPrismaError",
+        message: expect.stringContaining("prisma.posting where.postingId"),
+      })
     )
   })
 
