@@ -13,6 +13,7 @@ import {
   coverLetterInstructions,
   createJob,
   createPrismaClient,
+  deletePostings,
   dueJobs,
   ensureUserForAuth,
   failRun,
@@ -21,6 +22,7 @@ import {
   latestRunPerJob,
   pauseJob,
   POSTING_STATUSES,
+  ownedPostingIds,
   recordArtifact,
   recordPostings,
   recordRunFindings,
@@ -717,6 +719,97 @@ describeWithDatabase("against a real database", () => {
       await expect(
         admin.query(`delete from "${SCHEMA}".runs where id = $1`, [runId])
       ).rejects.toThrow()
+    })
+
+    it("deletes only the ids named, and only the caller's rows", async () => {
+      const runId = await aRun()
+      const doomed = aPosting()
+      const spared = aPosting()
+
+      await recordPostings(prisma, {
+        userId,
+        runId,
+        seenAt: FIRST_SIGHTING,
+        postings: [doomed, spared],
+      })
+
+      const stranger = await ensureUserForAuth(prisma, `auth_${randomUUID()}`)
+
+      // The stranger names a real Posting id — they are derived from a public
+      // URL, so anyone reading the same board can produce one — and reaches
+      // nothing, because `user_id` is the other half of the key.
+      expect(
+        await ownedPostingIds(prisma, stranger.id, [doomed.postingId])
+      ).toEqual([])
+      expect(
+        await deletePostings(prisma, stranger.id, [doomed.postingId])
+      ).toBe(0)
+      expect(await readBack(doomed.postingId)).not.toBeNull()
+
+      expect(await ownedPostingIds(prisma, userId, [doomed.postingId])).toEqual(
+        [doomed.postingId]
+      )
+      expect(await deletePostings(prisma, userId, [doomed.postingId])).toBe(1)
+
+      expect(await readBack(doomed.postingId)).toBeNull()
+      expect(await readBack(spared.postingId)).not.toBeNull()
+    })
+
+    it("deletes a whole selection in one statement", async () => {
+      const runId = await aRun()
+      const postings = [aPosting(), aPosting(), aPosting()]
+
+      await recordPostings(prisma, {
+        userId,
+        runId,
+        seenAt: FIRST_SIGHTING,
+        postings,
+      })
+
+      const ids = postings.map((posting) => posting.postingId)
+
+      expect(await deletePostings(prisma, userId, ids)).toBe(3)
+      expect(await ownedPostingIds(prisma, userId, ids)).toEqual([])
+    })
+
+    /**
+     * ⚠️ **The delete is from the page, not from the search, and this pins
+     * that.** `recordPostings` upserts on `(user_id, posting_id)` and knows
+     * nothing about a Posting having been removed, so a Briefing that still
+     * matches the advertisement brings it back at `new`. Intended behaviour
+     * rather than a gap — a tombstone would be a schema decision — and the
+     * confirmation dialog says so in words. If this test ever starts failing,
+     * something added that tombstone; the copy has to change with it.
+     */
+    it("lets a later run re-record a deleted posting, at new", async () => {
+      const posting = aPosting()
+
+      await recordPostings(prisma, {
+        userId,
+        runId: await aRun(),
+        seenAt: FIRST_SIGHTING,
+        postings: [posting],
+      })
+      await setPostingStatus(prisma, userId, posting.postingId, "applied")
+      await deletePostings(prisma, userId, [posting.postingId])
+
+      await recordPostings(prisma, {
+        userId,
+        runId: await aRun(),
+        seenAt: SECOND_SIGHTING,
+        postings: [posting],
+      })
+
+      const reappeared = await readBack(posting.postingId)
+
+      expect(reappeared).not.toBeNull()
+      expect(reappeared?.status).toBe("new")
+      expect(reappeared?.statusChangedAt).toBeNull()
+    })
+
+    it("takes an empty list as nothing to do, without a query", async () => {
+      expect(await ownedPostingIds(prisma, userId, [])).toEqual([])
+      expect(await deletePostings(prisma, userId, [])).toBe(0)
     })
   })
 

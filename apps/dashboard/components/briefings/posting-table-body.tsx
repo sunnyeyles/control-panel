@@ -6,14 +6,17 @@ import {
   CoverLetterCell,
   type CoverLetterPromise,
 } from "@/components/briefings/cover-letter-cell"
+import { DeletePostingsDialog } from "@/components/briefings/delete-postings-dialog"
 import { PostingDetail } from "@/components/briefings/posting-detail"
+import { usePostingSelection } from "@/components/briefings/posting-selection"
 import type { PostingView } from "@/lib/postings/list-postings"
 import { POSTING_COLSPAN } from "@/lib/postings/posting-columns"
 import { Button } from "@workspace/ui/components/button"
+import { Checkbox } from "@workspace/ui/components/checkbox"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 import { TableBody, TableCell, TableRow } from "@workspace/ui/components/table"
 import { cn } from "@workspace/ui/lib/utils"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 
 /**
  * The table's body, and the client boundary that owns which posting is open.
@@ -96,10 +99,25 @@ function PostingRow({
   onToggle: () => void
 }) {
   const detailId = `posting-detail-${posting.id}`
+  const { isSelected, toggle } = usePostingSelection()
+  const selected = isSelected(posting.id)
 
   return (
     <>
-      <TableRow>
+      {/*
+        `data-state` rather than a class of our own: the shared `TableRow`
+        already styles `data-[state=selected]:bg-muted`, and `TableCell` already
+        tightens the padding of a cell holding a checkbox.
+      */}
+      <TableRow data-state={selected ? "selected" : undefined}>
+        <TableCell className="w-8">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => toggle(posting.id)}
+            aria-label={`Select ${posting.title}`}
+          />
+        </TableCell>
+
         {/*
           The disclosure control. A chevron and not the title, because an
           underlined title means "this navigates" and it does not — it expands
@@ -183,6 +201,34 @@ function PostingRow({
           <Suspense fallback={<Skeleton className="size-4" />}>
             <CoverLetterCell postingId={posting.id} letters={letters} />
           </Suspense>
+        </TableCell>
+
+        {/*
+          A list of one, through the same dialog and the same action the bulk
+          bar uses. There is no second delete path to keep honest.
+
+          ⚠️ Radix's `DialogTrigger` sets `aria-expanded` while the dialog is
+          open, and the shared `TableRow` carries `has-aria-expanded:bg-muted/50`
+          — so an open confirmation highlights its row. Harmless, matches what
+          the documents table already does, and not to be "fixed" by stripping
+          the attribute: the disclosure chevron above depends on that selector.
+        */}
+        <TableCell className="w-12">
+          <DeletePostingsDialog
+            postingIds={[posting.id]}
+            postingTitle={posting.title}
+            letters={letters}
+            trigger={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Delete ${posting.title}`}
+              >
+                <Trash2Icon />
+              </Button>
+            }
+          />
         </TableCell>
       </TableRow>
 

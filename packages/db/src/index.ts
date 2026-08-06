@@ -75,6 +75,8 @@ export {
 } from "./artifacts.ts"
 
 export {
+  deletePostings,
+  ownedPostingIds,
   POSTING_STATUSES,
   recordPostings,
   setPostingStatus,

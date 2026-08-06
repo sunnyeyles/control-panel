@@ -42,6 +42,7 @@ const runActions = createRunActions({
 const postingActions = createPostingActions({
   getUser: getCurrentUser,
   getPrisma,
+  getCoverLetters: getCoverLetterStore,
 })
 
 /** Create a manually written cover letter from the blank editor. */
@@ -136,6 +137,30 @@ export async function setPostingStatusAction(
   formData: FormData
 ): Promise<ActionState> {
   const result = await postingActions.setPostingStatus(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Delete the selected Postings, and the cover letter each one carries.
+ *
+ * One export for both the per-row trash icon and the bulk bar — the field
+ * repeats, so a row submits a list of one. See `lib/postings/posting-actions.ts`
+ * for why the letter is deleted before the row.
+ *
+ * `refresh()` is the whole of what puts the page back in step here, and unlike
+ * the status action there is no optimistic control holding the new state in the
+ * meantime: without it the client router would keep serving rows that no longer
+ * exist for up to `staleTimes.dynamic`, and clicking one would open a detail
+ * for an advertisement the user just removed.
+ */
+export async function deletePostingsAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await postingActions.deletePostings(state, formData)
 
   if (result.status === "success") refresh()
 
