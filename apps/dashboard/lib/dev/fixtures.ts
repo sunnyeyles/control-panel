@@ -83,12 +83,18 @@ const MERIDIAN: Posting = {
   matchReason: "Matches your backend engineer title in Sydney.",
 }
 
-/** No `postedAt`: the advertisement did not say, which is the common case. */
+/**
+ * No `postedAt`: the advertisement did not say, which is the common case.
+ *
+ * On `au.linkedin.com` rather than `www.`, which is what the board actually
+ * answers an Australian search with — and the case `boardForHost`'s suffix
+ * match exists for, so the Source badge here reads LinkedIn and not a hostname.
+ */
 const NORTHWIND: Posting = {
   title: "Platform Engineer",
   company: "Northwind Health",
   location: "Remote (Australia)",
-  url: "https://www.seek.com.au/job/dev-fixture-2",
+  url: "https://au.linkedin.com/jobs/view/dev-fixture-2",
   highlights: [
     "Kubernetes, Terraform, and a small amount of Go",
     "Fully remote within Australia",
@@ -103,7 +109,7 @@ const CORVUS: Posting = {
   title: "Staff Engineer, Payments",
   company: "Corvus Bank",
   location: "Melbourne, VIC",
-  url: "https://www.seek.com.au/job/dev-fixture-3",
+  url: "https://au.indeed.com/viewjob?jk=dev-fixture-3",
   postedAt: "2026-07-30",
   summary:
     "Technical leadership across the payments group, splitting time between design review and hands-on work.",
@@ -342,21 +348,44 @@ function devPosting(
 }
 
 /**
+ * The hosts the filler rows cycle through, one per Source badge state.
+ *
+ * ⚠️ **The fourth entry is deliberately not a board.** Every fixture URL used to
+ * be `www.seek.com.au`, so under `DEV_AUTH_BYPASS` the Source column would have
+ * rendered one badge, forever, in the one environment this table is built in —
+ * and the unrecognised-host path, which is the whole reason that badge has a
+ * second variant, would never have been seen. Keep a host no entry in
+ * `JOB_BOARDS` claims.
+ */
+const GENERATED_HOSTS: readonly [string, ...string[]] = [
+  "https://www.seek.com.au/job/dev-fixture-generated-",
+  "https://au.linkedin.com/jobs/view/dev-fixture-generated-",
+  "https://au.indeed.com/viewjob?jk=dev-fixture-generated-",
+  "https://boards.greenhouse.io/acme/jobs/dev-fixture-generated-",
+]
+
+/**
  * A filler advertisement, distinct in every field a column sorts on.
  *
  * The title and company letters run *up* the alphabet as the dates run *down*,
- * so no two sorts produce the same order.
+ * so no two sorts produce the same order. The host cycles independently of
+ * both — no column sorts on it, so it is free to vary.
  */
 function generatedPosting(index: number): Posting {
   const letter = String.fromCharCode(65 + (index % 26))
   const number = index + 1
   const postedOn = generatedPostedOn(index)
+  // A modulo index cannot be out of range; `noUncheckedIndexedAccess` types it
+  // as optional anyway, so the fallback narrows rather than defends — and the
+  // tuple type above is what makes the first element a definite `string`.
+  const host =
+    GENERATED_HOSTS[index % GENERATED_HOSTS.length] ?? GENERATED_HOSTS[0]
 
   return {
     title: `${letter}${number} Engineer`,
     company: `${letter}${number} Systems`,
     location: index % 3 === 0 ? "Remote (Australia)" : "Sydney, NSW",
-    url: `https://www.seek.com.au/job/dev-fixture-generated-${number}`,
+    url: `${host}${number}`,
     // The date as the advertisement stated it, which is where a real payload
     // carries it. `devPostings` writes the same instant into the column through
     // {@link generatedPostedOn}, so the two agree by construction rather than

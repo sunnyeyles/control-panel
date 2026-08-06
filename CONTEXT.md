@@ -29,11 +29,16 @@ and the object key is what `artifacts` records. Built and running.
 _Avoid_: digest, report (which means **Run Report**), briefing
 
 **Scout**:
-The agent that searches for postings and reports **Findings**. Carries the SEEK
-search tool and nothing else, so it has no way to write anything: "a scraper
-returns data and performs no side effects" is a property of its tool set, not a
-line in its prompt. Today there is one; fanning out across several and merging
-their results is unbuilt.
+The agent that searches for postings and reports **Findings**. Carries one
+search tool per **Job Board** — SEEK, Indeed and LinkedIn — and nothing else, so
+it has no way to write anything: "a scraper returns data and performs no side
+effects" is a property of its tool set, not a line in its prompt. Adding a board
+means adding a tool to `JOB_SCOUT_SEARCH_TOOLS`, which is what the scout's
+model-call budget is sized from.
+
+Three tools, but still one scout: it searches every board in turn within a
+single run and reports one merged list. Fanning out across several scouts and
+merging their results is unbuilt, and is a different thing.
 _Avoid_: scraper, crawler, search agent
 
 **Brief Writer**:
@@ -171,6 +176,32 @@ re-finds the advertisement: on a schedule, with no error and no trace.
 "when did the user last touch this" and never "when was this last seen" — that
 question is `last_seen_at`, which a Run does write.
 _Avoid_: state, stage, application status, pipeline
+
+**Job Board**:
+Where a **Posting** was advertised. Three today — SEEK, Indeed and LinkedIn —
+each reached by its own **Scout** tool over its own Apify actor, and each
+reaching one board's inventory and no other.
+
+**A Posting's board is derived from its URL, and is stored nowhere.**
+`postings` has no source column and does not want one: `postingId()` already
+derives a Posting's whole identity from its normalised URL, so the board is a
+function of a fact the row already carries. A column would be a second copy that
+can drift — a Run rewrites `url` on every sighting — and it would answer only
+for rows written after it existed, where deriving answers for every row ever
+recorded. `boardForHost()` is the one rule that turns a host into a board;
+`apps/dashboard/lib/postings/posting-source.ts` is the only thing that renders
+the answer, as the Source badge on `/briefings`, and a host no board claims
+shows as the bare hostname rather than as nothing.
+
+`JOB_BOARDS` in `packages/agents/src/job-boards.ts` is **not** a registry of
+tools and selects nothing: a board is listed there when its URLs need
+normalising, and its `trackingParameters` are the stamps that would otherwise
+give one advertisement two ids across two Runs.
+
+Not to be confused with **Search Criteria**'s `sources`, which is a list of
+boards the candidate follows, is context for ranking, and is explicitly not a
+filter — the scout searches every board it has a tool for whatever that says.
+_Avoid_: site, source (which means the `sources` criterion), search provider
 
 **Search Criteria**:
 What a candidate is looking for — titles, locations, keywords, exclusions,

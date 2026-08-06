@@ -93,10 +93,10 @@ unanswered — and an unanswered tool call is rejected on the next turn. `halt`
 answers each one with a `status:"error"` ToolMessage saying the budget ran out,
 so the transcript stays well-formed.
 
-| Budget                    | Value | Why                                                                                                                                                                                 |
-| ------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_MAX_LLM_CALLS`   | 5     | Sized for a question with one tool round trip                                                                                                                                       |
-| `JOB_SCOUT_MAX_LLM_CALLS` | 10    | A Scout makes several focused searches, one per role title and location; the default would divert it to `halt` mid-search and produce a partial answer that still looks well-formed |
+| Budget                    | Value | Why                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_MAX_LLM_CALLS`   | 5     | Sized for a question with one tool round trip                                                                                                                                                                                                                                                                                                                                    |
+| `JOB_SCOUT_MAX_LLM_CALLS` | 10    | The Scout's _floor_, not its budget. It makes one focused search per role title, location and **board**, so the worker sizes the real figure with `scoutLlmCallBudget()` — `titles × locations × boards + 3`, never below this and never above `MAX_SCOUT_LLM_CALLS`. The default would divert it to `halt` mid-search and produce a partial answer that still looks well-formed |
 
 The tool registry (`tools.ts`) is the other containment point. Duplicate tool
 names **throw at construction** rather than silently shadowing each other. After
@@ -125,6 +125,8 @@ flowchart LR
 
     subgraph catalog ["@workspace/agent-tools"]
         SEEK["seek_search"]
+        IND["indeed_search"]
+        LI["linkedin_search"]
         WEB["web_search"]
         TIME["get_current_time"]
     end
@@ -132,25 +134,41 @@ flowchart LR
     NONE["no tools at all"]
 
     SCOUT --> SEEK
+    SCOUT --> IND
+    SCOUT --> LI
     ASST --> WEB
     ASST --> TIME
     BW --> NONE
     CLW --> NONE
     PE --> NONE
 
-    SEEK --> APIFY["Apify actor<br/>unfenced-group/seek-com-au-scraper<br/>APIFY_TOKEN"]
-    APIFY --> LIVE["seek.com.au live inventory"]
+    SEEK --> RUN["apify-search.ts<br/>shared runner — APIFY_TOKEN"]
+    IND --> RUN
+    LI --> RUN
+    RUN --> A1["unfenced-group~seek-com-au-scraper"]
+    RUN --> A2["misceres~indeed-scraper"]
+    RUN --> A3["curious_coder~linkedin-jobs-scraper"]
+    A1 --> L1["seek.com.au live inventory"]
+    A2 --> L2["indeed.com live inventory"]
+    A3 --> L3["linkedin.com live inventory"]
     WEB --> TAV["Tavily REST API<br/>TAVILY_API_KEY"]
     TIME --> INTL["Intl.DateTimeFormat<br/>no network, no key"]
 ```
 
-| Agent                     | Tools                     | Why that set                                                                                                                                                                               |
-| ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `createJobScout`          | `[seekSearch]`            | Read-only **by construction**. With no tool that writes anything, "the Scout returns data and performs no side effects" is structural rather than a prompt rule someone can talk it out of |
-| `createBriefWriter`       | `[]`                      | Cannot search, so it cannot quietly supplement thin Findings with something half-remembered; cannot write, so uploading stays with the worker                                              |
-| `createCoverLetterWriter` | `[]`                      | Prompt-injection containment — see below                                                                                                                                                   |
-| `createProfileExtractor`  | `[]`                      | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                     |
-| `createAssistant`         | `allTools` + `extraTools` | The one genuinely general-purpose agent                                                                                                                                                    |
+**The three board tools are one implementation, not three.** `apify-search.ts`
+owns the token, the timeout, the result clamp, the failure split and the
+rendering; a board file supplies only an `ApifyBoardSpec` — an actor id, a
+request body and a field mapping. They take the same five inputs deliberately,
+so the model does not have to learn a different search per board. Adding a board
+is a spec and a line in `JOB_SCOUT_SEARCH_TOOLS`.
+
+| Agent                     | Tools                     | Why that set                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createJobScout`          | `JOB_SCOUT_SEARCH_TOOLS`  | One search tool per board — `seekSearch`, `indeedSearch`, `linkedinSearch`. Read-only **by construction**: with no tool that writes anything, "the Scout returns data and performs no side effects" is structural rather than a prompt rule someone can talk it out of. Three boards does not weaken that — each added tool is another reader |
+| `createBriefWriter`       | `[]`                      | Cannot search, so it cannot quietly supplement thin Findings with something half-remembered; cannot write, so uploading stays with the worker                                                                                                                                                                                                 |
+| `createCoverLetterWriter` | `[]`                      | Prompt-injection containment — see below                                                                                                                                                                                                                                                                                                      |
+| `createProfileExtractor`  | `[]`                      | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                        |
+| `createAssistant`         | `allTools` + `extraTools` | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                       |
 
 ### Why the Letter Writer and the Profile Extractor have no tools
 
@@ -189,19 +207,21 @@ sees the profile, handing them validated data.
 
 ### The same idea one level down
 
-`seek_search` narrows its own reach the same way. The Apify actor behind it
-accepts webhook, Telegram and Slack notification fields; the tool never sends
-them. Its Zod input schema is the Scout's entire reach — which is what keeps the
-no-side-effects property structural at the tool layer too.
+The board tools narrow their own reach the same way. The Apify actors behind them
+accept webhook, Telegram and Slack notification fields; no tool ever sends them.
+Each tool's Zod input schema is that board's entire reach — which is what keeps
+the no-side-effects property structural at the tool layer too, and putting the
+request body in one shared runner means it is one place to check rather than
+three.
 
 ### Two notes on the catalog
 
-- **`seek_search` is not in `allTools`.** `allTools` is
-  `[getCurrentTime, webSearch]`, and it is reached only through the wildcard
-  subpath `@workspace/agent-tools/seek-search` — which is how `job-scout.ts`
-  imports it. So the assistant, which carries `allTools`, cannot search SEEK.
-  Worth knowing before reading `allTools`' docstring, which still calls itself
-  "every tool in the catalog".
+- **The board tools are not in `allTools`.** `allTools` is
+  `[getCurrentTime, webSearch]`, and each board tool is reached only through its
+  wildcard subpath — `@workspace/agent-tools/seek-search` and its two neighbours,
+  which is how `job-scout.ts` imports them. So the assistant, which carries
+  `allTools`, cannot search any job board. Worth knowing before reading
+  `allTools`' docstring, which still calls itself "every tool in the catalog".
 - **Agents are `createX()` factories, never instances.** Building one constructs
   a model, which reads `OPENAI_API_KEY` and throws without it. A module-level
   instance would move that failure to import time and break any consumer that
@@ -350,5 +370,5 @@ down with it.
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `profile-extractor`, plus the two schema contracts — `findings` (Scout → Brief Writer) and `criteria` (Profile Extractor → whoever stores them) — and `cover-letter` and `posting-id` |
 | `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                            |
-| `packages/agent-tools` | `seek-search.ts`, `web-search.ts`, `time.ts`, and `index.ts` with `allTools`                                                                                                                                                                           |
+| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `web-search.ts`, `time.ts`, and `index.ts` with `allTools`                                                                                            |
 | `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                             |

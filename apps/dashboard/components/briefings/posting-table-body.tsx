@@ -11,6 +11,7 @@ import { PostingDetail } from "@/components/briefings/posting-detail"
 import { usePostingSelection } from "@/components/briefings/posting-selection"
 import type { PostingView } from "@/lib/postings/list-postings"
 import { POSTING_COLSPAN } from "@/lib/postings/posting-columns"
+import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import { Checkbox } from "@workspace/ui/components/checkbox"
 import { Skeleton } from "@workspace/ui/components/skeleton"
@@ -226,6 +227,31 @@ function PostingRow({
               <span aria-hidden="true">—</span>
               <span className="sr-only">Posting date not stated</span>
             </>
+          )}
+        </TableCell>
+
+        {/*
+          Which board found it, derived from the URL rather than stored — see
+          `lib/postings/posting-source.ts`.
+
+          The outline variant is not decoration: it marks a host no board in
+          `JOB_BOARDS` claimed, and the label beside it is that hostname. This
+          page is where a board missing from the registry becomes visible, so
+          the two states have to look different. An em-dash means the stored URL
+          would not parse at all, which is a third thing again.
+        */}
+        <TableCell>
+          {posting.source ? (
+            <Badge
+              variant={posting.source.recognised ? "secondary" : "outline"}
+            >
+              {posting.source.label}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">
+              <span aria-hidden="true">—</span>
+              <span className="sr-only">Source not recognised</span>
+            </span>
           )}
         </TableCell>
 

@@ -6,6 +6,7 @@ import {
 } from "@workspace/db"
 
 import { PAGE_SIZE, type PostingQuery } from "./posting-query"
+import { postingSource, type PostingSource } from "./posting-source"
 
 /**
  * One page of the Postings table.
@@ -50,6 +51,14 @@ export interface PostingView {
    * other. See {@link toView}.
    */
   postedAt?: string
+  /**
+   * Which job board this came from, derived from {@link PostingView.url} rather
+   * than stored — see `posting-source.ts` for why there is no column.
+   *
+   * Absent only when the stored URL will not parse, which is a different thing
+   * from a host no board claims: that still answers, with the hostname.
+   */
+  source?: PostingSource
   /** Lines copied from the advertisement. Empty when it carried none. */
   highlights: string[]
   /** Absent when the stored payload could not be read — see {@link toView}. */
@@ -320,6 +329,10 @@ interface PostingRow {
  */
 function toView(row: PostingRow, now: Date): PostingView {
   const parsed = PostingSchema.safeParse(row.payload)
+  // Independent of the parse above, deliberately: `url` is a projected column
+  // written by the same statement as the payload, so a Posting whose payload
+  // the schema no longer matches still knows which board it came from.
+  const source = postingSource(row.url)
 
   return {
     id: row.postingId,
@@ -328,6 +341,7 @@ function toView(row: PostingRow, now: Date): PostingView {
     location: row.location,
     url: row.url,
     status: toStatus(row.status),
+    ...(source ? { source } : {}),
     firstSeen: formatSeenAgo(row.firstSeenAt, now),
     firstSeenExact: formatSeenAt(row.firstSeenAt),
     lastSeen: formatSeenAgo(row.lastSeenAt, now),

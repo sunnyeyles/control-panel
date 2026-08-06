@@ -38,6 +38,11 @@ export interface PostingColumn {
    * `0006_posting_posted_at` stopped it being: the value lived only inside
    * `postings.payload`, so there was nothing for an `ORDER BY` to name. It is a
    * column now, and the heading sorts.
+   *
+   * `source` cannot sort, and not for that reason: it is derived from the URL's
+   * host at read time and stored nowhere, so there is no column for an
+   * `ORDER BY` to name at all — see `posting-source.ts` for why that is the
+   * design rather than an omission this migration could also fix.
    */
   sort?: PostingSort
 }
@@ -47,6 +52,7 @@ export const POSTING_COLUMNS: readonly PostingColumn[] = [
   { key: "company", label: "Company", sort: "company" },
   { key: "location", label: "Location" },
   { key: "postedAt", label: "Posted", sort: "posted" },
+  { key: "source", label: "Source" },
   { key: "letter", label: "Cover letter" },
 ]
 
