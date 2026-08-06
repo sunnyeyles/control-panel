@@ -2,7 +2,7 @@
 
 import { useActionState } from "react"
 import { ActionAlert } from "@/components/forms/action-alert"
-import { SubmitButton } from "@/components/forms/submit-button"
+import { SubmitButton } from "@workspace/ui/components/submit-button"
 
 import { updateJobScheduleAction } from "@/app/(app)/settings/actions"
 import { IntervalField } from "@/components/settings/interval-field"

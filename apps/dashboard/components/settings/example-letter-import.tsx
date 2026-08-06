@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react"
 import { ActionAlert } from "@/components/forms/action-alert"
-import { SubmitButton } from "@/components/forms/submit-button"
+import { SubmitButton } from "@workspace/ui/components/submit-button"
 
 import { importExampleLetterAction } from "@/app/(app)/settings/actions"
 import { IDLE } from "@/lib/actions/action-state"

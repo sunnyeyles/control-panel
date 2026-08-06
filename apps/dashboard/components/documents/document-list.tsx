@@ -3,6 +3,7 @@ import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import type { DocumentSummary } from "@/lib/documents/list-documents"
 import { formatCalendarDate } from "@/lib/format-calendar-date"
 import { Badge } from "@workspace/ui/components/badge"
+import { Empty, EmptyDescription } from "@workspace/ui/components/empty"
 import {
   Table,
   TableBody,
@@ -23,11 +24,11 @@ import {
 export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
   if (documents.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed p-8 text-center">
-        <p className="text-sm text-muted-foreground">
+      <Empty>
+        <EmptyDescription>
           No documents yet. Upload a CV to get started.
-        </p>
-      </div>
+        </EmptyDescription>
+      </Empty>
     )
   }
 

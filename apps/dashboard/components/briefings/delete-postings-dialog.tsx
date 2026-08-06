@@ -4,30 +4,26 @@ import { Suspense, use, useActionState, useState, type ReactNode } from "react"
 
 import { deletePostingsAction } from "@/app/(app)/briefings/actions"
 import { ActionError } from "@/components/forms/action-error"
-import { SubmitButton } from "@/components/forms/submit-button"
 
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
-import { Button } from "@workspace/ui/components/button"
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@workspace/ui/components/dialog"
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@workspace/ui/components/alert-dialog"
+import { SubmitButton } from "@workspace/ui/components/submit-button"
 
 /**
  * The one confirmation, for both the row's trash icon and the bulk bar.
  *
- * A plain `Dialog` rather than `alert-dialog`, which this repo's `packages/ui`
- * does not have — the same call `delete-document-button.tsx` makes, and for a
- * weaker reason than it gives: a Posting is a projection of what a Run found,
- * and a **Cover Letter** is versioned in S3, so the worst case here is a
- * redraft rather than a loss.
+ * A Posting is a projection of what a Run found, and a **Cover Letter** is
+ * versioned in S3, so the worst case here is a redraft rather than a loss.
  *
  * One component and not two, because the two entry points differ only in how
  * many ids they carry. Splitting them would put the copy that has to be right —
@@ -78,17 +74,17 @@ export function DeletePostingsDialog({
   const single = postingIds.length === 1
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
 
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
             {single
               ? "Delete this posting?"
               : `Delete ${postingIds.length} postings?`}
-          </DialogTitle>
-          <DialogDescription>
+          </AlertDialogTitle>
+          <AlertDialogDescription>
             {single
               ? `${postingTitle ?? "This posting"} will be removed from your postings.`
               : `${postingIds.length} postings will be removed from your postings.`}{" "}
@@ -109,8 +105,8 @@ export function DeletePostingsDialog({
             {single
               ? "A future briefing run that finds this advertisement again will add it back."
               : "A future briefing run that finds any of these advertisements again will add them back."}
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
 
         <form action={formAction}>
           {/*
@@ -131,21 +127,17 @@ export function DeletePostingsDialog({
 
           <ActionError state={state} className="mb-4" />
 
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Cancel
-              </Button>
-            </DialogClose>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
             <SubmitButton
               pending={pending}
               variant="destructive"
               label="Delete"
             />
-          </DialogFooter>
+          </AlertDialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 

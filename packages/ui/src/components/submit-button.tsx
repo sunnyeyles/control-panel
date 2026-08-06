@@ -1,3 +1,4 @@
+import * as React from "react"
 import type { ReactNode } from "react"
 
 import { Button } from "@workspace/ui/components/button"
@@ -10,14 +11,14 @@ import { Spinner } from "@workspace/ui/components/spinner"
  * style choice. A Server Action surfaces no progress events, so a bar would
  * either be fake or sit at zero, both of which read as the app having hung.
  *
- * `pending` is passed in rather than read from `useFormStatus()`. The forms here
- * already hold it from `useActionState`, and one of them — the enabled switch —
- * dispatches without a `<form>` at all, so there is no form status to read.
+ * `pending` is passed in rather than read from `useFormStatus()`. Callers
+ * already hold it from `useActionState`, and some dispatch without a `<form>`
+ * at all, so there is no form status to read.
  *
- * `disabled` composes with `pending` rather than replacing it: the uploader
- * disables on a client-side size check *and* while submitting.
+ * `disabled` composes with `pending` rather than replacing it: a caller may
+ * disable on a client-side check *and* while submitting.
  */
-export function SubmitButton({
+function SubmitButton({
   pending,
   label,
   pendingLabel,
@@ -29,8 +30,9 @@ export function SubmitButton({
   label: string
   /**
    * Shown in place of `label` while pending. Omit when the label is already
-   * short enough to leave alone — the delete button says "Delete" throughout,
-   * because a dialog that changes its own button text mid-confirm is worse.
+   * short enough to leave alone — a delete button often says "Delete"
+   * throughout, because a dialog that changes its own button text mid-confirm
+   * is worse.
    */
   pendingLabel?: string
   disabled?: boolean
@@ -47,3 +49,5 @@ export function SubmitButton({
     </Button>
   )
 }
+
+export { SubmitButton }
