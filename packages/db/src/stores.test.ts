@@ -7,7 +7,6 @@ import pg from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
-  artifactsForRun,
   claimAdHocRun,
   claimJob,
   coverLetterInstructions,
@@ -18,7 +17,6 @@ import {
   ensureUserForAuth,
   failRun,
   finishRun,
-  latestArtifactForJob,
   latestRunPerJob,
   pauseJob,
   POSTING_STATUSES,
@@ -388,7 +386,9 @@ describeWithDatabase("against a real database", () => {
       const artifact = await recordArtifact(prisma, runId, key)
 
       expect(artifact.objectKey).toBe(key)
-      expect(await artifactsForRun(prisma, runId)).toHaveLength(1)
+      expect(await prisma.artifact.findMany({ where: { runId } })).toHaveLength(
+        1
+      )
     })
 
     it("rejects a URL", async () => {
@@ -421,33 +421,6 @@ describeWithDatabase("against a real database", () => {
       await recordArtifact(prisma, runId, key)
 
       await expect(recordArtifact(prisma, runId, key)).rejects.toThrow()
-    })
-
-    it("finds the latest artifact of a successful run", async () => {
-      const job = await dueJob("artifact-latest")
-
-      const older = await claimOrFail(job)
-      await recordArtifact(
-        prisma,
-        older.runId,
-        `prod/${userId}/briefs/2026/07/30/a.md`
-      )
-      await finishRun(prisma, older.runId)
-
-      const refreshed = await prisma.job.findUnique({ where: { id: job.id } })
-      if (!refreshed?.nextRunAt) throw new Error("job lost its slot")
-
-      const newer = await claimOrFail({
-        ...refreshed,
-        nextRunAt: refreshed.nextRunAt,
-      })
-      const latestKey = `prod/${userId}/briefs/2026/07/31/b.md`
-      await recordArtifact(prisma, newer.runId, latestKey)
-      await finishRun(prisma, newer.runId)
-
-      expect((await latestArtifactForJob(prisma, job.id))?.objectKey).toBe(
-        latestKey
-      )
     })
   })
 

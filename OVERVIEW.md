@@ -202,11 +202,11 @@ flowchart TD
   became of it, running, failed, or too long in `running` to still be believed —
   and carries that briefing's **Run now** button, which is what makes the line
   worth watching. That is a status line and not a history: nothing lists more
-  than one Run per briefing and nothing can cancel one.
-  `latestArtifactForJob()` still has no caller outside its own tests, and the
-  briefings page deliberately does not use it — it orders on run start _and_
-  artifact creation, and stops being well defined once a run writes more than
-  one artifact.
+  than one Run per briefing and nothing can cancel one. There is no
+  "latest artifact for this job" helper either — once a run can write more than
+  one artifact, that query stops being well defined, and the briefings page
+  never needed it: briefs live under `prod:briefs`, which the dashboard cannot
+  read.
 
 ## Infrastructure
 

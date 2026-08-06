@@ -1,3 +1,9 @@
+/**
+ * LangGraph agent runtime: the graph, state, model, and tool registry.
+ *
+ * Take this package directly when a project brings its own prompt and tools.
+ * Named agents live in `@workspace/agents`.
+ */
 export {
   createAgent,
   DEFAULT_MAX_LLM_CALLS,
@@ -7,11 +13,7 @@ export {
   type CreateAgentOptions,
 } from "./agent.ts"
 
-export { getOpenAIApiKey } from "./env.ts"
-
 export { createModel, DEFAULT_MODEL, type ModelOptions } from "./model.ts"
-
-export { AgentState } from "./state.ts"
 
 export {
   createToolRegistry,

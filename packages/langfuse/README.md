@@ -45,7 +45,9 @@ mix their traces.
 `runWithLangfuseTrace(options, run)` wraps a multi-stage workflow in a single
 root trace and hands `run` a callback created inside that trace context, which
 nests every generation and tool call below the root. An error inside `run`
-marks the trace `ERROR` and rethrows.
+marks the trace `ERROR` and rethrows. Pass identity and tags once via
+`userId` / `sessionId` / `tags` / `traceMetadata` — the package fans
+`traceMetadata` into both attribute propagation and the root observation.
 
 `shutdownLangfuse()` delivers queued spans before a short-lived runtime exits.
 
