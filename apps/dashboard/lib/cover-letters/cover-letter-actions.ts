@@ -8,6 +8,10 @@ import {
   type NoBackgroundReason,
 } from "@/lib/cover-letters/candidate-background"
 import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
+import {
+  loadStoredPosting,
+  storedPostingMessage,
+} from "@/lib/postings/load-stored-posting"
 import type { Agent } from "@workspace/agents"
 import {
   assertDraftable,
@@ -21,7 +25,6 @@ import {
   coverLetterSystemPrompt,
   createCoverLetterWriter,
 } from "@workspace/agents/cover-letter-writer"
-import { PostingSchema, type Posting } from "@workspace/agents/findings"
 import { coverLetterInstructions, type PrismaClient } from "@workspace/db"
 import { createLangfuseCallback } from "@workspace/langfuse"
 import {
@@ -64,18 +67,12 @@ import { z } from "zod"
  *    `@workspace/user-storage` is a second line of defence rather than the only
  *    one.
  *
- * ⚠️ **The Posting is read from `postings.payload`, never from `runs.findings`,
- * and the smaller alternative was rejected on purpose.** Threading the row's
- * stored run id through the hidden field this action used to take would have
- * worked and been a smaller change. But recording Postings and recording
- * Findings are two independent non-fatal steps, so a Run can succeed with its
- * Postings recorded and its `findings` left NULL — the row would then name a
- * Run holding nothing to read back, and drafting would refuse an advertisement
- * plainly on the screen in front of the user. Reading the payload removes that
- * failure mode, removes the Run from the client surface entirely, and is what
- * makes property 2 structural rather than a comparison bolted beside a query.
- * The Run survives as provenance on the stored letter, where "which Run found
- * this" is still worth knowing and is still no part of any key.
+ * Properties 1 and 2 are held by `lib/postings/load-stored-posting.ts`, which
+ * this file used to contain and which the tailored-resume actions now share —
+ * including why the Posting is read from `postings.payload` and never from
+ * `runs.findings`. The reasoning lives there; what stays here is that this
+ * action passes it one identifier out of the form and the caller's own id, and
+ * nothing else.
  *
  * The candidate's saved instructions extend that first property rather than
  * qualifying it. They are read from the database, keyed on the session's user
@@ -103,19 +100,6 @@ export { POSTING_NOT_FOUND }
 
 /** Reachable only by posting a form directly; the buttons always send it. */
 const BAD_REQUEST = "That posting could not be identified."
-
-/**
- * The row is there and the Posting stored on it will not parse.
- *
- * `lib/postings/list-postings.ts` degrades such a row to its projected columns
- * and renders it anyway, so a Posting in this state is on the page and looks
- * ordinary. Here there is nothing to degrade to: `payload` *is* what the letter
- * would be written from, and `title`/`company`/`location`/`url` are a
- * projection for a table rather than an advertisement. Refuse, and say which
- * half is missing rather than reporting it as a Posting nobody ever found.
- */
-const POSTING_UNREADABLE =
-  "The details this posting was found with could not be read, so there is nothing to write a letter from."
 
 /**
  * The Posting id shape, from `cover-letter-ref.ts`.
@@ -186,65 +170,6 @@ const saveSchema = z.object({
   markdown: z.string(),
 })
 
-type StoredPosting =
-  | { status: "found"; posting: Posting; lastSeenRunId: string }
-  | { status: "not-found" | "unreadable" | "failed" }
-
-/**
- * Reads one owned Posting and validates the payload written by its producer.
- *
- * Both drafting and manual creation need the same ownership boundary and
- * provenance. Keeping it here means a new path cannot accidentally accept
- * title, company, URL, or a Run id from a form.
- */
-async function loadStoredPosting(
-  prisma: PrismaClient,
-  userId: string,
-  postingId: string
-): Promise<StoredPosting> {
-  let row
-  try {
-    row = await prisma.posting.findUnique({
-      where: { userId_postingId: { userId, postingId } },
-      select: { payload: true, lastSeenRunId: true },
-    })
-  } catch (error) {
-    console.error("cover-letters: could not load the posting", error)
-    return { status: "failed" }
-  }
-
-  if (!row) return { status: "not-found" }
-
-  const parsed = PostingSchema.safeParse(row.payload)
-  if (!parsed.success) {
-    console.error("cover-letters: the stored posting is unreadable", postingId)
-    return { status: "unreadable" }
-  }
-
-  return {
-    status: "found",
-    posting: parsed.data,
-    lastSeenRunId: row.lastSeenRunId,
-  }
-}
-
-function storedPostingMessage(
-  result: Exclude<StoredPosting, { status: "found" }>
-): string {
-  switch (result.status) {
-    case "not-found":
-      return POSTING_NOT_FOUND
-    case "unreadable":
-      return POSTING_UNREADABLE
-    case "failed":
-      return "Something went wrong."
-    default: {
-      const _exhaustive: never = result.status
-      return _exhaustive
-    }
-  }
-}
-
 export interface CoverLetterActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
   getUser: () => Promise<CurrentUser>
@@ -313,7 +238,8 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     const stored = await loadStoredPosting(
       deps.getPrisma(),
       caller.userId,
-      parsed.data.postingId
+      parsed.data.postingId,
+      "cover-letters"
     )
     if (stored.status !== "found") return fail(storedPostingMessage(stored))
 
@@ -460,7 +386,8 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     const stored = await loadStoredPosting(
       deps.getPrisma(),
       caller.userId,
-      parsed.data.postingId
+      parsed.data.postingId,
+      "cover-letters"
     )
     if (stored.status !== "found") return fail(storedPostingMessage(stored))
 

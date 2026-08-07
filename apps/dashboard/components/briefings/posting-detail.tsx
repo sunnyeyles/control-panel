@@ -10,10 +10,19 @@ import { CoverLetterDownloadLink } from "@/components/briefings/cover-letter-dow
 import { CreateCoverLetterButton } from "@/components/briefings/create-cover-letter-button"
 import { DraftCoverLetterButton } from "@/components/briefings/draft-cover-letter-button"
 import { EditCoverLetterButton } from "@/components/briefings/edit-cover-letter-button"
+import { EditTailoredResumeButton } from "@/components/briefings/edit-tailored-resume-button"
+import { GenerateTailoredResumeButton } from "@/components/briefings/generate-tailored-resume-button"
 import { PostingStatusSelect } from "@/components/briefings/posting-status-select"
+import { TailoredResumeDownloadLink } from "@/components/briefings/tailored-resume-download-link"
+import { TailoredResumePdfButton } from "@/components/briefings/tailored-resume-pdf-button"
+import {
+  useTailoredResume,
+  type TailoredResumePromise,
+} from "@/components/briefings/use-tailored-resume"
 import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
 import type { PostingView } from "@/lib/postings/list-postings"
 import type { PostingDetailView } from "@/lib/postings/load-posting-detail"
+import { tailoredResumeFilename } from "@/lib/tailored-resumes/tailored-resume-ref"
 import { Badge } from "@workspace/ui/components/badge"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 import { cn } from "@workspace/ui/lib/utils"
@@ -37,7 +46,8 @@ export type PostingDetailState =
  * location, when the advertisement was posted, and whether a letter exists.
  * Everything a row has no width for lives here: the status control, the summary,
  * the highlights copied from the advertisement, why it matched, which Briefing
- * found it, both sighting times, and all three Cover Letter controls.
+ * found it, both sighting times, all three Cover Letter controls, and the
+ * Tailored Resume controls beneath them.
  *
  * ⚠️ **"What the row has no width for" is a function of the viewport, so part of
  * this panel appears only on a narrow one.** Location, Posted and Source are
@@ -57,15 +67,21 @@ export type PostingDetailState =
  * page of prose in every navigation that nobody read. See
  * `lib/postings/load-posting-detail.ts`.
  *
- * Opening a letter for editing has always worked this way:
- * {@link EditCoverLetterButton} fetches the body on demand into the shared
- * `FileEditorDialog`, so the table never server-renders every letter's markdown.
+ * Opening a document for editing has always worked this way:
+ * {@link EditCoverLetterButton} and {@link EditTailoredResumeButton} fetch the
+ * body on demand into the shared `FileEditorDialog`, so the table never
+ * server-renders anyone's markdown.
  *
- * ⚠️ **All three letter controls live here, together.** Editing is offered
- * nowhere else in the app, so leaving it behind when moving drafting would
- * delete the letter editor, and nothing would fail to compile to say so. The
- * status select is now in the same position: this is the only place in the app
- * it is rendered, and the only caller of `setPostingStatusAction`.
+ * ⚠️ **Every letter and resume control lives here, together.** Editing either is
+ * offered nowhere else in the app, so leaving it behind when moving generation
+ * would delete the editor, and nothing would fail to compile to say so. The
+ * status select is in the same position: this is the only place in the app it is
+ * rendered, and the only caller of `setPostingStatusAction`.
+ *
+ * ⚠️ **The Tailored Resume has no table column, and the Cover Letter does.**
+ * "Have I written to this one yet" is a question worth scanning a page for;
+ * "have I tailored my CV for this one" is asked once you are already reading a
+ * Posting. A sixth column would narrow the five that carry the advertisement.
  *
  * `"use client"` is explicit rather than inherited. The file was always in the
  * client bundle — the table body imports it — and it now calls a hook, so the
@@ -75,6 +91,7 @@ export function PostingDetail({
   posting,
   detail,
   letters,
+  tailoredResumes,
 }: {
   posting: PostingView
   /**
@@ -96,6 +113,18 @@ export function PostingDetail({
    * the first paint must not block the panel it sits in.
    */
   letters: CoverLetterPromise
+  /**
+   * Every tailored resume this user has, still in flight.
+   *
+   * A **second** promise rather than one merged object, because the two loads
+   * fail independently: the letters are twenty-five `HeadObject` calls and this
+   * is one `ListObjectsV2`, so one can be unreadable while the other is fine,
+   * and each section says so for itself. Merging them would make either failure
+   * blank both.
+   *
+   * Note it is not scoped to this page — see `TailoredResumePromise`.
+   */
+  tailoredResumes: TailoredResumePromise
 }) {
   /**
    * `summary` is absent exactly when the stored payload no longer matched the
@@ -335,6 +364,21 @@ export function PostingDetail({
           <CoverLetterControls posting={posting} letters={letters} />
         </Suspense>
       </Section>
+
+      {/*
+        Its own `<Suspense>`, not shared with the letter's. `use()` suspends the
+        whole component that calls it, and the two loads are independent — one
+        boundary would hold the letter controls behind a `ListObjectsV2` that has
+        nothing to do with them, and vice versa.
+      */}
+      <Section title="Tailored resume">
+        <Suspense fallback={<Skeleton className="h-8 w-56" />}>
+          <TailoredResumeControls
+            posting={posting}
+            tailoredResumes={tailoredResumes}
+          />
+        </Suspense>
+      </Section>
     </div>
   )
 }
@@ -446,6 +490,104 @@ function CoverLetterControls({
             postingId={letter.postingId}
             displayName={posting.title}
             filename={filename}
+          />
+        ) : null}
+      </div>
+    </>
+  )
+}
+
+/**
+ * What has been tailored for this Posting, and what can be done about it.
+ *
+ * The letter's counterpart, holding the same three-state rule for the same
+ * reason: with the store unreadable, offering *Generate* would invite someone to
+ * spend a model call replacing a document this panel simply could not see.
+ *
+ * ⚠️ **Every name shown here comes from `posting`, not from storage.** The
+ * lookup carries a Posting id and a date and nothing else, because
+ * `loadTailoredResumeRows` reads the whole set with one `ListObjectsV2` and a
+ * listing carries no user metadata. The title and company the download link and
+ * the PDF button need are already on this component's props — the same values,
+ * out of Postgres rather than S3.
+ *
+ * ⚠️ **Two ways to a PDF, and neither is redundant.** The button below makes one
+ * from the stored markdown without opening anything; the editor's own *Download
+ * PDF* makes one from whatever is on screen, including unsaved edits. Removing
+ * the first would mean opening an editor to get a file, and removing the second
+ * would mean saving before you could see how an edit prints.
+ */
+function TailoredResumeControls({
+  posting,
+  tailoredResumes,
+}: {
+  posting: PostingView
+  tailoredResumes: TailoredResumePromise
+}) {
+  const lookup = useTailoredResume(posting.id, tailoredResumes)
+
+  if (lookup.state === "unavailable") {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Your tailored resumes could not be loaded, so whether one has already
+        been generated for this posting is unknown. Try again in a moment.
+      </p>
+    )
+  }
+
+  const resume = lookup.state === "generated" ? lookup.resume : undefined
+
+  return (
+    <>
+      {resume ? (
+        <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <span>Generated {resume.generatedAt}.</span>
+          <TailoredResumeDownloadLink
+            postingId={posting.id}
+            title={posting.title}
+            company={posting.company}
+          />
+          <TailoredResumePdfButton
+            postingId={posting.id}
+            title={posting.title}
+            company={posting.company}
+          />
+        </p>
+      ) : (
+        // Said once, where the decision is made, rather than in the page-level
+        // paragraph above the table: a tailored resume is a rearrangement of a
+        // document the user wrote, and the one failure mode worth naming is the
+        // model quietly adding something. Reading it against the original is
+        // the whole of what the user has to do about that.
+        <p className="text-sm text-muted-foreground">
+          Rewrites the newest document you have labelled <em>Resume</em> for
+          this advertisement — reordering and re-emphasising what is already in
+          it, never adding to it. Read the result against your own CV before you
+          send it.
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-start gap-2">
+        <GenerateTailoredResumeButton
+          postingId={posting.id}
+          title={posting.title}
+          generated={resume !== undefined}
+        />
+
+        {/*
+          Conditional for the reason the download link is: with nothing
+          generated there is nothing to edit, and the editor would open on an
+          empty document.
+        */}
+        {resume ? (
+          <EditTailoredResumeButton
+            postingId={posting.id}
+            displayName={posting.title}
+            filename={tailoredResumeFilename({
+              postingId: posting.id,
+              title: posting.title,
+              company: posting.company,
+            })}
           />
         ) : null}
       </div>

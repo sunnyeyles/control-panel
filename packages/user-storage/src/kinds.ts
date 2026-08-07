@@ -47,6 +47,35 @@ export const OBJECT_KINDS = {
   },
 
   /**
+   * Resumes rewritten for one Posting, from the candidate's own uploaded CV.
+   *
+   * ⚠️ **Not the `resumes` kind, and the distance between them is the reason.**
+   * `resumes` is the shelf uploads go on: seven file types, `attachment`,
+   * addressed by an id this application minted for a file it did not produce.
+   * These are generated markdown addressed by Posting, in the shape a Cover
+   * Letter is — one file type, `inline`, written by this application from a
+   * document the user gave it. Putting them on the same shelf would list them
+   * back to the user as their own uploads and would widen that kind's allowlist
+   * to cover text nobody uploaded.
+   *
+   * `inline` for the reason `cover-letters` is: nothing is served from the
+   * bucket's origin, and these bytes did not arrive from outside, so the
+   * stored-XSS argument that makes `resumes` an `attachment` does not apply.
+   *
+   * Retention is the letters posture, not the briefs one — `expiration_days =
+   * null` in `infra/aws/modules/user-storage/variables.tf`. A brief is
+   * regenerated daily and expiring a year of them is housekeeping; a tailored
+   * resume is generated once for one advertisement the user may already have
+   * applied to with it. Deleting it is data loss.
+   */
+  "tailored-resumes": {
+    contentTypes: {
+      ".md": "text/markdown; charset=utf-8",
+    },
+    disposition: "inline",
+  },
+
+  /**
    * Documents the user uploaded themselves — CVs and the like.
    *
    * `attachment` matters here in a way it does not for briefs. These bytes

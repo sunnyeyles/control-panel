@@ -1,3 +1,8 @@
+import {
+  postingDocumentFilename,
+  type PostingDocumentNameParts,
+} from "@/lib/postings/posting-document-filename"
+
 /**
  * Addressing one stored cover letter, and naming the file a download produces.
  *
@@ -49,53 +54,16 @@ export function isPostingId(value: unknown): value is string {
 }
 
 /** What is known about the Posting a letter was drafted for, for naming it. */
-export interface CoverLetterNameParts {
-  postingId: string
-  title?: string
-  company?: string
-}
+export type CoverLetterNameParts = PostingDocumentNameParts
 
 /**
  * The filename a download is offered under.
  *
- * The Posting id is a hex digest, so a download named after it is a file nobody
- * can identify a week later in their downloads folder. Title and company come
- * from object metadata, which the store already stripped to printable ASCII on
- * the way in ({@link ../../../packages/user-storage/src/metadata.ts}) — but this
- * still restricts them further, because a filename is a filename: path
- * separators would suggest a directory to whatever unpacks it, and the download
- * route's own `contentDisposition()` escaping is the header's concern rather
- * than this one's.
- *
- * Falls back to the id when nothing usable survives, which is what a letter
- * written before provenance existed, or one whose `head()` failed, will hit.
+ * The naming rule moved to `lib/postings/posting-document-filename.ts` when the
+ * tailored resume needed the identical one — the two differ by a label and by
+ * nothing else, and the character cleaning inside it is the half worth having
+ * one copy of. This stays as the name the letter's own call sites use.
  */
 export function coverLetterFilename(parts: CoverLetterNameParts): string {
-  const subject = [parts.title, parts.company]
-    .map((part) => cleanNamePart(part))
-    .filter((part) => part.length > 0)
-    .join(" - ")
-
-  return subject.length > 0
-    ? `Cover letter - ${subject}.md`
-    : `Cover letter - ${parts.postingId}.md`
-}
-
-/**
- * A metadata value as a filename can carry it.
- *
- * Path separators and the characters Windows refuses become spaces rather than
- * being deleted, so `A/B` reads as two words instead of silently becoming `AB`.
- * Runs of whitespace collapse for the same reason a title with a stray tab in
- * it should not produce a filename with a gap in the middle.
- */
-function cleanNamePart(value: string | undefined): string {
-  if (!value) return ""
-
-  return value
-    .replace(/[/\\:*?"<>|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80)
-    .trim()
+  return postingDocumentFilename("Cover letter", parts)
 }

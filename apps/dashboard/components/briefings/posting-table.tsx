@@ -1,4 +1,5 @@
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
+import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import { PostingBulkBar } from "@/components/briefings/posting-bulk-bar"
 import { PostingColumnHeading } from "@/components/briefings/posting-column-heading"
 import { PostingPagination } from "@/components/briefings/posting-pagination"
@@ -48,6 +49,7 @@ export function PostingTable({
   page,
   query,
   letters,
+  tailoredResumes,
   counts,
 }: {
   page: PostingPage
@@ -61,6 +63,16 @@ export function PostingTable({
    * shape exists to remove. See `cover-letter-cell.tsx`.
    */
   letters: CoverLetterPromise
+  /**
+   * The user's tailored resumes, still in flight.
+   *
+   * ⚠️ **A second promise rather than one merged object.** The two are read from
+   * different places by different means — twenty-five `HeadObject` calls against
+   * one `ListObjectsV2` — so they fail independently, and each section of the
+   * detail reports its own failure. It is likewise never awaited on the way
+   * down. See `use-tailored-resume.ts`.
+   */
+  tailoredResumes: TailoredResumePromise
   /**
    * What the strip knows, for choosing among the three empty states.
    *
@@ -149,7 +161,11 @@ export function PostingTable({
               </TableRow>
             </TableHeader>
 
-            <PostingTableBody postings={page.postings} letters={letters} />
+            <PostingTableBody
+              postings={page.postings}
+              letters={letters}
+              tailoredResumes={tailoredResumes}
+            />
           </Table>
         </div>
 
