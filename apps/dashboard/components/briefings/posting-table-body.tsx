@@ -13,6 +13,7 @@ import {
   type PostingDetailState,
 } from "@/components/briefings/posting-detail"
 import { usePostingSelection } from "@/components/briefings/posting-selection"
+import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import type { PostingView } from "@/lib/postings/list-postings"
 import { POSTING_COLSPAN } from "@/lib/postings/posting-columns"
 import { Badge } from "@workspace/ui/components/badge"
@@ -38,18 +39,21 @@ import { ChevronRightIcon, Trash2Icon } from "lucide-react"
  * Opening a different posting collapses the previous one, because there is a
  * single expanded id.
  *
- * ⚠️ **`letters` is passed straight through and never read here.** It is a
- * promise, and `use()` suspends whatever component calls it — reading it in this
- * component would hold the entire table behind the page's S3 round trips and
- * undo the reason the page stopped awaiting them. Only the leaves read it, each
- * behind its own boundary. See `cover-letter-cell.tsx`.
+ * ⚠️ **`letters` and `tailoredResumes` are passed straight through and never
+ * read here.** Both are promises, and `use()` suspends whatever component calls
+ * it — reading either in this component would hold the entire table behind the
+ * page's S3 round trips and undo the reason the page stopped awaiting them. Only
+ * the leaves read them, each behind its own boundary. See `cover-letter-cell.tsx`
+ * and `use-tailored-resume.ts`.
  */
 export function PostingTableBody({
   postings,
   letters,
+  tailoredResumes,
 }: {
   postings: readonly PostingView[]
   letters: CoverLetterPromise
+  tailoredResumes: TailoredResumePromise
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const { details, warm } = usePostingDetails()
@@ -61,6 +65,7 @@ export function PostingTableBody({
           key={posting.id}
           posting={posting}
           letters={letters}
+          tailoredResumes={tailoredResumes}
           detail={details[posting.id] ?? PENDING}
           onWarm={() => warm(posting.id)}
           expanded={expandedId === posting.id}
@@ -190,6 +195,7 @@ const PENDING: PostingDetailState = { status: "loading" }
 function PostingRow({
   posting,
   letters,
+  tailoredResumes,
   detail,
   onWarm,
   expanded,
@@ -197,6 +203,7 @@ function PostingRow({
 }: {
   posting: PostingView
   letters: CoverLetterPromise
+  tailoredResumes: TailoredResumePromise
   /** This row's fetched detail, or where that fetch has got to. */
   detail: PostingDetailState
   /**
@@ -423,6 +430,7 @@ function PostingRow({
               posting={posting}
               detail={detail}
               letters={letters}
+              tailoredResumes={tailoredResumes}
             />
           </TableCell>
         </TableRow>

@@ -2,6 +2,7 @@ import { S3Client } from "@aws-sdk/client-s3"
 import {
   getDevCoverLetterStore,
   getDevResumeStore,
+  getDevTailoredResumeStore,
 } from "@/lib/dev/fake-stores"
 import { devMockEnabled } from "@/lib/dev/mode"
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider"
@@ -9,9 +10,11 @@ import {
   createCoverLetterStore,
   createResumeStore,
   createS3UserObjectStore,
+  createTailoredResumeStore,
   readUserStorageConfig,
   type CoverLetterStore,
   type ResumeStore,
+  type TailoredResumeStore,
   type UserObjectStore,
   type UserStorageConfig,
 } from "@workspace/user-storage"
@@ -43,6 +46,7 @@ import {
 let objects: UserObjectStore | undefined
 let resumes: ResumeStore | undefined
 let coverLetters: CoverLetterStore | undefined
+let tailoredResumes: TailoredResumeStore | undefined
 
 /**
  * The role the memoized client assumes, or `undefined` for the default chain.
@@ -100,11 +104,33 @@ export function getCoverLetterStore(): CoverLetterStore {
 }
 
 /**
- * The one client both facades share.
+ * Resumes this app rewrites for one Posting.
  *
- * Split out of `getResumeStore` when the second facade arrived: two independent
- * memos would have meant two `S3Client`s, two connection pools, and two
- * opportunities for one of them to be left pinned to a stale credential branch.
+ * A third facade over the **same** client and the same credentials. The
+ * dashboard's Vercel role holds `prod:resumes`, `prod:cover-letters` and
+ * `prod:tailored-resumes`, and still not `prod:briefs`.
+ *
+ * ⚠️ **The grant is Terraform, not TypeScript** — the same warning as the
+ * letters above, and it is not hypothetical here: this kind is new, so until
+ * `terraform -chdir=infra/aws apply` has run there is no lifecycle rule and no
+ * role attachment for it, and the first **Generate tailored resume** click 403s
+ * with nothing more specific on screen than "Document storage is unavailable".
+ */
+export function getTailoredResumeStore(): TailoredResumeStore {
+  if (devMockEnabled()) return getDevTailoredResumeStore()
+
+  const store = getObjectStore()
+  tailoredResumes ??= createTailoredResumeStore(store)
+  return tailoredResumes
+}
+
+/**
+ * The one client every facade shares.
+ *
+ * Split out of `getResumeStore` when the second facade arrived: independent
+ * memos would have meant several `S3Client`s, several connection pools, and
+ * several opportunities for one of them to be left pinned to a stale credential
+ * branch.
  */
 function getObjectStore(): UserObjectStore {
   // ⚠️ **The credential source is recomputed every call; only the client is
@@ -133,9 +159,12 @@ function getObjectStore(): UserObjectStore {
 
     // The facades close over the client, so a rebuilt client must invalidate
     // them too — otherwise a role change would swap the credentials underneath
-    // and leave both facades holding the old ones.
+    // and leave the facades holding the old ones. **Every facade above needs a
+    // line here**; one left out is a store that keeps assuming the previous
+    // role for the life of the instance, and nothing anywhere would say so.
     resumes = undefined
     coverLetters = undefined
+    tailoredResumes = undefined
   }
 
   return objects

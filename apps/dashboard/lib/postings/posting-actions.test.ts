@@ -5,6 +5,7 @@ import {
   StorageUnavailableError,
   type CoverLetterRef,
   type CoverLetterStore,
+  type TailoredResumeStore,
 } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -172,35 +173,47 @@ class FakeDb {
 }
 
 /**
- * A stand-in for `CoverLetterStore` that only knows how to delete.
+ * A stand-in for one Posting-addressed document store that only knows how to
+ * delete.
  *
  * `object_not_found` is the ordinary case rather than an error — most Postings
- * have no letter — so the fake throws it for any id it was not told about, and
- * the tests assert the action treats that as a success.
+ * have neither a cover letter nor a tailored resume — so the fake throws it for
+ * any id it was not told about, and the tests assert the action treats that as a
+ * success.
+ *
+ * One class for both stores because their refs are identical (`(userId,
+ * postingId)`) and the delete path treats them the same way. `label` is what
+ * lands in the shared log, so an assertion can pin the *order* the two deletes
+ * and the row deletion happen in — which is the property that keeps an object
+ * from being orphaned by a row that went first.
  */
-class FakeLetters {
+class FakeDocuments {
   readonly deleted: CoverLetterRef[] = []
   private readonly present = new Set<string>()
   private readonly broken = new Set<string>()
 
-  constructor(private readonly log: string[]) {}
+  constructor(
+    private readonly log: string[],
+    private readonly label: string,
+    private readonly kind: string
+  ) {}
 
-  withLetter(postingId: string): this {
+  with(postingId: string): this {
     this.present.add(postingId)
     return this
   }
 
-  /** A letter S3 refuses to delete for a reason that is not "no such object". */
+  /** A document S3 refuses to delete for a reason that is not "no such object". */
   unavailable(postingId: string): this {
     this.present.add(postingId)
     this.broken.add(postingId)
     return this
   }
 
-  asStore(): CoverLetterStore {
+  asStore(): CoverLetterStore & TailoredResumeStore {
     return {
       delete: async (ref: CoverLetterRef) => {
-        this.log.push(`letter:${ref.postingId}`)
+        this.log.push(`${this.label}:${ref.postingId}`)
 
         if (this.broken.has(ref.postingId)) {
           throw new StorageUnavailableError("s3 is having a moment")
@@ -208,18 +221,19 @@ class FakeLetters {
 
         if (!this.present.has(ref.postingId)) {
           throw new ObjectNotFoundError(
-            `prod/${ref.userId}/cover-letters/${ref.postingId}.md`
+            `prod/${ref.userId}/${this.kind}/${ref.postingId}.md`
           )
         }
 
         this.deleted.push(ref)
       },
-    } as unknown as CoverLetterStore
+    } as unknown as CoverLetterStore & TailoredResumeStore
   }
 }
 
 let store: FakeDb
-let letters: FakeLetters
+let letters: FakeDocuments
+let tailoredResumes: FakeDocuments
 
 beforeEach(() => {
   store = new FakeDb()
@@ -230,7 +244,8 @@ beforeEach(() => {
       payload: { ...PAYLOAD, summary: "A stranger's advertisement." },
     })
 
-  letters = new FakeLetters(store.log)
+  letters = new FakeDocuments(store.log, "letter", "cover-letters")
+  tailoredResumes = new FakeDocuments(store.log, "resume", "tailored-resumes")
 
   vi.spyOn(console, "error").mockImplementation(() => {})
 })
@@ -240,6 +255,7 @@ function actionsFor(user: CurrentUser) {
     getUser: async () => user,
     getPrisma: () => store.asPrisma(),
     getCoverLetters: () => letters.asStore(),
+    getTailoredResumes: () => tailoredResumes.asStore(),
     now: () => NOW,
     newResetKey: () => RESET_KEY,
   })
@@ -288,6 +304,7 @@ describe("the gate", () => {
       },
       getPrisma: () => store.asPrisma(),
       getCoverLetters: () => letters.asStore(),
+      getTailoredResumes: () => tailoredResumes.asStore(),
     })
 
     const result = await actions.setPostingStatus(IDLE, statusForm())
@@ -421,6 +438,7 @@ describe("someone else's Posting", () => {
           },
         }) as unknown as PrismaClient,
       getCoverLetters: () => letters.asStore(),
+      getTailoredResumes: () => tailoredResumes.asStore(),
       now: () => NOW,
       newResetKey: () => RESET_KEY,
     })
@@ -552,7 +570,13 @@ describe("deleting postings", () => {
         status: "success",
         message: "Deleted 1 posting.",
       })
-      expect(store.log).toEqual([`letter:${POSTING_ID}`, `row:${POSTING_ID}`])
+      // One pass per distinct id, not per submitted field: both documents are
+      // attempted once each, and the row once.
+      expect(store.log).toEqual([
+        `letter:${POSTING_ID}`,
+        `resume:${POSTING_ID}`,
+        `row:${POSTING_ID}`,
+      ])
     })
   })
 
@@ -602,18 +626,22 @@ describe("deleting postings", () => {
 
   describe("the cover letter", () => {
     it("is deleted before the row, so a storage failure cannot strand it", async () => {
-      letters.withLetter(POSTING_ID)
+      letters.with(POSTING_ID)
 
       await actionsFor(SIGNED_IN).deletePostings(IDLE, deleteForm(POSTING_ID))
 
-      expect(store.log).toEqual([`letter:${POSTING_ID}`, `row:${POSTING_ID}`])
+      expect(store.log).toEqual([
+        `letter:${POSTING_ID}`,
+        `resume:${POSTING_ID}`,
+        `row:${POSTING_ID}`,
+      ])
       expect(letters.deleted).toEqual([
         { userId: USER_ID, postingId: POSTING_ID },
       ])
     })
 
     it("is addressed with the session's user id, never the form's", async () => {
-      letters.withLetter(POSTING_ID)
+      letters.with(POSTING_ID)
 
       const data = deleteForm(POSTING_ID)
       data.set("userId", OTHER_USER_ID)
@@ -638,7 +666,7 @@ describe("deleting postings", () => {
 
     it("failing for any other reason leaves its Posting on the page", async () => {
       store.posting({ postingId: SECOND_POSTING_ID })
-      letters.unavailable(POSTING_ID).withLetter(SECOND_POSTING_ID)
+      letters.unavailable(POSTING_ID).with(SECOND_POSTING_ID)
 
       const result = await actionsFor(SIGNED_IN).deletePostings(
         IDLE,
@@ -655,6 +683,98 @@ describe("deleting postings", () => {
 
     it("failing for every one deletes nothing and says so", async () => {
       letters.unavailable(POSTING_ID)
+
+      const result = await actionsFor(SIGNED_IN).deletePostings(
+        IDLE,
+        deleteForm(POSTING_ID)
+      )
+
+      expect(result).toMatchObject({ status: "error" })
+      expect(store.deletes).toHaveLength(0)
+      expect(store.find(POSTING_ID)).toBeDefined()
+    })
+  })
+
+  /**
+   * A Posting carries two documents, and both are keyed on its id — so a delete
+   * that removed only one would leave an object nothing in the app can any
+   * longer address, because the Posting whose id was its key is gone.
+   *
+   * Every case here is the letter's own, asked of the other store. They are not
+   * redundant: the two travel through one `Promise.allSettled` and are folded
+   * into one "is this Posting removable" answer, so an asymmetry — one store
+   * skipped when the other misses, one failure not counted — is a real and
+   * invisible way for this to be wrong.
+   */
+  describe("the tailored resume", () => {
+    it("is deleted before the row, like the letter", async () => {
+      tailoredResumes.with(POSTING_ID)
+
+      await actionsFor(SIGNED_IN).deletePostings(IDLE, deleteForm(POSTING_ID))
+
+      expect(store.log).toEqual([
+        `letter:${POSTING_ID}`,
+        `resume:${POSTING_ID}`,
+        `row:${POSTING_ID}`,
+      ])
+      expect(tailoredResumes.deleted).toEqual([
+        { userId: USER_ID, postingId: POSTING_ID },
+      ])
+    })
+
+    it("is addressed with the session's user id, never the form's", async () => {
+      tailoredResumes.with(POSTING_ID)
+
+      const data = deleteForm(POSTING_ID)
+      data.set("userId", OTHER_USER_ID)
+
+      await actionsFor(SIGNED_IN).deletePostings(IDLE, data)
+
+      expect(tailoredResumes.deleted).toEqual([
+        { userId: USER_ID, postingId: POSTING_ID },
+      ])
+    })
+
+    /**
+     * ⚠️ **The case that would orphan an object.** A Posting with a tailored
+     * resume and no cover letter is ordinary — the two are generated
+     * independently — and the letter's delete rejects with `object_not_found`.
+     * Issuing the pair with `allSettled` rather than `all` is what keeps that
+     * rejection from skipping the resume's delete.
+     */
+    it("is still deleted when the Posting has no cover letter", async () => {
+      tailoredResumes.with(POSTING_ID)
+
+      const result = await actionsFor(SIGNED_IN).deletePostings(
+        IDLE,
+        deleteForm(POSTING_ID)
+      )
+
+      expect(result).toMatchObject({ status: "success" })
+      expect(tailoredResumes.deleted).toEqual([
+        { userId: USER_ID, postingId: POSTING_ID },
+      ])
+      expect(store.find(POSTING_ID)).toBeUndefined()
+    })
+
+    /** And the mirror of it: a letter with no tailored resume beside it. */
+    it("not existing does not stop the letter being deleted", async () => {
+      letters.with(POSTING_ID)
+
+      const result = await actionsFor(SIGNED_IN).deletePostings(
+        IDLE,
+        deleteForm(POSTING_ID)
+      )
+
+      expect(result).toMatchObject({ status: "success" })
+      expect(letters.deleted).toEqual([
+        { userId: USER_ID, postingId: POSTING_ID },
+      ])
+      expect(store.find(POSTING_ID)).toBeUndefined()
+    })
+
+    it("failing for any other reason leaves its Posting on the page", async () => {
+      tailoredResumes.unavailable(POSTING_ID)
 
       const result = await actionsFor(SIGNED_IN).deletePostings(
         IDLE,
@@ -703,6 +823,7 @@ describe("deleting postings", () => {
             },
           }) as unknown as PrismaClient,
         getCoverLetters: () => letters.asStore(),
+        getTailoredResumes: () => tailoredResumes.asStore(),
         now: () => NOW,
         newResetKey: () => RESET_KEY,
       })
@@ -715,8 +836,9 @@ describe("deleting postings", () => {
       })
     })
 
-    it("says the letters are gone when the rows fail after them", async () => {
-      letters.withLetter(POSTING_ID)
+    it("says the documents are gone when the rows fail after them", async () => {
+      letters.with(POSTING_ID)
+      tailoredResumes.with(POSTING_ID)
 
       const actions = createPostingActions({
         getUser: async () => SIGNED_IN,
@@ -730,16 +852,18 @@ describe("deleting postings", () => {
             },
           }) as unknown as PrismaClient,
         getCoverLetters: () => letters.asStore(),
+        getTailoredResumes: () => tailoredResumes.asStore(),
         now: () => NOW,
         newResetKey: () => RESET_KEY,
       })
 
       const result = await actions.deletePostings(IDLE, deleteForm(POSTING_ID))
 
-      // The letter is already gone by the time the rows are attempted — that
-      // is what deleting it first buys everywhere else — so this is the one
-      // failure the message must not round off to "something went wrong".
+      // Both documents are already gone by the time the rows are attempted —
+      // that is what deleting them first buys everywhere else — so this is the
+      // one failure the message must not round off to "something went wrong".
       expect(letters.deleted).toHaveLength(1)
+      expect(tailoredResumes.deleted).toHaveLength(1)
       expect(result).toMatchObject({
         status: "error",
         message: expect.stringContaining("already been deleted"),
@@ -848,6 +972,7 @@ describe("loadPostingDetail", () => {
           },
         }) as unknown as PrismaClient,
       getCoverLetters: () => letters.asStore(),
+      getTailoredResumes: () => tailoredResumes.asStore(),
     })
 
     await expect(actions.loadPostingDetail(POSTING_ID)).resolves.toMatchObject({

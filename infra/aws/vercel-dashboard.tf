@@ -147,7 +147,14 @@ locals {
   # The kinds the dashboard may touch. `briefs` is deliberately absent: the app
   # holds no grant over what the worker wrote, which is why /briefings renders
   # the Findings on the run row rather than the Brief itself.
-  vercel_dashboard_kinds = ["resumes", "cover-letters"]
+  #
+  # `tailored-resumes` is here for the same reason `cover-letters` is: the app
+  # generates the object, serves it back, and deletes it with the Posting it
+  # belongs to. It is the *worker* that has no business with it — a tailored
+  # resume is written from a button on a page, never on a schedule, so the two
+  # roles' attachments stay disjoint and the assertion in
+  # `tests/vercel_dashboard.tftest.hcl` still holds.
+  vercel_dashboard_kinds = ["resumes", "cover-letters", "tailored-resumes"]
 }
 
 resource "aws_iam_role_policy_attachment" "vercel_dashboard_user_storage" {

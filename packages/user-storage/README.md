@@ -14,20 +14,31 @@ user-object-store.ts   the UserObjectStore interface                          no
 metadata.ts            cleaning a value a header can carry                    no AWS import
 brief-store.ts         BriefStore facade                                      no AWS import
 cover-letter-store.ts  CoverLetterStore facade                                no AWS import
+tailored-resume-store.ts  TailoredResumeStore facade                          no AWS import
 resume-store.ts        ResumeStore facade                                     no AWS import
 s3-user-object-store.ts  createS3UserObjectStore()                            the only AWS import
 ```
 
 One generic core does the S3 work, key validation, ownership checks and error
-mapping. Three thin facades sit on top and know their own kind's key shape and
+mapping. Four thin facades sit on top and know their own kind's key shape and
 file types, so a call site does not have to restate them — and cannot get them
 wrong.
 
-`metadata.ts` is shared by two of them and is not decoration: **S3 user-metadata
+`metadata.ts` is shared by three of them and is not decoration: **S3 user-metadata
 values travel in HTTP headers**, so a value carrying a newline is header
-injection and a non-ASCII one is silently mangled. An uploaded filename and a
-cover letter's provenance are both text from outside, so both go through
-`toMetadataValue`.
+injection and a non-ASCII one is silently mangled. An uploaded filename, a cover
+letter's provenance and a tailored resume's are all text from outside, so all go
+through `toMetadataValue`.
+
+⚠️ **Only `TailoredResumeStore` and `ResumeStore` have a `list()`, and the
+asymmetry is deliberate.** `CoverLetterStore` does not, which is why rendering
+"does one exist for this Posting" down a table costs it one `HeadObject` per row
+— see `docs/cover-letter-existence-plan.md`. The tailored resume was built with
+`list()` from the start rather than repeating that. The cost of having it is that
+a listing carries **no user metadata**: every entry comes back with empty
+provenance and a date taken from the object's own write time, so anything
+rendering a filename or a company must `get()` or `head()` the one object it is
+showing.
 
 Compose once, at the composition root:
 
@@ -37,12 +48,14 @@ import {
   createBriefStore,
   createCoverLetterStore,
   createResumeStore,
+  createTailoredResumeStore,
 } from "@workspace/user-storage"
 
 const objects = createS3UserObjectStore()
 const briefs = createBriefStore(objects)
 const resumes = createResumeStore(objects)
 const coverLetters = createCoverLetterStore(objects)
+const tailoredResumes = createTailoredResumeStore(objects)
 ```
 
 Everything downstream takes the narrow type:
@@ -155,11 +168,12 @@ caller.** A caller-supplied content type is a caller-supplied claim; it would
 let a `.pdf` be stored as `text/html`. Each kind declares an allowlist in
 `kinds.ts`, and an extension outside it is rejected before any request is made.
 
-| Kind            | Extensions                           | Disposition  |
-| --------------- | ------------------------------------ | ------------ |
-| `briefs`        | `.md`                                | `inline`     |
-| `cover-letters` | `.md`                                | `inline`     |
-| `resumes`       | `.pdf .doc .docx .odt .rtf .txt .md` | `attachment` |
+| Kind               | Extensions                           | Disposition  |
+| ------------------ | ------------------------------------ | ------------ |
+| `briefs`           | `.md`                                | `inline`     |
+| `cover-letters`    | `.md`                                | `inline`     |
+| `tailored-resumes` | `.md`                                | `inline`     |
+| `resumes`          | `.pdf .doc .docx .odt .rtf .txt .md` | `attachment` |
 
 `attachment` on uploaded documents matters: those bytes arrived from outside,
 and a browser rendering an uploaded file inline on the bucket's origin is the

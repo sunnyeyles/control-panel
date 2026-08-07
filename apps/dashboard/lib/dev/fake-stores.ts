@@ -1,25 +1,40 @@
-import { devContentType, devCoverLetters, devResumes } from "@/lib/dev/fixtures"
+import {
+  devContentType,
+  devCoverLetters,
+  devResumes,
+  devTailoredResumes,
+} from "@/lib/dev/fixtures"
 import {
   ObjectNotFoundError,
   type CoverLetterRef,
   type CoverLetterStore,
   type NewCoverLetter,
   type NewResume,
+  type NewTailoredResume,
   type ResumeRef,
   type ResumeStore,
   type StoredCoverLetter,
   type StoredResume,
+  type StoredTailoredResume,
+  type TailoredResumeRef,
+  type TailoredResumeStore,
 } from "@workspace/user-storage"
 
 /**
- * S3, for `DEV_AUTH_BYPASS=1` only — the two facades the dashboard uses, backed
- * by a `Map` each. Faked at the facade rather than at `UserObjectStore` below
- * it, so key building and `assertSegment()` keep their single implementation.
+ * S3, for `DEV_AUTH_BYPASS=1` only — the three facades the dashboard uses,
+ * backed by a `Map` each. Faked at the facade rather than at `UserObjectStore`
+ * below it, so key building and `assertSegment()` keep their single
+ * implementation.
  *
- * ⚠️ **`list()` deliberately returns less than `head()` does** for resumes,
- * because ListObjectsV2 returns no user metadata — a listed resume has no
- * `originalFilename`. Cover letters are addressed directly by Posting id, so
- * their metadata is always read through `head()`.
+ * ⚠️ **`list()` deliberately returns less than `head()` does**, because
+ * ListObjectsV2 returns no user metadata. For resumes that means a listed one
+ * has no `originalFilename`; for tailored resumes it means no provenance and a
+ * `generatedAt` off the object's own write time. Both fakes drop it on purpose:
+ * supplying it here would make the `head()`-per-item loop on `/documents` look
+ * deletable, and would hide that the postings table dates a tailored resume by
+ * when the object was written. Cover letters are addressed directly by Posting
+ * id and have no `list()` at all, so their metadata is always read through
+ * `head()`.
  */
 
 /**
@@ -34,7 +49,18 @@ function devKey(kind: string, userId: string, name: string): string {
 interface DevStores {
   resumes?: ResumeStore
   coverLetters?: CoverLetterStore
+  tailoredResumes?: TailoredResumeStore
 }
+
+/**
+ * Anything these fakes address an object by.
+ *
+ * `TailoredResumeRef` and `CoverLetterRef` are structurally identical — both are
+ * `(userId, postingId)` — so naming it here buys nothing at the type level and
+ * is written out anyway: the helpers below fan out over every kind the fakes
+ * hold, and a union that lists two of three reads as an oversight.
+ */
+type DevRef = ResumeRef | CoverLetterRef | TailoredResumeRef
 
 /**
  * ⚠️ **The fakes are memoized on `globalThis`, not in a module variable, and
@@ -78,6 +104,12 @@ export function getDevCoverLetterStore(): CoverLetterStore {
   const stores = devStores()
   stores.coverLetters ??= createDevCoverLetterStore()
   return stores.coverLetters
+}
+
+export function getDevTailoredResumeStore(): TailoredResumeStore {
+  const stores = devStores()
+  stores.tailoredResumes ??= createDevTailoredResumeStore()
+  return stores.tailoredResumes
 }
 
 // Not exported: the only correct way to reach these is through the memoized
@@ -205,8 +237,68 @@ function createDevCoverLetterStore(): CoverLetterStore {
   }
 }
 
+function createDevTailoredResumeStore(): TailoredResumeStore {
+  const stored = new Map<string, StoredTailoredResume & { markdown: string }>()
+
+  const put = async (
+    resume: NewTailoredResume
+  ): Promise<StoredTailoredResume> => {
+    const record = {
+      key: devKey(
+        "tailored-resumes",
+        resume.userId,
+        `${resume.postingId}/resume.md`
+      ),
+      userId: resume.userId,
+      postingId: resume.postingId,
+      size: new TextEncoder().encode(resume.markdown).byteLength,
+      generatedAt: resume.generatedAt,
+      provenance: resume.provenance ?? {},
+      markdown: resume.markdown,
+    }
+
+    // Re-generating supersedes rather than accumulates — same address, one
+    // object.
+    stored.set(refKey(resume), record)
+
+    return withoutTailoredMarkdown(record)
+  }
+
+  for (const resume of devTailoredResumes()) void put(resume)
+
+  return {
+    put,
+
+    async get(ref: TailoredResumeRef): Promise<StoredTailoredResume> {
+      return { ...mustGet(stored, ref) }
+    },
+
+    async head(ref: TailoredResumeRef): Promise<StoredTailoredResume> {
+      return withoutTailoredMarkdown(mustGet(stored, ref))
+    },
+
+    async delete(ref: TailoredResumeRef): Promise<void> {
+      mustDelete(stored, ref)
+    },
+
+    async list(userId: string): Promise<StoredTailoredResume[]> {
+      return [...stored.values()]
+        .filter((resume) => resume.userId === userId)
+        .map((resume) => ({
+          // See the warning at the top of this file: a listing carries no user
+          // metadata, so the provenance is dropped and the instant falls back
+          // to the object's own write time — which is what the real store does
+          // too, and what the postings table therefore renders. Faking it
+          // richer here would hide that from every local run.
+          ...withoutTailoredMarkdown(resume),
+          provenance: {},
+        }))
+    },
+  }
+}
+
 /** One address, one object — the same rule the real key layout enforces. */
-function refKey(ref: ResumeRef | CoverLetterRef): string {
+function refKey(ref: DevRef): string {
   return "resumeId" in ref
     ? `${ref.userId}/${ref.resumeId}${ref.extension}`
     : `${ref.userId}/${ref.postingId}`
@@ -216,10 +308,7 @@ function refKey(ref: ResumeRef | CoverLetterRef): string {
  * The real store's error, so call sites narrowing with `isUserStorageError` take
  * the branch they were written for.
  */
-function mustGet<T>(
-  stored: Map<string, T>,
-  ref: ResumeRef | CoverLetterRef
-): T {
+function mustGet<T>(stored: Map<string, T>, ref: DevRef): T {
   const found = stored.get(refKey(ref))
   if (!found) throw new ObjectNotFoundError(refKey(ref))
   return found
@@ -234,16 +323,13 @@ function mustGet<T>(
  * only a read can supply.
  *
  * The divergence mattered most where it was least visible. Deleting a
- * **Posting** removes its **Cover Letter** first, and most Postings have no
- * letter — so `object_not_found` is the *ordinary* path there, and a fake that
- * never raised it meant `DEV_AUTH_BYPASS=1` exercised the branch zero times.
- * A missing branch would have looked perfect locally and refused every delete
- * of a letterless Posting in production.
+ * **Posting** removes its **Cover Letter** and its **Tailored Resume** first,
+ * and most Postings have neither — so `object_not_found` is the *ordinary* path
+ * there, and a fake that never raised it meant `DEV_AUTH_BYPASS=1` exercised the
+ * branch zero times. A missing branch would have looked perfect locally and
+ * refused every delete of a Posting nothing had been written for in production.
  */
-function mustDelete(
-  stored: Map<string, unknown>,
-  ref: ResumeRef | CoverLetterRef
-): void {
+function mustDelete(stored: Map<string, unknown>, ref: DevRef): void {
   if (!stored.delete(refKey(ref))) {
     throw new ObjectNotFoundError(refKey(ref))
   }
@@ -251,8 +337,8 @@ function mustDelete(
 
 /**
  * The record minus its payload — what `put`, `head` and `list` return; bytes and
- * markdown travel only on a `get`. Two functions rather than one generic `omit`
- * so each return type lands as the interface's own, uncast.
+ * markdown travel only on a `get`. One function per store rather than a generic
+ * `omit`, so each return type lands as the interface's own, uncast.
  */
 function withoutBytes(
   resume: StoredResume & { bytes: Uint8Array }
@@ -266,6 +352,14 @@ function withoutMarkdown(
   letter: StoredCoverLetter & { markdown: string }
 ): StoredCoverLetter {
   const { markdown, ...rest } = letter
+  void markdown
+  return rest
+}
+
+function withoutTailoredMarkdown(
+  resume: StoredTailoredResume & { markdown: string }
+): StoredTailoredResume {
+  const { markdown, ...rest } = resume
   void markdown
   return rest
 }

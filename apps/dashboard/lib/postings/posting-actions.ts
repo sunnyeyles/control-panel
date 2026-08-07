@@ -20,6 +20,7 @@ import {
 import {
   isUserStorageError,
   type CoverLetterStore,
+  type TailoredResumeStore,
 } from "@workspace/user-storage"
 import { z } from "zod"
 
@@ -57,45 +58,82 @@ const INVALID_STATUS = "Choose New, Applied or Rejected."
 const TOO_MANY_POSTINGS = `Delete at most ${PAGE_SIZE} postings at a time.`
 
 /**
- * How many cover-letter deletes may be in flight at once.
+ * How many **Postings'** deletes may be in flight at once.
  *
  * The same bound `list-documents.ts` and `cover-letter-rows.ts` use, through the
  * same helper, and matched to them on purpose: `S3UserObjectStore.delete()` is a
  * `HeadObject` followed by a `DeleteObject`, so a full-page selection run one at
- * a time is fifty sequential round trips inside one Server Action — and most of
- * those heads miss, because most Postings have no letter.
+ * a time is a hundred sequential round trips inside one Server Action — and most
+ * of those heads miss, because most Postings have neither document.
+ *
+ * ⚠️ Each unit of work is now *two* deletes rather than one — the cover letter
+ * and the tailored resume, issued together — so this bounds sixteen concurrent
+ * requests rather than eight. Left as it was rather than halved: the pair is
+ * what has to succeed or fail together for a Posting to be removable, so
+ * splitting them across two slots would let a page-worth of Postings interleave
+ * and make "which Posting is safe to delete" a question about scheduling.
  */
 const DELETE_CONCURRENCY = 8
 
 /**
- * Every letter failed, so nothing was deleted.
+ * Every Posting's documents failed, so nothing was deleted.
  *
  * Distinct from {@link POSTING_NOT_FOUND}: the Postings are there and are the
  * caller's, and what refused was S3. Saying "could not be found" here would
  * send someone looking for a row that is still on the page.
+ *
+ * "documents" rather than "cover letters" since a Posting carries two — the
+ * message cannot name which one refused without being wrong half the time, and
+ * the user's next move is the same either way.
  */
-const LETTERS_UNAVAILABLE =
-  "Those postings were left alone — their cover letters could not be deleted. Try again in a moment."
+const DOCUMENTS_UNAVAILABLE =
+  "Those postings were left alone — the documents saved against them could not be deleted. Try again in a moment."
 
 /**
- * The letters went and the rows did not — the one failure this action cannot
+ * One document delete, as "is this Posting safe to remove".
+ *
+ * ⚠️ **A miss is the ordinary case and not a failure.** Most Postings have
+ * neither a cover letter nor a tailored resume, so `object_not_found` is the
+ * path this takes most of the time. Branching on `code` rather than
+ * `instanceof`, per `errors.ts`: an error crossing a bundler boundary can fail a
+ * prototype check while carrying a perfectly good discriminant.
+ *
+ * `object_ownership` deliberately does *not* land here. At a key built from the
+ * caller's own id it should be unreachable, and treating it as "nothing to
+ * delete" would turn the one signal that the key shape is wrong into a silent
+ * success.
+ */
+function deleted(result: PromiseSettledResult<void>, what: string): boolean {
+  if (result.status === "fulfilled") return true
+
+  const error: unknown = result.reason
+  if (isUserStorageError(error) && error.code === "object_not_found") {
+    return true
+  }
+
+  console.error(`postings: could not delete the ${what}`, error)
+  return false
+}
+
+/**
+ * The documents went and the rows did not — the one failure this action cannot
  * undo, so it is the one it must not describe as "something went wrong".
  *
- * ⚠️ **Deleting the letter first is what makes an S3 failure safe, and it is
+ * ⚠️ **Deleting the documents first is what makes an S3 failure safe, and it is
  * also what makes *this* failure lossy.** By the time the `deleteMany` runs,
- * every letter the selection carried is already gone; a Postgres failure here
- * therefore leaves Postings on the page that no longer have the letters the
- * table will now report they never had. A generic message would read as "no
- * harm done" and send the user looking for letters that are not coming back
- * from the UI.
+ * every cover letter and tailored resume the selection carried is already gone;
+ * a Postgres failure here therefore leaves Postings on the page that no longer
+ * have the documents the table will now report they never had. A generic message
+ * would read as "no harm done" and send the user looking for files that are not
+ * coming back from the UI.
  *
- * Retrying is safe and is the way out: the letters are already absent, so the
- * second attempt takes the `object_not_found` path and removes the rows. What
- * is lost is the letter *bodies*, recoverable only from the bucket's noncurrent
- * versions, which `cover-letters` retains for a year.
+ * Retrying is safe and is the way out: the objects are already absent, so the
+ * second attempt takes the `object_not_found` path and removes the rows. What is
+ * lost is the document *bodies*, recoverable only from the bucket's noncurrent
+ * versions, which both `cover-letters` and `tailored-resumes` retain for a year.
  */
 const POSTINGS_NOT_REMOVED =
-  "Those postings could not be removed, and any cover letters drafted for them have already been deleted. Try again in a moment to remove the postings."
+  "Those postings could not be removed, and any cover letters or tailored resumes saved against them have already been deleted. Try again in a moment to remove the postings."
 
 export interface PostingActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
@@ -117,6 +155,17 @@ export interface PostingActionsDeps {
    * action here that touches storage at all — see `deleteSelected` below.
    */
   getCoverLetters: () => CoverLetterStore
+  /**
+   * The tailored-resume store, for the same reason and on the same key.
+   *
+   * ⚠️ **A second store here is not optional tidying.** A tailored resume is
+   * addressed by `(user, Posting)` exactly as a letter is, so a delete that
+   * removed only the letter would leave an object in the bucket that nothing in
+   * the app can any longer address, list or delete — the Posting whose id was
+   * its key is gone. It would sit there until someone went looking with the AWS
+   * console.
+   */
+  getTailoredResumes: () => TailoredResumeStore
   /** Overridden in tests, so an assertion can name the occurrence. */
   now?: () => Date
   /** Overridden in tests, so an assertion can name the reset key. */
@@ -278,38 +327,55 @@ export function createPostingActions(deps: PostingActionsDeps) {
     if (owned.length === 0) return fail(POSTING_NOT_FOUND)
 
     const letters = deps.getCoverLetters()
+    const tailoredResumes = deps.getTailoredResumes()
 
+    // ⚠️ **Both documents per Posting, and both must go before the row does.**
+    // Each is keyed on the Posting id, so a row deleted while one of its objects
+    // survives leaves that object unaddressable — there is no longer a Posting
+    // to name it by. The two deletes are one unit of work per Posting rather
+    // than two passes, so `DELETE_CONCURRENCY` still bounds how much is in
+    // flight and a Posting is only counted removable when *neither* document is
+    // left behind.
+    //
     // The key is built from the session's user id, never from the form, so a
     // tampered field can only ever address something in the caller's own prefix.
     const settled = await settleWithConcurrency(
       owned,
       DELETE_CONCURRENCY,
-      (postingId) => letters.delete({ userId: caller.userId, postingId })
+      async (postingId) => {
+        const ref = { userId: caller.userId, postingId }
+
+        // `allSettled`, not `all`: the ordinary case is that *neither* object
+        // exists, and a rejection from one must not skip the other's delete —
+        // that is exactly how a tailored resume would be orphaned by a Posting
+        // that happened to have no cover letter.
+        const [letter, resume] = await Promise.allSettled([
+          letters.delete(ref),
+          tailoredResumes.delete(ref),
+        ])
+
+        return { letter, resume }
+      }
     )
 
     const removable = owned.filter((_postingId, index) => {
       const result = settled[index]
-      if (result === undefined || result.status === "fulfilled") return true
+      if (result === undefined) return true
 
-      // Most Postings have no letter, so a miss is the ordinary case and not a
-      // failure. Branching on `code` rather than `instanceof`, per `errors.ts`:
-      // an error crossing a bundler boundary can fail a prototype check while
-      // carrying a perfectly good discriminant.
-      //
-      // `object_ownership` deliberately does *not* land here. At a key built
-      // from the caller's own id it should be unreachable, and treating it as
-      // "nothing to delete" would turn the one signal that the key shape is
-      // wrong into a silent success.
-      const error: unknown = result.reason
-      if (isUserStorageError(error) && error.code === "object_not_found") {
-        return true
+      // The outer promise only rejects on something unexpected; the two deletes
+      // report themselves.
+      if (result.status === "rejected") {
+        console.error("postings: could not delete the documents", result.reason)
+        return false
       }
 
-      console.error("postings: could not delete the cover letter", error)
-      return false
+      return (
+        deleted(result.value.letter, "cover letter") &&
+        deleted(result.value.resume, "tailored resume")
+      )
     })
 
-    if (removable.length === 0) return fail(LETTERS_UNAVAILABLE)
+    if (removable.length === 0) return fail(DOCUMENTS_UNAVAILABLE)
 
     let removed: number
 

@@ -15,6 +15,7 @@ import {
   runActivityForUser,
   type BriefingActivity,
 } from "@/lib/briefing-runs/run-activity"
+import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import { loadCoverLetterRows } from "@/lib/cover-letters/cover-letter-rows"
 import { getPrisma } from "@/lib/db"
 import { listPostings, type PostingPage } from "@/lib/postings/list-postings"
@@ -24,7 +25,8 @@ import {
   type SearchParams,
 } from "@/lib/postings/posting-query"
 import type { BriefingCounts } from "@/lib/postings/postings-empty-state"
-import { getCoverLetterStore } from "@/lib/storage"
+import { getCoverLetterStore, getTailoredResumeStore } from "@/lib/storage"
+import { loadTailoredResumeRows } from "@/lib/tailored-resumes/tailored-resume-rows"
 import { timed } from "@/lib/timed"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 
@@ -39,6 +41,9 @@ export const dynamic = "force-dynamic"
  * Raised from 15 when the letters arrived, and kept there now that they cost
  * one request rather than twenty-five: the binding constraint is the cold
  * connection, not the fan-out that is gone.
+ *
+ * The tailored resumes added one more S3 call and not one more per row — a
+ * single `ListObjectsV2` — so this did not move again for them.
  */
 export const maxDuration = 30
 
@@ -60,13 +65,15 @@ export const maxDuration = 30
  * the app's first untrusted GET input; establishing who is asking before
  * reading anything they sent keeps the order the rest of the app has.
  *
- * ⚠️ **Three independent loads, three independent failures, and none of them
- * may blank the other two.** The postings are Postgres, the letters are S3, and
- * the run activity is a third query answering a different question — the latest
- * Run of any status rather than the rows a briefing has ever produced. The
- * dashboard's `prod:cover-letters` grant is a Terraform apply away from the code
- * that needs it, so "letters unreadable" is a state this page will genuinely be
- * in.
+ * ⚠️ **Four independent loads, four independent failures, and none of them may
+ * blank the other three.** The postings are Postgres; the letters and the
+ * tailored resumes are S3, read by different means and therefore able to fail
+ * separately; and the run activity is a fourth query answering a different
+ * question — the latest Run of any status rather than the rows a briefing has
+ * ever produced. Each of the dashboard's storage grants is a Terraform apply
+ * away from the code that needs it, so "unreadable" is a state this page will
+ * genuinely be in — and `prod:tailored-resumes` is the newest of them, so it is
+ * the one most likely to be missing.
  *
  * `searchParams` is typed inline rather than with the generated `PageProps`
  * helper, which only exists once `next typegen` has written `.next/types/` —
@@ -317,6 +324,26 @@ async function PostingsSection({
     return null
   })
 
+  // ⚠️ **A second storage read, alongside the letters rather than behind them.**
+  // Also a single `ListObjectsV2` over one prefix — see
+  // `lib/tailored-resumes/tailored-resume-rows.ts` — and it takes no posting ids
+  // for the same reason the letters now take theirs only to filter: what comes
+  // back is everything this user has generated, not a page of it.
+  //
+  // Not awaited, `.catch()` attached now rather than at the `await`, and `null`
+  // on failure never an empty list — all three for the reasons the letters give
+  // one comment up. Degrading this one to "nothing generated" would offer to
+  // spend a model call replacing a document the page simply could not see, and
+  // `prod:tailored-resumes` is the newest grant, so the missing-permission case
+  // is the likely one.
+  const tailoredResumesPromise: TailoredResumePromise = timed(
+    "briefings.tailored-resumes",
+    () => loadTailoredResumeRows(userId, getTailoredResumeStore())
+  ).catch((error) => {
+    console.error("tailored-resumes: could not load", error)
+    return null
+  })
+
   // Only known when the activity load succeeded, which is exactly why it is
   // optional: "you have no briefings" is the wrong thing to tell someone whose
   // briefings simply could not be read.
@@ -340,6 +367,7 @@ async function PostingsSection({
         page={postings}
         query={query}
         letters={lettersPromise}
+        tailoredResumes={tailoredResumesPromise}
         counts={counts}
       />
     </>
