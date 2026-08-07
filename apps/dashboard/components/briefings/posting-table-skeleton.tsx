@@ -2,6 +2,8 @@ import {
   POSTING_ACTIONS_WIDTH,
   POSTING_COLUMNS,
   POSTING_EXPAND_WIDTH,
+  POSTING_HIDE_BELOW_LG,
+  POSTING_HIDE_BELOW_MD,
   POSTING_ROW_HEIGHT,
   POSTING_SELECT_WIDTH,
 } from "@/lib/postings/posting-columns"
@@ -36,6 +38,11 @@ import { cn } from "@workspace/ui/lib/utils"
  *   unachievable in principle — column widths are measured from content, and a
  *   skeleton has none.
  * - `POSTING_ROW_HEIGHT` on every row, and {@link PAGE_SIZE} of them.
+ * - **The same columns, which below `lg` is fewer than six.** Location, Posted
+ *   and Source stop being rendered on a narrow viewport — see
+ *   `PostingColumn.visibility` — and a skeleton that kept them would be a
+ *   different table from the one replacing it, on exactly the viewport where
+ *   the difference is widest.
  * - The bulk bar's empty 36px above, and the pager's line below.
  *
  * ⚠️ **The real headings, not grey bars where headings go.** They come from
@@ -85,7 +92,10 @@ export function PostingTableSkeleton({
               <TableHead className={POSTING_EXPAND_WIDTH} />
 
               {POSTING_COLUMNS.map((column) => (
-                <TableHead key={column.key} className={column.width}>
+                <TableHead
+                  key={column.key}
+                  className={cn(column.width, column.visibility)}
+                >
                   {column.label}
                 </TableHead>
               ))}
@@ -204,16 +214,22 @@ function PlaceholderRow({ index }: { index: number }) {
         <Skeleton className={cn("h-4", widths.company)} />
       </TableCell>
 
-      <TableCell>
+      {/*
+        ⚠️ **The same three cells `PostingRow` hides, at the same two widths.**
+        Not an optimisation — the skeleton's whole job is to occupy the geometry
+        the rows will, so a placeholder still drawing a Source column that the
+        arriving rows do not is the sideways jump this file exists to prevent.
+      */}
+      <TableCell className={POSTING_HIDE_BELOW_MD}>
         <Skeleton className={cn("h-4", widths.location)} />
       </TableCell>
 
-      <TableCell>
+      <TableCell className={POSTING_HIDE_BELOW_MD}>
         <Skeleton className={cn("h-4", widths.posted)} />
       </TableCell>
 
       {/* A `Badge`, which is neither the height nor the shape of a line. */}
-      <TableCell>
+      <TableCell className={POSTING_HIDE_BELOW_LG}>
         <Skeleton className={cn("h-5 rounded-4xl", widths.source)} />
       </TableCell>
 

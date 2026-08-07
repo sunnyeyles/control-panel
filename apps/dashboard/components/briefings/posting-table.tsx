@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
+import { cn } from "@workspace/ui/lib/utils"
 
 /**
  * Every Posting this user's briefings have ever found, one row each.
@@ -113,9 +114,19 @@ export function PostingTable({
                   <span className="sr-only">Expand</span>
                 </TableHead>
 
+                {/*
+                  ⚠️ **`column.visibility` is half of a pair.** The matching
+                  `<td>` in `posting-table-body.tsx` carries the same class, and
+                  a heading hidden without its cells — or the reverse — leaves
+                  the row one column out of step with its own header. See
+                  `PostingColumn.visibility`.
+                */}
                 {POSTING_COLUMNS.map((column) =>
                   column.sort === undefined ? (
-                    <TableHead key={column.key} className={column.width}>
+                    <TableHead
+                      key={column.key}
+                      className={cn(column.width, column.visibility)}
+                    >
                       {column.label}
                     </TableHead>
                   ) : (
@@ -124,6 +135,7 @@ export function PostingTable({
                       column={column.sort}
                       label={column.label}
                       width={column.width}
+                      visibility={column.visibility}
                       query={query}
                     />
                   )

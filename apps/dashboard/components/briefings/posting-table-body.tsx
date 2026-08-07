@@ -18,6 +18,8 @@ import {
   POSTING_ACTIONS_WIDTH,
   POSTING_COLSPAN,
   POSTING_EXPAND_WIDTH,
+  POSTING_HIDE_BELOW_LG,
+  POSTING_HIDE_BELOW_MD,
   POSTING_ROW_HEIGHT,
   POSTING_SELECT_WIDTH,
 } from "@/lib/postings/posting-columns"
@@ -336,9 +338,14 @@ function PostingRow({
           {/*
             ⚠️ **Two lines, and the clamp is on a child rather than the cell.**
             `line-clamp-2` sets `display: -webkit-box`, which on a `<td>` would
-            take the element out of the table's own layout. The `title`
-            attribute is what keeps a clipped third line readable — the detail
-            panel this row discloses does not repeat the title.
+            take the element out of the table's own layout.
+
+            The `title` attribute is what keeps a clipped third line readable on
+            a desktop — and it is a hover tooltip, so on a touch screen it is
+            nothing. Below `md` this column is about 170px wide and most real
+            advertisement titles clip, which is why `posting-detail.tsx` repeats
+            the title in full at that width and only at that width. Above it the
+            panel still does not, because this cell is showing it.
           */}
           <span className="line-clamp-2" title={posting.title}>
             {posting.title}
@@ -354,8 +361,19 @@ function PostingRow({
           {posting.company}
         </TableCell>
 
+        {/*
+          ⚠️ **The three cells below stop being rendered on a narrow viewport,
+          and `posting-detail.tsx` is where they go.** The classes are the same
+          constants the header row and the skeleton use — see
+          `PostingColumn.visibility` for why nine columns do not fit on a phone,
+          and the "Where and when" section of the detail panel for where these
+          facts stay reachable.
+        */}
         <TableCell
-          className="truncate text-muted-foreground"
+          className={cn(
+            "truncate text-muted-foreground",
+            POSTING_HIDE_BELOW_MD
+          )}
           title={posting.location}
         >
           {posting.location}
@@ -368,7 +386,12 @@ function PostingRow({
           scout is instructed to omit rather than estimate, so an em-dash means
           the advertisement did not say, not that anything failed.
         */}
-        <TableCell className="truncate text-muted-foreground">
+        <TableCell
+          className={cn(
+            "truncate text-muted-foreground",
+            POSTING_HIDE_BELOW_MD
+          )}
+        >
           {posting.postedAt ?? (
             <>
               <span aria-hidden="true">—</span>
@@ -387,7 +410,7 @@ function PostingRow({
           the two states have to look different. An em-dash means the stored URL
           would not parse at all, which is a third thing again.
         */}
-        <TableCell className="truncate">
+        <TableCell className={cn("truncate", POSTING_HIDE_BELOW_LG)}>
           {posting.source ? (
             <Badge
               variant={posting.source.recognised ? "secondary" : "outline"}

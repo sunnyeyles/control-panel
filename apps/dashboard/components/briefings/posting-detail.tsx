@@ -14,7 +14,9 @@ import { PostingStatusSelect } from "@/components/briefings/posting-status-selec
 import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
 import type { PostingView } from "@/lib/postings/list-postings"
 import type { PostingDetailView } from "@/lib/postings/load-posting-detail"
+import { Badge } from "@workspace/ui/components/badge"
 import { Skeleton } from "@workspace/ui/components/skeleton"
+import { cn } from "@workspace/ui/lib/utils"
 
 /**
  * One row's detail, as the table body holds it.
@@ -36,6 +38,15 @@ export type PostingDetailState =
  * Everything a row has no width for lives here: the status control, the summary,
  * the highlights copied from the advertisement, why it matched, which Briefing
  * found it, both sighting times, and all three Cover Letter controls.
+ *
+ * ⚠️ **"What the row has no width for" is a function of the viewport, so part of
+ * this panel appears only on a narrow one.** Location, Posted and Source are
+ * columns above `lg`, and below it they stop being rendered — see
+ * `PostingColumn.visibility`. This panel is where they go, which makes hiding
+ * them a relocation rather than a loss; the title comes with them below `md`,
+ * where its column is too narrow to finish the sentence. Each of those pieces
+ * carries the breakpoint of the column it stands in for, so nothing is ever on
+ * screen twice.
  *
  * ⚠️ **Most of this costs no round trip; the advertisement's own words do.**
  * The link, the status control, the sighting times and the letter controls all
@@ -102,6 +113,21 @@ export function PostingDetail({
   return (
     <div className="flex min-w-0 flex-col gap-5 py-2 break-words">
       {/*
+        ⚠️ **The title, and only where the row above cannot finish it.** Below
+        `md` the Title column is around 170px, so `line-clamp-2` clips most real
+        advertisement titles and the `title` attribute that would otherwise
+        rescue them is a hover tooltip — nothing at all on a touch screen. Above
+        `md` the row is showing the whole thing and this would be it twice.
+
+        `aria-hidden`, because the clipping is purely visual: `line-clamp` hides
+        no text from the accessibility tree, so the row's own cell already reads
+        the full title out and this copy would be the second time.
+      */}
+      <p aria-hidden="true" className="text-sm font-medium md:hidden">
+        {posting.title}
+      </p>
+
+      {/*
         A plain anchor, not `next/link`: this leaves the app entirely, and
         prefetching a third party's advertisement site is neither useful nor ours to
         do. `noreferrer` keeps the board from being told where the click
@@ -136,6 +162,64 @@ export function PostingDetail({
           status={posting.status}
           title={posting.title}
         />
+      </Section>
+
+      {/*
+        ⚠️ **The columns this viewport is not rendering, and nothing else.**
+        These three are cells of the compact row above `lg` — see
+        `PostingColumn.visibility` — so each pair here carries the breakpoint at
+        which its own column comes back, and the section carries the widest of
+        them. Above `lg` the whole thing is gone rather than a heading over an
+        empty grid.
+
+        Three separate breakpoints and not one, because the columns do not all
+        leave together: Location and Posted go at `md`, Source at `lg`. Hiding
+        the pairs as a block would put Source on screen twice between 768px and
+        1024px.
+
+        The same `dl` as **Seen** below, deliberately: they are the same kind of
+        content — labelled single facts — and two grid shapes for that in one
+        panel would read as two different things.
+      */}
+      <Section title="Where and when" className="lg:hidden">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          <dt className="md:hidden">Location</dt>
+          <dd className="md:hidden">{posting.location}</dd>
+
+          <dt className="md:hidden">Posted</dt>
+          <dd className="md:hidden">
+            {posting.postedAt ?? (
+              <>
+                <span aria-hidden="true">—</span>
+                <span className="sr-only">Posting date not stated</span>
+              </>
+            )}
+          </dd>
+
+          {/*
+            The same three branches the cell above draws, and for the same
+            reason: `outline` marks a host no board in `JOB_BOARDS` claimed, and
+            an em-dash means the stored URL would not parse at all. A panel that
+            collapsed those into one would make a board missing from the
+            registry invisible on precisely the viewport where the column that
+            reveals it is not rendered. See `lib/postings/posting-source.ts`.
+          */}
+          <dt className="lg:hidden">Source</dt>
+          <dd className="lg:hidden">
+            {posting.source ? (
+              <Badge
+                variant={posting.source.recognised ? "secondary" : "outline"}
+              >
+                {posting.source.label}
+              </Badge>
+            ) : (
+              <>
+                <span aria-hidden="true">—</span>
+                <span className="sr-only">Source not recognised</span>
+              </>
+            )}
+          </dd>
+        </dl>
       </Section>
 
       {/*
@@ -378,13 +462,23 @@ function CoverLetterControls({
  */
 function Section({
   title,
+  className,
   children,
 }: {
   title: string
+  /**
+   * Extra classes on the `<section>` itself.
+   *
+   * Exists for one caller: **Where and when** is only on screen below `lg`, and
+   * the heading has to disappear with its own content — a `lg:hidden` on the
+   * grid inside would leave the parent's `gap-5` and an uppercase heading above
+   * nothing.
+   */
+  className?: string
   children: React.ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className={cn("flex flex-col gap-2", className)}>
       <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {title}
       </h3>

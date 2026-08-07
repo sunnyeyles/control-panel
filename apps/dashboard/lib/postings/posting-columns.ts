@@ -72,14 +72,91 @@ export interface PostingColumn {
    * design rather than an omission this migration could also fix.
    */
   sort?: PostingSort
+  /**
+   * When this column is rendered, as a Tailwind class on its `<th>` and on the
+   * matching `<td>`. Absent means always.
+   *
+   * ⚠️ **Nine cells do not fit on a phone.** At 375px each of them is about
+   * 40px, and `TableHead` is `whitespace-nowrap`, so every heading spills its
+   * own column. The `overflow-x-auto` the shared `Table` puts around itself
+   * does not save this table: it is `w-full` and `table-fixed`, so it shrinks
+   * to the viewport instead of overflowing it, and there is nothing to scroll.
+   *
+   * So the columns that are scanning aids rather than identity stop being
+   * rendered — and what they said is disclosed in the panel the row already
+   * opens, which is why `posting-detail.tsx` has a section that appears only
+   * below `lg`. **Hiding a column here without adding the fact there makes it
+   * unreachable on the device the change is for.**
+   *
+   * Two things follow from `table-fixed` and neither needs fixing:
+   *
+   * - **The percentages no longer total 90%, and that is fine.** A
+   *   `display: none` cell contributes no column at all, and the slack is
+   *   distributed across the columns that remain in proportion to their
+   *   declared widths — so below `md` the 27/17/10 ratio scales up to fill the
+   *   row and Title stays the widest thing on screen. A per-breakpoint width
+   *   would be three more numbers to keep in step with the skeleton for no
+   *   visible gain.
+   * - **{@link POSTING_COLSPAN} stays 9.** CSS cannot vary an attribute, and
+   *   under `table-fixed` the column count is fixed by the first row — so a
+   *   `colSpan` wider than the visible columns is clamped to the row rather
+   *   than inventing a phantom tenth one. Computing a smaller number from a
+   *   media query would put the breakpoint into JavaScript, and the header is a
+   *   server component.
+   */
+  visibility?: string
 }
 
+/**
+ * The two points at which a column stops being rendered.
+ *
+ * Named rather than written into the array below, because the `<td>`s in
+ * `posting-table-body.tsx` and the placeholder cells in
+ * `posting-table-skeleton.tsx` are hand-written in the array's order rather than
+ * mapped from it — so all three files have to spell the same class, and a
+ * literal repeated in three places is the drift this file exists to prevent.
+ *
+ * `md:table-cell` and not `md:block`: these are `<th>` and `<td>`, and putting
+ * one back as a block takes it out of the table's layout rather than returning
+ * it to the row.
+ *
+ * `md` is 768px, which is also `MOBILE_BREAKPOINT` in
+ * `@workspace/ui/hooks/use-mobile` — but this is plain CSS and deliberately not
+ * that hook. A media query read in JavaScript renders differently on the server
+ * than in the browser, and the header row is a server component.
+ */
+export const POSTING_HIDE_BELOW_MD = "hidden md:table-cell"
+export const POSTING_HIDE_BELOW_LG = "hidden lg:table-cell"
+
+/**
+ * ⚠️ **Which three columns hide is a judgement about what a row is *for*.**
+ * Title and Company are how somebody recognises an advertisement they have
+ * already seen, and the letter column is the only per-row state worth scanning
+ * a page for — so those stay at every width. Location, Posted and Source answer
+ * questions about one posting, which is what expanding it is for.
+ */
 export const POSTING_COLUMNS: readonly PostingColumn[] = [
   { key: "title", label: "Title", width: "w-[27%]", sort: "title" },
   { key: "company", label: "Company", width: "w-[17%]", sort: "company" },
-  { key: "location", label: "Location", width: "w-[15%]" },
-  { key: "postedAt", label: "Posted", width: "w-[11%]", sort: "posted" },
-  { key: "source", label: "Source", width: "w-[10%]" },
+  {
+    key: "location",
+    label: "Location",
+    width: "w-[15%]",
+    visibility: POSTING_HIDE_BELOW_MD,
+  },
+  {
+    key: "postedAt",
+    label: "Posted",
+    width: "w-[11%]",
+    sort: "posted",
+    visibility: POSTING_HIDE_BELOW_MD,
+  },
+  {
+    key: "source",
+    label: "Source",
+    width: "w-[10%]",
+    visibility: POSTING_HIDE_BELOW_LG,
+  },
   { key: "letter", label: "Cover letter", width: "w-[10%]" },
 ]
 
@@ -128,5 +205,11 @@ const FIXED_CELLS = 3
  * The columns above plus the {@link FIXED_CELLS} that carry controls and no
  * heading text. Derived rather than written down, so a column added to the
  * array cannot leave the detail row behind.
+ *
+ * ⚠️ **Every column, including the ones a narrow viewport does not render.** It
+ * is deliberately not `POSTING_COLUMNS.filter(visible)`, because "visible" is a
+ * media query and this number becomes an HTML attribute. Under `table-fixed`
+ * the row count is set by the first row, so the excess is clamped — see
+ * {@link PostingColumn.visibility}.
  */
 export const POSTING_COLSPAN = POSTING_COLUMNS.length + FIXED_CELLS
