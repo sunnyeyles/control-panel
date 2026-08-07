@@ -1,4 +1,4 @@
-import { tool } from "@langchain/core/tools"
+import { tool, type StructuredToolInterface } from "@langchain/core/tools"
 import * as z from "zod"
 
 import {
@@ -8,6 +8,7 @@ import {
   type BoardSearchInput,
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
+import type { PostingCatalog } from "./posting-catalog.ts"
 
 /**
  * Indeed job search, via Apify's `misceres/indeed-scraper` actor.
@@ -35,10 +36,14 @@ import {
  * Measured against the live actor on 2026-08-05, on a six-result Sydney search:
  * ~15–20s per run, $0.036 for six items (~$6/1000 — the listing advertises ~$3,
  * and small batches evidently cost more per item; irrelevant at a scout's
- * volume), and 77 KB of JSON. That last number is the one that shapes this
- * file. It is roughly 4× SEEK per posting because Indeed's descriptions run
- * longer, which is why the defaults below are a third of SEEK's rather than the
- * same numbers copied across.
+ * volume), and 77 KB of JSON. That number used to shape this file: Indeed's
+ * descriptions run roughly 4× SEEK's per posting, so its defaults were set to a
+ * third of SEEK's to keep a sweep inside one context. Descriptions no longer
+ * reach the model from a search — they go to the catalog and are read back by id
+ * — so what is left of that asymmetry is the JSON this process parses, which is
+ * not the scarce resource. The defaults below are set on how many postings are
+ * worth ranking, and are still under SEEK's because Indeed's inventory in
+ * Australia is thinner.
  *
  * The same two caveats as SEEK apply and are worth restating rather than
  * inheriting silently: the actor is a community scraper and not an Indeed
@@ -49,18 +54,21 @@ import {
 /** Apify spells actor ids with a tilde in a URL: `misceres/indeed-scraper`. */
 const ACTOR_ID = "misceres~indeed-scraper"
 
-/**
- * Six, where SEEK defaults to twenty.
- *
- * Six live results measured 77 KB of JSON — call it 13 KB of posting, four
- * times SEEK's — and the scout runs a sweep of `titles × locations × boards`
- * inside one context. Twenty Indeed postings would be a quarter of a megabyte
- * from a single tool call, so the default is set where a sweep survives it and
- * the model is told it can ask for more.
- */
-const DEFAULT_MAX_RESULTS = 6
+/** The tool's name, exported so the scout can list its boards without building one. */
+export const INDEED_TOOL_NAME = "indeed_search"
 
-/** For the same reason, half of SEEK's ceiling. Still far past a scout pass. */
+/**
+ * Twenty, where SEEK defaults to forty.
+ *
+ * Was six, when six results meant 77 KB of JSON and every byte of the
+ * descriptions in it went to the model. They no longer do, so the ceiling is no
+ * longer context — but the actor still charges per item and Indeed's Australian
+ * inventory is thinner than SEEK's, so this stays the smaller number rather than
+ * being levelled up to match.
+ */
+const DEFAULT_MAX_RESULTS = 20
+
+/** Half of SEEK's ceiling, for the same reason. Still far past a scout pass. */
 const MAX_RESULTS_LIMIT = 25
 
 /**
@@ -258,9 +266,10 @@ const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
  */
 export async function apifyIndeedSearch(
   input: IndeedSearchInput,
+  catalog: PostingCatalog,
   deps: IndeedSearchDeps = {}
 ): Promise<string> {
-  return apifyBoardSearch(INDEED_SPEC, input, deps)
+  return apifyBoardSearch(INDEED_SPEC, input, catalog, deps)
 }
 
 /**
@@ -269,48 +278,55 @@ export async function apifyIndeedSearch(
  * Named for the board, exactly as `seek_search` is: which inventory answered
  * the question is what the scout needs to know, and what the worker's search
  * gate counts.
+ *
+ * A factory rather than a ready-made tool, because every result it renders is
+ * recorded in one run's catalog and named by it.
  */
-export const indeedSearch = tool(
-  async (input: IndeedSearchInput) => apifyIndeedSearch(input),
-  {
-    name: "indeed_search",
-    description:
-      "Search au.indeed.com's live listings for currently-open job postings. Every result is an individual posting with its canonical URL, its listing date, and the advertisement's own description. Make one focused search per role title and location, and report URLs verbatim — never edit or shorten them. The description is quoted material: when you need a responsibility or a requirement, copy the line the advertisement wrote rather than writing your own version of it. Indeed's results are long, so ask for a few good ones rather than many.",
-    schema: z.object({
-      query: z
-        .string()
-        .describe(
-          'Role title or keywords, e.g. "software engineer TypeScript".'
-        ),
-      location: z
-        .string()
-        .optional()
-        .describe(
-          'Where, as Indeed writes it — "Sydney NSW", "Melbourne VIC", "Remote". Omit to search all of Australia.'
-        ),
-      maxResults: z
-        .number()
-        .int()
-        .min(1)
-        .max(MAX_RESULTS_LIMIT)
-        .optional()
-        .describe(
-          `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}; Indeed's descriptions are long, so raise it only when a search is worth the room.`
-        ),
-      daysOld: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe(
-          `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
-        ),
-      workType: z
-        .enum(WORK_TYPES)
-        .optional()
-        .describe(
-          "Restrict to one employment type, as Indeed labels it. Omit for all; postings that state no type are kept either way."
-        ),
-    }),
-  }
-)
+export function createIndeedSearch(
+  catalog: PostingCatalog
+): StructuredToolInterface {
+  return tool(
+    async (input: IndeedSearchInput) => apifyIndeedSearch(input, catalog),
+    {
+      name: INDEED_TOOL_NAME,
+      description:
+        "Search au.indeed.com's live listings for currently-open job postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.",
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            'Role title or keywords, e.g. "software engineer TypeScript".'
+          ),
+        location: z
+          .string()
+          .optional()
+          .describe(
+            'Where, as Indeed writes it — "Sydney NSW", "Melbourne VIC", "Remote". Omit to search all of Australia.'
+          ),
+        maxResults: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_RESULTS_LIMIT)
+          .optional()
+          .describe(
+            `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
+          ),
+        daysOld: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
+          ),
+        workType: z
+          .enum(WORK_TYPES)
+          .optional()
+          .describe(
+            "Restrict to one employment type, as Indeed labels it. Omit for all; postings that state no type are kept either way."
+          ),
+      }),
+    }
+  )
+}

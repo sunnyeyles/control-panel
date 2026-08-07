@@ -1,4 +1,4 @@
-import { tool } from "@langchain/core/tools"
+import { tool, type StructuredToolInterface } from "@langchain/core/tools"
 import * as z from "zod"
 
 import {
@@ -8,6 +8,7 @@ import {
   type BoardSearchInput,
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
+import type { PostingCatalog } from "./posting-catalog.ts"
 
 /**
  * SEEK job search, via Apify's `unfenced-group/seek-com-au-scraper` actor.
@@ -25,12 +26,14 @@ import {
  * rendering are shared with every other board. What is left here is the actor
  * id, the request body it wants, and which of its fields carry what.
  *
- * Each result carries the advertisement's full description, because the actor
- * is asked for it — `fetchDetails`, which was off until the cost of turning it
- * on was measured rather than assumed. Without it the teaser and three bullet
- * points are everything a posting has, which is enough to summarise a role and
- * not enough to argue anyone into one. See the comment on the request body for
- * what it actually costs.
+ * Every result carries the advertisement's full description into the catalog,
+ * because the actor is asked for it — `fetchDetails`, which was off until the
+ * cost of turning it on was measured rather than assumed. Without it the teaser
+ * and three bullet points are everything a posting has, which is enough to
+ * summarise a role and not enough to argue anyone into one. What reaches the
+ * model is the teaser; the description is read back by id through
+ * `posting-details.ts`. See the comment on the request body for what the flag
+ * actually costs.
  *
  * Two caveats, stated rather than hidden. The actor is a community scraper,
  * not a SEEK product, and SEEK's terms prohibit automated collection — using
@@ -43,8 +46,18 @@ import {
 
 const ACTOR_ID = "unfenced-group~seek-com-au-scraper"
 
-/** Enough for one focused search without flooding the model's context. */
-const DEFAULT_MAX_RESULTS = 20
+/** The tool's name, exported so the scout can list its boards without building one. */
+export const SEEK_TOOL_NAME = "seek_search"
+
+/**
+ * Enough candidates for one focused search to be worth making.
+ *
+ * Was 20, when a result meant the whole advertisement and twenty of them meant
+ * ~79 KB of context. A result is now two lines, so the ceiling on this stopped
+ * being the model's context and started being how many postings are worth
+ * ranking — and a broad title in a capital city has more than twenty.
+ */
+const DEFAULT_MAX_RESULTS = 40
 
 /** A scout pass ranks a handful of matches; it has no use for hundreds. */
 const MAX_RESULTS_LIMIT = 50
@@ -105,8 +118,9 @@ const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
   // `descriptionMarkdown: null`, and a teaser plus three bullets is all a
   // posting carries.
   //
-  // What it does cost is context — ~79 KB of description across 20 results,
-  // which the shared description bound trims per posting.
+  // It used to cost context too — ~79 KB across 20 results, every byte of it in
+  // front of the model. It no longer does: descriptions go into the catalog and
+  // are read back only for the shortlist, so the flag now costs nothing at all.
   buildRequestBody(search: ResolvedBoardSearch): Record<string, unknown> {
     return {
       searchQuery: search.query,
@@ -150,9 +164,10 @@ const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
  */
 export async function apifySeekSearch(
   input: SeekSearchInput,
+  catalog: PostingCatalog,
   deps: SeekSearchDeps = {}
 ): Promise<string> {
-  return apifyBoardSearch(SEEK_SPEC, input, deps)
+  return apifyBoardSearch(SEEK_SPEC, input, catalog, deps)
 }
 
 /**
@@ -161,46 +176,53 @@ export async function apifySeekSearch(
  * Named for the board, unlike `web_search`: which inventory answers the
  * question is exactly what the scout needs to know, and what the worker's
  * search gate counts.
+ *
+ * A factory rather than a ready-made tool, because every result it renders is
+ * recorded in one run's catalog and named by it.
  */
-export const seekSearch = tool(
-  async (input: SeekSearchInput) => apifySeekSearch(input),
-  {
-    name: "seek_search",
-    description:
-      "Search seek.com.au's live listings for currently-open job postings. Every result is an individual posting with its canonical URL, its listing date, and the advertisement's own description. Make one focused search per role title and location, and report URLs verbatim — never edit or shorten them. The description is quoted material: when you need a responsibility or a requirement, copy the line the advertisement wrote rather than writing your own version of it.",
-    schema: z.object({
-      query: z
-        .string()
-        .describe(
-          'Role title or keywords, e.g. "software engineer TypeScript".'
-        ),
-      location: z
-        .string()
-        .optional()
-        .describe(
-          'Where, as SEEK writes it — "Sydney NSW", "Melbourne VIC", "All Australia". Defaults to all of Australia.'
-        ),
-      maxResults: z
-        .number()
-        .int()
-        .min(1)
-        .max(MAX_RESULTS_LIMIT)
-        .optional()
-        .describe(
-          `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
-        ),
-      daysOld: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe(
-          `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
-        ),
-      workType: z
-        .enum(["Full time", "Part time", "Contract/Temp", "Casual/Vacation"])
-        .optional()
-        .describe("Restrict to one employment type. Omit for all."),
-    }),
-  }
-)
+export function createSeekSearch(
+  catalog: PostingCatalog
+): StructuredToolInterface {
+  return tool(
+    async (input: SeekSearchInput) => apifySeekSearch(input, catalog),
+    {
+      name: SEEK_TOOL_NAME,
+      description:
+        "Search seek.com.au's live listings for currently-open job postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.",
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            'Role title or keywords, e.g. "software engineer TypeScript".'
+          ),
+        location: z
+          .string()
+          .optional()
+          .describe(
+            'Where, as SEEK writes it — "Sydney NSW", "Melbourne VIC", "All Australia". Defaults to all of Australia.'
+          ),
+        maxResults: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_RESULTS_LIMIT)
+          .optional()
+          .describe(
+            `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
+          ),
+        daysOld: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
+          ),
+        workType: z
+          .enum(["Full time", "Part time", "Contract/Temp", "Casual/Vacation"])
+          .optional()
+          .describe("Restrict to one employment type. Omit for all."),
+      }),
+    }
+  )
+}

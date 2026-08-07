@@ -1,6 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import { apifyLinkedinSearch } from "./linkedin-search.ts"
+import {
+  apifyLinkedinSearch,
+  type LinkedinSearchDeps,
+} from "./linkedin-search.ts"
+import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
 
 /**
  * What is true of LinkedIn and of no other board: the actor it runs, the search
@@ -77,6 +81,35 @@ const TEN_JOBS = Array.from({ length: 10 }, (_, index) => ({
   link: `https://au.linkedin.com/jobs/view/job-${index}`,
 }))
 
+/**
+ * The run's catalog, handing out `id1`, `id2`, … in the order postings arrive.
+ *
+ * Readable ids rather than the platform's hashes: how an id is derived is
+ * `posting-id.test.ts`'s subject in `@workspace/agents`, and what matters here
+ * is that this board's URL reaches the catalog untouched.
+ */
+let catalog: PostingCatalog
+let ids: Map<string, string>
+
+beforeEach(() => {
+  ids = new Map()
+  catalog = createPostingCatalog({
+    idFor: (url) => {
+      const held = ids.get(url) ?? `id${ids.size + 1}`
+      ids.set(url, held)
+      return held
+    },
+  })
+})
+
+/** `apifyLinkedinSearch` against the catalog this test is holding. */
+function linkedinSearch(
+  input: Parameters<typeof apifyLinkedinSearch>[0],
+  deps: LinkedinSearchDeps
+): Promise<string> {
+  return apifyLinkedinSearch(input, catalog, deps)
+}
+
 afterEach(() => {
   delete process.env.APIFY_TOKEN
 })
@@ -85,7 +118,7 @@ describe("apifyLinkedinSearch", () => {
   it("points LinkedIn's actor at a composed search URL and renders its fields", async () => {
     const captured: Capture[] = []
 
-    const output = await apifyLinkedinSearch(
+    const output = await linkedinSearch(
       {
         query: "software engineer TypeScript",
         location: "Sydney, New South Wales, Australia",
@@ -106,12 +139,7 @@ describe("apifyLinkedinSearch", () => {
       "https://www.linkedin.com/jobs/search/?keywords=software%20engineer%20TypeScript&location=Sydney%2C%20New%20South%20Wales%2C%20Australia"
     )
 
-    // The URL is the traceability requirement — a result the brief cannot link
-    // to is not usable downstream. The listing date is the freshness evidence.
-    expect(output).toContain(
-      "https://au.linkedin.com/jobs/view/software-engineer-at-simplus-anz-4446494860?position=60&pageNum=0&refId=Is5ZuQho&trackingId=D%2BHsFbhL"
-    )
-    expect(output).toContain("Software Engineer — Simplus ANZ")
+    expect(output).toContain("[id1] Software Engineer — Simplus ANZ")
     expect(output).toContain("listed: 2026-07-30")
     expect(output).toContain(
       "Sydney, New South Wales, Australia · Full-time · Mid-Senior level · $120,000 - $140,000"
@@ -119,8 +147,8 @@ describe("apifyLinkedinSearch", () => {
     expect(output).toContain("Build TypeScript services")
   })
 
-  it("reports the URL the actor returned, tracking parameters and all", async () => {
-    const output = await apifyLinkedinSearch(
+  it("records the URL the actor returned, tracking parameters and all", async () => {
+    const output = await linkedinSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), []) }
     )
@@ -130,8 +158,13 @@ describe("apifyLinkedinSearch", () => {
     // Neither is edited here: stabilising posting identity across those
     // parameters is done per-host in `packages/agents/src/job-boards.ts`, and a
     // URL this tool rewrote would be a URL the board never issued.
-    expect(output).toContain("au.linkedin.com")
-    expect(output).toContain("refId=Is5ZuQho")
+    expect(catalog.get("id1")?.url).toBe(ONE_JOB[0]!.link)
+
+    // And none of it is shown to the model. Eighty characters of per-search
+    // decoration is precisely what a model cannot transcribe reliably — the
+    // seven runs that proved it are in the worker's `resolve-postings.ts`.
+    expect(output).not.toContain("au.linkedin.com")
+    expect(output).not.toContain("refId=Is5ZuQho")
   })
 
   it("never reads applyUrl, which is empty on every result", async () => {
@@ -142,7 +175,7 @@ describe("apifyLinkedinSearch", () => {
       },
     ]
 
-    const output = await apifyLinkedinSearch(
+    const output = await linkedinSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(withApplyUrl), []) }
     )
@@ -150,14 +183,15 @@ describe("apifyLinkedinSearch", () => {
     // Measured empty on every posting on 2026-08-05, so `link` is the posting
     // and this field is not read even when the actor fills it in.
     expect(output).not.toContain("should-not-appear")
+    expect(catalog.get("id1")?.url).toBe(ONE_JOB[0]!.link)
   })
 
   it("bakes the freshness bound into the URL as LinkedIn's seconds filter", async () => {
     const captured: Capture[] = []
     const fetch = fakeFetch(jsonResponse(ONE_JOB), captured)
 
-    await apifyLinkedinSearch({ query: "a" }, { apiToken: API_TOKEN, fetch })
-    await apifyLinkedinSearch(
+    await linkedinSearch({ query: "a" }, { apiToken: API_TOKEN, fetch })
+    await linkedinSearch(
       { query: "b", daysOld: 7 },
       { apiToken: API_TOKEN, fetch }
     )
@@ -171,15 +205,15 @@ describe("apifyLinkedinSearch", () => {
     const captured: Capture[] = []
     const fetch = fakeFetch(jsonResponse(ONE_JOB), captured)
 
-    await apifyLinkedinSearch(
+    await linkedinSearch(
       { query: "a", workType: "Contract" },
       { apiToken: API_TOKEN, fetch }
     )
-    await apifyLinkedinSearch(
+    await linkedinSearch(
       { query: "b", workType: "Full time" },
       { apiToken: API_TOKEN, fetch }
     )
-    await apifyLinkedinSearch({ query: "c" }, { apiToken: API_TOKEN, fetch })
+    await linkedinSearch({ query: "c" }, { apiToken: API_TOKEN, fetch })
 
     // The single-letter codes are LinkedIn's vocabulary and never leave this
     // module — the model asks for "Contract" on every board.
@@ -191,7 +225,7 @@ describe("apifyLinkedinSearch", () => {
   it("bounds a locationless search to Australia rather than the world", async () => {
     const captured: Capture[] = []
 
-    await apifyLinkedinSearch(
+    await linkedinSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -205,7 +239,7 @@ describe("apifyLinkedinSearch", () => {
   it("escapes the keywords and location rather than pasting them in", async () => {
     const captured: Capture[] = []
 
-    await apifyLinkedinSearch(
+    await linkedinSearch(
       { query: "C++ & Rust", location: "Sydney, NSW" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -221,7 +255,7 @@ describe("apifyLinkedinSearch", () => {
   it("asks for the actor's ten-item floor while returning what was requested", async () => {
     const captured: Capture[] = []
 
-    const output = await apifyLinkedinSearch(
+    const output = await linkedinSearch(
       { query: "a", maxResults: 3 },
       {
         apiToken: API_TOKEN,
@@ -233,7 +267,7 @@ describe("apifyLinkedinSearch", () => {
     // >= 10` — so a small search asks for ten and drops the surplus. The floor
     // must not reach the schema the model reads.
     expect(requestBody(captured[0]!).count).toBe(10)
-    expect(output).toContain("3 currently-listed posting(s)")
+    expect(output).toContain("3 currently-listed LinkedIn posting(s)")
     expect(output).toContain("Job 2")
     expect(output).not.toContain("Job 3")
   })
@@ -242,15 +276,15 @@ describe("apifyLinkedinSearch", () => {
     const captured: Capture[] = []
     const fetch = fakeFetch(jsonResponse(TEN_JOBS), captured)
 
-    await apifyLinkedinSearch(
+    await linkedinSearch(
       { query: "a", maxResults: 25 },
       { apiToken: API_TOKEN, fetch }
     )
-    await apifyLinkedinSearch({ query: "b" }, { apiToken: API_TOKEN, fetch })
+    await linkedinSearch({ query: "b" }, { apiToken: API_TOKEN, fetch })
 
     // The floor is a minimum, not a rewrite: nothing above it is touched, and
-    // the default of 20 is already clear of it.
+    // the default of 40 is already well clear of it.
     expect(requestBody(captured[0]!).count).toBe(25)
-    expect(requestBody(captured[1]!).count).toBe(20)
+    expect(requestBody(captured[1]!).count).toBe(40)
   })
 })

@@ -57,6 +57,21 @@ Two things that matter more than they look:
 A tool that needs data access should take its dependency explicitly — add it to
 this package's `dependencies` and import it in that tool's module only.
 
+## Tools bound to a run
+
+Not every tool can be a module singleton. The board searches and
+`get_posting_details` share a `PostingCatalog` — one search writes into it and
+the other reads out of it, so the pair only makes sense per run — and each is
+exported as a `createXSearch(catalog)` factory rather than a ready-made tool. A
+module-level instance would carry one run's postings into the next, and on a warm
+Lambda container that is not hypothetical.
+
+`posting-catalog.ts` states the shape and takes the id function from its caller.
+It does not know how a posting id is derived, deliberately: the platform already
+has exactly one answer (`postingId` in `@workspace/agents`), and this package
+must not depend on that one — a second hash of a URL down here would be a second
+identity for the same advertisement.
+
 ## Build
 
 Consumed as built output (`dist/`). Turbo's `build.dependsOn: ["^build"]` orders

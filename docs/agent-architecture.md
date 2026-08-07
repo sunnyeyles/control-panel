@@ -93,10 +93,10 @@ unanswered — and an unanswered tool call is rejected on the next turn. `halt`
 answers each one with a `status:"error"` ToolMessage saying the budget ran out,
 so the transcript stays well-formed.
 
-| Budget                    | Value | Why                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_MAX_LLM_CALLS`   | 5     | Sized for a question with one tool round trip                                                                                                                                                                                                                                                                                                                                    |
-| `JOB_SCOUT_MAX_LLM_CALLS` | 10    | The Scout's _floor_, not its budget. It makes one focused search per role title, location and **board**, so the worker sizes the real figure with `scoutLlmCallBudget()` — `titles × locations × boards + 3`, never below this and never above `MAX_SCOUT_LLM_CALLS`. The default would divert it to `halt` mid-search and produce a partial answer that still looks well-formed |
+| Budget                    | Value | Why                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_MAX_LLM_CALLS`   | 5     | Sized for a question with one tool round trip                                                                                                                                                                                                                                                                                                                                                                                     |
+| `JOB_SCOUT_MAX_LLM_CALLS` | 10    | The Scout's _floor_, not its budget. It makes one focused search per role title, location and **board**, so the worker sizes the real figure with `scoutLlmCallBudget()` — `titles × locations × boards + 6`, never below this and never above `MAX_SCOUT_LLM_CALLS`. The `+ 6` is the turns that are not searches: reading the brief, reading the shortlist back with `get_posting_details`, submitting, and the line it ends on |
 
 The tool registry (`tools.ts`) is the other containment point. Duplicate tool
 names **throw at construction** rather than silently shadowing each other. After
@@ -127,6 +127,7 @@ flowchart LR
         SEEK["seek_search"]
         IND["indeed_search"]
         LI["linkedin_search"]
+        DET["get_posting_details"]
         WEB["web_search"]
         TIME["get_current_time"]
     end
@@ -136,6 +137,8 @@ flowchart LR
     SCOUT --> SEEK
     SCOUT --> IND
     SCOUT --> LI
+    SCOUT --> DET
+    SCOUT --> SUB["submit_findings<br/>@workspace/agents"]
     ASST --> WEB
     ASST --> TIME
     BW --> NONE
@@ -145,6 +148,9 @@ flowchart LR
     SEEK --> RUN["apify-search.ts<br/>shared runner — APIFY_TOKEN"]
     IND --> RUN
     LI --> RUN
+    RUN --> CAT["posting-catalog.ts<br/>one per run: id → posting"]
+    DET --> CAT
+    SUB --> CAT
     RUN --> A1["unfenced-group~seek-com-au-scraper"]
     RUN --> A2["misceres~indeed-scraper"]
     RUN --> A3["curious_coder~linkedin-jobs-scraper"]
@@ -160,15 +166,30 @@ owns the token, the timeout, the result clamp, the failure split and the
 rendering; a board file supplies only an `ApifyBoardSpec` — an actor id, a
 request body and a field mapping. They take the same five inputs deliberately,
 so the model does not have to learn a different search per board. Adding a board
-is a spec and a line in `JOB_SCOUT_SEARCH_TOOLS`.
+is a spec, a factory, and a line in `JOB_SCOUT_SEARCH_TOOL_NAMES`.
 
-| Agent                     | Tools                     | Why that set                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createJobScout`          | `JOB_SCOUT_SEARCH_TOOLS`  | One search tool per board — `seekSearch`, `indeedSearch`, `linkedinSearch`. Read-only **by construction**: with no tool that writes anything, "the Scout returns data and performs no side effects" is structural rather than a prompt rule someone can talk it out of. Three boards does not weaken that — each added tool is another reader |
-| `createBriefWriter`       | `[]`                      | Cannot search, so it cannot quietly supplement thin Findings with something half-remembered; cannot write, so uploading stays with the worker                                                                                                                                                                                                 |
-| `createCoverLetterWriter` | `[]`                      | Prompt-injection containment — see below                                                                                                                                                                                                                                                                                                      |
-| `createProfileExtractor`  | `[]`                      | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                        |
-| `createAssistant`         | `allTools` + `extraTools` | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                       |
+**A search returns two lines per posting, not the advertisement.** Every result
+is recorded in the run's `PostingCatalog` and rendered as an id, a listing date
+and a teaser; the advertisement itself is read back by id through
+`get_posting_details`, for the shortlist alone. Descriptions were already
+arriving in the same actor call, so this costs no extra scrape — what it saves
+is context, and a transcript is re-sent to the model on every turn. It also
+stops sixty advertisements' worth of boilerplate sitting between the model and
+the handful of facts it ranks on.
+
+Two consequences beyond the cost. **No URL is ever shown to the model** — a
+posting is named by its id, and the worker resolves the id back to the URL the
+board issued, so the transcription failures recorded in `resolve-postings.ts`
+have nothing left to go wrong in. And the board tools are **factories** rather
+than module singletons, because each is bound to one run's catalog.
+
+| Agent                     | Tools                                                          | Why that set                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createJobScout`          | three board searches, `get_posting_details`, `submit_findings` | One search tool per board, one reader for what they returned, and one way to report. Read-only **outside the run** by construction: no tool reaches the network except to search, so "the Scout returns data and performs no side effects" is structural rather than a prompt rule someone can talk it out of. `submit_findings` does not weaken that — it writes to a variable `createJobScout` owns, and reaches nothing else |
+| `createBriefWriter`       | `[]`                                                           | Cannot search, so it cannot quietly supplement thin Findings with something half-remembered; cannot write, so uploading stays with the worker                                                                                                                                                                                                                                                                                   |
+| `createCoverLetterWriter` | `[]`                                                           | Prompt-injection containment — see below                                                                                                                                                                                                                                                                                                                                                                                        |
+| `createProfileExtractor`  | `[]`                                                           | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                                                                                                          |
+| `createAssistant`         | `allTools` + `extraTools`                                      | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                                                                                                         |
 
 ### Why the Letter Writer and the Profile Extractor have no tools
 
@@ -265,8 +286,8 @@ flowchart TD
         direction TB
         B1["EventBridge Tick, hourly"] --> B2["run-tick.ts<br/>dueJobs → claimJob"]
         B2 --> B3["createJobScout → find-postings"]
-        B3 --> B4["successfulSearchResults<br/>zero searches fails the Run"]
-        B4 --> B5["parseFindings<br/>+ verifyPostingUrls"]
+        B3 --> B4["successfulSearches<br/>zero searches fails the Run"]
+        B4 --> B5["session.findings()<br/>+ resolvePostings"]
         B5 --> B6["createBriefWriter → write-brief"]
         B6 --> B7["S3 object → artifacts row → runs.findings"]
     end
@@ -294,14 +315,16 @@ subpaths (`@workspace/agents/cover-letter-writer`,
 Two invariants the worker enforces, both of which exist because a plausible
 fabrication is worse than an empty result:
 
-- **URLs are copied, never composed.** The Scout is told never to invent or
-  repair one, and `posting-urls.ts` independently drops any posting no search
-  returned — comparing on `postingId()`, so that a LinkedIn URL's per-search
-  tracking parameters can be mistyped without costing a real posting, while an
-  invented one is still caught. The Run survives a drop and carries a warning
-  naming it; only a Run with nothing left at all fails.
+- **The Scout never handles a URL.** It reports the id a search gave it, and
+  `resolve-postings.ts` looks that id up in the run's catalog to get the URL the
+  board issued — so there is no transcription step left to get wrong, and an
+  invented id names nothing. That module records why: comparing URLs on
+  `postingId()` fixed seven runs lost to mistyped LinkedIn tracking parameters,
+  and not showing the model a URL at all makes them unrepeatable. The Run
+  survives a drop and carries a warning naming it; only a Run with nothing left
+  at all fails.
 - **A Run with no successful search fails.** This is why
-  `JOB_SCOUT_SEARCH_TOOLS` is exported at all: `search-results.ts` counts
+  `JOB_SCOUT_SEARCH_TOOL_NAMES` is exported at all: `search-results.ts` counts
   evidence against the Scout's real tool set rather than a list maintained
   separately, which would drift silently the first time a board was added.
   `extraTools` is deliberately excluded from it, so nothing a caller passes can

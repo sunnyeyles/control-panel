@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import { apifyIndeedSearch } from "./indeed-search.ts"
+import { apifyIndeedSearch, type IndeedSearchDeps } from "./indeed-search.ts"
+import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
 
 /**
  * What is true of Indeed and of no other board: the actor it runs, the request
@@ -67,6 +68,35 @@ const ONE_JOB = [
   },
 ]
 
+/**
+ * The run's catalog, handing out `id1`, `id2`, … in the order postings arrive.
+ *
+ * Readable ids rather than the platform's hashes: how an id is derived is
+ * `posting-id.test.ts`'s subject in `@workspace/agents`, and what matters here
+ * is that this board's URL reaches the catalog and its description with it.
+ */
+let catalog: PostingCatalog
+let ids: Map<string, string>
+
+beforeEach(() => {
+  ids = new Map()
+  catalog = createPostingCatalog({
+    idFor: (url) => {
+      const held = ids.get(url) ?? `id${ids.size + 1}`
+      ids.set(url, held)
+      return held
+    },
+  })
+})
+
+/** `apifyIndeedSearch` against the catalog this test is holding. */
+function indeedSearch(
+  input: Parameters<typeof apifyIndeedSearch>[0],
+  deps: IndeedSearchDeps
+): Promise<string> {
+  return apifyIndeedSearch(input, catalog, deps)
+}
+
 afterEach(() => {
   delete process.env.APIFY_TOKEN
 })
@@ -75,7 +105,7 @@ describe("apifyIndeedSearch", () => {
   it("sends the query to Indeed's actor and renders its fields", async () => {
     const captured: Capture[] = []
 
-    const output = await apifyIndeedSearch(
+    const output = await indeedSearch(
       { query: "software engineer TypeScript", location: "Sydney NSW" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -93,25 +123,29 @@ describe("apifyIndeedSearch", () => {
       position: "software engineer TypeScript",
       country: "AU",
       location: "Sydney NSW",
-      maxItemsPerSearch: 6,
+      maxItemsPerSearch: 20,
       saveOnlyUniqueItems: true,
       parseCompanyDetails: false,
       followApplyRedirects: false,
     })
 
-    // The URL is the traceability requirement — a result the brief cannot link
-    // to is not usable downstream. The listing date is the freshness evidence.
-    expect(output).toContain(
-      "https://au.indeed.com/viewjob?jk=e84cd445a1ea8a30"
-    )
-    expect(output).toContain("Senior Software Engineer — Acme")
+    expect(output).toContain("[id1] Senior Software Engineer — Acme")
     expect(output).toContain(
       "Sydney NSW · Full-time · $140,000 - $170,000 a year"
     )
     expect(output).toContain("Build TypeScript services")
+
+    // The URL is the traceability requirement — a result the brief cannot link
+    // to is not usable downstream — and it is kept in the catalog rather than
+    // put in front of the model.
+    expect(output).not.toContain("https://au.indeed.com")
+    expect(catalog.get("id1")).toMatchObject({
+      board: "Indeed",
+      url: "https://au.indeed.com/viewjob?jk=e84cd445a1ea8a30",
+    })
   })
 
-  it("reports the canonical URL and never the tracking-laden apply link", async () => {
+  it("records the canonical URL and never the tracking-laden apply link", async () => {
     const withApplyLink = [
       {
         ...ONE_JOB[0],
@@ -120,43 +154,42 @@ describe("apifyIndeedSearch", () => {
       },
     ]
 
-    const output = await apifyIndeedSearch(
+    await indeedSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(withApplyLink), []) }
     )
 
     // Posting identity downstream is derived from the URL, so the same
     // advertisement reached twice with different `from`/`tk`/`vjk` values would
-    // become two postings. `url` is the stable `viewjob?jk=` form; the apply
-    // link is not, and nothing here may read it.
-    expect(output).toContain(
+    // become two postings — and now two catalog entries, so two ids for one
+    // role. `url` is the stable `viewjob?jk=` form; the apply link is not, and
+    // nothing here may read it.
+    expect(catalog.get("id1")?.url).toBe(
       "https://au.indeed.com/viewjob?jk=e84cd445a1ea8a30"
     )
-    expect(output).not.toContain("applystart")
-    expect(output).not.toContain("tk=")
   })
 
-  it("defaults to a handful of results, because Indeed's are large", async () => {
+  it("asks for fewer than SEEK, because the inventory is thinner", async () => {
     const captured: Capture[] = []
     const fetch = fakeFetch(jsonResponse(ONE_JOB), captured)
 
-    await apifyIndeedSearch({ query: "a" }, { apiToken: API_TOKEN, fetch })
-    await apifyIndeedSearch(
+    await indeedSearch({ query: "a" }, { apiToken: API_TOKEN, fetch })
+    await indeedSearch(
       { query: "b", maxResults: 500 },
       { apiToken: API_TOKEN, fetch }
     )
 
-    // Six results measured 77 KB of JSON, roughly 4x SEEK per posting, and the
-    // scout runs a sweep of titles x locations x boards inside one context.
-    // Both numbers are a fraction of SEEK's 20/50 for that reason alone.
-    expect(requestBody(captured[0]!).maxItemsPerSearch).toBe(6)
+    // Under SEEK's 40, because the actor charges per item and Indeed's
+    // Australian inventory is thinner — not because of context any more. Six
+    // results measured 77 KB of JSON, and none of it reaches the model now.
+    expect(requestBody(captured[0]!).maxItemsPerSearch).toBe(20)
     expect(requestBody(captured[1]!).maxItemsPerSearch).toBe(25)
   })
 
   it("scopes an unspecified location by country rather than inventing one", async () => {
     const captured: Capture[] = []
 
-    await apifyIndeedSearch(
+    await indeedSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_JOB), captured) }
     )
@@ -178,7 +211,7 @@ describe("apifyIndeedSearch", () => {
         },
       ]
 
-      const output = await apifyIndeedSearch(
+      const output = await indeedSearch(
         { query: "a", daysOld: 7 },
         { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(mixed), captured) }
       )
@@ -196,16 +229,24 @@ describe("apifyIndeedSearch", () => {
     })
 
     it("keeps a posting whose date is missing or will not parse", async () => {
+      // Distinct URLs, because these are distinct advertisements: the catalog
+      // gives one entry per posting, so two items sharing a URL render once.
       const undated = [
         {
           ...ONE_JOB[0],
+          url: "https://au.indeed.com/viewjob?jk=1111111111111111",
           positionName: "Undated",
           postingDateParsed: undefined,
         },
-        { ...ONE_JOB[0], positionName: "Garbled", postingDateParsed: "soon" },
+        {
+          ...ONE_JOB[0],
+          url: "https://au.indeed.com/viewjob?jk=2222222222222222",
+          positionName: "Garbled",
+          postingDateParsed: "soon",
+        },
       ]
 
-      const output = await apifyIndeedSearch(
+      const output = await indeedSearch(
         { query: "a", daysOld: 7 },
         { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(undated), []) }
       )
@@ -236,7 +277,7 @@ describe("apifyIndeedSearch", () => {
         },
       ]
 
-      const output = await apifyIndeedSearch(
+      const output = await indeedSearch(
         { query: "a", workType: "Contract" },
         { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(mixed), captured) }
       )
@@ -259,7 +300,7 @@ describe("apifyIndeedSearch", () => {
         { ...ONE_JOB[0], positionName: "Unstated", jobType: undefined },
       ]
 
-      const output = await apifyIndeedSearch(
+      const output = await indeedSearch(
         { query: "a", workType: "Contract" },
         { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(untyped), []) }
       )
@@ -277,7 +318,7 @@ describe("apifyIndeedSearch", () => {
       { ...ONE_JOB[0], positionName: "Open", isExpired: false },
     ]
 
-    const output = await apifyIndeedSearch(
+    const output = await indeedSearch(
       { query: "a" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(closed), []) }
     )
@@ -290,7 +331,7 @@ describe("apifyIndeedSearch", () => {
   })
 
   it("names Indeed when there is nothing to report", async () => {
-    const output = await apifyIndeedSearch(
+    const output = await indeedSearch(
       { query: "zeppelin wrangler" },
       { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse([]), []) }
     )
