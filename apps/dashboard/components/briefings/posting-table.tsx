@@ -1,5 +1,6 @@
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
 import { PostingBulkBar } from "@/components/briefings/posting-bulk-bar"
+import { PostingColumnHeading } from "@/components/briefings/posting-column-heading"
 import { PostingPagination } from "@/components/briefings/posting-pagination"
 import { PostingSelectAll } from "@/components/briefings/posting-select-all"
 import { PostingSelectionProvider } from "@/components/briefings/posting-selection"
@@ -127,13 +128,13 @@ export function PostingTable({
                       key={column.key}
                       className={cn(column.width, column.visibility)}
                     >
-                      {column.label}
+                      <PostingColumnHeading column={column} />
                     </TableHead>
                   ) : (
                     <PostingSortHeader
                       key={column.key}
                       column={column.sort}
-                      label={column.label}
+                      label={<PostingColumnHeading column={column} />}
                       width={column.width}
                       visibility={column.visibility}
                       query={query}

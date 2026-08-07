@@ -1,3 +1,4 @@
+import { PostingColumnHeading } from "@/components/briefings/posting-column-heading"
 import {
   POSTING_ACTIONS_WIDTH,
   POSTING_COLUMNS,
@@ -96,7 +97,7 @@ export function PostingTableSkeleton({
                   key={column.key}
                   className={cn(column.width, column.visibility)}
                 >
-                  {column.label}
+                  <PostingColumnHeading column={column} />
                 </TableHead>
               ))}
 
@@ -206,11 +207,20 @@ function PlaceholderRow({ index }: { index: number }) {
         <Skeleton className="size-4" />
       </TableCell>
 
+      {/*
+        Two bars below `md`, one above it: the company moves into this cell when
+        its own column stops being rendered, so the fallback has to stack the
+        same way the row does. `POSTING_ROW_HEIGHT` grows at the same breakpoint
+        for the same reason.
+      */}
       <TableCell>
-        <Skeleton className={cn("h-4", widths.title)} />
+        <div className="flex flex-col gap-1.5">
+          <Skeleton className={cn("h-4", widths.title)} />
+          <Skeleton className={cn("h-3 md:hidden", widths.company)} />
+        </div>
       </TableCell>
 
-      <TableCell>
+      <TableCell className={POSTING_HIDE_BELOW_MD}>
         <Skeleton className={cn("h-4", widths.company)} />
       </TableCell>
 

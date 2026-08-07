@@ -40,7 +40,12 @@ export function PostingSortHeader({
   query,
 }: {
   column: PostingSort
-  label: string
+  /**
+   * A node rather than a string, so the caller can pass
+   * `<PostingColumnHeading>` — which renders a column's long and short
+   * spellings and hides one in CSS. See `PostingColumn.shortLabel`.
+   */
+  label: React.ReactNode
   /**
    * This column's width class, from `POSTING_COLUMNS`.
    *

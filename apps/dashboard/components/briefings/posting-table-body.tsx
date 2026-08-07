@@ -350,6 +350,25 @@ function PostingRow({
           <span className="line-clamp-2" title={posting.title}>
             {posting.title}
           </span>
+
+          {/*
+            ⚠️ **The company, where its own column is not being rendered.** Below
+            `md` the Company column is gone — 17% of a 358px table is 61px, and
+            61px of an employer name is "Meri…" — so it stacks here instead,
+            which is the width the title already has. Above `md` the column is
+            back and this would be it twice, so it hides on the same breakpoint
+            the column appears on.
+
+            ⚠️ **Not `aria-hidden`, and the two spellings never coexist.**
+            `hidden md:table-cell` on the cell below is `display: none` *under*
+            `md`, which removes it from the accessibility tree as well as the
+            layout — so on a phone this span is the only copy a screen reader
+            has, and hiding it would drop the employer from the row entirely.
+            Above `md` this one is gone instead. Exactly one, at every width.
+          */}
+          <span className="line-clamp-1 text-xs text-muted-foreground md:hidden">
+            {posting.company}
+          </span>
         </TableCell>
 
         {/*
@@ -357,7 +376,10 @@ function PostingRow({
           makes necessary: a cell wider than its column used to widen the column,
           and now overflows it. See `POSTING_COLUMNS`.
         */}
-        <TableCell className="truncate" title={posting.company}>
+        <TableCell
+          className={cn("truncate", POSTING_HIDE_BELOW_MD)}
+          title={posting.company}
+        >
           {posting.company}
         </TableCell>
 
