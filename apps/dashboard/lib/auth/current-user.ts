@@ -80,7 +80,7 @@ export const getCurrentUser = cache(
      * opens the app — and nothing downstream needs a branch of its own.
      *
      * Returning before `auth.getSession()` skips the session lookup, the
-     * allowlist and the `ensureUserForAuth` upsert together, which is what lets
+     * allowlist and the `ensureUserForAuth` lookup together, which is what lets
      * the app run with no `NEON_*` variables and no database.
      */
     if (devMockEnabled()) return DEV_USER
@@ -95,7 +95,10 @@ export const getCurrentUser = cache(
     }
 
     // Idempotent by construction, so this is safe to run on every request and
-    // self-heals if a previous attempt failed after the account existed upstream.
+    // self-heals if a previous attempt failed after the account existed
+    // upstream. It reads before it writes, so the request that finds an
+    // existing mapping — every request but the first — never opens a write
+    // transaction; see `ensureUserForAuth`.
     const platformUser = await ensureUserForAuth(getPrisma(), user.id)
 
     return {

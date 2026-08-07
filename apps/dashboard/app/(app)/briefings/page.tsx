@@ -2,6 +2,7 @@ import { Suspense } from "react"
 
 import {
   BriefingStrip,
+  BriefingStripSkeleton,
   type BriefingStripEntry,
 } from "@/components/briefings/briefing-strip"
 import { CoverLetterAlert } from "@/components/briefings/cover-letter-alert"
@@ -15,7 +16,10 @@ import {
   runActivityForUser,
   type BriefingActivity,
 } from "@/lib/briefing-runs/run-activity"
-import { loadCoverLetterRows } from "@/lib/cover-letters/cover-letter-rows"
+import {
+  coverLetterRowsFor,
+  listCoverLetters,
+} from "@/lib/cover-letters/cover-letter-rows"
 import { getPrisma } from "@/lib/db"
 import { listPostings, type PostingPage } from "@/lib/postings/list-postings"
 import {
@@ -27,6 +31,7 @@ import type { BriefingCounts } from "@/lib/postings/postings-empty-state"
 import { getCoverLetterStore } from "@/lib/storage"
 import { timed } from "@/lib/timed"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import type { StoredCoverLetter } from "@workspace/user-storage"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
@@ -53,7 +58,7 @@ export const maxDuration = 30
  *
  * The guard establishes who is asking. It does **not** scope rows — that is
  * `where: { userId }` inside `listPostings`, and the session's `userId` passed
- * to `loadCoverLetterRows`, which is where the two user-isolation tests point.
+ * to `listCoverLetters`, which is where the two user-isolation tests point.
  * Neither identifier is ever read from the URL or a form.
  *
  * ⚠️ **The guard runs before `searchParams` is touched.** The query string is
@@ -128,6 +133,28 @@ export default async function BriefingsPage({
     return null
   })
 
+  // ⚠️ **Started here rather than after the postings, and the reason is in the
+  // signature.** `listCoverLetters` takes the user and nothing else — narrowing
+  // to the twenty-five ids on screen is `coverLetterRowsFor`, a filter over the
+  // result. So this depends on the postings query for nothing and used to wait
+  // for it anyway, which on a function deployed away from its data is a round
+  // trip to a second service paid in series for no reason.
+  //
+  // The trade, stated in `cover-letter-rows.ts`: a user with no postings now
+  // pays one listing they will not read.
+  //
+  // `null` on failure, never an empty list. The two sources are Postgres and S3,
+  // and the dashboard's `prod:cover-letters` grant is a Terraform apply away
+  // from the code that needs it — so "letters unreadable" is a state this page
+  // will genuinely be in. Degrading it to "nothing drafted" would tell someone
+  // who has already written a letter that they have not.
+  const listedLetters: ListedLetters = timed("briefings.cover-letters", () =>
+    listCoverLetters(user.userId, getCoverLetterStore())
+  ).catch((error) => {
+    console.error("cover-letters: could not load", error)
+    return null
+  })
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-8 lg:px-6">
@@ -174,13 +201,13 @@ export default async function BriefingsPage({
           </p>
 
           {/*
-            `fallback={null}`: the strip is a short list whose height depends on
-            how many briefings someone has, so a placeholder would reserve the
-            wrong amount of space above the table and then collapse. Nothing
-            below it moves when it arrives, because the table's own fallback
-            already occupies the table's height.
+            One reserved strip row. The height genuinely depends on how many
+            briefings someone has, so this is a guess — but it sits directly
+            above the table, so the alternative was not "no guess", it was
+            pushing the table down by a whole row every time the strip landed.
+            See `BriefingStripSkeleton` for why one row is the guess to make.
           */}
-          <Suspense fallback={null}>
+          <Suspense fallback={<BriefingStripSkeleton />}>
             <BriefingActivitySection activity={activityPromise} />
           </Suspense>
 
@@ -189,6 +216,7 @@ export default async function BriefingsPage({
               userId={user.userId}
               query={query}
               activity={activityPromise}
+              letters={listedLetters}
             />
           </Suspense>
         </section>
@@ -201,6 +229,16 @@ export default async function BriefingsPage({
 type ActivityPromise = Promise<
   [{ id: string; name: string }[], BriefingActivity[]] | null
 >
+
+/**
+ * Every letter this user has drafted, or `null` when the store could not be
+ * read.
+ *
+ * The whole user rather than the visible page, because that is what one
+ * `ListObjectsV2` returns and what lets the request start before the postings
+ * are known. `PostingsSection` narrows it once they are.
+ */
+type ListedLetters = Promise<readonly StoredCoverLetter[] | null>
 
 /**
  * The per-briefing strip above the table, and the poller.
@@ -259,10 +297,20 @@ async function PostingsSection({
   userId,
   query,
   activity,
+  letters,
 }: {
   userId: string
   query: PostingQuery
   activity: ActivityPromise
+  /**
+   * The whole user's letters, already in flight.
+   *
+   * ⚠️ **A promise, and narrowing it must not await it.** The request was
+   * started in `BriefingsPage` precisely so it would not queue behind
+   * `listPostings`; awaiting it here to filter would put it back in series and
+   * hold the table behind a second service.
+   */
+  letters: ListedLetters
 }) {
   let postings: PostingPage
 
@@ -286,36 +334,28 @@ async function PostingsSection({
     )
   }
 
-  // ⚠️ **Not awaited, and that is still the fix.** One S3 `ListObjectsV2` for
-  // the whole user rather than a `head()` per visible Posting — see
-  // `lib/cover-letters/cover-letter-rows.ts` — but a single request to another
-  // service is still a request, and putting it on the critical path would hold
-  // the table behind it. The promise goes down to the cells that need it, each
-  // behind its own `<Suspense>`, so the table paints and the letter column
-  // fills in. See `cover-letter-cell.tsx`.
+  // ⚠️ **Narrowed with `.then`, not with `await`, and that is still the fix.**
+  // The listing is one S3 request for the whole user — see
+  // `lib/cover-letters/cover-letter-rows.ts` — and it is already in flight,
+  // started alongside the postings query above. Awaiting it here to apply the
+  // filter would put a second service back on the table's critical path, which
+  // is the wait this shape exists to remove. The promise goes down to the cells
+  // that need it, each behind its own `<Suspense>`, so the table paints and the
+  // letter column fills in. See `cover-letter-cell.tsx`.
   //
-  // ⚠️ **`null` on failure, never an empty list.** The two sources are Postgres
-  // and S3, and the dashboard's `prod:cover-letters` grant is a Terraform apply
-  // away from the code that needs it — so "letters unreadable" is a state this
-  // page will genuinely be in. Degrading it to "nothing drafted" would tell
-  // someone who has already written a letter that they have not.
+  // `null` survives the narrowing: a store that could not be read is a distinct
+  // state from a user with nothing drafted, and only the alert below may speak
+  // for it.
   //
   // An array rather than a `Map` keyed by Posting, because this crosses the RSC
   // boundary into client components and a `Map` is an awkward payload. It is
   // bounded by the page size, so the per-row scan that replaces the keying is
   // bounded too.
-  const lettersPromise: CoverLetterPromise = timed(
-    "briefings.cover-letters",
-    () =>
-      loadCoverLetterRows(
-        userId,
-        postings.postings.map((posting) => posting.id),
-        getCoverLetterStore()
-      )
-  ).catch((error) => {
-    console.error("cover-letters: could not load", error)
-    return null
-  })
+  const postingIds = postings.postings.map((posting) => posting.id)
+
+  const lettersPromise: CoverLetterPromise = letters.then((listed) =>
+    listed === null ? null : coverLetterRowsFor(listed, postingIds)
+  )
 
   // Only known when the activity load succeeded, which is exactly why it is
   // optional: "you have no briefings" is the wrong thing to tell someone whose

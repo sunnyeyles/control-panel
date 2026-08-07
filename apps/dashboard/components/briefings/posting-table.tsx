@@ -6,7 +6,11 @@ import { PostingSelectionProvider } from "@/components/briefings/posting-selecti
 import { PostingSortHeader } from "@/components/briefings/posting-sort-header"
 import { PostingTableBody } from "@/components/briefings/posting-table-body"
 import type { PostingPage } from "@/lib/postings/list-postings"
-import { POSTING_COLUMNS } from "@/lib/postings/posting-columns"
+import {
+  POSTING_ACTIONS_WIDTH,
+  POSTING_COLUMNS,
+  POSTING_EXPAND_WIDTH,
+} from "@/lib/postings/posting-columns"
 import type { PostingQuery } from "@/lib/postings/posting-query"
 import {
   postingsEmptyState,
@@ -86,7 +90,15 @@ export function PostingTable({
         <PostingBulkBar letters={letters} />
 
         <div className="rounded-lg border">
-          <Table>
+          {/*
+            ⚠️ **`table-fixed`, and `posting-table-skeleton.tsx` says it too.**
+            Column widths come from `POSTING_COLUMNS` rather than from the rows,
+            which is what lets a fallback occupy the same geometry as the data it
+            stands in for — see the `width` docblock in
+            `lib/postings/posting-columns.ts`. Dropping it here reverts to
+            content-measured columns and the skeleton silently stops matching.
+          */}
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 <PostingSelectAll />
@@ -97,25 +109,28 @@ export function PostingTable({
                   with an unnamed column — so it is named once here, and the
                   per-row chevrons carry each posting's own title.
                 */}
-                <TableHead className="w-8">
+                <TableHead className={POSTING_EXPAND_WIDTH}>
                   <span className="sr-only">Expand</span>
                 </TableHead>
 
                 {POSTING_COLUMNS.map((column) =>
                   column.sort === undefined ? (
-                    <TableHead key={column.key}>{column.label}</TableHead>
+                    <TableHead key={column.key} className={column.width}>
+                      {column.label}
+                    </TableHead>
                   ) : (
                     <PostingSortHeader
                       key={column.key}
                       column={column.sort}
                       label={column.label}
+                      width={column.width}
                       query={query}
                     />
                   )
                 )}
 
                 {/* Named for the same reason the disclosure column is. */}
-                <TableHead className="w-12">
+                <TableHead className={POSTING_ACTIONS_WIDTH}>
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>

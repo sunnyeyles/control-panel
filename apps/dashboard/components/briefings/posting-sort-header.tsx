@@ -34,10 +34,20 @@ import Link from "next/link"
 export function PostingSortHeader({
   column,
   label,
+  width,
   query,
 }: {
   column: PostingSort
   label: string
+  /**
+   * This column's width class, from `POSTING_COLUMNS`.
+   *
+   * Passed in rather than looked up, because this component renders its own
+   * `<TableHead>` — so it is the only place the class can land, and the table is
+   * `table-fixed`. A sortable heading that dropped it would size itself from
+   * its content and take the column with it.
+   */
+  width: string
   /** The view currently rendered, which decides both arrow and destination. */
   query: PostingQuery
 }) {
@@ -45,6 +55,7 @@ export function PostingSortHeader({
 
   return (
     <TableHead
+      className={width}
       aria-sort={
         active
           ? query.direction === "asc"

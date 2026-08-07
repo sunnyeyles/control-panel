@@ -1,5 +1,8 @@
 import { formatUtcDateTime } from "@/lib/format-utc-datetime"
-import type { CoverLetterStore } from "@workspace/user-storage"
+import type {
+  CoverLetterStore,
+  StoredCoverLetter,
+} from "@workspace/user-storage"
 
 /**
  * The cover-letter facts rendered for one visible Posting.
@@ -10,7 +13,7 @@ import type { CoverLetterStore } from "@workspace/user-storage"
  * carry `displayName` and `filename` as well, both derived from the letter's
  * stored provenance. Those come from S3 *object metadata*, which a listing does
  * not return — and a listing is now how this is read (see
- * {@link loadCoverLetterRows}). They are not lost: `displayName` is the
+ * {@link listCoverLetters}). They are not lost: `displayName` is the
  * Posting's title and `filename` is `coverLetterFilename()` over its title and
  * company, and the table already holds both for every row it renders. So they
  * are computed at the point of use in `components/briefings/posting-detail.tsx`
@@ -26,7 +29,7 @@ export interface CoverLetterRow {
 }
 
 /**
- * Which of the visible Postings have a letter, in one request.
+ * Every letter this user has drafted, in one request.
  *
  * ⚠️ **One `ListObjectsV2`, not one `HeadObject` per Posting, and that is the
  * whole point of this module's shape.** `PAGE_SIZE` is 25, so the fan-out it
@@ -45,11 +48,18 @@ export interface CoverLetterRow {
  * written before it. `docs/cover-letter-existence-plan.md` weighed the two and
  * chose this; it is in git history, deleted with the work it described.
  *
- * ⚠️ **Still filtered to the ids being rendered.** The listing answers for
- * every letter the user has, and this returns only the visible page's — so the
- * array crossing the RSC boundary stays bounded by `PAGE_SIZE` however much
- * someone has drafted, and the linear scans in `useCoverLetter` and
- * `LetterWarning` stay bounded with it.
+ * ⚠️ **It takes the user and nothing else, and that is what lets it start
+ * early.** Narrowing to the visible page is {@link coverLetterRowsFor}, applied
+ * to the result — no part of it reaches the wire. So this request does not
+ * depend on the postings query and must not queue behind it: `page.tsx` starts
+ * the two together. It used to be issued after the postings landed, which cost
+ * a round trip to another service, in series, for a filter that runs in
+ * microseconds on data already in hand.
+ *
+ * The price is a request that is sometimes wasted: a user with no postings at
+ * all still asks. `listPostings` accepts the same trade for the same reason —
+ * its speculative page fetch is discarded whenever the requested page overshot
+ * — and one listing over an empty prefix is the cheapest request S3 has.
  *
  * ⚠️ **It rejects rather than degrading, and that is a correctness property.**
  * A store that cannot be read must reach the page's storage-failure alert. An
@@ -58,19 +68,34 @@ export interface CoverLetterRow {
  * `object_not_found` case that `head()` used to catch has no analogue: a
  * listing simply does not include what is not there.
  */
-export async function loadCoverLetterRows(
+export async function listCoverLetters(
   userId: string,
-  postingIds: readonly string[],
   letters: CoverLetterStore
-): Promise<CoverLetterRow[]> {
-  // Nothing on screen is nothing to ask about — an empty page must not cost a
-  // request. `listPostings` short-circuits its own second query the same way.
-  if (postingIds.length === 0) return []
+): Promise<readonly StoredCoverLetter[]> {
+  return letters.list(userId)
+}
 
-  const found = await letters.list(userId)
+/**
+ * The rows for one page of Postings, out of everything {@link listCoverLetters}
+ * found.
+ *
+ * ⚠️ **Filtered to the ids being rendered.** The listing answers for every
+ * letter the user has, and this returns only the visible page's — so the array
+ * crossing the RSC boundary stays bounded by `PAGE_SIZE` however much someone
+ * has drafted, and the linear scans in `useCoverLetter` and `LetterWarning` stay
+ * bounded with it.
+ *
+ * Synchronous, and deliberately so: it is the half of the old
+ * `loadCoverLetterRows` that never touched the network, and separating them is
+ * what let the half that does start without waiting for the postings query.
+ */
+export function coverLetterRowsFor(
+  listed: readonly StoredCoverLetter[],
+  postingIds: readonly string[]
+): CoverLetterRow[] {
   const visible = new Set(postingIds)
 
-  return found
+  return listed
     .filter((letter) => visible.has(letter.postingId))
     .map((letter) => ({
       postingId: letter.postingId,

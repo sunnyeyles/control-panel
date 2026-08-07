@@ -1,6 +1,7 @@
 "use client"
 
 import { usePostingSelection } from "@/components/briefings/posting-selection"
+import { POSTING_SELECT_WIDTH } from "@/lib/postings/posting-columns"
 import { Checkbox } from "@workspace/ui/components/checkbox"
 import { TableHead } from "@workspace/ui/components/table"
 
@@ -26,7 +27,7 @@ export function PostingSelectAll() {
   const { allSelected, toggleAll, total } = usePostingSelection()
 
   return (
-    <TableHead className="w-8">
+    <TableHead className={POSTING_SELECT_WIDTH}>
       <Checkbox
         checked={allSelected}
         onCheckedChange={toggleAll}

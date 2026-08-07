@@ -63,8 +63,8 @@ try {
 ```
 
 Ordinary reads and writes use Prisma Client directly (`prisma.job.findMany`,
-`prisma.user.upsert` via `ensureUserForAuth`, …). `@workspace/db/schedule` is
-importable on its own and pulls in no driver.
+`prisma.user.findUnique` via `ensureUserForAuth`, …). `@workspace/db/schedule`
+is importable on its own and pulls in no driver.
 
 ## Connections
 

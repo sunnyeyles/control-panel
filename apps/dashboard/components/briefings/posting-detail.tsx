@@ -145,15 +145,38 @@ export function PostingDetail({
         it must not look like "the advertisement carried no description".
       */}
       {detail.status === "loading" ? (
-        <div
-          aria-busy="true"
-          aria-label={`Loading the details for ${posting.title}`}
-          className="flex flex-col gap-2"
-        >
-          <Skeleton className="h-4 w-full max-w-xl" />
-          <Skeleton className="h-4 w-full max-w-md" />
-          <Skeleton className="h-4 w-full max-w-lg" />
-        </div>
+        /*
+          ⚠️ **The real `Section` scaffolding, not three bars in a box.** What
+          lands here is two or three headed sections separated by the parent's
+          `gap-5`; three bare `gap-2` bars were roughly half that height, so the
+          panel grew under the reader's cursor every time a row was expanded.
+          Only the two sections that always render are reserved — "From the
+          advertisement" is conditional on the advertisement having highlights,
+          so reserving it would be wrong whenever it did not.
+
+          The headings are the real words rather than placeholders: they are
+          static, they are what arrives, and a grey bar where a heading goes is
+          a second thing to move.
+        */
+        <>
+          <Section title="Summary">
+            <div
+              aria-busy="true"
+              aria-label={`Loading the details for ${posting.title}`}
+              className="flex flex-col gap-2"
+            >
+              <Skeleton className="h-4 w-full max-w-xl" />
+              <Skeleton className="h-4 w-full max-w-md" />
+            </div>
+          </Section>
+
+          <Section title="Why it matched">
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-4 w-full max-w-lg" />
+              <Skeleton className="h-4 w-full max-w-sm" />
+            </div>
+          </Section>
+        </>
       ) : detail.status === "failed" ? (
         <p className="text-sm text-muted-foreground">
           {detail.message} The advertisement itself still opens above.

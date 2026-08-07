@@ -27,6 +27,33 @@ export interface PostingColumn {
   key: string
   label: string
   /**
+   * How wide this column is, as a Tailwind class on its `<th>`.
+   *
+   * ⚠️ **The table is `table-fixed`, and these widths are what makes a loading
+   * skeleton possible at all.** Under the default `table-auto`, a column is as
+   * wide as its widest cell — so the table's geometry is a function of the data
+   * in it, and a placeholder rendered before that data arrives cannot be the
+   * same shape by any amount of care. Every sort click moved the columns
+   * sideways as the rows landed.
+   *
+   * It is not only the rows that differ: a sortable heading wraps its label in a
+   * `size="sm"` button with an icon beside it, roughly 28px wider than the plain
+   * text `posting-table-skeleton.tsx` draws in its place. Even a skeleton that
+   * copied the headings exactly would still have measured differently.
+   *
+   * Percentages rather than pixels, so the table still answers to its
+   * `max-w-6xl` container and to a narrow viewport. They total 90%; the
+   * remaining tenth is the three unlabelled cells, which keep the fixed `w-8`,
+   * `w-8` and `w-12` they already carried — 112px, or almost exactly 10% of the
+   * table inside `max-w-6xl`.
+   *
+   * The floor on each is its own heading: `TableHead` is `whitespace-nowrap`, so
+   * a column narrower than the words in it spills rather than wrapping. "Cover
+   * letter" is the longest and is why that column is 10% and not the 7% its
+   * contents — a single `size-4` icon — would otherwise justify.
+   */
+  width: string
+  /**
    * Present when the heading sorts, absent when the column is display-only.
    *
    * Location has no order worth having — nobody sorts a job search by the
@@ -48,13 +75,42 @@ export interface PostingColumn {
 }
 
 export const POSTING_COLUMNS: readonly PostingColumn[] = [
-  { key: "title", label: "Title", sort: "title" },
-  { key: "company", label: "Company", sort: "company" },
-  { key: "location", label: "Location" },
-  { key: "postedAt", label: "Posted", sort: "posted" },
-  { key: "source", label: "Source" },
-  { key: "letter", label: "Cover letter" },
+  { key: "title", label: "Title", width: "w-[27%]", sort: "title" },
+  { key: "company", label: "Company", width: "w-[17%]", sort: "company" },
+  { key: "location", label: "Location", width: "w-[15%]" },
+  { key: "postedAt", label: "Posted", width: "w-[11%]", sort: "posted" },
+  { key: "source", label: "Source", width: "w-[10%]" },
+  { key: "letter", label: "Cover letter", width: "w-[10%]" },
 ]
+
+/**
+ * The width of the three cells that carry controls rather than a heading, in
+ * the order they are rendered: the selection checkbox, the disclosure chevron,
+ * and the row's delete control.
+ *
+ * Here rather than written into three components, for the same reason
+ * {@link POSTING_COLUMNS} carries its own: the header row, every body row and
+ * the loading skeleton all have to agree on them, and under `table-fixed` a
+ * disagreement is a visible jump rather than a silent no-op.
+ */
+export const POSTING_SELECT_WIDTH = "w-8"
+export const POSTING_EXPAND_WIDTH = "w-8"
+export const POSTING_ACTIONS_WIDTH = "w-12"
+
+/**
+ * How tall one body row is, header excluded.
+ *
+ * ⚠️ **Uniform, and that is the point.** The title cell wraps to two lines when
+ * an advertisement has a long one, so without a declared height a page of rows
+ * is a mix of one- and two-line rows — and the skeleton would have to guess
+ * which, for all twenty-five. Fixing the height moves the variation inside the
+ * cell (`line-clamp-2`) where it costs nothing, and lets the fallback reserve
+ * exactly the space the rows will take.
+ *
+ * 56px, which is the 44px the row already needed for its `size-7` icon buttons
+ * plus room for the second line of a wrapped title.
+ */
+export const POSTING_ROW_HEIGHT = "h-14"
 
 /**
  * The cells the table renders outside {@link POSTING_COLUMNS}: the selection

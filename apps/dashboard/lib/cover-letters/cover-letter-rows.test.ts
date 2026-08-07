@@ -5,7 +5,7 @@ import {
 } from "@workspace/user-storage"
 import { describe, expect, it } from "vitest"
 
-import { loadCoverLetterRows } from "./cover-letter-rows"
+import { coverLetterRowsFor, listCoverLetters } from "./cover-letter-rows"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -50,48 +50,63 @@ function storeOf(letters: StoredCoverLetter[] | Error) {
   return { store, listedFor }
 }
 
-describe("loadCoverLetterRows", () => {
+describe("listCoverLetters", () => {
   it("asks once for the whole user, not once per Posting", async () => {
     const postingIds = Array.from({ length: 25 }, (_, index) =>
       String(index).padStart(16, "0")
     )
     const result = storeOf(postingIds.map(listed))
 
-    const rows = await loadCoverLetterRows(USER_ID, postingIds, result.store)
+    const found = await listCoverLetters(USER_ID, result.store)
 
     expect(result.listedFor).toEqual([USER_ID])
-    expect(rows).toHaveLength(25)
+    expect(found).toHaveLength(25)
   })
 
-  it("returns only the current page's Postings", async () => {
+  it("takes no posting ids, so it need not wait for the postings query", () => {
+    // Not a style assertion. The page starts this request alongside
+    // `listPostings` precisely because it cannot depend on its result, and a
+    // second parameter here would be the thing that quietly reintroduced the
+    // dependency. `listCoverLetters.length` counts the declared parameters.
+    expect(listCoverLetters).toHaveLength(2)
+  })
+
+  it("reports an unavailable store instead of showing every Posting undrafted", async () => {
+    const unavailable = new StorageUnavailableError("access denied")
+    const result = storeOf(unavailable)
+
+    await expect(listCoverLetters(USER_ID, result.store)).rejects.toBe(
+      unavailable
+    )
+  })
+})
+
+describe("coverLetterRowsFor", () => {
+  it("returns only the current page's Postings", () => {
     const visible = "0f1e2d3c4b5a6978"
     const elsewhere = "aaaaaaaaaaaaaaaa"
-    const result = storeOf([listed(visible), listed(elsewhere)])
 
-    const rows = await loadCoverLetterRows(USER_ID, [visible], result.store)
+    const rows = coverLetterRowsFor(
+      [listed(visible), listed(elsewhere)],
+      [visible]
+    )
 
     expect(rows.map((row) => row.postingId)).toEqual([visible])
   })
 
-  it("omits a Posting with no drafted letter", async () => {
+  it("omits a Posting with no drafted letter", () => {
     const drafted = "0f1e2d3c4b5a6978"
     const undrafted = "aaaaaaaaaaaaaaaa"
-    const result = storeOf([listed(drafted)])
 
-    const rows = await loadCoverLetterRows(
-      USER_ID,
-      [drafted, undrafted],
-      result.store
-    )
+    const rows = coverLetterRowsFor([listed(drafted)], [drafted, undrafted])
 
     expect(rows.map((row) => row.postingId)).toEqual([drafted])
   })
 
-  it("returns only the two fields the table renders", async () => {
+  it("returns only the two fields the table renders", () => {
     const postingId = "0f1e2d3c4b5a6978"
-    const result = storeOf([listed(postingId)])
 
-    const rows = await loadCoverLetterRows(USER_ID, [postingId], result.store)
+    const rows = coverLetterRowsFor([listed(postingId)], [postingId])
 
     // Not `displayName` and not `filename`: a listing carries no object
     // metadata, so both are derived from the Posting in `posting-detail.tsx`.
@@ -100,21 +115,10 @@ describe("loadCoverLetterRows", () => {
     ])
   })
 
-  it("reports an unavailable store instead of showing every Posting undrafted", async () => {
-    const unavailable = new StorageUnavailableError("access denied")
-    const result = storeOf(unavailable)
-
-    await expect(
-      loadCoverLetterRows(USER_ID, ["0f1e2d3c4b5a6978"], result.store)
-    ).rejects.toBe(unavailable)
-  })
-
-  it("costs no request at all when the page is empty", async () => {
-    const result = storeOf([])
-
-    await expect(
-      loadCoverLetterRows(USER_ID, [], result.store)
-    ).resolves.toEqual([])
-    expect(result.listedFor).toEqual([])
+  it("is empty for an empty page, however much has been drafted", () => {
+    // The listing still happened — it is started before the postings are known,
+    // and `listCoverLetters` is where that trade is documented. What must not
+    // happen is a letter for some other page crossing the RSC boundary.
+    expect(coverLetterRowsFor([listed("0f1e2d3c4b5a6978")], [])).toEqual([])
   })
 })
