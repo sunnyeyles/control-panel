@@ -27,6 +27,65 @@ export interface PostingColumn {
   key: string
   label: string
   /**
+   * A shorter heading for when the column is too narrow for {@link label}.
+   * Absent when the label already fits at every width.
+   *
+   * ⚠️ **This is not a nicety — a heading that does not fit is a heading that
+   * overlaps the next column.** `TableHead` is `whitespace-nowrap`, so a `<th>`
+   * narrower than its own words spills sideways rather than wrapping or
+   * truncating, and "Cover letter" in a 67px column ran clean across the delete
+   * control beside it. The floor on a column is the width of its heading, which
+   * is why this field exists rather than a narrower percentage.
+   *
+   * Swapped in CSS, not chosen in JavaScript: both spellings are rendered and
+   * one is hidden, so the header stays a server component with no breakpoint in
+   * its logic. See `PostingColumnHeading`.
+   */
+  shortLabel?: string
+  /**
+   * How wide this column is, as a Tailwind class on its `<th>`.
+   *
+   * ⚠️ **The table is `table-fixed`, and these widths are what makes a loading
+   * skeleton possible at all.** Under the default `table-auto`, a column is as
+   * wide as its widest cell — so the table's geometry is a function of the data
+   * in it, and a placeholder rendered before that data arrives cannot be the
+   * same shape by any amount of care. Every sort click moved the columns
+   * sideways as the rows landed.
+   *
+   * It is not only the rows that differ: a sortable heading wraps its label in a
+   * `size="sm"` button with an icon beside it, roughly 28px wider than the plain
+   * text `posting-table-skeleton.tsx` draws in its place. Even a skeleton that
+   * copied the headings exactly would still have measured differently.
+   *
+   * Percentages rather than pixels, so the table still answers to its
+   * `max-w-6xl` container and to a narrow viewport. They total 90%; the
+   * remaining tenth is the three unlabelled cells, which keep the fixed `w-8`,
+   * `w-8` and `w-12` they already carried — 112px, or almost exactly 10% of the
+   * table inside `max-w-6xl`.
+   *
+   * ⚠️ **Below `md` a second set of percentages applies, and they have to add
+   * up on their own.** Only Title and the letter column are still rendered
+   * there, and their `lg` shares — 27% and 10% — describe a table with four
+   * more columns in it. Left at those, 37% of the width was claimed and the
+   * other 63% was slack the browser spread across every column including the
+   * three control cells; measured on a 390px viewport that produced a 97px
+   * Title, a letter column too narrow for its own heading, and half the table
+   * spent on a checkbox, a chevron and a bin.
+   *
+   * So the mobile pair is sized against the space that actually exists. On a
+   * 356px table: 32 + 32 + 40 for the control cells leaves 252px, which is 52%
+   * for Title (≈185px, two clamped lines of about 24 characters) and 18% for
+   * the letter column (≈64px, against the ≈59px "Letter" plus `px-2` needs).
+   * **Check both sums when changing either.** A column whose share leaves slack
+   * does not simply render narrow — it makes every other column wrong too.
+   *
+   * The floor on each is its own heading: `TableHead` is `whitespace-nowrap`, so
+   * a column narrower than the words in it spills rather than wrapping. "Cover
+   * letter" is the longest and is why that column is 10% and not the 7% its
+   * contents — a single `size-4` icon — would otherwise justify.
+   */
+  width: string
+  /**
    * Present when the heading sorts, absent when the column is display-only.
    *
    * Location has no order worth having — nobody sorts a job search by the
@@ -45,16 +104,162 @@ export interface PostingColumn {
    * design rather than an omission this migration could also fix.
    */
   sort?: PostingSort
+  /**
+   * When this column is rendered, as a Tailwind class on its `<th>` and on the
+   * matching `<td>`. Absent means always.
+   *
+   * ⚠️ **Nine cells do not fit on a phone.** At 375px each of them is about
+   * 40px, and `TableHead` is `whitespace-nowrap`, so every heading spills its
+   * own column. The `overflow-x-auto` the shared `Table` puts around itself
+   * does not save this table: it is `w-full` and `table-fixed`, so it shrinks
+   * to the viewport instead of overflowing it, and there is nothing to scroll.
+   *
+   * So the columns that are scanning aids rather than identity stop being
+   * rendered — and what they said is disclosed in the panel the row already
+   * opens, which is why `posting-detail.tsx` has a section that appears only
+   * below `lg`. **Hiding a column here without adding the fact there makes it
+   * unreachable on the device the change is for.**
+   *
+   * Two things follow from `table-fixed` and neither needs fixing:
+   *
+   * - **The percentages no longer total 90%, and that is fine.** A
+   *   `display: none` cell contributes no column at all, and the slack is
+   *   distributed across the columns that remain in proportion to their
+   *   declared widths — so below `md` the 27/17/10 ratio scales up to fill the
+   *   row and Title stays the widest thing on screen. A per-breakpoint width
+   *   would be three more numbers to keep in step with the skeleton for no
+   *   visible gain.
+   * - **{@link POSTING_COLSPAN} stays 9.** CSS cannot vary an attribute, and
+   *   under `table-fixed` the column count is fixed by the first row — so a
+   *   `colSpan` wider than the visible columns is clamped to the row rather
+   *   than inventing a phantom tenth one. Computing a smaller number from a
+   *   media query would put the breakpoint into JavaScript, and the header is a
+   *   server component.
+   */
+  visibility?: string
 }
 
+/**
+ * The two points at which a column stops being rendered.
+ *
+ * Named rather than written into the array below, because the `<td>`s in
+ * `posting-table-body.tsx` and the placeholder cells in
+ * `posting-table-skeleton.tsx` are hand-written in the array's order rather than
+ * mapped from it — so all three files have to spell the same class, and a
+ * literal repeated in three places is the drift this file exists to prevent.
+ *
+ * `md:table-cell` and not `md:block`: these are `<th>` and `<td>`, and putting
+ * one back as a block takes it out of the table's layout rather than returning
+ * it to the row.
+ *
+ * `md` is 768px, which is also `MOBILE_BREAKPOINT` in
+ * `@workspace/ui/hooks/use-mobile` — but this is plain CSS and deliberately not
+ * that hook. A media query read in JavaScript renders differently on the server
+ * than in the browser, and the header row is a server component.
+ */
+export const POSTING_HIDE_BELOW_MD = "hidden md:table-cell"
+export const POSTING_HIDE_BELOW_LG = "hidden lg:table-cell"
+
+/**
+ * ⚠️ **Which columns hide is a judgement about what a row is *for*.** Title is
+ * how somebody recognises an advertisement they have already seen, and the
+ * letter column is the only per-row state worth scanning a page for — so those
+ * two stay at every width. Location, Posted and Source answer questions about
+ * one posting, which is what expanding it is for.
+ *
+ * ⚠️ **Company hides but does not go to the detail panel — it moves into the
+ * title cell.** A column and a stacked line are not the same trade. The other
+ * three are facts somebody looks up about one posting; the company is half of
+ * how a row is identified at a glance, and a page of titles with no employers
+ * beside them is not a shorter table, it is a table missing a field. So below
+ * `md` it is rendered under the title in the same cell — see the title cell in
+ * `posting-table-body.tsx`.
+ *
+ * ⚠️ **A percentage is a share of the *table*, not of what is left.** This is
+ * what made the first attempt at this unreadable: with the other columns gone,
+ * `w-[17%]` of a 358px table is 61px, and 61px of Company is "Meri…". The slack
+ * from the hidden columns is redistributed in proportion to the widths that
+ * remain, so Title and the letter column grow — but a column that was narrow to
+ * begin with stays narrow, and no amount of hiding fixes it.
+ */
 export const POSTING_COLUMNS: readonly PostingColumn[] = [
-  { key: "title", label: "Title", sort: "title" },
-  { key: "company", label: "Company", sort: "company" },
-  { key: "location", label: "Location" },
-  { key: "postedAt", label: "Posted", sort: "posted" },
-  { key: "source", label: "Source" },
-  { key: "letter", label: "Cover letter" },
+  { key: "title", label: "Title", width: "w-[52%] md:w-[27%]", sort: "title" },
+  {
+    key: "company",
+    label: "Company",
+    width: "w-[17%]",
+    sort: "company",
+    visibility: POSTING_HIDE_BELOW_MD,
+  },
+  {
+    key: "location",
+    label: "Location",
+    width: "w-[15%]",
+    visibility: POSTING_HIDE_BELOW_MD,
+  },
+  {
+    key: "postedAt",
+    label: "Posted",
+    width: "w-[11%]",
+    sort: "posted",
+    visibility: POSTING_HIDE_BELOW_MD,
+  },
+  {
+    key: "source",
+    label: "Source",
+    width: "w-[10%]",
+    visibility: POSTING_HIDE_BELOW_LG,
+  },
+  {
+    key: "letter",
+    label: "Cover letter",
+    shortLabel: "Letter",
+    width: "w-[18%] md:w-[10%]",
+  },
 ]
+
+/**
+ * The width of the three cells that carry controls rather than a heading, in
+ * the order they are rendered: the selection checkbox, the disclosure chevron,
+ * and the row's delete control.
+ *
+ * Here rather than written into three components, for the same reason
+ * {@link POSTING_COLUMNS} carries its own: the header row, every body row and
+ * the loading skeleton all have to agree on them, and under `table-fixed` a
+ * disagreement is a visible jump rather than a silent no-op.
+ *
+ * ⚠️ **These are why the mobile percentages are declared rather than left to
+ * work themselves out.** When declared widths total less than the table, the
+ * browser hands the slack out roughly evenly — so hiding four columns fed a
+ * quarter of the reclaimed space to each of *these three*, and the controls
+ * ended up holding half the table while the title stayed at 97px. Declaring
+ * mobile widths that already add up leaves no slack to misallocate.
+ */
+export const POSTING_SELECT_WIDTH = "w-8"
+export const POSTING_EXPAND_WIDTH = "w-8"
+export const POSTING_ACTIONS_WIDTH = "w-10 md:w-12"
+
+/**
+ * How tall one body row is, header excluded.
+ *
+ * ⚠️ **Uniform, and that is the point.** The title cell wraps to two lines when
+ * an advertisement has a long one, so without a declared height a page of rows
+ * is a mix of one- and two-line rows — and the skeleton would have to guess
+ * which, for all twenty-five. Fixing the height moves the variation inside the
+ * cell (`line-clamp-2`) where it costs nothing, and lets the fallback reserve
+ * exactly the space the rows will take.
+ *
+ * 56px, which is the 44px the row already needed for its `size-7` icon buttons
+ * plus room for the second line of a wrapped title.
+ *
+ * ⚠️ **72px below `md`, because the title cell carries a third line there.**
+ * That is where the company moves when its own column stops being rendered —
+ * two clamped lines of `text-sm` title (40px) plus one of `text-xs` company
+ * (16px) plus the cell's `p-2` (16px). Uniform at each width, which is all the
+ * skeleton needs; it reads this same constant, so the two heights cannot drift.
+ * Shrinking this back to a single value re-clips the company line.
+ */
+export const POSTING_ROW_HEIGHT = "h-18 md:h-14"
 
 /**
  * The cells the table renders outside {@link POSTING_COLUMNS}: the selection
@@ -72,5 +277,11 @@ const FIXED_CELLS = 3
  * The columns above plus the {@link FIXED_CELLS} that carry controls and no
  * heading text. Derived rather than written down, so a column added to the
  * array cannot leave the detail row behind.
+ *
+ * ⚠️ **Every column, including the ones a narrow viewport does not render.** It
+ * is deliberately not `POSTING_COLUMNS.filter(visible)`, because "visible" is a
+ * media query and this number becomes an HTML attribute. Under `table-fixed`
+ * the row count is set by the first row, so the excess is clamped — see
+ * {@link PostingColumn.visibility}.
  */
 export const POSTING_COLSPAN = POSTING_COLUMNS.length + FIXED_CELLS

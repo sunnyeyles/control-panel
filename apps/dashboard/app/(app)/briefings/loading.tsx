@@ -1,3 +1,4 @@
+import { BriefingStripSkeleton } from "@/components/briefings/briefing-strip"
 import { PostingTableSkeleton } from "@/components/briefings/posting-table-skeleton"
 
 /**
@@ -56,11 +57,11 @@ export default function Loading() {
           </p>
 
           {/*
-            No placeholder for the briefing strip, for the reason `page.tsx`
-            gives about its own `fallback={null}`: its height depends on how
-            many briefings someone has, so anything here would reserve the wrong
-            space and then collapse.
+            The same two placeholders `page.tsx` uses for its own boundaries, in
+            the same order — this element is replaced by that shell mid
+            navigation, so anything only one of them draws is a jump.
           */}
+          <BriefingStripSkeleton />
           <PostingTableSkeleton />
         </section>
       </div>

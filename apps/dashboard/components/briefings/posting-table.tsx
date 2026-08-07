@@ -1,13 +1,18 @@
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
 import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import { PostingBulkBar } from "@/components/briefings/posting-bulk-bar"
+import { PostingColumnHeading } from "@/components/briefings/posting-column-heading"
 import { PostingPagination } from "@/components/briefings/posting-pagination"
 import { PostingSelectAll } from "@/components/briefings/posting-select-all"
 import { PostingSelectionProvider } from "@/components/briefings/posting-selection"
 import { PostingSortHeader } from "@/components/briefings/posting-sort-header"
 import { PostingTableBody } from "@/components/briefings/posting-table-body"
 import type { PostingPage } from "@/lib/postings/list-postings"
-import { POSTING_COLUMNS } from "@/lib/postings/posting-columns"
+import {
+  POSTING_ACTIONS_WIDTH,
+  POSTING_COLUMNS,
+  POSTING_EXPAND_WIDTH,
+} from "@/lib/postings/posting-columns"
 import type { PostingQuery } from "@/lib/postings/posting-query"
 import {
   postingsEmptyState,
@@ -21,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
+import { cn } from "@workspace/ui/lib/utils"
 
 /**
  * Every Posting this user's briefings have ever found, one row each.
@@ -98,7 +104,15 @@ export function PostingTable({
         <PostingBulkBar letters={letters} />
 
         <div className="rounded-lg border">
-          <Table>
+          {/*
+            ⚠️ **`table-fixed`, and `posting-table-skeleton.tsx` says it too.**
+            Column widths come from `POSTING_COLUMNS` rather than from the rows,
+            which is what lets a fallback occupy the same geometry as the data it
+            stands in for — see the `width` docblock in
+            `lib/postings/posting-columns.ts`. Dropping it here reverts to
+            content-measured columns and the skeleton silently stops matching.
+          */}
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 <PostingSelectAll />
@@ -109,25 +123,39 @@ export function PostingTable({
                   with an unnamed column — so it is named once here, and the
                   per-row chevrons carry each posting's own title.
                 */}
-                <TableHead className="w-8">
+                <TableHead className={POSTING_EXPAND_WIDTH}>
                   <span className="sr-only">Expand</span>
                 </TableHead>
 
+                {/*
+                  ⚠️ **`column.visibility` is half of a pair.** The matching
+                  `<td>` in `posting-table-body.tsx` carries the same class, and
+                  a heading hidden without its cells — or the reverse — leaves
+                  the row one column out of step with its own header. See
+                  `PostingColumn.visibility`.
+                */}
                 {POSTING_COLUMNS.map((column) =>
                   column.sort === undefined ? (
-                    <TableHead key={column.key}>{column.label}</TableHead>
+                    <TableHead
+                      key={column.key}
+                      className={cn(column.width, column.visibility)}
+                    >
+                      <PostingColumnHeading column={column} />
+                    </TableHead>
                   ) : (
                     <PostingSortHeader
                       key={column.key}
                       column={column.sort}
-                      label={column.label}
+                      label={<PostingColumnHeading column={column} />}
+                      width={column.width}
+                      visibility={column.visibility}
                       query={query}
                     />
                   )
                 )}
 
                 {/* Named for the same reason the disclosure column is. */}
-                <TableHead className="w-12">
+                <TableHead className={POSTING_ACTIONS_WIDTH}>
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>

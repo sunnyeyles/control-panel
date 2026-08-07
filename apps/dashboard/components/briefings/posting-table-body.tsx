@@ -15,7 +15,15 @@ import {
 import { usePostingSelection } from "@/components/briefings/posting-selection"
 import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import type { PostingView } from "@/lib/postings/list-postings"
-import { POSTING_COLSPAN } from "@/lib/postings/posting-columns"
+import {
+  POSTING_ACTIONS_WIDTH,
+  POSTING_COLSPAN,
+  POSTING_EXPAND_WIDTH,
+  POSTING_HIDE_BELOW_LG,
+  POSTING_HIDE_BELOW_MD,
+  POSTING_ROW_HEIGHT,
+  POSTING_SELECT_WIDTH,
+} from "@/lib/postings/posting-columns"
 import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import { Checkbox } from "@workspace/ui/components/checkbox"
@@ -248,7 +256,14 @@ function PostingRow({
       */}
       <TableRow
         data-state={selected ? "selected" : undefined}
-        className="cursor-pointer"
+        /*
+          ⚠️ **A declared height, and `posting-table-skeleton.tsx` declares the
+          same one.** The title wraps to a second line when an advertisement has
+          a long one, so without this a page is a mix of one- and two-line rows
+          and no fallback can reserve the right space for twenty-five of them.
+          See `POSTING_ROW_HEIGHT`.
+        */
+        className={cn("cursor-pointer", POSTING_ROW_HEIGHT)}
         /*
           Warming the detail, not opening it. Expanding a row costs one small
           request now — see `lib/postings/load-posting-detail.ts` — and this is
@@ -273,7 +288,7 @@ function PostingRow({
           onToggle()
         }}
       >
-        <TableCell className="w-8">
+        <TableCell className={POSTING_SELECT_WIDTH}>
           <Checkbox
             checked={selected}
             onCheckedChange={() => toggle(posting.id)}
@@ -296,7 +311,7 @@ function PostingRow({
           looks like the natural home for it — silently drops that highlight,
           because `:has()` matches descendants.
         */}
-        <TableCell className="w-8">
+        <TableCell className={POSTING_EXPAND_WIDTH}>
           <Button
             type="button"
             variant="ghost"
@@ -323,16 +338,73 @@ function PostingRow({
           it expanded the row underneath, exactly as every other cell now does.
           `whitespace-normal` is what the removed button was supplying, and it
           is still needed: `TableCell` defaults to `whitespace-nowrap`, so a
-          long advertisement title would otherwise stretch the column rather
-          than wrap inside it.
+          long advertisement title would otherwise spill out of its column
+          rather than wrap inside it.
         */}
-        <TableCell className="max-w-xs font-medium whitespace-normal">
-          {posting.title}
+        <TableCell className="font-medium whitespace-normal">
+          {/*
+            ⚠️ **Two lines, and the clamp is on a child rather than the cell.**
+            `line-clamp-2` sets `display: -webkit-box`, which on a `<td>` would
+            take the element out of the table's own layout.
+
+            The `title` attribute is what keeps a clipped third line readable on
+            a desktop — and it is a hover tooltip, so on a touch screen it is
+            nothing. Below `md` this column is about 170px wide and most real
+            advertisement titles clip, which is why `posting-detail.tsx` repeats
+            the title in full at that width and only at that width. Above it the
+            panel still does not, because this cell is showing it.
+          */}
+          <span className="line-clamp-2" title={posting.title}>
+            {posting.title}
+          </span>
+
+          {/*
+            ⚠️ **The company, where its own column is not being rendered.** Below
+            `md` the Company column is gone — 17% of a 358px table is 61px, and
+            61px of an employer name is "Meri…" — so it stacks here instead,
+            which is the width the title already has. Above `md` the column is
+            back and this would be it twice, so it hides on the same breakpoint
+            the column appears on.
+
+            ⚠️ **Not `aria-hidden`, and the two spellings never coexist.**
+            `hidden md:table-cell` on the cell below is `display: none` *under*
+            `md`, which removes it from the accessibility tree as well as the
+            layout — so on a phone this span is the only copy a screen reader
+            has, and hiding it would drop the employer from the row entirely.
+            Above `md` this one is gone instead. Exactly one, at every width.
+          */}
+          <span className="line-clamp-1 text-xs text-muted-foreground md:hidden">
+            {posting.company}
+          </span>
         </TableCell>
 
-        <TableCell>{posting.company}</TableCell>
+        {/*
+          `truncate` on the four single-line text columns, which the fixed layout
+          makes necessary: a cell wider than its column used to widen the column,
+          and now overflows it. See `POSTING_COLUMNS`.
+        */}
+        <TableCell
+          className={cn("truncate", POSTING_HIDE_BELOW_MD)}
+          title={posting.company}
+        >
+          {posting.company}
+        </TableCell>
 
-        <TableCell className="text-muted-foreground">
+        {/*
+          ⚠️ **The three cells below stop being rendered on a narrow viewport,
+          and `posting-detail.tsx` is where they go.** The classes are the same
+          constants the header row and the skeleton use — see
+          `PostingColumn.visibility` for why nine columns do not fit on a phone,
+          and the "Where and when" section of the detail panel for where these
+          facts stay reachable.
+        */}
+        <TableCell
+          className={cn(
+            "truncate text-muted-foreground",
+            POSTING_HIDE_BELOW_MD
+          )}
+          title={posting.location}
+        >
           {posting.location}
         </TableCell>
 
@@ -343,7 +415,12 @@ function PostingRow({
           scout is instructed to omit rather than estimate, so an em-dash means
           the advertisement did not say, not that anything failed.
         */}
-        <TableCell className="text-muted-foreground">
+        <TableCell
+          className={cn(
+            "truncate text-muted-foreground",
+            POSTING_HIDE_BELOW_MD
+          )}
+        >
           {posting.postedAt ?? (
             <>
               <span aria-hidden="true">—</span>
@@ -362,10 +439,11 @@ function PostingRow({
           the two states have to look different. An em-dash means the stored URL
           would not parse at all, which is a third thing again.
         */}
-        <TableCell>
+        <TableCell className={cn("truncate", POSTING_HIDE_BELOW_LG)}>
           {posting.source ? (
             <Badge
               variant={posting.source.recognised ? "secondary" : "outline"}
+              title={posting.source.label}
             >
               {posting.source.label}
             </Badge>
@@ -400,7 +478,7 @@ function PostingRow({
           the documents table already does, and not to be "fixed" by stripping
           the attribute: the disclosure chevron above depends on that selector.
         */}
-        <TableCell className="w-12">
+        <TableCell className={POSTING_ACTIONS_WIDTH}>
           <DeletePostingsDialog
             postingIds={[posting.id]}
             postingTitle={posting.title}

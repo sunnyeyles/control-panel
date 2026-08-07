@@ -5,6 +5,7 @@ import {
 } from "@/lib/postings/posting-query"
 import { Button } from "@workspace/ui/components/button"
 import { TableHead } from "@workspace/ui/components/table"
+import { cn } from "@workspace/ui/lib/utils"
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react"
 import Link from "next/link"
 
@@ -34,10 +35,36 @@ import Link from "next/link"
 export function PostingSortHeader({
   column,
   label,
+  width,
+  visibility,
   query,
 }: {
   column: PostingSort
-  label: string
+  /**
+   * A node rather than a string, so the caller can pass
+   * `<PostingColumnHeading>` — which renders a column's long and short
+   * spellings and hides one in CSS. See `PostingColumn.shortLabel`.
+   */
+  label: React.ReactNode
+  /**
+   * This column's width class, from `POSTING_COLUMNS`.
+   *
+   * Passed in rather than looked up, because this component renders its own
+   * `<TableHead>` — so it is the only place the class can land, and the table is
+   * `table-fixed`. A sortable heading that dropped it would size itself from
+   * its content and take the column with it.
+   */
+  width: string
+  /**
+   * This column's visibility class, from `POSTING_COLUMNS`, or `undefined` for
+   * a column that renders at every width.
+   *
+   * Here for the same reason `width` is — this component renders its own
+   * `<TableHead>`, so it is the only place the class can land. **Posted** is a
+   * sortable column that hides below `md`, so without this the table would drop
+   * that column's cells and keep its heading.
+   */
+  visibility?: string
   /** The view currently rendered, which decides both arrow and destination. */
   query: PostingQuery
 }) {
@@ -45,6 +72,7 @@ export function PostingSortHeader({
 
   return (
     <TableHead
+      className={cn(width, visibility)}
       aria-sort={
         active
           ? query.direction === "asc"
