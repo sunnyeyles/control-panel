@@ -317,6 +317,84 @@ describe("CoverLetterStore", () => {
     expect(read.draftedAt.toISOString()).toBe(DRAFTED_AT.toISOString())
   })
 
+  describe("list", () => {
+    it("answers which Postings have a letter in one request", async () => {
+      // The reason this method exists. The postings table asks it once per page
+      // render; it used to ask `head()` once per visible Posting, twenty-five
+      // at a time. The posting id is the last key segment, so the set of
+      // drafted ids falls straight out of the listing.
+      const letters = createCoverLetterStore(objects)
+      const other = "aaaaaaaaaaaaaaaa"
+
+      for (const postingId of [POSTING_ID, other]) {
+        await letters.put({
+          userId: "alice",
+          postingId,
+          markdown: "Dear Hiring Team",
+          draftedAt: DRAFTED_AT,
+        })
+      }
+
+      await letters.put({
+        userId: "bob",
+        postingId: POSTING_ID,
+        markdown: "Not alice's",
+        draftedAt: DRAFTED_AT,
+      })
+
+      const listed = await letters.list("alice")
+
+      expect(listed.map((letter) => letter.postingId).sort()).toEqual(
+        [POSTING_ID, other].sort()
+      )
+    })
+
+    it("carries no provenance, because ListObjectsV2 returns no metadata", async () => {
+      // The same trap the resume suite pins below: `MemoryObjectStore` keeps
+      // metadata on a listed object and the real store hardcodes `metadata: {}`
+      // in `list()`. Narrowing the fake is what makes this about S3 rather than
+      // about the fake — and it is why `posting-detail.tsx` derives a letter's
+      // display name and filename from the Posting instead of from the letter.
+      const listsWithoutMetadata: UserObjectStore = {
+        ...objects,
+        put: (object) => objects.put(object),
+        get: (ref) => objects.get(ref),
+        head: (ref) => objects.head(ref),
+        delete: (ref) => objects.delete(ref),
+        list: async (userId, kind) =>
+          (await objects.list(userId, kind)).map((object) => ({
+            ...object,
+            metadata: {},
+          })),
+      }
+
+      const letters = createCoverLetterStore(listsWithoutMetadata)
+
+      await letters.put({
+        userId: "alice",
+        postingId: POSTING_ID,
+        markdown: "Dear Hiring Team",
+        draftedAt: DRAFTED_AT,
+        provenance: { title: "Backend Engineer", company: "Acme" },
+      })
+
+      const [listed] = await letters.list("alice")
+
+      expect(listed?.postingId).toBe(POSTING_ID)
+      expect(listed?.provenance).toEqual({})
+
+      // And `draftedAt` degrades to the object's write time rather than going
+      // missing, because the `drafted-at` metadata is gone with the rest.
+      expect(listed?.draftedAt).toBeInstanceOf(Date)
+
+      const headed = await letters.head({
+        userId: "alice",
+        postingId: POSTING_ID,
+      })
+      expect(headed.provenance.title).toBe("Backend Engineer")
+    })
+  })
+
   describe("provenance metadata", () => {
     it("carries the Run and the Posting rather than putting them in the key", async () => {
       const letters = createCoverLetterStore(objects)

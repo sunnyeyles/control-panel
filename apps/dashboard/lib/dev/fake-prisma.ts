@@ -61,6 +61,18 @@ export function createDevPrisma(): PrismaClient {
       findMany: async (query: FindManyPostings) => db.findManyPostings(query),
       findUnique: async (query: ByUserAndPostingId) =>
         db.findPosting(query.where.userId_postingId),
+      /**
+       * Addressed by the two columns rather than by the compound key, which is
+       * why it cannot go through `findUnique` above.
+       *
+       * `loadPostingDetail` is the only caller, and it filters on `userId` and
+       * `postingId` as a plain `where` — that filter *is* the ownership check,
+       * so a fake that answered from `postingId` alone would let the real one
+       * stop scoping without anything here noticing.
+       */
+      findFirst: async (query: {
+        where: { userId: string; postingId: string }
+      }) => db.findPosting(query.where),
       updateMany: async (query: {
         where: { userId: string; postingId: string }
         data: Partial<Posting>
@@ -104,6 +116,12 @@ interface ById {
 interface FindManyJobs {
   where: { userId: string }
   orderBy?: unknown
+  /**
+   * Honoured, for the reason the Postings one is: a fake that answered *more*
+   * than it was asked would hide a component reading a field nobody selected,
+   * which in production is `undefined` and here would be a value.
+   */
+  select?: Record<string, boolean>
 }
 
 /**
@@ -250,10 +268,42 @@ class DevDb {
    * like this: its order is chosen from the URL, so ignoring it there would be
    * a wrong-order bug rather than a shortcut.
    */
-  findManyJobs(query: FindManyJobs): Job[] {
-    return this.jobs
+  findManyJobs(query: FindManyJobs): Partial<Job>[] {
+    const found = this.jobs
       .filter((job) => job.userId === query.where.userId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+
+    const select = query.select
+    if (!select) return found
+
+    return found.map((job) => this.projectJob(job, select))
+  }
+
+  /**
+   * A Job narrowed to the fields a `select` asked for.
+   *
+   * The same rule as {@link projectPosting}, minus the relation branch: jobs
+   * are only ever selected by column here. An unknown field throws by name
+   * rather than answering `undefined`, so a select this fake cannot serve fails
+   * loudly under `DEV_AUTH_BYPASS` instead of rendering a blank.
+   */
+  private projectJob(job: Job, select: Record<string, boolean>): Partial<Job> {
+    const projected: Record<string, unknown> = {}
+
+    for (const [field, wanted] of Object.entries(select)) {
+      if (!wanted) continue
+
+      if (!(field in job)) {
+        throw new DevPrismaError(
+          `prisma.job.findMany select.${field}`,
+          "That column is not on a Job. Add it to lib/dev/fixtures.ts, or fix the select in app/(app)/briefings/page.tsx."
+        )
+      }
+
+      projected[field] = job[field as keyof Job]
+    }
+
+    return projected as Partial<Job>
   }
 
   countPostings(where: PostingWhere): number {

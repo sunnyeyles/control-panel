@@ -166,3 +166,25 @@ export async function deletePostingsAction(
 
   return result
 }
+
+/**
+ * What an expanded row shows, fetched when the row is expanded.
+ *
+ * ⚠️ **The one export here that reads rather than writes, and the only one that
+ * takes neither `state` nor `FormData`.** That departure from the convention
+ * this file otherwise follows is deliberate: `ActionState` exists to carry a
+ * message back into the form that submitted it, and there is no form here — the
+ * caller is a chevron. It is still a `"use server"` export, so it is still a
+ * POST endpoint reachable without the UI, which is why the authorization and
+ * the id validation live in `lib/postings/posting-actions.ts` with everything
+ * else rather than in the component that calls it.
+ *
+ * **No `refresh()`**, for the obvious reason: nothing was mutated.
+ *
+ * It exists because the summary, the match reason and the copied highlights
+ * used to ship with all twenty-five rows of every page render for the sake of
+ * the one row that might be opened. See `lib/postings/load-posting-detail.ts`.
+ */
+export async function loadPostingDetailAction(postingId: string) {
+  return postingActions.loadPostingDetail(postingId)
+}
