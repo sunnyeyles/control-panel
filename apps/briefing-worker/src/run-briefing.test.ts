@@ -3,13 +3,13 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
-import { postingId, type Findings } from "@workspace/agents"
+import { postingId, type Findings, type ScoutFindings } from "@workspace/agents"
 import type { Artifact, ClaimedSlot, DueJob, NewPosting } from "@workspace/db"
 import type { BriefStore, NewBrief, StoredBrief } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { AgentLike, AgentStreamOptions } from "./run-agent.ts"
-import { runBriefing } from "./run-briefing.ts"
+import { runBriefing, type ScoutSessionLike } from "./run-briefing.ts"
 import { SEARCH_TOOL_NAMES } from "./search-results.ts"
 import type { TraceEvent } from "./trace.ts"
 
@@ -43,18 +43,41 @@ const JOB = {
   updatedAt: new Date("2026-07-01T00:00:00.000Z"),
 } as DueJob
 
-const FINDINGS = {
+const POSTING_URL = "https://example.com/jobs/1"
+
+/** The id a search gave that posting, and the only name the scout knows it by. */
+const POSTING_ID = "7f3a91c2aa10bb42"
+
+/** What the scout reports: composed fields, and an id instead of a URL. */
+const SCOUT_FINDINGS: ScoutFindings = {
   postings: [
     {
+      id: POSTING_ID,
       title: "Senior Backend Engineer",
       company: "Acme",
       location: "Sydney",
-      url: "https://example.com/jobs/1",
       summary: "Building things.",
       matchReason: "Matches the title and location.",
     },
   ],
 }
+
+/** The same findings once the run has resolved that id, which is what is stored. */
+const FINDINGS: Findings = {
+  postings: [
+    {
+      title: "Senior Backend Engineer",
+      company: "Acme",
+      location: "Sydney",
+      summary: "Building things.",
+      matchReason: "Matches the title and location.",
+      url: POSTING_URL,
+    },
+  ],
+}
+
+/** The catalog a search filled, as the run's fake scout hands it over. */
+const CATALOG: Record<string, string> = { [POSTING_ID]: POSTING_URL }
 
 /**
  * Every board at zero — the breakdown a run carries before anything searched.
@@ -71,7 +94,7 @@ function noSearches(): Record<string, number> {
 /** A successful search result — what proves the scout actually searched. */
 function searchResult(name = "seek_search", callId = "call_1"): ToolMessage {
   return new ToolMessage({
-    content: "1. Senior Backend Engineer\n   https://example.com/jobs/1",
+    content: `1. [${POSTING_ID}] Senior Backend Engineer — Acme\n   listed: 2026-07-28 · Sydney`,
     tool_call_id: callId,
     name,
     status: "success",
@@ -116,8 +139,46 @@ function fakeAgent(messages: BaseMessage[], llmCalls = 2): AgentLike {
   }
 }
 
-function scoutReturning(text: string, tools: ToolMessage[] = [searchResult()]) {
-  return () => fakeAgent([...tools, new AIMessage(text)])
+/**
+ * A fake scout session: an agent, the catalog its searches filled, and whatever
+ * it submitted.
+ *
+ * The three arrive together because the run needs all three and none is
+ * derivable from the others — the messages say what the scout *did*, the
+ * findings say what it *reported*, and only the catalog says what an id names.
+ * Satisfying `ScoutSessionLike` outright rather than by a cast is what widening
+ * that seam to a structural type bought.
+ */
+function fakeSession(options: {
+  findings?: ScoutFindings
+  messages?: BaseMessage[]
+  catalog?: Record<string, string>
+  /** `null` ends the run on a tool result, which is what a budget halt does. */
+  reply?: string | null
+  llmCalls?: number
+}): ScoutSessionLike {
+  const entries = options.catalog ?? CATALOG
+
+  return {
+    agent: fakeAgent(
+      [
+        ...(options.messages ?? [searchResult()]),
+        ...(options.reply === null
+          ? []
+          : [new AIMessage(options.reply ?? "Submitted.")]),
+      ],
+      options.llmCalls
+    ),
+    catalog: { get: (id) => (entries[id] ? { url: entries[id] } : undefined) },
+    findings: () => options.findings,
+  }
+}
+
+function scoutReturning(
+  findings: ScoutFindings | undefined = SCOUT_FINDINGS,
+  messages: BaseMessage[] = [searchResult()]
+) {
+  return () => fakeSession({ findings, messages })
 }
 
 function writerReturning(markdown: string) {
@@ -192,7 +253,7 @@ function run(overrides: Partial<Parameters<typeof runBriefing>[0]> = {}) {
     recordArtifact,
     recordFindings,
     recordPostings,
-    createScout: scoutReturning(JSON.stringify(FINDINGS)),
+    createScout: scoutReturning(),
     createWriter: writerReturning("# Roles for you\n\nOne match."),
     ...overrides,
   })
@@ -228,8 +289,7 @@ describe("runBriefing", () => {
 
   it("sums model calls across both agents", async () => {
     const report = await run({
-      createScout: () =>
-        fakeAgent([searchResult(), new AIMessage(JSON.stringify(FINDINGS))], 5),
+      createScout: () => fakeSession({ findings: SCOUT_FINDINGS, llmCalls: 5 }),
       createWriter: () => fakeAgent([new AIMessage("# Brief")], 1),
     })
 
@@ -263,9 +323,10 @@ describe("runBriefing", () => {
 
   it("treats an honest empty result as a success", async () => {
     const report = await run({
-      createScout: scoutReturning(
-        JSON.stringify({ postings: [], notes: "Nothing open this week." })
-      ),
+      createScout: scoutReturning({
+        postings: [],
+        notes: "Nothing open this week.",
+      }),
       createWriter: writerReturning("No roles matched this week."),
     })
 
@@ -424,42 +485,31 @@ describe("runBriefing", () => {
     })
   })
 
-  describe("when a search did not return one of the reported URLs", () => {
-    /** One search result carrying exactly these URLs, one per stanza. */
-    function returning(...urls: string[]): ToolMessage {
-      return new ToolMessage({
-        content: urls
-          .map((url, index) => `${index + 1}. A role — A company\n   ${url}`)
-          .join("\n\n"),
-        tool_call_id: "call_1",
-        name: "linkedin_search",
-        status: "success",
-      })
+  describe("when a search did not return one of the reported ids", () => {
+    const REAL = SCOUT_FINDINGS.postings[0]!
+    const INVENTED = {
+      ...REAL,
+      id: "deadbeefdeadbeef",
+      title: "Staff Engineer",
     }
-
-    const REAL = FINDINGS.postings[0]!
-    const INVENTED = { ...REAL, url: "https://example.com/jobs/999" }
 
     /** A run reporting one posting a search returned and one it did not. */
     function runWithOneInvented() {
       return run({
-        createScout: scoutReturning(
-          JSON.stringify({ postings: [REAL, INVENTED] }),
-          [returning(REAL.url)]
-        ),
+        createScout: scoutReturning({ postings: [REAL, INVENTED] }),
       })
     }
 
     it("still writes the brief from the postings that survived", async () => {
       const report = await runWithOneInvented()
 
-      // The whole point of the change: one bad URL among several is a
-      // transcription slip, and throwing the run away over it threw away the
-      // other postings, the brief, and the cumulative record with them.
+      // One unresolvable id among several costs that posting alone. Throwing
+      // the run away over it would throw away the other postings, the brief,
+      // and the cumulative record with them.
       expect(report.outcome).toBe("success")
       expect(report.postings).toBe(1)
       expect(puts).toHaveLength(1)
-      expect(kept[0]?.findings.postings).toEqual([REAL])
+      expect(kept[0]?.findings.postings).toEqual(FINDINGS.postings)
       expect(tracked[0]?.postings).toHaveLength(1)
     })
 
@@ -467,12 +517,15 @@ describe("runBriefing", () => {
       const report = await runWithOneInvented()
 
       // The brief does not mention what is missing from it and the run
-      // succeeded, so without this the drop is invisible in production.
+      // succeeded, so without this the drop is invisible in production. The
+      // title rides along because an id alone identifies nothing to a person —
+      // and it is the scout's own title, which is the point when what is being
+      // diagnosed is a posting it may have invented outright.
       expect(report.warnings).toEqual({
-        postingUrls: {
+        unresolvedPostings: {
           message:
-            "1 posting left out of the brief: no search returned the URL the scout gave.",
-          urls: [INVENTED.url],
+            "1 posting left out of the brief: no search returned the id the scout gave.",
+          postings: [{ id: INVENTED.id, title: "Staff Engineer" }],
         },
       })
     })
@@ -481,10 +534,7 @@ describe("runBriefing", () => {
       const events: TraceEvent[] = []
       await run({
         trace: (event) => events.push(event),
-        createScout: scoutReturning(
-          JSON.stringify({ postings: [REAL, INVENTED] }),
-          [returning(REAL.url)]
-        ),
+        createScout: scoutReturning({ postings: [REAL, INVENTED] }),
       })
 
       expect(
@@ -495,7 +545,7 @@ describe("runBriefing", () => {
             event.step === "handoff"
         )
       ).toMatchObject({
-        detail: "1 posting dropped — no search returned the URL",
+        detail: "1 posting dropped — no search returned the id",
       })
     })
 
@@ -515,28 +565,22 @@ describe("runBriefing", () => {
       ).not.toHaveProperty("detail")
     })
 
-    it("keeps a posting whose per-search decoration the scout mistyped", async () => {
-      // The production failure this was written for: a real LinkedIn posting
-      // reported with `position=59` where the search returned `position=58`.
-      // `posting-urls.test.ts` covers the rule; this covers the run keeping
-      // going, and linking to what LinkedIn issued rather than what was typed.
-      //
-      // A `linkedin.com` host, not the `example.com` the other fixtures use,
-      // and that is the rule rather than a detail: `job-boards.ts` scopes
-      // `position` to the board known to stamp it, so on any other host it is
-      // a parameter that might carry identity and is kept.
-      const found = "https://au.linkedin.com/jobs/view/engineer-at-acme-443814"
-      const issued = `${found}?position=58&trackingId=vwiYgy%3D%3D`
-      const mistyped = { ...REAL, url: `${found}?position=59` }
+    it("links to the URL the board issued, not to anything reported", async () => {
+      // The scout never sees a URL, so the one in the brief can only have come
+      // out of the catalog. That is the whole reason the hand-off carries ids:
+      // the seven production runs lost over 2026-08-05/06 were all a URL typed
+      // back slightly wrong, and there is nothing left to type.
+      const issued =
+        "https://au.linkedin.com/jobs/view/engineer-at-acme-443814?position=58&trackingId=vwiYgy%3D%3D"
 
-      const report = await run({
-        createScout: scoutReturning(JSON.stringify({ postings: [mistyped] }), [
-          returning(issued),
-        ]),
+      await run({
+        createScout: () =>
+          fakeSession({
+            findings: SCOUT_FINDINGS,
+            catalog: { [POSTING_ID]: issued },
+          }),
       })
 
-      expect(report.outcome).toBe("success")
-      expect(report.warnings).toBeUndefined()
       expect(kept[0]?.findings.postings[0]?.url).toBe(issued)
     })
   })
@@ -557,56 +601,59 @@ describe("runBriefing", () => {
       // whole search-count check exists to catch.
       await expect(
         run({
-          createScout: scoutReturning(JSON.stringify(FINDINGS), [
-            failedSearch(),
-          ]),
+          createScout: scoutReturning(SCOUT_FINDINGS, [failedSearch()]),
         })
       ).rejects.toThrow(/no successful search .* on any of seek_search/)
       expect(puts).toHaveLength(0)
     })
 
     it("no posting the scout reported came from a search", async () => {
-      // Every field valid, every URL well-formed — and not one of them came
-      // back from a search. A single unaccounted-for URL is a transcription
-      // slip and costs that posting alone (see below); *all* of them is a
-      // scout that has stopped copying, and a brief built from the empty
-      // remainder would cite nothing at all.
+      // Every field valid — and not one id came back from a search. A single
+      // unresolvable id is a slip and costs that posting alone (see above);
+      // *all* of them is a scout reporting postings it never found, and a brief
+      // built from the empty remainder would cite nothing at all.
       const invented = {
-        postings: [
-          { ...FINDINGS.postings[0], url: "https://example.com/jobs/999" },
-        ],
+        postings: [{ ...SCOUT_FINDINGS.postings[0]!, id: "deadbeefdeadbeef" }],
       }
 
       await expect(
-        run({ createScout: scoutReturning(JSON.stringify(invented)) })
-      ).rejects.toThrow(/no search returned any of their URLs/)
+        run({ createScout: scoutReturning(invented) })
+      ).rejects.toThrow(/no search returned any of their ids/)
       expect(puts).toHaveLength(0)
     })
 
-    it("the scout ran out of turns", async () => {
-      // A budget halt ends on a ToolMessage rather than an AI message.
+    it("the scout never submitted its findings", async () => {
+      // It searched and then stopped — out of turns, or answering in prose. A
+      // scout that submits an empty list has reported a result; one that never
+      // submits has reported nothing, and only the second is a failed run.
       await expect(
-        run({ createScout: () => fakeAgent([searchResult()]) })
-      ).rejects.toThrow(/scout did not end on an AI message/)
+        run({ createScout: () => fakeSession({ findings: undefined }) })
+      ).rejects.toThrow(/never called submit_findings/)
       expect(puts).toHaveLength(0)
     })
 
-    it("the scout answered in prose instead of JSON", async () => {
-      await expect(
-        run({ createScout: scoutReturning("I found three great roles!") })
-      ).rejects.toThrow(/not JSON/)
-      expect(puts).toHaveLength(0)
-    })
+    it("the scout submitted after running out of turns, and is believed", async () => {
+      // The gain from capturing findings as the tool validates them rather than
+      // reading the final message: a scout that reported and *then* hit its
+      // budget has still reported. This used to fail the run outright.
+      const halted = new ToolMessage({
+        content: "Stopped: the agent reached its budget of 10 model calls.",
+        tool_call_id: "call_2",
+        name: "seek_search",
+        status: "error",
+      })
 
-    it("the scout invented a URL that is not one", async () => {
-      const bad = {
-        postings: [{ ...FINDINGS.postings[0], url: "seek.com.au/job/123" }],
-      }
+      const report = await run({
+        createScout: () =>
+          fakeSession({
+            findings: SCOUT_FINDINGS,
+            messages: [searchResult(), halted],
+            reply: null,
+          }),
+      })
 
-      await expect(
-        run({ createScout: scoutReturning(JSON.stringify(bad)) })
-      ).rejects.toThrow(/does not match the findings schema/)
-      expect(puts).toHaveLength(0)
+      expect(report.outcome).toBe("success")
+      expect(report.postings).toBe(1)
     })
 
     it("the writer returned nothing", async () => {
@@ -648,7 +695,7 @@ describe("runBriefing", () => {
       // so widening the gate to a set must not widen it to "any tool the
       // scout happens to carry".
       const report = await run({
-        createScout: scoutReturning(JSON.stringify(FINDINGS), [
+        createScout: scoutReturning(SCOUT_FINDINGS, [
           searchResult(),
           searchResult("get_current_time", "call_2"),
         ]),
@@ -666,7 +713,7 @@ describe("runBriefing", () => {
       // in the findings' notes; it is not grounds for throwing away a brief
       // built from postings that were genuinely looked up.
       const report = await run({
-        createScout: scoutReturning(JSON.stringify(FINDINGS), [
+        createScout: scoutReturning(SCOUT_FINDINGS, [
           failedSearch(),
           searchResult("seek_search", "call_2"),
         ]),
@@ -683,9 +730,7 @@ describe("runBriefing", () => {
 
       await expect(
         run({
-          createScout: scoutReturning(JSON.stringify(FINDINGS), [
-            failedSearch(),
-          ]),
+          createScout: scoutReturning(SCOUT_FINDINGS, [failedSearch()]),
         })
       ).rejects.toThrow()
 
@@ -761,11 +806,10 @@ describe("runBriefing", () => {
 
       const { events, result } = tracedRun({
         createScout: () =>
-          fakeAgent([
-            asking,
-            searchResult(),
-            new AIMessage(JSON.stringify(FINDINGS)),
-          ]),
+          fakeSession({
+            findings: SCOUT_FINDINGS,
+            messages: [asking, searchResult()],
+          }),
       })
       await result
 

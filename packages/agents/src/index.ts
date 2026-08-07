@@ -31,6 +31,8 @@ export {
   PostingSchema,
   type Findings,
   type Posting,
+  type ScoutFindings,
+  type ScoutPosting,
 } from "./findings.ts"
 
 export { postingId } from "./posting-id.ts"
@@ -56,8 +58,9 @@ export {
 export {
   createJobScout,
   JOB_SCOUT_MAX_LLM_CALLS,
-  JOB_SCOUT_SEARCH_TOOLS,
+  JOB_SCOUT_SEARCH_TOOL_NAMES,
   type CreateJobScoutOptions,
+  type JobScoutSession,
 } from "./job-scout.ts"
 
 export type { Agent } from "@workspace/agents-core"

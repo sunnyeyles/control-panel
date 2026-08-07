@@ -67,17 +67,20 @@ dashboard's assistant carries `allTools`, which is `get_current_time` and
   and in the UI, so routing it into the alarm as well would spend the only
   signal that says _the schedule is broken_.
 - **The scout returns data, not side effects.** No writes, no uploads, no DB
-  calls inside it. It carries one tool, so this is structural.
-- **URLs are copied, never composed.** Every posting must carry a URL a search
-  actually returned; the findings schema rejects anything that is not a URL, and
-  the worker separately drops any posting no search returned. "Returned" is
-  measured by `postingId()` rather than byte-for-byte, because a board's
-  per-search tracking parameters are not part of a posting's identity — see
-  `apps/briefing-worker/src/posting-urls.ts`.
+  calls inside it. Its tools search, read what a search returned, and report;
+  nothing reaches outside the run, so this is structural.
+- **The scout never handles a URL.** A search returns two lines per posting
+  against an **id**; the advertisement itself is read back by id with
+  `get_posting_details`, and a reported posting names that id. The worker
+  resolves it to the URL the board issued — see
+  `apps/briefing-worker/src/resolve-postings.ts`, which records the seven
+  production runs lost to a model retyping a LinkedIn URL slightly wrong. An id
+  no search returned names nothing, so a fabricated posting cannot pass.
 - **A dropped posting costs the posting, not the Run.** The brief is written
-  from what survived, and the Run succeeds carrying a `postingUrls` warning that
-  names what was left out. A Run where _every_ reported posting is unaccounted
-  for still fails: that is a scout that has stopped copying URLs at all.
+  from what survived, and the Run succeeds carrying an `unresolvedPostings`
+  warning that names what was left out. A Run where _every_ reported posting is
+  unaccounted for still fails: that is a scout reporting postings it never
+  found.
 - **A run with no successful search fails.** Well-formed findings that never
   touched a live search would produce a confident brief citing postings nobody
   looked up — worse than no brief.
@@ -106,7 +109,12 @@ flowchart TD
     T1 --> X1[seek.com.au live listings]
     T2 --> X2[indeed.com live listings]
     T3 --> X3[linkedin.com live listings]
-    G -->|Findings JSON, validated| L[Brief writer agent]
+    T1 --> C[Posting catalog — id → posting, one per run]
+    T2 --> C
+    T3 --> C
+    C --> G2[get_posting_details — the shortlist, in full]
+    G2 --> G
+    G -->|submit_findings, ids resolved against the catalog| L[Brief writer agent]
     L --> Z[Markdown]
     Z --> U[Upload to private S3]
     U --> V[(S3 bucket — markdown briefs)]

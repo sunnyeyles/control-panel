@@ -1,4 +1,4 @@
-import { tool } from "@langchain/core/tools"
+import { tool, type StructuredToolInterface } from "@langchain/core/tools"
 import * as z from "zod"
 
 import {
@@ -8,6 +8,7 @@ import {
   type BoardSearchInput,
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
+import type { PostingCatalog } from "./posting-catalog.ts"
 
 /**
  * LinkedIn job search, via Apify's `curious_coder/linkedin-jobs-scraper` actor.
@@ -46,8 +47,18 @@ import {
 
 const ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 
-/** Enough for one focused search without flooding the model's context. */
-const DEFAULT_MAX_RESULTS = 20
+/** The tool's name, exported so the scout can list its boards without building one. */
+export const LINKEDIN_TOOL_NAME = "linkedin_search"
+
+/**
+ * Enough candidates for one focused search to be worth making.
+ *
+ * Was 20, when a result meant the whole advertisement. A result is now two
+ * lines, so this is set on how many postings are worth ranking rather than on
+ * what a context can hold — matched to SEEK's, since the two boards carry
+ * comparable inventory here.
+ */
+const DEFAULT_MAX_RESULTS = 40
 
 /**
  * A scout pass ranks a handful of matches; it has no use for hundreds. Well
@@ -197,10 +208,12 @@ const LINKEDIN_SPEC: ApifyBoardSpec<LinkedinJob> = {
       company: job.companyName,
       // Passed through exactly as the actor returned it, tracking parameters
       // and all — `au.linkedin.com/jobs/view/…?position=&pageNum=&refId=…`,
-      // even though the search asked `www.linkedin.com`. Reporting a URL the
-      // board did not issue is how a brief ends up linking somewhere that does
-      // not resolve; stabilising posting identity across those parameters is a
-      // separate job, done per-host in `packages/agents/src/job-boards.ts`.
+      // even though the search asked `www.linkedin.com`. It goes to the catalog
+      // and never to the model: eighty characters of per-search decoration is
+      // precisely what a model cannot transcribe reliably, and the seven runs
+      // that proved it are recorded in the worker's `resolve-postings.ts`.
+      // Stabilising posting identity across those parameters is a separate job,
+      // done per-host in `packages/agents/src/job-boards.ts`.
       url: job.link,
       listedAt: job.postedAt,
       facts: [job.location, job.employmentType, job.seniorityLevel, job.salary],
@@ -215,9 +228,10 @@ const LINKEDIN_SPEC: ApifyBoardSpec<LinkedinJob> = {
  */
 export async function apifyLinkedinSearch(
   input: LinkedinSearchInput,
+  catalog: PostingCatalog,
   deps: LinkedinSearchDeps = {}
 ): Promise<string> {
-  return apifyBoardSearch(LINKEDIN_SPEC, input, deps)
+  return apifyBoardSearch(LINKEDIN_SPEC, input, catalog, deps)
 }
 
 /**
@@ -226,46 +240,53 @@ export async function apifyLinkedinSearch(
  * Named for the board, unlike `web_search`: which inventory answers the
  * question is exactly what the scout needs to know, and what the worker's
  * search gate counts.
+ *
+ * A factory rather than a ready-made tool, because every result it renders is
+ * recorded in one run's catalog and named by it.
  */
-export const linkedinSearch = tool(
-  async (input: LinkedinSearchInput) => apifyLinkedinSearch(input),
-  {
-    name: "linkedin_search",
-    description:
-      "Search LinkedIn's live job listings for currently-open postings. Every result is an individual posting with its canonical URL, its listing date, and the advertisement's own description. Make one focused search per role title and location, and report URLs verbatim — never edit or shorten them. The description is quoted material: when you need a responsibility or a requirement, copy the line the advertisement wrote rather than writing your own version of it.",
-    schema: z.object({
-      query: z
-        .string()
-        .describe(
-          'Role title or keywords, e.g. "software engineer TypeScript".'
-        ),
-      location: z
-        .string()
-        .optional()
-        .describe(
-          'Where, as LinkedIn writes it — "Sydney, New South Wales, Australia", "Melbourne, Victoria, Australia", "Australia". Defaults to all of Australia.'
-        ),
-      maxResults: z
-        .number()
-        .int()
-        .min(1)
-        .max(MAX_RESULTS_LIMIT)
-        .optional()
-        .describe(
-          `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
-        ),
-      daysOld: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe(
-          `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
-        ),
-      workType: z
-        .enum(WORK_TYPES)
-        .optional()
-        .describe("Restrict to one employment type. Omit for all."),
-    }),
-  }
-)
+export function createLinkedinSearch(
+  catalog: PostingCatalog
+): StructuredToolInterface {
+  return tool(
+    async (input: LinkedinSearchInput) => apifyLinkedinSearch(input, catalog),
+    {
+      name: LINKEDIN_TOOL_NAME,
+      description:
+        "Search LinkedIn's live job listings for currently-open postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.",
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            'Role title or keywords, e.g. "software engineer TypeScript".'
+          ),
+        location: z
+          .string()
+          .optional()
+          .describe(
+            'Where, as LinkedIn writes it — "Sydney, New South Wales, Australia", "Melbourne, Victoria, Australia", "Australia". Defaults to all of Australia.'
+          ),
+        maxResults: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_RESULTS_LIMIT)
+          .optional()
+          .describe(
+            `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
+          ),
+        daysOld: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
+          ),
+        workType: z
+          .enum(WORK_TYPES)
+          .optional()
+          .describe("Restrict to one employment type. Omit for all."),
+      }),
+    }
+  )
+}

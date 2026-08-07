@@ -28,9 +28,10 @@ describe("scoutLlmCallBudget", () => {
       locations: ["Sydney", "Melbourne"],
     })
 
-    // 3 × 2 × 3 searches, plus the turns that are not searches. On one board
-    // the same job would have had 10 and been cut off mid-sweep.
-    expect(scoutLlmCallBudget(wide, 3)).toBe(21)
+    // 3 × 2 × 3 searches, plus the turns that are not searches — reading the
+    // brief, reading the shortlist back, submitting, and the line it ends on.
+    // On one board the same job would have had 10 and been cut off mid-sweep.
+    expect(scoutLlmCallBudget(wide, 3)).toBe(24)
     expect(scoutLlmCallBudget(wide, 1)).toBeLessThan(
       scoutLlmCallBudget(wide, 3)
     )

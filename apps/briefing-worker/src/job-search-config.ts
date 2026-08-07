@@ -58,12 +58,23 @@ export const DEFAULT_MAX_POSTINGS = 8
  * The hard ceiling on a scout's model calls, whatever the config asks for.
  *
  * A budget is not a quality dial: every extra call buys another search, and
- * another search buys tens of kilobytes of advertisement text in a context the
- * scout still has to reason over. A configuration wide enough to need more than
- * this wants fewer results per search, or splitting into two jobs — and either
- * way somebody should notice, which a truncated run makes them do.
+ * another search buys another actor run and another set of candidates the scout
+ * still has to reason over. A configuration wide enough to need more than this
+ * wants fewer results per search, or splitting into two jobs — and either way
+ * somebody should notice, which a truncated run makes them do.
  */
 const MAX_SCOUT_LLM_CALLS = 40
+
+/**
+ * The turns in a scout run that are not searches.
+ *
+ * Reading the brief, reading the shortlist back out of the catalog with
+ * `get_posting_details`, calling `submit_findings`, and the one short message it
+ * ends on. Was three, when a run was searches-then-answer; reading is its own
+ * pass now, and a scout that runs out of turns before it can submit loses
+ * everything it found rather than reporting less.
+ */
+const NON_SEARCH_TURNS = 6
 
 /**
  * How many model calls to give the scout for one config.
@@ -74,11 +85,11 @@ const MAX_SCOUT_LLM_CALLS = 40
  * a well-formed brief. Sizing the budget to the work is what stops a run
  * quietly covering less than it was asked to.
  *
- * The `+ 3` is the turns that are not searches: reading the brief, and writing
- * the findings out at the end. `JOB_SCOUT_MAX_LLM_CALLS` stays the floor, so a
- * one-title, one-location job is unaffected by this existing. In practice the
- * budget is slack rather than tight — the model issues several tool calls in
- * one turn, and parallel calls cost one call between them.
+ * {@link NON_SEARCH_TURNS} covers the rest of the run.
+ * `JOB_SCOUT_MAX_LLM_CALLS` stays the floor, so a one-title, one-location job is
+ * unaffected by this existing. In practice the budget is slack rather than tight
+ * — the model issues several tool calls in one turn, and parallel calls cost one
+ * call between them.
  *
  * `boardCount` is passed rather than read here so the caller stays the single
  * place that knows which search tools the scout carries.
@@ -90,7 +101,7 @@ export function scoutLlmCallBudget(
   const searches = config.titles.length * config.locations.length * boardCount
 
   return Math.min(
-    Math.max(searches + 3, JOB_SCOUT_MAX_LLM_CALLS),
+    Math.max(searches + NON_SEARCH_TURNS, JOB_SCOUT_MAX_LLM_CALLS),
     MAX_SCOUT_LLM_CALLS
   )
 }

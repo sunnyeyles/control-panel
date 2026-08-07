@@ -3,6 +3,10 @@ import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
+import {
+  loadPostingDetail,
+  type PostingDetailView,
+} from "@/lib/postings/load-posting-detail"
 import { PAGE_SIZE } from "@/lib/postings/posting-query"
 import { POSTING_STATUS_LABELS } from "@/lib/postings/posting-status-labels"
 import { settleWithConcurrency } from "@/lib/settle-with-concurrency"
@@ -394,8 +398,68 @@ export function createPostingActions(deps: PostingActionsDeps) {
     }
   }
 
-  return { setPostingStatus: setStatus, deletePostings: deleteSelected }
+  /**
+   * What the expanded row shows, fetched when the row is expanded.
+   *
+   * ⚠️ **A read among mutations, and it sits here anyway.** Everything else in
+   * this factory writes. This is in the same place because it needs the same
+   * two things and must not get either of them differently: the caller from the
+   * session rather than from the submission, and the Posting id checked against
+   * `postingIdSchema` before it reaches a query. A read reachable by direct POST
+   * is still a read someone can aim at another user's rows.
+   *
+   * ⚠️ **A discriminated union, not a thrown error and not a bare
+   * `undefined`.** The panel has three things to say — here is the detail, this
+   * payload could not be read, and something went wrong — and only the middle
+   * one is a state `loadPostingDetail` returns. Collapsing "the store failed"
+   * into "nothing to show" would tell someone their advertisement carried no
+   * description when in fact the database refused.
+   *
+   * It takes a plain id rather than `(state, formData)` because it is a read.
+   * The `ActionState` shape exists so a form can carry a message back into the
+   * markup that submitted it; there is no form here, and no state to carry.
+   */
+  async function loadDetail(
+    rawPostingId: unknown
+  ): Promise<PostingDetailResult> {
+    const caller = await requireUser(deps.getUser, "postings")
+    if (!caller.ok) return { status: "error", message: caller.message }
+
+    const postingId = postingIdSchema.safeParse(rawPostingId)
+    if (!postingId.success) {
+      return { status: "error", message: POSTING_NOT_FOUND }
+    }
+
+    try {
+      const detail = await loadPostingDetail(
+        deps.getPrisma(),
+        caller.userId,
+        postingId.data
+      )
+
+      // Absent means no such row *for this caller* — the natural key covers
+      // both halves. The row is on their screen, so this is all but
+      // unreachable; a Posting deleted in another tab is how it happens.
+      if (!detail) return { status: "error", message: POSTING_NOT_FOUND }
+
+      return { status: "success", detail }
+    } catch (error) {
+      console.error("postings: could not load the detail", error)
+      return { status: "error", message: "Something went wrong." }
+    }
+  }
+
+  return {
+    setPostingStatus: setStatus,
+    deletePostings: deleteSelected,
+    loadPostingDetail: loadDetail,
+  }
 }
+
+/** What the expanded row gets back — see `loadDetail` on why it is a union. */
+export type PostingDetailResult =
+  | { status: "success"; detail: PostingDetailView }
+  | { status: "error"; message: string }
 
 /**
  * What the user is told, counting only what actually went.

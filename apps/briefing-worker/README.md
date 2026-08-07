@@ -38,6 +38,8 @@ src/run-tick.ts            deep — claim, run, record; one invocation's worth o
 src/run-briefing.ts        deep — owns one briefing and its success contract
 src/run-agent.ts           deep — drives one agent, watching it work
 src/job-search-config.ts   deep — what `jobs.config` means to this worker
+src/search-results.ts      which tool results count as searches, and from where
+src/resolve-postings.ts    deep — the reported id → the URL the board issued
 src/trace.ts               the run's event stream, and where it can be sent
 src/dev/                   the local harness. Never bundled, never deployed.
 build.mjs                  esbuild bundle + deploy-root assembly

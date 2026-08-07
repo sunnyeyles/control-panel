@@ -89,11 +89,15 @@ export function createProfileExtractor(
  * empty tool set on the agent reading this.
  *
  * ⚠️ **The schema is deliberately not repeated here.** It is already in
- * {@link PROFILE_EXTRACTOR_SYSTEM_PROMPT}, which is exactly how the scout is
- * arranged — `jobScoutSchemaDescription` sits in `JOB_SCOUT_SYSTEM_PROMPT` and
- * `toSearchBrief` says nothing about the shape. Restating it would put the same
- * JSON Schema in the context twice on every call, and would create a second
- * place for it to be stale.
+ * {@link PROFILE_EXTRACTOR_SYSTEM_PROMPT}, and `toProfilePrompt` says nothing
+ * about the shape. Restating it would put the same JSON Schema in the context
+ * twice on every call, and would create a second place for it to be stale.
+ *
+ * The scout no longer needs the arrangement at all: its hand-off is a
+ * `submit_findings` tool call, so the provider renders the schema from the
+ * tool's arguments and its prompt carries none of it. This agent still answers
+ * in a final message, so the schema has to reach it somehow, and once is the
+ * answer.
  */
 export function toProfilePrompt(background: string): string {
   return [

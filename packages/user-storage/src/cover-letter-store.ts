@@ -109,6 +109,30 @@ export interface CoverLetterStore {
   /** Metadata only — does not transfer the markdown. */
   head(ref: CoverLetterRef): Promise<StoredCoverLetter>
   delete(ref: CoverLetterRef): Promise<void>
+  /**
+   * Every letter a user has, oldest key first.
+   *
+   * **This is the "which of these have one" question, and it is why the facade
+   * has a `list` at all.** The postings table shows per row whether a letter
+   * has been drafted; answering that with `head()` cost one `HeadObject` per
+   * visible posting, twenty-five per render, re-issued on every sort click and
+   * every five-second poll. One `ListObjectsV2` answers it for the whole page,
+   * because the last key segment **is** the posting id — see
+   * {@link CoverLetterRef}.
+   *
+   * ⚠️ **A listing carries less than `head()` does, and the difference is not a
+   * bug to work around here.** `ListObjectsV2` returns no user metadata, so
+   * `provenance` comes back empty and `draftedAt` falls back to the object's
+   * write time. That is enough for existence and for "drafted <when>"; a caller
+   * that needs the stored title, company or URL must `head()` the one letter it
+   * cares about. `facades.test.ts` pins this for resumes and the same holds
+   * here.
+   *
+   * O(letters this user has) rather than O(postings on the page), so it
+   * degrades slowly for a heavy drafter where the per-row `head()` degraded
+   * immediately.
+   */
+  list(userId: string): Promise<StoredCoverLetter[]>
 }
 
 export function createCoverLetterStore(
@@ -161,6 +185,11 @@ export function createCoverLetterStore(
 
     async delete(ref: CoverLetterRef): Promise<void> {
       await objects.delete(refFor(ref))
+    },
+
+    async list(userId: string): Promise<StoredCoverLetter[]> {
+      const found = await objects.list(userId, KIND)
+      return found.map((object) => toStoredCoverLetter(userId, object))
     },
   }
 }

@@ -181,7 +181,24 @@ describe("listPostings", () => {
 
     expect(page).toMatchObject({ total: 1, page: 1, pageCount: 1 })
     expect(page.postings.map((row) => row.title)).toEqual(["Platform Engineer"])
-    expect(page.postings[0]?.summary).toBe("Building services.")
+  })
+
+  /**
+   * ⚠️ **The payload's prose must not reach the table**, which is the whole
+   * point of `load-posting-detail.ts`. `summary`, `matchReason` and
+   * `highlights` are the largest fields a Posting has and at most one row is
+   * expanded, so carrying them here put a page of unread prose into the RSC
+   * payload of every sort click. Asserted by key rather than by value, so a
+   * field creeping back on fails here rather than in a bundle-size review.
+   */
+  it("carries none of the expanded row's prose", async () => {
+    db.posting({ postingId: "a".repeat(16), title: "Platform Engineer" })
+
+    const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+
+    expect(Object.keys(page.postings[0] ?? {})).not.toContain("summary")
+    expect(Object.keys(page.postings[0] ?? {})).not.toContain("matchReason")
+    expect(Object.keys(page.postings[0] ?? {})).not.toContain("highlights")
   })
 
   /**
@@ -239,8 +256,7 @@ describe("listPostings", () => {
 
   /**
    * ⚠️ A page past the end renders the last page, not an empty one with
-   * working controls underneath it — which is why the count runs first and the
-   * clamp happens before anything is fetched.
+   * working controls underneath it.
    */
   it("clamps a page past the end to the last one", async () => {
     db.many(PAGE_SIZE + 1)
@@ -253,6 +269,38 @@ describe("listPostings", () => {
 
     expect(page).toMatchObject({ page: 2, pageCount: 2 })
     expect(page.postings).toHaveLength(1)
+    expect(db.queries.at(-1)).toMatchObject({ skip: PAGE_SIZE })
+  })
+
+  /**
+   * ⚠️ **The round-trip budget, asserted rather than described.** The count and
+   * the page are asked for concurrently, so an ordinary render pays one round
+   * trip where it used to pay two serial ones. The price is a speculative fetch
+   * for a page that may not exist — which is why the overshoot case below is
+   * the only one that still issues two.
+   */
+  it("asks for the count and the page in one round trip", async () => {
+    db.many(PAGE_SIZE + 1)
+
+    await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
+
+    expect(db.counts).toHaveLength(1)
+    expect(db.queries).toHaveLength(1)
+  })
+
+  it("re-fetches only when the requested page really did overshoot", async () => {
+    db.many(PAGE_SIZE + 1)
+
+    await listPostings(
+      db.asPrisma(),
+      USER_ID,
+      parsePostingQuery({ page: "99" })
+    )
+
+    // The first is the speculative fetch for page 99, thrown away; the second
+    // is the clamped page actually rendered.
+    expect(db.queries).toHaveLength(2)
+    expect(db.queries.at(0)).toMatchObject({ skip: 98 * PAGE_SIZE })
     expect(db.queries.at(-1)).toMatchObject({ skip: PAGE_SIZE })
   })
 
@@ -442,12 +490,16 @@ describe("listPostings", () => {
     expect(page.postings).toHaveLength(1)
     expect(page.postings[0]).toMatchObject({
       title: "Still here",
-      highlights: [],
       // The board is read off the `url` column, which the same statement wrote
       // — so an unreadable payload costs the detail and not the badge.
       source: { label: "SEEK", recognised: true },
     })
-    expect(page.postings[0]?.summary).toBeUndefined()
+
+    // ⚠️ **The report still fires, and it no longer has a `summary` to infer
+    // it from.** The count used to be "how many views came back without a
+    // summary", which stopped being answerable when that field moved to
+    // `load-posting-detail.ts`. If this stops being called, a page of drifted
+    // payloads goes by in silence.
     expect(logged).toHaveBeenCalled()
 
     logged.mockRestore()
@@ -557,7 +609,15 @@ describe("listPostings", () => {
     logged.mockRestore()
   })
 
-  it("issues no second query when there is nothing to page", async () => {
+  /**
+   * An empty table still issues the speculative fetch, because it is sent
+   * before anything has been counted. It costs no wall-clock — it runs
+   * alongside the count — and it is the price of the common path being one
+   * round trip rather than two. What must not change is the shape returned:
+   * `pageCount` is 1 and not 0, so the pager renders "page 1 of 1" rather than
+   * a page that does not exist.
+   */
+  it("returns a usable empty page rather than a zero-page one", async () => {
     const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
 
     expect(page).toEqual({
@@ -568,7 +628,7 @@ describe("listPostings", () => {
       pageSize: PAGE_SIZE,
     })
     expect(db.counts).toHaveLength(1)
-    expect(db.queries).toEqual([])
+    expect(db.queries).toHaveLength(1)
   })
 })
 

@@ -218,6 +218,22 @@ function createDevCoverLetterStore(): CoverLetterStore {
     async delete(ref: CoverLetterRef): Promise<void> {
       mustDelete(stored, ref)
     },
+
+    async list(userId: string): Promise<StoredCoverLetter[]> {
+      return [...stored.values()]
+        .filter((letter) => letter.userId === userId)
+        .sort((a, b) => a.postingId.localeCompare(b.postingId))
+        .map((letter) => {
+          // See the warning at the top of this file: a listing carries no user
+          // metadata, so the provenance is dropped here on purpose. The real
+          // store cannot supply it from `ListObjectsV2` either, and a fake that
+          // did would make the `head()` in `posting-detail.tsx` look deletable.
+          const { markdown, provenance, ...listed } = letter
+          void markdown
+          void provenance
+          return { ...listed, provenance: {} }
+        })
+    },
   }
 }
 

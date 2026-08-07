@@ -19,9 +19,23 @@ import {
   useTailoredResume,
   type TailoredResumePromise,
 } from "@/components/briefings/use-tailored-resume"
+import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
 import type { PostingView } from "@/lib/postings/list-postings"
+import type { PostingDetailView } from "@/lib/postings/load-posting-detail"
 import { tailoredResumeFilename } from "@/lib/tailored-resumes/tailored-resume-ref"
 import { Skeleton } from "@workspace/ui/components/skeleton"
+
+/**
+ * One row's detail, as the table body holds it.
+ *
+ * Lives here rather than beside the fetch because this is the component the
+ * three states are *for*: the panel renders one branch each, and a fourth state
+ * would have to earn a branch here to exist at all.
+ */
+export type PostingDetailState =
+  | { status: "loading" }
+  | { status: "ready"; view: PostingDetailView }
+  | { status: "failed"; message: string }
 
 /**
  * One advertisement in full, shown in the expanded table row beneath it.
@@ -33,11 +47,19 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
  * found it, both sighting times, all three Cover Letter controls, and the
  * Tailored Resume controls beneath them.
  *
- * ⚠️ **Rendering this costs no round trip.** It takes the whole
- * {@link PostingView} as props, which the page already holds. Opening a document
- * for editing is the opposite: {@link EditCoverLetterButton} and
- * {@link EditTailoredResumeButton} fetch the body on demand into the shared
- * `FileEditorDialog`, so the table never server-renders anyone's markdown.
+ * ⚠️ **Most of this costs no round trip; the advertisement's own words do.**
+ * The link, the status control, the sighting times and the letter controls all
+ * come from the {@link PostingView} the page already holds. The summary, the
+ * highlights and the match reason arrive as {@link PostingDetailView}, fetched
+ * by the row above when it was expanded — they are the largest fields a Posting
+ * has and at most one row is open, so shipping them for all twenty-five was a
+ * page of prose in every navigation that nobody read. See
+ * `lib/postings/load-posting-detail.ts`.
+ *
+ * Opening a document for editing has always worked this way:
+ * {@link EditCoverLetterButton} and {@link EditTailoredResumeButton} fetch the
+ * body on demand into the shared `FileEditorDialog`, so the table never
+ * server-renders anyone's markdown.
  *
  * ⚠️ **Every letter and resume control lives here, together.** Editing either is
  * offered nowhere else in the app, so leaving it behind when moving generation
@@ -56,10 +78,21 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
  */
 export function PostingDetail({
   posting,
+  detail,
   letters,
   tailoredResumes,
 }: {
   posting: PostingView
+  /**
+   * The advertisement's own words, fetched when this row was expanded.
+   *
+   * ⚠️ **Three states, and `failed` is not `loading`.** A request that never
+   * comes back would otherwise leave a skeleton pulsing forever, which reads as
+   * "still working" rather than as "this did not load" — so the failure carries
+   * a message and says so. Everything on this panel that needs no request is
+   * rendered under all three.
+   */
+  detail: PostingDetailState
   /**
    * Every letter on this page, still in flight.
    *
@@ -84,11 +117,16 @@ export function PostingDetail({
 }) {
   /**
    * `summary` is absent exactly when the stored payload no longer matched the
-   * schema — see `toView()` in `lib/postings/list-postings.ts`, which degrades
-   * such a row to its projected columns rather than dropping it. `matchReason`
-   * and `highlights` go with it, so one branch covers all three.
+   * schema — see `loadPostingDetail()` in `lib/postings/load-posting-detail.ts`,
+   * which degrades such a row to empty rather than failing the request.
+   * `matchReason` and `highlights` go with it, so one branch covers all three.
+   *
+   * Distinct from `detail.status === "failed"`, which is the request itself not
+   * arriving. A drifted payload is a fact about the row; a failed request is a
+   * fact about this moment, and only the second is worth retrying.
    */
-  const detailUnreadable = posting.summary === undefined
+  const payloadUnreadable =
+    detail.status === "ready" && detail.view.summary === undefined
 
   return (
     <div className="flex min-w-0 flex-col gap-5 py-2 break-words">
@@ -129,7 +167,27 @@ export function PostingDetail({
         />
       </Section>
 
-      {detailUnreadable ? (
+      {/*
+        Three states, not two. The request for this content is made when the row
+        is expanded — see `lib/postings/load-posting-detail.ts` for why it is
+        not shipped with the row — so "not here yet" is a state of its own, and
+        it must not look like "the advertisement carried no description".
+      */}
+      {detail.status === "loading" ? (
+        <div
+          aria-busy="true"
+          aria-label={`Loading the details for ${posting.title}`}
+          className="flex flex-col gap-2"
+        >
+          <Skeleton className="h-4 w-full max-w-xl" />
+          <Skeleton className="h-4 w-full max-w-md" />
+          <Skeleton className="h-4 w-full max-w-lg" />
+        </div>
+      ) : detail.status === "failed" ? (
+        <p className="text-sm text-muted-foreground">
+          {detail.message} The advertisement itself still opens above.
+        </p>
+      ) : payloadUnreadable ? (
         <p className="text-sm text-muted-foreground">
           The details this posting was found with could not be read, so only
           what the table shows is available. The advertisement itself still
@@ -138,10 +196,10 @@ export function PostingDetail({
       ) : (
         <>
           <Section title="Summary">
-            <p className="text-sm whitespace-normal">{posting.summary}</p>
+            <p className="text-sm whitespace-normal">{detail.view.summary}</p>
           </Section>
 
-          {posting.highlights.length > 0 ? (
+          {detail.view.highlights.length > 0 ? (
             <Section title="From the advertisement">
               <ul className="list-disc pl-5 text-sm whitespace-normal text-muted-foreground">
                 {/*
@@ -150,7 +208,7 @@ export function PostingDetail({
                   a thing an advertisement does. The list is never reordered
                   or filtered, so an index is a stable key here.
                 */}
-                {posting.highlights.map((highlight, index) => (
+                {detail.view.highlights.map((highlight, index) => (
                   <li key={`${posting.id}-${index}`}>{highlight}</li>
                 ))}
               </ul>
@@ -159,7 +217,7 @@ export function PostingDetail({
 
           <Section title="Why it matched">
             <p className="text-sm whitespace-normal text-muted-foreground">
-              {posting.matchReason}
+              {detail.view.matchReason}
             </p>
           </Section>
         </>
@@ -252,6 +310,25 @@ function CoverLetterControls({
 
   const letter = lookup.state === "drafted" ? lookup.letter : undefined
 
+  /*
+    Derived from the Posting rather than read off the letter. Both used to be
+    fields of `CoverLetterRow`, taken from the letter's stored S3 provenance —
+    but the page now learns which Postings have letters from one
+    `ListObjectsV2`, and a listing carries no object metadata. See
+    `lib/cover-letters/cover-letter-rows.ts`.
+
+    The visible difference is the right way round: a letter drafted when the
+    advertisement had a different title downloads under the title on screen,
+    rather than the one captured at drafting time. `coverLetterFilename` is the
+    same function the drafting path names its object with, so the two cannot
+    drift apart.
+  */
+  const filename = coverLetterFilename({
+    postingId: posting.id,
+    title: posting.title,
+    company: posting.company,
+  })
+
   return (
     <>
       {/*
@@ -264,7 +341,11 @@ function CoverLetterControls({
       {letter ? (
         <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
           <span>Drafted {letter.draftedAt}.</span>
-          <CoverLetterDownloadLink letter={letter} />
+          <CoverLetterDownloadLink
+            postingId={letter.postingId}
+            displayName={posting.title}
+            filename={filename}
+          />
         </p>
       ) : null}
 
@@ -300,8 +381,8 @@ function CoverLetterControls({
         {letter ? (
           <EditCoverLetterButton
             postingId={letter.postingId}
-            displayName={letter.displayName}
-            filename={letter.filename}
+            displayName={posting.title}
+            filename={filename}
           />
         ) : null}
       </div>

@@ -150,6 +150,40 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
     )
   })
 
+  /**
+   * ⚠️ **The fake must not answer more than it was asked.** The briefings page
+   * selects `{ id, name }` off `jobs` so the strip does not drag every
+   * briefing's search-criteria JSON across the wire; a fake that ignored the
+   * `select` would keep serving the whole row, and a component reading a field
+   * nobody selected would work here and be `undefined` in production.
+   */
+  it("narrows a job listing to the fields the select names", async () => {
+    const prisma = createDevPrisma()
+
+    const [job] = await prisma.job.findMany({
+      where: { userId: DEV_USER_ID },
+      select: { id: true, name: true },
+    })
+
+    expect(Object.keys(job ?? {}).sort()).toEqual(["id", "name"])
+  })
+
+  it("refuses a job select it cannot serve, by name", async () => {
+    const prisma = createDevPrisma()
+
+    await expect(
+      prisma.job.findMany({
+        where: { userId: DEV_USER_ID },
+        select: { nonsense: true } as never,
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        name: "DevPrismaError",
+        message: expect.stringContaining("prisma.job.findMany select.nonsense"),
+      })
+    )
+  })
+
   it("keeps a status change across reads, and refuses another user's row", async () => {
     const prisma = createDevPrisma()
     const [first] = (

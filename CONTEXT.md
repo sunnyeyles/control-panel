@@ -33,7 +33,8 @@ The agent that searches for postings and reports **Findings**. Carries one
 search tool per **Job Board** — SEEK, Indeed and LinkedIn — and nothing else, so
 it has no way to write anything: "a scraper returns data and performs no side
 effects" is a property of its tool set, not a line in its prompt. Adding a board
-means adding a tool to `JOB_SCOUT_SEARCH_TOOLS`, which is what the scout's
+means adding a tool to the scout's set and a name to
+`JOB_SCOUT_SEARCH_TOOL_NAMES`, which is what the scout's
 model-call budget is sized from.
 
 Three tools, but still one scout: it searches every board in turn within a
@@ -166,9 +167,11 @@ thing these extend), tone settings
 **Findings**:
 The scout's output and the writer's input: a validated list of **Postings** plus
 optional notes, defined by `FindingsSchema` in `@workspace/agents`. The hand-off
-travels as JSON in a message and is parsed before the writer sees it — that
+travels as a `submit_findings` tool call, validated by the provider against
+`ScoutFindingsSchema` and resolved into `Findings` by the worker — that
 validation is the point of keeping the two agents apart, because data can be
-checked and prose cannot. An empty findings list is a legitimate result.
+checked and prose cannot. An empty findings list is a legitimate result; never
+calling `submit_findings` at all is not, and fails the run.
 
 Findings outlive the run that produced them: `runs.findings` is a nullable JSONB
 column holding the validated record. It is written after the **Brief** exists
@@ -189,11 +192,13 @@ after the other, each accessory and each losable with only a warning.
 **Posting**:
 One open job advertisement, with the URL a search actually returned. **Not** a
 `jobs` row — see **Job** below, which is the collision worth being careful about.
-A URL the scout assembled rather than received is a fabrication: the schema
-rejects anything that is not a URL, and the worker separately drops any posting
-no search returned. What "returned" means is the same normalised identity used
-below — `postingId()`, not the raw string — so a board's per-search tracking
-parameters may differ and an invented posting still cannot pass.
+The scout never handles that URL: a search result gives it an **id**, it reports
+the id, and the worker resolves the id back to the URL the board issued through
+the run's posting catalog. An id no search returned names nothing, so the posting
+is dropped — which is what makes an invented posting impossible rather than
+merely detectable. The id is `postingId()`, the same normalised identity used
+below, so a board's per-search tracking parameters may differ and one
+advertisement still has one id.
 
 Also a stored row, in `postings`, keyed `(user_id, posting_id)` with **no Run in
 it** — the same unit of identity a **Cover Letter**'s object key already uses,
