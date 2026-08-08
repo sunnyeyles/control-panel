@@ -131,7 +131,7 @@ the row rather than off a Run — two documents, both addressed by
 
 ```mermaid
 flowchart TD
-    PT[(postings — payload, last_seen_run_id)] --> BR[/briefings — expanded posting/]
+    PT[(postings — payload, last_seen_run_id)] --> BR[/jobs — expanded posting/]
     DOC[(S3 — resumes: the user's uploaded CV)] --> BG[loadCandidateBackground]
     BG --> BR
     BR -->|Draft cover letter| LW[Letter Writer]
@@ -193,7 +193,7 @@ flowchart TD
   Fanning out replaces what produces `Findings` and leaves everything downstream
   of it alone.
 - **Sending a cover letter.** Everything short of delivery is built, under #77.
-  Drafting (#84): a Draft button on each **Posting** on `/briefings` runs the
+  Drafting (#84): a Draft button on each **Posting** on `/jobs` runs the
   **Letter Writer** over the advertisement stored on that Posting's row —
   `postings.payload`, re-read server-side, since the page no longer holds a
   Run's findings to draft from — and stores the result at
@@ -204,7 +204,7 @@ flowchart TD
   `cover-letter-rows.ts` pays one `HeadObject` per visible Posting, because a
   listing carries no user metadata, and `/api/cover-letters/{postingId}` hands
   the Markdown back as a file. **Letter Instructions** — a per-user row in
-  `cover_letter_instructions`, edited from `/settings` and composed onto the
+  `cover_letter_instructions`, edited from `/jobs/letters` and composed onto the
   writer's prompt by `coverLetterSystemPrompt()` — make tone and structure
   settable, with an optional example letter fenced as a style reference and
   never as a source of facts. Editing: **Edit letter** opens the stored Markdown
@@ -223,7 +223,7 @@ flowchart TD
   had to be argued for in that test, and it asserts separately that the
   dashboard's and the worker's grants stay disjoint.
 
-  What `/briefings` does show is what the runs have _found_ — every **Posting**
+  What `/jobs` does show is what the runs have _found_ — every **Posting**
   any of this user's briefings has ever turned up, read out of the `postings`
   table by `lib/postings/list-postings.ts` as a sorted, server-paginated table,
   each row carrying the **Posting Status** its owner set and opening its full

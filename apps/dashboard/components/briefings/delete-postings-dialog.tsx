@@ -2,7 +2,7 @@
 
 import { Suspense, use, useActionState, useState, type ReactNode } from "react"
 
-import { deletePostingsAction } from "@/app/(app)/briefings/actions"
+import { deletePostingsAction } from "@/app/(app)/jobs/actions"
 import { ActionError } from "@/components/forms/action-error"
 
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"

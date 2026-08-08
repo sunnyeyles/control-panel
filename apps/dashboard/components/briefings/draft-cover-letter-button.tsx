@@ -3,7 +3,7 @@
 import { useActionState } from "react"
 import { StarsIcon } from "lucide-react"
 
-import { draftCoverLetterAction } from "@/app/(app)/briefings/actions"
+import { draftCoverLetterAction } from "@/app/(app)/jobs/actions"
 import { ActionAlert } from "@/components/forms/action-alert"
 import { SubmitButton } from "@workspace/ui/components/submit-button"
 import { IDLE } from "@/lib/actions/action-state"

@@ -2,7 +2,7 @@
 
 import { useActionState } from "react"
 
-import { triggerBriefingRunAction } from "@/app/(app)/briefings/actions"
+import { triggerBriefingRunAction } from "@/app/(app)/jobs/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { SubmitButton } from "@workspace/ui/components/submit-button"
 import { IDLE } from "@/lib/actions/action-state"

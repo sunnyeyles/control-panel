@@ -20,7 +20,7 @@ import { staleBefore } from "./staleness"
  * **Nothing in this file imports Next**, which is what lets the authorization
  * branches be tested at all — every one of them turns on who is asking, and a
  * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/briefings/actions.ts`.
+ * `app/(app)/jobs/actions.ts`.
  *
  * The run this starts is **ad-hoc**: it occupies no scheduled occurrence, so it
  * neither consumes the next slot nor moves `next_run_at`, and it works on a

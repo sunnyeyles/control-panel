@@ -49,8 +49,8 @@ export interface NavChild {
  * navigate to. The union below is what stops one being written.
  *
  * The corollary is that a group has to carry its own reachable children:
- * `/briefings` is only in the sidebar because **Postings** is a child, not
- * because **Briefings** is the parent.
+ * `/jobs` is only in the sidebar because **Postings** is a child, not because
+ * **Jobs** is the parent.
  */
 export interface NavGroup {
   title: string
@@ -61,28 +61,39 @@ export interface NavGroup {
 export type NavItem = NavLink | NavGroup
 
 /**
- * "Briefing" is the glossary's word for what a user set up and what one
- * occurrence of it produced — never "Jobs", which in this system means a row in
- * `jobs` and never an employment opportunity. So the group is **Briefings**,
- * and its two children are the two things you can do with them: read the
- * **Postings** they found, and set the **Schedules** they run on.
+ * **The group is named for what the user is doing, not for the machinery.**
+ * "Jobs" here means a job search — three routes that share a tab bar
+ * (`components/jobs/job-tabs.tsx`) and read as one section: the **Postings**
+ * their briefings found, the **Schedules** those briefings run on, and the
+ * **Cover letters** settings that shape a draft written from one.
  *
- * ⚠️ **`/briefings` lists postings and `/briefings/jobs` configures briefings,
- * which reads backwards, and that is a known mismatch rather than an
- * oversight.** The URL predates the vocabulary. Renaming the segment is a
- * folder move plus this file, the trace metadata in
- * `lib/cover-letters/cover-letter-actions.ts` and prose in three documents —
- * mechanical, but a decision, and one nobody has taken. Until then the headings
- * follow the labels, because `titleForPathname` reads them from here.
+ * ⚠️ **That does not licence calling a Posting a "job" anywhere.** `CONTEXT.md`
+ * reserves the word for a row in `jobs` — a thing that runs on a cadence — and
+ * the interface never uses it for an advertisement. A *section* called Jobs
+ * containing a table of Postings breaks neither rule: nothing on the page calls
+ * one advertisement a job, and the label the sidebar renders is a heading, not
+ * a row. This is the decision the previous docblock said nobody had taken: the
+ * old URLs had `/briefings` listing postings while `/briefings/jobs` configured
+ * briefings, which read backwards, and the fix was to name the section rather
+ * than to rename the rows. `next.config.ts` redirects both.
+ *
+ * ⚠️ **A second briefing kind arrives as a sibling group, not as a fourth child
+ * here.** Briefings are going to divide by kind — a topic or news watcher
+ * alongside the job search — and that one is not "Jobs" by any reading. It gets
+ * its own group with its own tab bar, and nothing in this section moves. See
+ * `docs/job-kind-registry-plan.md`, which also names the point at which
+ * `config.kind` has to stop being JSONB: the moment a page filters on it. None
+ * of these three do.
  */
 export const navMain: readonly NavItem[] = [
   { title: "Assistant", url: "/", icon: MessageSquareIcon },
   {
-    title: "Briefings",
+    title: "Jobs",
     icon: NewspaperIcon,
     items: [
-      { title: "Postings", url: "/briefings" },
-      { title: "Schedules", url: "/briefings/jobs" },
+      { title: "Postings", url: "/jobs" },
+      { title: "Schedules", url: "/jobs/schedules" },
+      { title: "Cover letters", url: "/jobs/letters" },
     ],
   },
   { title: "Documents", url: "/documents", icon: FileTextIcon },
@@ -99,9 +110,11 @@ export const navSecondary: readonly NavLink[] = [
  * every route in the app and make every page "Assistant".
  *
  * Groups are flattened away first, because a group has no `url` to match and
- * its children have no other way to be found — without this `/briefings/jobs`
+ * its children have no other way to be found — without this `/jobs/schedules`
  * would fall through to "Control Panel". Only the children reach the header, so
- * "Briefings" is a sidebar label and never a page title.
+ * "Jobs" is a sidebar label and never a page title: the three routes in that
+ * section head as **Postings**, **Schedules** and **Cover letters**, which is
+ * also what their tab bar says.
  */
 export function titleForPathname(pathname: string): string {
   const links: readonly (NavLink | NavChild)[] = [

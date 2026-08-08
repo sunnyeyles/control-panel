@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useRef, useState } from "react"
 
-import { loadPostingDetailAction } from "@/app/(app)/briefings/actions"
+import { loadPostingDetailAction } from "@/app/(app)/jobs/actions"
 import {
   CoverLetterCell,
   type CoverLetterPromise,

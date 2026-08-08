@@ -3,7 +3,7 @@
  *
  * ⚠️ **Needed because the editor dialogs are mounted only while they are
  * open.** `FileEditorDialog` pulls TipTap in behind `next/dynamic`, so the
- * three callers on `/briefings` render it as `{open ? <FileEditorDialog … /> :
+ * three callers on `/jobs` render it as `{open ? <FileEditorDialog … /> :
  * null}` and its trigger sits outside that boundary. Radix restores focus to
  * whatever it recorded when the dialog content mounted — but the content is
  * gone from the tree in the same commit that closes it, so that restore never

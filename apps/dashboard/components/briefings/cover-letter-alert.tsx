@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@workspace/ui/components/alert"
  *
  * **A component that awaits, rather than a flag the page sets in a `catch`.**
  * The page no longer awaits the letters at all — see
- * `app/(app)/briefings/page.tsx` — so there is no `try` block left for this to
+ * `app/(app)/jobs/page.tsx` — so there is no `try` block left for this to
  * be decided in. Rendered inside `<Suspense fallback={null}>`, which is what
  * keeps the alert's own wait off the critical path: nothing appears here until
  * the storage reads have finished, and in the ordinary case nothing appears at
