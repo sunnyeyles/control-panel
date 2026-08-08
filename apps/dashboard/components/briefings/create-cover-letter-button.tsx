@@ -1,15 +1,21 @@
 "use client"
 
-import { useState } from "react"
+import dynamic from "next/dynamic"
+import { useRef, useState } from "react"
 
 import { createCoverLetterAction } from "@/app/(app)/briefings/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
+import { returnFocusTo } from "@/lib/focus/return-focus"
 import { Button } from "@workspace/ui/components/button"
-import {
-  FileEditorDialog,
-  type MarkdownFile,
-} from "@workspace/ui/components/file-editor-dialog"
+import type { MarkdownFile } from "@workspace/ui/components/file-editor-dialog"
+
+/** Deferred for the reason `edit-cover-letter-button.tsx` sets out: TipTap. */
+const FileEditorDialog = dynamic(() =>
+  import("@workspace/ui/components/file-editor-dialog").then(
+    (module) => module.FileEditorDialog
+  )
+)
 
 const SAVE_FAILED =
   "Your cover letter could not be saved. Your edit is still here — try again in a moment."
@@ -20,6 +26,16 @@ const SAVE_FAILED =
  * Saving calls a dedicated action rather than the edit action: an edit must
  * only overwrite an existing object, while this path creates the first object
  * after the server has re-checked the Posting belongs to the current user.
+ *
+ * ⚠️ **This button waits on the editor chunk explicitly, and its two siblings
+ * do not need to.** `EditCoverLetterButton` and `EditTailoredResumeButton`
+ * fetch a stored document before they open, and that request is far slower than
+ * the chunk it hides — so their "Opening…" already covers the download. There
+ * is nothing to fetch here: the letter starts empty. Without the wait below,
+ * deferring TipTap would turn an instant open into a button that looks dead for
+ * as long as the download takes. The `import()` is the same specifier the
+ * {@link FileEditorDialog} above is built from, so it resolves from the module
+ * registry rather than downloading anything twice.
  */
 export function CreateCoverLetterButton({
   postingId,
@@ -30,22 +46,27 @@ export function CreateCoverLetterButton({
   title: string
 }) {
   const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [files, setFiles] = useState<MarkdownFile[]>([])
   const [saveState, setSaveState] = useState<ActionState>(IDLE)
-  const [session, setSession] = useState(0)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
-  function openBlankEditor() {
-    const visit = session + 1
-    setFiles([
-      {
-        id: `${postingId}#new-${visit}`,
-        name: "Cover letter.md",
-        content: "",
-      },
-    ])
-    setSession(visit)
-    setSaveState(IDLE)
-    setOpen(true)
+  async function openBlankEditor() {
+    setLoading(true)
+
+    try {
+      await import("@workspace/ui/components/file-editor-dialog")
+
+      setFiles([{ id: postingId, name: "Cover letter.md", content: "" }])
+      setSaveState(IDLE)
+      setOpen(true)
+    } catch (error) {
+      // A chunk that will not load is a network fault, not something the user
+      // did. Leaving the button released lets them try again.
+      console.error("cover-letters: could not load the editor", error)
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleSave(edited: MarkdownFile[]) {
@@ -61,42 +82,48 @@ export function CreateCoverLetterButton({
     }
   }
 
+  /** Only ever called with `false` — the trigger is outside the dialog now. */
   function handleOpenChange(next: boolean) {
-    if (next) {
-      openBlankEditor()
-      return
-    }
+    if (next) return
 
     setSaveState(IDLE)
     setOpen(false)
+    returnFocusTo(triggerRef.current)
   }
 
   return (
-    <FileEditorDialog
-      files={files}
-      onFilesChange={setFiles}
-      open={open}
-      onOpenChange={handleOpenChange}
-      title="Create cover letter"
-      onSave={handleSave}
-      trigger={
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label={`Create a cover letter for ${title}`}
-        >
-          Create cover letter
-        </Button>
-      }
-      footer={
-        saveState.status === "success" ? (
-          <p className="text-sm text-muted-foreground" role="status">
-            {saveState.message}
-          </p>
-        ) : (
-          <ActionError state={saveState} />
-        )
-      }
-    />
+    <>
+      {/* Outside the lazy boundary, and what focus returns to on close. */}
+      <Button
+        ref={triggerRef}
+        variant="outline"
+        size="sm"
+        disabled={loading}
+        onClick={() => void openBlankEditor()}
+        aria-label={`Create a cover letter for ${title}`}
+      >
+        {loading ? "Opening…" : "Create cover letter"}
+      </Button>
+
+      {open ? (
+        <FileEditorDialog
+          files={files}
+          onFilesChange={setFiles}
+          open={open}
+          onOpenChange={handleOpenChange}
+          title="Create cover letter"
+          onSave={handleSave}
+          footer={
+            saveState.status === "success" ? (
+              <p className="text-sm text-muted-foreground" role="status">
+                {saveState.message}
+              </p>
+            ) : (
+              <ActionError state={saveState} />
+            )
+          }
+        />
+      ) : null}
+    </>
   )
 }

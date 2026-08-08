@@ -1,15 +1,21 @@
 "use client"
 
-import { useState } from "react"
+import dynamic from "next/dynamic"
+import { useRef, useState } from "react"
 
 import { saveTailoredResumeAction } from "@/app/(app)/briefings/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
+import { returnFocusTo } from "@/lib/focus/return-focus"
 import { Button } from "@workspace/ui/components/button"
-import {
-  FileEditorDialog,
-  type MarkdownFile,
-} from "@workspace/ui/components/file-editor-dialog"
+import type { MarkdownFile } from "@workspace/ui/components/file-editor-dialog"
+
+/** Deferred for the reason `edit-cover-letter-button.tsx` sets out: TipTap. */
+const FileEditorDialog = dynamic(() =>
+  import("@workspace/ui/components/file-editor-dialog").then(
+    (module) => module.FileEditorDialog
+  )
+)
 
 const LOAD_FAILED =
   "The tailored resume could not be loaded. Try again in a moment."
@@ -32,14 +38,11 @@ const SAVE_FAILED =
  *   deliberately absent from the dependencies, so filling in the body of a file
  *   the editor is already showing changes nothing on screen. Opening only once
  *   the bytes are in hand means the editor always mounts over a complete file.
- * - **`session` rides in the file's id.** A second open re-fetches, and on a
- *   bare `postingId` the re-fetched document would carry the same id as the
- *   first — so the effect would decline to re-run and the editor would show the
- *   previous visit's text rather than what is stored.
- * - **The id, not a `key` on the dialog.** Remounting would re-run the effect
- *   just as well, but it destroys and rebuilds the trigger in the same commit
- *   that opens the dialog, and Radix records the element to restore focus to at
- *   mount time — so closing would drop a keyboard user to `<body>`.
+ * - **The dialog is mounted only while open**, so a bare `postingId` serves as
+ *   the file id: every open builds a new editor over freshly fetched bytes,
+ *   and there is no surviving editor holding the previous visit's text.
+ * - **Focus is returned to the trigger by hand** on close, because that
+ *   unmount is what stops Radix doing it — see {@link returnFocusTo}.
  *
  * ⚠️ **The dialog's own "Download PDF" is the PDF export for the edit path, and
  * it is why this component needs no PDF code.** `FileEditorDialog` renders that
@@ -67,7 +70,7 @@ export function EditTailoredResumeButton({
   const [loadState, setLoadState] = useState<ActionState>(IDLE)
   const [saveState, setSaveState] = useState<ActionState>(IDLE)
   const [files, setFiles] = useState<MarkdownFile[]>([])
-  const [session, setSession] = useState(0)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   async function openWithResume() {
     setLoading(true)
@@ -93,16 +96,13 @@ export function EditTailoredResumeButton({
         return
       }
 
-      const visit = session + 1
-
       setFiles([
         {
-          id: `${postingId}#${visit}`,
+          id: postingId,
           name: filename,
           content: await response.text(),
         },
       ])
-      setSession(visit)
       setOpen(true)
     } catch (error) {
       // A dropped connection or an aborted request. Nothing the user can act on
@@ -140,52 +140,52 @@ export function EditTailoredResumeButton({
     }
   }
 
+  /** Only ever called with `false` — the trigger is outside the dialog now. */
   function handleOpenChange(next: boolean) {
-    if (!next) {
-      // Clear the last save's message, or reopening shows a confirmation for an
-      // edit made a visit ago.
-      setSaveState(IDLE)
-      setOpen(false)
-      return
-    }
+    if (next) return
 
-    // The trigger asks to open; the fetch decides when. Deliberately not
-    // awaited — this is a DOM event handler, and the button's pending state is
-    // what reports the wait.
-    void openWithResume()
+    // Clear the last save's message, or reopening shows a confirmation for an
+    // edit made a visit ago.
+    setSaveState(IDLE)
+    setOpen(false)
+    returnFocusTo(triggerRef.current)
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <FileEditorDialog
-        files={files}
-        onFilesChange={setFiles}
-        open={open}
-        onOpenChange={handleOpenChange}
-        title="Tailored resume"
-        onSave={handleSave}
-        trigger={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={loading}
-            aria-label={`Edit the tailored resume for ${displayName}`}
-          >
-            {loading ? "Opening…" : "Edit resume"}
-          </Button>
-        }
-        footer={
-          saveState.status === "success" ? (
-            // A save leaves the text exactly as it was, so there is no visible
-            // change to serve as its own confirmation.
-            <p className="text-sm text-muted-foreground" role="status">
-              {saveState.message}
-            </p>
-          ) : (
-            <ActionError state={saveState} />
-          )
-        }
-      />
+      {/* Outside the lazy boundary, and what focus returns to on close. */}
+      <Button
+        ref={triggerRef}
+        variant="outline"
+        size="sm"
+        disabled={loading}
+        onClick={() => void openWithResume()}
+        aria-label={`Edit the tailored resume for ${displayName}`}
+      >
+        {loading ? "Opening…" : "Edit resume"}
+      </Button>
+
+      {open ? (
+        <FileEditorDialog
+          files={files}
+          onFilesChange={setFiles}
+          open={open}
+          onOpenChange={handleOpenChange}
+          title="Tailored resume"
+          onSave={handleSave}
+          footer={
+            saveState.status === "success" ? (
+              // A save leaves the text exactly as it was, so there is no
+              // visible change to serve as its own confirmation.
+              <p className="text-sm text-muted-foreground" role="status">
+                {saveState.message}
+              </p>
+            ) : (
+              <ActionError state={saveState} />
+            )
+          }
+        />
+      ) : null}
 
       {/*
         Outside the dialog, because a load that fails is a dialog that never
