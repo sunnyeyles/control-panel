@@ -173,7 +173,7 @@ export default async function BriefingsPage({
           */}
           <p className="text-sm text-muted-foreground">
             Every posting your briefings have found, however long ago. Manage
-            schedules and search criteria in Settings.
+            schedules and search criteria in Schedules.
           </p>
 
           {/*

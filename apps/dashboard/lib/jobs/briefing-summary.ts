@@ -70,7 +70,7 @@ export function toBriefingSummary(job: Job): BriefingSummary {
  * The `try` is not defensive padding. `Intl` throws a `RangeError` on a zone it
  * does not recognise, and while `createJob()` and `updateJobSchedule()` both
  * validate, a row inserted by hand in psql has been through neither — and an
- * unrecognised zone should not take down the whole settings page.
+ * unrecognised zone should not take down the whole schedules page.
  */
 function formatInZone(date: Date, timeZone: string): string {
   try {

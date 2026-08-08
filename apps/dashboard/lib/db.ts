@@ -18,7 +18,7 @@ let prisma: PrismaClient | undefined
 
 export function getPrisma(): PrismaClient {
   // Memoized through the same variable, so the fake's rows are one set per
-  // process — a briefing paused on /settings reads as paused on /briefings.
+  // process — a briefing paused on /briefings/jobs reads as paused on /briefings.
   // `createPrismaClient()` is never called, so `DATABASE_URL` is never read.
   prisma ??= devMockEnabled() ? createDevPrisma() : createPrismaClient()
   return prisma

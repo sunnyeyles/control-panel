@@ -57,9 +57,9 @@ export function postingsEmptyState(
  */
 export const POSTINGS_EMPTY_MESSAGES: Record<PostingsEmptyState, string> = {
   "no-briefings":
-    "No briefings yet. Create one in Settings and the postings it finds will appear here.",
+    "No briefings yet. Create one in Schedules and the postings it finds will appear here.",
   "no-runs":
     "None of your briefings has run yet. Use Run now above, or wait for the next scheduled run.",
   "no-postings":
-    "No postings yet. Your briefings have run and found nothing matching their search criteria — you can widen those in Settings.",
+    "No postings yet. Your briefings have run and found nothing matching their search criteria — you can widen those in Schedules.",
 }
