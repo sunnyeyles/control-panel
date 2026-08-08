@@ -2,6 +2,7 @@ import {
   FileTextIcon,
   MessageSquareIcon,
   NewspaperIcon,
+  PresentationIcon,
   Settings2Icon,
   type LucideIcon,
 } from "lucide-react"
@@ -97,6 +98,7 @@ export const navMain: readonly NavItem[] = [
     ],
   },
   { title: "Documents", url: "/documents", icon: FileTextIcon },
+  { title: "Whiteboard", url: "/whiteboard", icon: PresentationIcon },
 ]
 
 export const navSecondary: readonly NavLink[] = [

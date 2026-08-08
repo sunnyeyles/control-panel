@@ -25,6 +25,7 @@ model User {
   coverLetterInstructions CoverLetterInstructions?
   postings                Posting[]
   documents               Document[]
+  board                   Board?
 
   @@map("users")
 }
@@ -55,6 +56,25 @@ model Document {
 
   @@index([userId, uploadedAt(sort: Desc), id(sort: Desc)], map: "documents_user_uploaded_idx")
   @@map("documents")
+}
+
+model Board {
+  userId String @id @map("user_id") @db.Uuid
+  // A tldraw store snapshot, opaque here exactly as `runs.findings` and
+  // `jobs.config` are. Nothing in this package reads inside it — its shape is
+  // tldraw's, it changes when tldraw's schema does, and tldraw migrates it on
+  // load. A column per shape would be a second, worse copy of a format that
+  // already has an owner.
+  snapshot  Json
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Cascades, like `CoverLetterInstructions` and unlike everything else. A
+  // board is something the user is working on, not a record that something
+  // happened, so there is no provenance to preserve and `Restrict` would make
+  // a user undeletable for the sake of a drawing.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("boards")
 }
 
 model CoverLetterInstructions {
