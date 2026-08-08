@@ -6,6 +6,7 @@ import {
   type NoBackgroundReason,
 } from "@/lib/cover-letters/candidate-background"
 import type { Agent } from "@workspace/agents"
+import type { PrismaClient } from "@workspace/db"
 import {
   assertDraftable,
   UndraftableError,
@@ -85,6 +86,12 @@ export interface SuggestCriteriaActionsDeps {
    * cannot read configuration at import time.
    */
   getResumes: () => ResumeStore
+  /**
+   * Which document the user called their resume. Resolved per call for the
+   * same reason the store is — the bucket has the bytes, and only Postgres
+   * knows which of them to read.
+   */
+  getPrisma: () => PrismaClient
   /**
    * The extractor. Defaults to the real agent, which reads `OPENAI_API_KEY`
    * when constructed — hence a factory **called inside the action**, never at
@@ -167,6 +174,7 @@ export function createSuggestCriteriaActions(
     try {
       background = await loadCandidateBackground(
         caller.userId,
+        deps.getPrisma(),
         deps.getResumes()
       )
     } catch (error) {

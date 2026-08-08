@@ -3,11 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { createBriefStore } from "./brief-store.ts"
 import { createCoverLetterStore } from "./cover-letter-store.ts"
 import { InvalidObjectKeyError } from "./errors.ts"
-import {
-  acceptedResumeExtensions,
-  createResumeStore,
-  type DocumentType,
-} from "./resume-store.ts"
+import { acceptedResumeExtensions, createResumeStore } from "./resume-store.ts"
 import { createTailoredResumeStore } from "./tailored-resume-store.ts"
 import type {
   FetchedObject,
@@ -824,7 +820,7 @@ describe("ResumeStore", () => {
   })
 
   describe("the document type", () => {
-    it("round-trips through metadata alongside the filename", async () => {
+    it("is stamped on the object alongside the filename", async () => {
       const resumes = createResumeStore(objects)
 
       await resumes.put({
@@ -842,17 +838,9 @@ describe("ResumeStore", () => {
         "original-filename": "cover.pdf",
         "document-type": "cover-letter",
       })
-
-      const read = await resumes.head({
-        userId: "alice",
-        resumeId: "r",
-        extension: ".pdf",
-      })
-      expect(read.documentType).toBe("cover-letter")
-      expect(read.originalFilename).toBe("cover.pdf")
     })
 
-    it("is absent rather than defaulted when none was given", async () => {
+    it("is left off entirely when none was given", async () => {
       const resumes = createResumeStore(objects)
 
       await resumes.put({
@@ -862,20 +850,12 @@ describe("ResumeStore", () => {
         bytes: BYTES,
       })
 
-      // Nothing uploaded before this field existed carries it, so "unlabelled"
-      // has to be representable. Defaulting to `resume` here would invent a
-      // claim the user never made.
+      // A present-but-empty metadata field says "we know this and it is
+      // blank", which is a different and false claim.
       expect(objects.puts[0]?.metadata).toEqual({})
-
-      const read = await resumes.head({
-        userId: "alice",
-        resumeId: "r",
-        extension: ".pdf",
-      })
-      expect(read.documentType).toBeUndefined()
     })
 
-    it("is dropped on the way in when it is not on the allowlist", async () => {
+    it("is stamped even when it is not a type this application offers", async () => {
       const resumes = createResumeStore(objects)
 
       await resumes.put({
@@ -883,26 +863,47 @@ describe("ResumeStore", () => {
         resumeId: "r",
         extension: ".pdf",
         bytes: BYTES,
-        // Reachable despite the type: this value crosses a form boundary
-        // before it gets here.
-        documentType: "curriculum-vitae" as DocumentType,
+        documentType: "curriculum-vitae",
       })
 
-      expect(objects.puts[0]?.metadata).toEqual({})
+      // ⚠️ This package deliberately holds no allowlist. The set of valid
+      // Document Types is `DOCUMENT_TYPES` in `@workspace/db` and a CHECK on
+      // `documents.doc_type`, which is the gate an upload actually passes
+      // through; a second copy here would be one more thing to keep in step and
+      // would refuse a label the database had just accepted.
+      expect(objects.puts[0]?.metadata).toEqual({
+        "document-type": "curriculum-vitae",
+      })
     })
 
-    it("reads back as undefined when the stored value is unrecognised", async () => {
+    it("is cleaned like every other metadata value", async () => {
       const resumes = createResumeStore(objects)
 
-      // An object written by an older version of this code, or edited by hand
-      // in the S3 console. Validating only on the way in would let it out.
-      await objects.put({
+      // It reaches here from a form field, so it is caller input, so it goes
+      // through `toMetadataValue` — a newline in a metadata value is header
+      // injection whatever the field is called.
+      await resumes.put({
         userId: "alice",
-        kind: "resumes",
-        segments: ["r"],
+        resumeId: "r",
         extension: ".pdf",
-        body: BYTES,
-        metadata: { "document-type": "something-else" },
+        bytes: BYTES,
+        documentType: "resume\r\nx-injected: yes",
+      })
+
+      expect(objects.puts[0]?.metadata).toEqual({
+        "document-type": "resumex-injected: yes",
+      })
+    })
+
+    it("is not read back onto the stored resume", async () => {
+      const resumes = createResumeStore(objects)
+
+      await resumes.put({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+        bytes: BYTES,
+        documentType: "resume",
       })
 
       const read = await resumes.head({
@@ -910,7 +911,36 @@ describe("ResumeStore", () => {
         resumeId: "r",
         extension: ".pdf",
       })
-      expect(read.documentType).toBeUndefined()
+
+      // ⚠️ The whole point of the move to Postgres. What is on the object is
+      // provenance — recoverable, and out of date the moment the row is
+      // relabelled. Reading it back here is how the two would silently
+      // disagree, so this store does not offer the value at all.
+      expect(read).not.toHaveProperty("documentType")
+    })
+
+    it("uses a metadata key the object store does not reserve", async () => {
+      // The reason the type can be metadata at all. `assertCustomMetadata` in
+      // the S3 store throws on `user-id`, `kind` or `environment`, so a facade
+      // writing one of those would fail every upload — and `user-id` is the
+      // ownership boundary, so shadowing it is the failure worth naming.
+      const resumes = createResumeStore(objects)
+
+      await resumes.put({
+        userId: "alice",
+        resumeId: "r",
+        extension: ".pdf",
+        bytes: BYTES,
+        documentType: "portfolio",
+      })
+
+      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain(
+        "user-id"
+      )
+      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain("kind")
+      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain(
+        "environment"
+      )
     })
 
     it("does not survive a listing, because ListObjectsV2 carries no metadata", async () => {
@@ -944,12 +974,12 @@ describe("ResumeStore", () => {
 
       const [listed] = await resumes.list("alice")
 
-      // The trap this pins: both fields read as undefined from a listing even
-      // though the object plainly has them. A list view that shows a filename
-      // must `head()` each item.
+      // The trap this pins, and the reason `listDocuments` reads Postgres
+      // rather than this: the filename is undefined from a listing even though
+      // the object plainly has it, so a list view built on this call needs a
+      // `head()` per item to show anything but a raw uuid.
       expect(listed?.resumeId).toBe("r")
       expect(listed?.size).toBe(BYTES.byteLength)
-      expect(listed?.documentType).toBeUndefined()
       expect(listed?.originalFilename).toBeUndefined()
 
       const headed = await resumes.head({
@@ -957,32 +987,7 @@ describe("ResumeStore", () => {
         resumeId: "r",
         extension: ".pdf",
       })
-      expect(headed.documentType).toBe("resume")
       expect(headed.originalFilename).toBe("cv.pdf")
-    })
-
-    it("uses a metadata key the object store does not reserve", async () => {
-      // The reason the type can be metadata at all. `assertCustomMetadata` in
-      // the S3 store throws on `user-id`, `kind` or `environment`, so a facade
-      // writing one of those would fail every upload — and `user-id` is the
-      // ownership boundary, so shadowing it is the failure worth naming.
-      const resumes = createResumeStore(objects)
-
-      await resumes.put({
-        userId: "alice",
-        resumeId: "r",
-        extension: ".pdf",
-        bytes: BYTES,
-        documentType: "portfolio",
-      })
-
-      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain(
-        "user-id"
-      )
-      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain("kind")
-      expect(Object.keys(objects.puts[0]?.metadata ?? {})).not.toContain(
-        "environment"
-      )
     })
   })
 })

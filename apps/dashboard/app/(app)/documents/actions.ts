@@ -2,6 +2,7 @@
 
 import { getCurrentUser } from "@/lib/auth/current-user"
 import type { ActionState } from "@/lib/actions/action-state"
+import { getPrisma } from "@/lib/db"
 import { createDocumentActions } from "@/lib/documents/document-actions"
 import { getResumeStore } from "@/lib/storage"
 import { refresh } from "next/cache"
@@ -51,6 +52,7 @@ import { headers } from "next/headers"
 const actions = createDocumentActions({
   getUser: getCurrentUser,
   getResumes: getResumeStore,
+  getPrisma,
   getContentLength: async () => {
     const value = (await headers()).get("content-length")
     if (!value) return undefined

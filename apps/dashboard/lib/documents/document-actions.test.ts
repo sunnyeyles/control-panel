@@ -1,4 +1,5 @@
 import type { CurrentUser } from "@/lib/auth/current-user"
+import type { Document as DocumentRow, PrismaClient } from "@workspace/db"
 import {
   InvalidObjectKeyError,
   ObjectNotFoundError,
@@ -14,9 +15,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { IDLE } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
 import { createDocumentActions } from "./document-actions"
+import {
+  fakeDocumentDb,
+  mergeClients,
+  toFakeDocument,
+} from "./fake-document-db"
 import { MAX_DOCUMENT_BYTES } from "./upload-validation"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
+const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
 const RESUME_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 
 const SIGNED_IN: CurrentUser = {
@@ -74,11 +81,40 @@ class SpyResumeStore implements ResumeStore {
 }
 
 let store: SpyResumeStore
+/**
+ * The `documents` table. Shared with {@link actionsFor} so an assertion can
+ * read what the upload wrote — the row is half of what an upload produces, and
+ * the only half any read path looks at.
+ */
+let rows: DocumentRow[]
+/** Set to make every `documents` query throw. */
+let dbError: unknown
 
 beforeEach(() => {
   store = new SpyResumeStore()
+  rows = []
+  dbError = undefined
   vi.spyOn(console, "error").mockImplementation(() => {})
 })
+
+function prisma(): PrismaClient {
+  const client = fakeDocumentDb(USER_ID, rows)
+
+  if (!dbError) return client
+
+  const failing = async () => {
+    throw dbError
+  }
+
+  return mergeClients(client, {
+    document: {
+      findMany: failing,
+      findFirst: failing,
+      create: failing,
+      deleteMany: failing,
+    },
+  } as unknown as PrismaClient)
+}
 
 function actionsFor(
   user: CurrentUser,
@@ -87,6 +123,7 @@ function actionsFor(
   return createDocumentActions({
     getUser: async () => user,
     getResumes: () => store,
+    getPrisma: prisma,
     getContentLength: async () => overrides.contentLength,
     newResumeId: overrides.newResumeId ?? (() => RESUME_ID),
   })
@@ -139,6 +176,7 @@ describe("uploadDocument — the gate", () => {
         throw new Error("connection refused")
       },
       getResumes: () => store,
+      getPrisma: prisma,
       getContentLength: async () => undefined,
     })
 
@@ -234,32 +272,85 @@ describe("uploadDocument — what reaches the store", () => {
     expect(store.puts[0]?.extension).toBe(".pdf")
   })
 
+  it("records a row beside the object", async () => {
+    await actionsFor(SIGNED_IN).uploadDocument(
+      IDLE,
+      uploadForm(pdf(2048, "My CV.pdf"), "resume")
+    )
+
+    // The row is the half every read path looks at, and it shares the object's
+    // id: that is what makes `{id}{extension}` address the bytes.
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      id: RESUME_ID,
+      userId: USER_ID,
+      extension: ".pdf",
+      filename: "My CV.pdf",
+      docType: "resume",
+      byteSize: 2048,
+    })
+    expect(store.puts[0]?.resumeId).toBe(RESUME_ID)
+  })
+
+  it("keeps a filename Postgres can hold and a header cannot", async () => {
+    // The visible half of why this moved off the object. An S3 metadata value
+    // is an HTTP header, so it is stripped to printable ASCII; the row is not.
+    await actionsFor(SIGNED_IN).uploadDocument(
+      IDLE,
+      uploadForm(pdf(1024, "Lebenslauf – 2026.pdf"))
+    )
+
+    expect(rows[0]?.filename).toBe("Lebenslauf – 2026.pdf")
+  })
+
   it("stores a valid document type", async () => {
     await actionsFor(SIGNED_IN).uploadDocument(
       IDLE,
       uploadForm(pdf(), "cover-letter")
     )
 
+    expect(rows[0]?.docType).toBe("cover-letter")
+    // Still stamped on the object too, as provenance. Nothing reads it back.
     expect(store.puts[0]?.documentType).toBe("cover-letter")
   })
 
-  it("drops a document type that is not on the allowlist", async () => {
+  it("falls back to `other` for a document type that is not on the allowlist", async () => {
     // A <select> value arrives in the same untrusted form data as everything
-    // else. Dropping rather than rejecting: the type is a label, and losing the
-    // label beats losing the upload.
+    // else. `other` rather than a rejection: the type is a label, and losing
+    // the label beats losing the upload — and the column is NOT NULL, so
+    // "absent" is not a value it can take.
     await actionsFor(SIGNED_IN).uploadDocument(
       IDLE,
       uploadForm(pdf(), "curriculum-vitae")
     )
 
     expect(store.puts).toHaveLength(1)
-    expect(store.puts[0]?.documentType).toBeUndefined()
+    expect(rows[0]?.docType).toBe("other")
   })
 
-  it("omits the type entirely when none was chosen", async () => {
+  it("falls back to `other` when none was chosen", async () => {
     await actionsFor(SIGNED_IN).uploadDocument(IDLE, uploadForm(pdf()))
 
-    expect(store.puts[0]?.documentType).toBeUndefined()
+    expect(rows[0]?.docType).toBe("other")
+  })
+
+  it("deletes the object and fails when the row cannot be written", async () => {
+    // ⚠️ The half-written state. The bytes are in the bucket and nothing points
+    // at them, which is invisible to the user — so the object is collected on
+    // the way out rather than left to accumulate, and the upload is reported as
+    // failed because from the user's side it is.
+    dbError = new Error("connection refused")
+
+    const result = await actionsFor(SIGNED_IN).uploadDocument(
+      IDLE,
+      uploadForm(pdf())
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.puts).toHaveLength(1)
+    expect(store.deletes).toEqual([
+      { userId: USER_ID, resumeId: RESUME_ID, extension: ".pdf" },
+    ])
   })
 
   it("never passes the browser-declared MIME type through", async () => {
@@ -442,43 +533,58 @@ describe("uploadDocument — the reset key", () => {
 })
 
 describe("deleteDocument", () => {
-  function deleteForm(resumeId: string, extension: string): FormData {
+  function deleteForm(resumeId: string): FormData {
     const form = new FormData()
     form.set("resumeId", resumeId)
-    form.set("extension", extension)
     return form
   }
 
+  /**
+   * A stored document, as both halves. The extension is only on the row: the
+   * form no longer carries one, which is the point of several tests below.
+   */
+  function seed(id = RESUME_ID, extension = ".pdf"): void {
+    rows.push(toFakeDocument(USER_ID, { id, extension }))
+  }
+
   it("refuses an anonymous caller without touching the store", async () => {
+    seed()
+
     const result = await actionsFor(ANONYMOUS).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID, ".pdf")
+      deleteForm(RESUME_ID)
     )
 
     expect(result.status).toBe("error")
     expect(store.deletes).toHaveLength(0)
+    expect(rows).toHaveLength(1)
   })
 
   it("gives a refused caller the identical message an anonymous one gets", async () => {
+    seed()
+
     const anonymous = await actionsFor(ANONYMOUS).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID, ".pdf")
+      deleteForm(RESUME_ID)
     )
     const refused = await actionsFor(REFUSED).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID, ".pdf")
+      deleteForm(RESUME_ID)
     )
 
     expect(refused).toEqual(anonymous)
   })
 
-  it("deletes under the session's userId", async () => {
+  it("removes the row and then the object, under the session's userId", async () => {
+    seed()
+
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID, ".pdf")
+      deleteForm(RESUME_ID)
     )
 
     expect(result.status).toBe("success")
+    expect(rows).toHaveLength(0)
     expect(store.deletes[0]).toEqual({
       userId: USER_ID,
       resumeId: RESUME_ID,
@@ -486,61 +592,78 @@ describe("deleteDocument", () => {
     })
   })
 
-  it("rejects a resumeId that is not a uuid", async () => {
-    const result = await actionsFor(SIGNED_IN).deleteDocument(
-      IDLE,
-      deleteForm("../../someone-else/resumes/theirs", ".pdf")
-    )
+  it("takes the extension from the row, not from the form", async () => {
+    // The form used to post one beside the id. It does not any more, so there
+    // is one less untrusted field and no way for the key to name something the
+    // row does not.
+    seed(RESUME_ID, ".docx")
 
-    expect(result.status).toBe("error")
-    expect(store.deletes).toHaveLength(0)
+    await actionsFor(SIGNED_IN).deleteDocument(IDLE, deleteForm(RESUME_ID))
+
+    expect(store.deletes[0]?.extension).toBe(".docx")
   })
 
-  it("rejects a malformed extension", async () => {
+  it("refuses an id with no row, without touching the bucket", async () => {
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID, "pdf")
-    )
-
-    expect(result.status).toBe("error")
-    expect(store.deletes).toHaveLength(0)
-  })
-
-  it("says the same thing for a missing document as for someone else's", async () => {
-    store.deleteError = new ObjectNotFoundError("gone")
-    const notFound = await actionsFor(SIGNED_IN).deleteDocument(
-      IDLE,
-      deleteForm(RESUME_ID, ".pdf")
-    )
-
-    store.deleteError = new ObjectOwnershipError(
-      "prod/x/resumes/y.pdf",
-      "x",
-      "z"
-    )
-    const ownership = await actionsFor(SIGNED_IN).deleteDocument(
-      IDLE,
-      deleteForm(RESUME_ID, ".pdf")
-    )
-
-    expect(ownership).toEqual(notFound)
-  })
-
-  it("does not tell someone deleting a document to check its file name", async () => {
-    // `invalid_object_key` carries upload wording by default, and there is no
-    // file and no name to check on this path — the id came from a hidden field
-    // the user never saw.
-    store.deleteError = new InvalidObjectKeyError("bad key")
-
-    const result = await actionsFor(SIGNED_IN).deleteDocument(
-      IDLE,
-      deleteForm(RESUME_ID, ".pdf")
+      deleteForm(RESUME_ID)
     )
 
     expect(result).toEqual({
       status: "error",
       message: "That document no longer exists.",
     })
+    expect(store.deletes).toHaveLength(0)
+  })
+
+  it("says the same thing for a missing document as for someone else's", async () => {
+    // ⚠️ The non-disclosure property, and the reason `findDocument` filters on
+    // `userId` as well as `id`. Splitting these would turn the form into an
+    // oracle for whether another user's document id is real.
+    const notFound = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm(RESUME_ID)
+    )
+
+    rows.push(
+      toFakeDocument(OTHER_USER_ID, { id: RESUME_ID, extension: ".pdf" })
+    )
+
+    const someoneElses = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm(RESUME_ID)
+    )
+
+    expect(someoneElses).toEqual(notFound)
+    // And theirs is still there.
+    expect(rows).toHaveLength(1)
+    expect(store.deletes).toHaveLength(0)
+  })
+
+  it("reports success when the row went but the object did not", async () => {
+    // The document is gone as far as this application is concerned — it is not
+    // listed, not downloadable and not deletable again — so telling the user
+    // their delete failed would be false. The orphan is logged instead.
+    seed()
+    store.deleteError = new StorageUnavailableError("access denied")
+
+    const result = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm(RESUME_ID)
+    )
+
+    expect(result.status).toBe("success")
+    expect(rows).toHaveLength(0)
+  })
+
+  it("rejects a resumeId that is not a uuid", async () => {
+    const result = await actionsFor(SIGNED_IN).deleteDocument(
+      IDLE,
+      deleteForm("../../someone-else/resumes/theirs")
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.deletes).toHaveLength(0)
   })
 
   it("rejects an id that is uuid-shaped only by length", async () => {
@@ -549,7 +672,7 @@ describe("deleteDocument", () => {
     // wording fits, rather than in the store, where it does not.
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm("-aaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", ".pdf")
+      deleteForm("-aaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
     )
 
     expect(result.status).toBe("error")
@@ -559,7 +682,7 @@ describe("deleteDocument", () => {
   it("rejects an id of the right length that is all dashes", async () => {
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm("-".repeat(36), ".pdf")
+      deleteForm("-".repeat(36))
     )
 
     expect(result.status).toBe("error")
@@ -569,9 +692,12 @@ describe("deleteDocument", () => {
   it("accepts what crypto.randomUUID actually produces", async () => {
     // The tightened pattern has to admit every id this app has ever written,
     // or it turns existing documents undeletable.
+    const id = crypto.randomUUID()
+    seed(id)
+
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(crypto.randomUUID(), ".pdf")
+      deleteForm(id)
     )
 
     expect(result.status).toBe("success")

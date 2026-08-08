@@ -230,6 +230,7 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
     try {
       background = await loadCandidateBackground(
         caller.userId,
+        deps.getPrisma(),
         deps.getResumes()
       )
     } catch (error) {

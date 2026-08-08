@@ -1,6 +1,7 @@
 import type {
   Artifact as PrismaArtifact,
   CoverLetterInstructions as PrismaCoverLetterInstructions,
+  Document as PrismaDocument,
   Job as PrismaJob,
   Posting as PrismaPosting,
   Run as PrismaRun,
@@ -58,9 +59,35 @@ export type PostingPayload = Record<string, unknown>
  */
 export type PostingStatus = "new" | "applied" | "rejected"
 
+/**
+ * What the user says a Document is.
+ *
+ * Text plus a CHECK rather than a Postgres enum, mirroring {@link RunStatus}
+ * and {@link PostingStatus}. `other` is not filler: without it a document that
+ * is none of the other five has to be mislabelled as one of them, and a label
+ * nobody trusts is worse than no label.
+ *
+ * These are not storage *kinds*. A kind — `resumes`, `briefs`,
+ * `cover-letters`, `tailored-resumes` in `@workspace/user-storage` — is a key
+ * segment, an S3 object tag and a file-type allowlist at once, and every one of
+ * these six wants the same three. They all live on the `resumes` shelf.
+ *
+ * Type-only, and it erases. The runtime list is `DOCUMENT_TYPES` in
+ * `documents.ts`; this file must stay importable without pulling in a value,
+ * which is what lets a client component import the type for a label map.
+ */
+export type DocumentType =
+  | "resume"
+  | "cover-letter"
+  | "portfolio"
+  | "reference"
+  | "certification"
+  | "other"
+
 export type User = PrismaUser
 export type Job = PrismaJob
 export type Run = PrismaRun
 export type Artifact = PrismaArtifact
 export type Posting = PrismaPosting
+export type Document = PrismaDocument
 export type CoverLetterInstructions = PrismaCoverLetterInstructions

@@ -253,6 +253,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     try {
       background = await loadCandidateBackground(
         caller.userId,
+        deps.getPrisma(),
         deps.getResumes()
       )
     } catch (error) {

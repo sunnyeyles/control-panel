@@ -1,8 +1,17 @@
 import type { CurrentUser } from "@/lib/auth/current-user"
+import {
+  fakeDocumentDb,
+  mergeClients,
+  toFakeDocument,
+} from "@/lib/documents/fake-document-db"
 import type { Agent } from "@workspace/agents"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
-import type { PrismaClient } from "@workspace/db"
+import type {
+  Document as DocumentRow,
+  DocumentType,
+  PrismaClient,
+} from "@workspace/db"
 import { ObjectNotFoundError } from "@workspace/user-storage/errors"
 import { buildObjectKey } from "@workspace/user-storage/keys"
 import type {
@@ -182,10 +191,21 @@ class MemoryObjects implements UserObjectStore {
  */
 class FakeResumes implements ResumeStore {
   private readonly documents: StoredResume[] = []
+  /**
+   * The rows beside the bytes. `add()` writes both, because a Document is
+   * both — an object nothing has a row for is invisible to every read path.
+   */
+  readonly rows: DocumentRow[] = []
 
   add(
-    document: Partial<StoredResume> & { resumeId: string; extension: string }
+    document: Partial<StoredResume> & {
+      resumeId: string
+      extension: string
+      documentType?: DocumentType
+    }
   ): this {
+    const { documentType, ...object } = document
+
     this.documents.push({
       key: `${ENVIRONMENT}/${USER_ID}/resumes/${document.resumeId}${document.extension}`,
       userId: USER_ID,
@@ -193,8 +213,24 @@ class FakeResumes implements ResumeStore {
       size: CV.length,
       uploadedAt: NOW,
       bytes: new TextEncoder().encode(CV),
-      ...document,
+      ...object,
     })
+
+    this.rows.push(
+      toFakeDocument(
+        USER_ID,
+        {
+          id: document.resumeId,
+          extension: document.extension,
+          ...(document.originalFilename
+            ? { filename: document.originalFilename }
+            : {}),
+          ...(documentType ? { docType: documentType } : {}),
+        },
+        this.rows.length
+      )
+    )
+
     return this
   }
 
@@ -220,15 +256,14 @@ class FakeResumes implements ResumeStore {
 
   async list(userId: string): Promise<StoredResume[]> {
     // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed document has neither a document type nor a filename. Getting that
-    // wrong here would let a broken implementation pass by reading the label
-    // off the listing, which S3 never supplies.
+    // listed object has no filename. Nothing on this path calls it any more,
+    // and it stays honest so that a future caller does not read a display name
+    // off something S3 never supplies.
     return this.documents
       .filter((document) => document.userId === userId)
       .map((document) => ({
         ...document,
         bytes: undefined,
-        documentType: undefined,
         originalFilename: undefined,
       }))
   }
@@ -365,7 +400,10 @@ beforeEach(() => {
 function actionsFor(user: CurrentUser) {
   return createTailoredResumeActions({
     getUser: async () => user,
-    getPrisma: () => db.asPrisma(),
+    // One client, because the action has one: the Posting tables come from
+    // `FakeDb` and `documents` from the rows the fake store recorded.
+    getPrisma: () =>
+      mergeClients(db.asPrisma(), fakeDocumentDb(USER_ID, resumes.rows)),
     getResumes: () => resumes,
     getTailoredResumes: () => createTailoredResumeStore(objects),
     createTailor: tailor.factory(),

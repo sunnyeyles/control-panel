@@ -192,27 +192,37 @@ segment or an identifier — it is attacker-controlled text, and using it as a
 path is the classic traversal. It is reduced to its basename and stripped of
 anything an HTTP header cannot carry, since S3 metadata travels in headers.
 
-`ResumeStore` also records an optional **document type** (`document-type`
-metadata): one of `resume`, `cover-letter`, `portfolio`, `reference`, `other`.
-It is validated against that allowlist in both directions — on write because it
-crosses a form boundary, and on read because an object written by older code or
-edited by hand carries whatever it carries; an unrecognised value reads back as
-`undefined`. Absent is legitimate, since nothing written before the field
-existed has one.
+`ResumeStore` also stamps an optional **document type** (`document-type`
+metadata) beside it.
 
-It is metadata rather than a kind on purpose. A kind buys separate retention and
-separate accepted extensions, and these five want neither — five kinds would
-cost five `kinds.ts` entries, five Terraform `object_kinds` entries and five IAM
-policies to label one shelf of documents. The cost is that S3 metadata is
-immutable without a copy, and no method here exposes one, so a type is fixed at
-upload.
+⚠️ **Both of those are written and never read back, and that is the point.** A
+Document's filename and its Document Type live in `documents` in Postgres, which
+is what the application reads; what is on the object is provenance. Keeping it
+means an object in the bucket still describes itself — which is what an operator
+staring at a key has to go on, and what would make a backfill possible if the
+table were ever lost. `StoredResume` therefore carries `originalFilename` and no
+`documentType` at all: offering the label here would be offering a value that
+goes stale the moment a row is relabelled.
+
+This package holds **no list of valid document types**, and must not grow one.
+That list is `DOCUMENT_TYPES` in `@workspace/db` plus a CHECK on
+`documents.doc_type` — one gate, in the place that can actually enforce it — and
+`@workspace/db` is not a dependency of this package. `NewResume.documentType` is
+a plain `string`, cleaned through `toMetadataValue` like every other
+caller-supplied value and otherwise taken as given.
+
+A Document Type was never a storage kind and still is not. A kind buys separate
+retention and separate accepted extensions, and these six want neither — six
+kinds would cost six `kinds.ts` entries, six Terraform `object_kinds` entries and
+six IAM policies to label one shelf of documents.
 
 ⚠️ **`list()` returns no user metadata at all.** ListObjectsV2 does not carry
-it, so every listed object has `metadata: {}` — meaning `originalFilename` and
-`documentType` are always `undefined` from a listing, while `key`, `size` and
-`storedAt` are real. Recovering either means a `head()` per object.
-`apps/dashboard/lib/documents/list-documents.ts` does exactly that, and explains
-why the N+1 is the right trade at this scale.
+it, so every listed object has `metadata: {}` — meaning `originalFilename` is
+always `undefined` from a listing, while `key`, `size` and `storedAt` are real.
+This used to force a `head()` per object on every render of the Documents page;
+it no longer does, because that listing is a query. What `list()` answers now is
+"what is actually in the bucket", which is the question a reconciliation or a
+backfill asks rather than the one a page does.
 
 ## Errors
 

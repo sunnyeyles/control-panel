@@ -205,4 +205,34 @@ Postgres:
   `artifacts_object_key_check` refuses a URL.
 - **`object_key` holds an S3 key and the CHECK enforces it** — no scheme prefix,
   no leading slash.
+- **`documents.id` is supplied by the caller, and it is the only id here that
+  is.** Every other table defaults to `gen_random_uuid()`. This one cannot: the
+  uuid is the S3 key segment in `{environment}/{user_id}/resumes/{id}{extension}`,
+  and the object is written **before** the row, so the id has to exist first. A
+  `DEFAULT` that quietly fired would mint a row addressing nothing. The order is
+  the load-bearing part — a failed upload after a successful insert leaves a
+  document the user can see and cannot open, while a failed insert after a
+  successful upload leaves an object nothing points at, which is invisible and
+  collectable. The delete path runs the mirror of it: row first, then object.
+- **`documents.filename` is here rather than in S3 user metadata because a
+  metadata value is an HTTP header.** It carries printable ASCII and nothing
+  else, so an em dash in a filename did not survive the round trip. The object
+  still gets an `original-filename` stamp as provenance, and nothing reads it
+  back — same for `document-type`. Reading either would be a second source of
+  truth that goes stale the moment a row changes.
+- **`documents.doc_type` is text plus a CHECK, and the list exists three
+  times.** `DocumentType` in `types.ts`, `DOCUMENT_TYPES` in `documents.ts`
+  (`as const satisfies`, so the two cannot disagree), and the CHECK in
+  `0007_documents` — which is the only one the database enforces. Adding a type
+  means all three, plus a label in
+  `apps/dashboard/lib/documents/document-type-labels.ts`, which is a
+  `Record<DocumentType, string>` and so fails to compile until it is added.
+  `NOT NULL` with a default of `other`: "unlabelled" was a state for objects
+  written before the field existed, and the table has none.
+- **`findDocument` and `deleteDocument` filter on `user_id` as well as `id`, and
+  that filter _is_ the ownership check.** Unlike an object key, which
+  `assertSegment` and `assertOwnedBy` guard underneath, there is nothing beneath
+  these two. The id reaches them from a URL or a hidden form field. Dropping the
+  `user_id` from either `where` hands one user another's documents with nothing
+  failing.
 - **`auth_user_id` is text, nullable, unique, and not an FK to `neon_auth`.**

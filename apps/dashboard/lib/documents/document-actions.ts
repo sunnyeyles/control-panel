@@ -3,14 +3,19 @@ import { DOCUMENT_GONE, storageMessage } from "@/lib/actions/storage-message"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
+  deleteDocument as deleteDocumentRow,
+  DOCUMENT_TYPES,
+  findDocument,
+  recordDocument,
+  type PrismaClient,
+} from "@workspace/db"
+import {
   acceptedResumeExtensions,
-  isDocumentType,
-  type DocumentType,
   type ResumeStore,
 } from "@workspace/user-storage"
 import { z } from "zod"
 
-import { EXTENSION_PATTERN, RESUME_ID_PATTERN } from "./document-ref"
+import { RESUME_ID_PATTERN } from "./document-ref"
 import {
   checkUpload,
   describeRejection,
@@ -44,6 +49,14 @@ export interface DocumentActionsDeps {
    */
   getResumes: () => ResumeStore
   /**
+   * The database client, resolved per call for the same reason the store is.
+   *
+   * A Document is two things written in order — bytes in the bucket, then a row
+   * naming them — so both dependencies are needed on the same path, and this
+   * one is what the read paths now go through exclusively.
+   */
+  getPrisma: () => PrismaClient
+  /**
    * The declared size of the request body, or undefined if there was no
    * `content-length`.
    *
@@ -72,19 +85,32 @@ const uploadSchema = z.object({
 })
 
 /**
- * The two halves of a stored object's address, validated separately.
+ * A stored document's id, as a hidden form field carries it.
  *
- * Both arrive from a hidden form field, so both are untrusted. Neither is
- * trusted to name a *user*, though — see `deleteDocument`.
+ * Untrusted, but never trusted to name a *user* — see `deleteDocument`. The
+ * pattern comes from `document-ref.ts`, which is also what the download route
+ * parses its path segment with. Why it is as tight as it is is documented
+ * there; what matters here is that a malformed field is rejected on this path,
+ * where the wording fits, rather than deep in the store.
  *
- * The patterns come from `document-ref.ts`, which is also what the download
- * route parses its path segment with. Why they are as tight as they are is
- * documented there; what matters here is that a malformed field is rejected on
- * this path, where the wording fits, rather than deep in the store, where the
- * only message available is about storing a file.
+ * The extension used to be a second field beside it and is not any more: the
+ * row carries it, so there is one less thing arriving from the browser.
  */
 const resumeIdSchema = z.string().regex(RESUME_ID_PATTERN)
-const extensionSchema = z.string().regex(EXTENSION_PATTERN)
+
+/**
+ * The label the `<select>` posted, or `other`.
+ *
+ * `.catch` rather than a rejection, keeping the rule this path has always had:
+ * the type is a label, and losing the label is a better outcome than losing the
+ * upload. What changed is where an unrecognised value lands — the column is
+ * `NOT NULL`, so it lands on `other`, which is the value that exists for
+ * exactly this and reads as an honest answer rather than a missing one.
+ *
+ * The runtime import of `DOCUMENT_TYPES` is right *here*, on the server, and
+ * would be wrong in `document-type-labels.ts` — see the note there.
+ */
+const docTypeSchema = z.enum(DOCUMENT_TYPES).catch("other")
 
 export function createDocumentActions(deps: DocumentActionsDeps) {
   const newResumeId = deps.newResumeId ?? (() => crypto.randomUUID())
@@ -148,14 +174,8 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     }
 
     // A `<select>` value arrives in the same untrusted form data as everything
-    // else, so it is validated against the closed allowlist rather than stored
-    // as typed. An unrecognised value is dropped, not rejected: the type is a
-    // label, and losing the label is a better outcome than losing the upload.
-    const documentType: DocumentType | undefined = isDocumentType(
-      parsed.data.documentType
-    )
-      ? parsed.data.documentType
-      : undefined
+    // else, so it is narrowed here before it can reach the CHECK on the column.
+    const documentType = docTypeSchema.parse(parsed.data.documentType)
 
     const resumeId = newResumeId()
 
@@ -167,13 +187,15 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         // the only one.
         userId: caller.userId,
         // A v4 uuid: 36 characters of [0-9a-f-], starting and ending
-        // alphanumeric, which is what `assertSegment` requires. The uploaded
-        // filename is never a key segment — it is metadata.
+        // alphanumeric, which is what `assertSegment` requires. Minted here
+        // rather than by the database, because it is the object's key segment
+        // and the object is written first. The uploaded filename is never a key
+        // segment.
         resumeId,
         extension: check.extension,
         bytes,
         originalFilename: file.name,
-        ...(documentType ? { documentType } : {}),
+        documentType,
       })
     } catch (error) {
       return fail(
@@ -182,6 +204,47 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
             "That file couldn't be stored. Check the file name and type.",
         })
       )
+    }
+
+    // ⚠️ **Bytes first, then the row, and this order is not interchangeable.**
+    // A failed upload after a successful insert leaves a document the user can
+    // see and cannot open; a failed insert after a successful upload leaves an
+    // object nothing points at — invisible, a few kilobytes, and collectable,
+    // which is what the cleanup below tries to do immediately.
+    try {
+      await recordDocument(deps.getPrisma(), {
+        id: resumeId,
+        userId: caller.userId,
+        extension: check.extension,
+        // The filename as the user typed it. Postgres holds it, so unlike the
+        // provenance copy on the object it is not stripped to printable ASCII.
+        filename: file.name,
+        docType: documentType,
+        byteSize: bytes.byteLength,
+      })
+    } catch (error) {
+      console.error("documents: upload recorded no row", resumeId, error)
+
+      // Best effort, and deliberately not reported: the user's upload has
+      // already failed, and a second message about a cleanup they did not ask
+      // for explains nothing. The object is unreachable either way — no row
+      // means no listing, no download and no delete button.
+      await deps
+        .getResumes()
+        .delete({
+          userId: caller.userId,
+          resumeId,
+          extension: check.extension,
+        })
+        .catch((cleanup: unknown) => {
+          console.error(
+            "documents: orphaned object left behind",
+            resumeId,
+            cleanup
+          )
+        })
+
+      return fail("That file couldn't be stored. Try again.")
     }
 
     // The reset key is the new object's id: unique per success by construction, so
@@ -205,10 +268,30 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     if (!caller.ok) return { status: "error", message: caller.message }
 
     const resumeId = resumeIdSchema.safeParse(formData.get("resumeId"))
-    const extension = extensionSchema.safeParse(formData.get("extension"))
 
-    if (!resumeId.success || !extension.success) {
+    if (!resumeId.success) {
       return { status: "error", message: "That document could not be found." }
+    }
+
+    const prisma = deps.getPrisma()
+
+    // The row is what says this document exists and whose it is. `findDocument`
+    // filters on `userId` as well as `id`, so someone else's id is simply not
+    // found — the caller gets one answer for "no such document" and "not
+    // yours", which is what stops this being an existence oracle.
+    const document = await findDocument(prisma, caller.userId, resumeId.data)
+
+    if (!document) {
+      return { status: "error", message: DOCUMENT_GONE }
+    }
+
+    // ⚠️ **Row first, then the object, the mirror of the upload's order.** A
+    // row removed with the object still there is an orphan in the bucket:
+    // invisible and collectable. An object removed with the row still there is
+    // a document the user can see and cannot open — so if the S3 call below
+    // fails, the delete has still done what the user asked.
+    if (!(await deleteDocumentRow(prisma, caller.userId, resumeId.data))) {
+      return { status: "error", message: DOCUMENT_GONE }
     }
 
     try {
@@ -217,16 +300,20 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         // different *object*, but never a different owner's prefix — the key is
         // built from an id the form never supplies.
         userId: caller.userId,
-        resumeId: resumeId.data,
-        extension: extension.data,
+        resumeId: document.id,
+        // From the row, not from the form. One less untrusted field, and one
+        // less way for the key to name something the row does not.
+        extension: document.extension,
       })
     } catch (error) {
-      return {
-        status: "error",
-        message: storageMessage("documents: delete failed", error, {
-          invalidObjectKey: DOCUMENT_GONE,
-        }),
-      }
+      // Logged, not reported. The row is gone, so the document is gone as far
+      // as this application is concerned, and telling the user their delete
+      // failed would be false.
+      console.error(
+        "documents: row deleted, object left behind",
+        document.id,
+        error
+      )
     }
 
     // Recoverable rather than destructive, which is why exposing this at all is

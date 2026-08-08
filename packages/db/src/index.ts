@@ -61,6 +61,15 @@ export {
 export { recordArtifact } from "./artifacts.ts"
 
 export {
+  deleteDocument,
+  DOCUMENT_TYPES,
+  findDocument,
+  listDocumentsForUser,
+  recordDocument,
+  type NewDocument,
+} from "./documents.ts"
+
+export {
   deletePostings,
   ownedPostingIds,
   POSTING_STATUSES,
@@ -75,6 +84,8 @@ export { computeNextRunAt } from "./schedule.ts"
 export type {
   Artifact,
   CoverLetterInstructions,
+  Document,
+  DocumentType,
   Job,
   JobConfig,
   Posting,

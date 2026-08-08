@@ -10,6 +10,7 @@ import { postingId } from "@workspace/agents/posting-id"
 import { computeNextRunAt } from "@workspace/db/schedule"
 import type {
   CoverLetterInstructions,
+  Document,
   Job,
   Posting as PostingRow,
   PostingStatus,
@@ -468,6 +469,23 @@ export function devCoverLetterInstructions(): CoverLetterInstructions[] {
 }
 
 /**
+ * ⚠️ **A Document is two fixtures, and they have to agree.**
+ *
+ * {@link devResumes} is the bytes in the fake bucket; {@link devDocuments} is
+ * the row in the fake database, and the row is what the application reads. The
+ * `id` of a row is the `resumeId` of its object — that is the real key
+ * relationship, not a convention of the fixtures — so a row without a matching
+ * object lists fine and 404s on download, and an object without a row is
+ * invisible. Both are real states in production; neither is a useful default
+ * here, so the three below are paired.
+ */
+const DEV_DOCUMENT_IDS = {
+  markdownCv: "3f8d1b2a-0000-4000-8000-0000000000c1",
+  pdfCv: "3f8d1b2a-0000-4000-8000-0000000000c2",
+  referees: "3f8d1b2a-0000-4000-8000-0000000000c3",
+} as const
+
+/**
  * Documents as they arrive at `ResumeStore.put()`. Only `.md` and `.txt` can be
  * read back as text, so the Markdown CV is what makes drafting work end to end;
  * the PDF is here because its refusal has a UI.
@@ -476,7 +494,7 @@ export function devResumes(): NewResume[] {
   return [
     {
       userId: DEV_USER_ID,
-      resumeId: "3f8d1b2a-0000-4000-8000-0000000000c1",
+      resumeId: DEV_DOCUMENT_IDS.markdownCv,
       extension: ".md",
       bytes: encode(DEV_CV_MARKDOWN),
       originalFilename: "dev-user-cv.md",
@@ -484,7 +502,7 @@ export function devResumes(): NewResume[] {
     },
     {
       userId: DEV_USER_ID,
-      resumeId: "3f8d1b2a-0000-4000-8000-0000000000c2",
+      resumeId: DEV_DOCUMENT_IDS.pdfCv,
       extension: ".pdf",
       // Not a real PDF; nothing renders its contents.
       bytes: encode("%PDF-1.4 dev fixture, not a real document"),
@@ -493,11 +511,53 @@ export function devResumes(): NewResume[] {
     },
     {
       userId: DEV_USER_ID,
-      resumeId: "3f8d1b2a-0000-4000-8000-0000000000c3",
+      resumeId: DEV_DOCUMENT_IDS.referees,
       extension: ".txt",
       bytes: encode("Referees available on request.\n"),
-      // No `documentType`: a real state in the bucket, renders without a badge.
       originalFilename: "referees.txt",
+      documentType: "reference",
+    },
+  ]
+}
+
+/**
+ * The rows in `documents` for the objects above — what `/documents`, the
+ * settings picker and `loadCandidateBackground` actually read.
+ *
+ * `uploadedAt` is staggered rather than shared so the newest-first order is
+ * observable: the Markdown CV is the newest, which is what makes it the one
+ * **Draft cover letter** reads. The filename on the last one carries an en dash
+ * on purpose — it is the character the old S3-metadata storage stripped, so a
+ * row that shows it intact is the visible half of why this table exists.
+ */
+export function devDocuments(): Document[] {
+  return [
+    {
+      id: DEV_DOCUMENT_IDS.markdownCv,
+      userId: DEV_USER_ID,
+      extension: ".md",
+      filename: "dev-user-cv.md",
+      docType: "resume",
+      byteSize: encode(DEV_CV_MARKDOWN).byteLength,
+      uploadedAt: SEEDED_AT,
+    },
+    {
+      id: DEV_DOCUMENT_IDS.pdfCv,
+      userId: DEV_USER_ID,
+      extension: ".pdf",
+      filename: "dev-user-cv.pdf",
+      docType: "resume",
+      byteSize: 40,
+      uploadedAt: new Date(SEEDED_AT.getTime() - 86_400_000),
+    },
+    {
+      id: DEV_DOCUMENT_IDS.referees,
+      userId: DEV_USER_ID,
+      extension: ".txt",
+      filename: "referees – 2026.txt",
+      docType: "reference",
+      byteSize: 31,
+      uploadedAt: new Date(SEEDED_AT.getTime() - 172_800_000),
     },
   ]
 }

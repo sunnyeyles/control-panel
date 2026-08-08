@@ -2,10 +2,20 @@ import { readFile } from "node:fs/promises"
 
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
+  fakeDocumentDb,
+  mergeClients,
+  toFakeDocument,
+} from "@/lib/documents/fake-document-db"
+import {
   MAX_EXAMPLE_LETTER_CHARS,
   MAX_INSTRUCTIONS_CHARS,
 } from "@workspace/agents/cover-letter"
-import type { CoverLetterInstructions, PrismaClient } from "@workspace/db"
+import type {
+  CoverLetterInstructions,
+  Document as DocumentRow,
+  DocumentType,
+  PrismaClient,
+} from "@workspace/db"
 import type {
   NewResume,
   ResumeRef,
@@ -130,16 +140,28 @@ class SpyDb {
 }
 
 /**
- * Just enough {@link ResumeStore} for `listDocuments`, which lists and then
- * heads each item for its document type and filename, plus the `get()` the
- * import does for the bytes.
+ * Just enough {@link ResumeStore} for the `get()` the import does for the
+ * bytes, plus the rows that go beside the objects — `listDocuments` is a query
+ * now, so the label and the filename come out of `rows`.
  */
 class FakeResumes implements ResumeStore {
   private readonly documents: StoredResume[] = []
+  /**
+   * The rows beside the bytes. `add()` writes both, and both carry the same
+   * owner — a row belonging to someone else is what makes their document
+   * *absent* from this user's listing rather than merely unselected, which is
+   * the property the ownership test turns on.
+   */
+  readonly rows: DocumentRow[] = []
 
   add(
-    document: Partial<StoredResume> & { resumeId: string; extension: string }
+    document: Partial<StoredResume> & {
+      resumeId: string
+      extension: string
+      documentType?: DocumentType
+    }
   ): this {
+    const { documentType, ...object } = document
     const bytes = document.bytes ?? new TextEncoder().encode(EXAMPLE)
 
     this.documents.push({
@@ -148,9 +170,25 @@ class FakeResumes implements ResumeStore {
       contentType: "text/markdown; charset=utf-8",
       size: bytes.byteLength,
       uploadedAt: NOW,
-      ...document,
+      ...object,
       bytes,
     })
+
+    this.rows.push(
+      toFakeDocument(
+        document.userId ?? USER_ID,
+        {
+          id: document.resumeId,
+          extension: document.extension,
+          ...(document.originalFilename
+            ? { filename: document.originalFilename }
+            : {}),
+          ...(documentType ? { docType: documentType } : {}),
+        },
+        this.rows.length
+      )
+    )
+
     return this
   }
 
@@ -177,15 +215,14 @@ class FakeResumes implements ResumeStore {
 
   async list(userId: string): Promise<StoredResume[]> {
     // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed document has neither a document type nor a filename — and it is
-    // filtered by the *prefix*, which is what makes another user's document
-    // absent rather than merely unselected.
+    // listed object has no filename. Nothing on this path calls it any more —
+    // the listing is a query, and `rows` is what carries the ownership
+    // property this file tests.
     return this.documents
       .filter((document) => document.userId === userId)
       .map((document) => ({
         ...document,
         bytes: undefined,
-        documentType: undefined,
         originalFilename: undefined,
       }))
   }
@@ -225,7 +262,10 @@ beforeEach(() => {
 function actionsFor(user: CurrentUser) {
   return createLetterInstructionsActions({
     getUser: async () => user,
-    getPrisma: () => store.asPrisma(),
+    // One client, because the action has one: the instructions row comes from
+    // `store` and `documents` from the rows the fake store recorded.
+    getPrisma: () =>
+      mergeClients(store.asPrisma(), fakeDocumentDb(USER_ID, resumes.rows)),
     getResumes: () => resumes,
     newResetKey: () => RESET_KEY,
   })
@@ -321,7 +361,8 @@ describe("the gate", () => {
       getUser: async () => {
         throw new Error("neon is asleep")
       },
-      getPrisma: () => store.asPrisma(),
+      getPrisma: () =>
+        mergeClients(store.asPrisma(), fakeDocumentDb(USER_ID, resumes.rows)),
       getResumes: () => resumes,
     })
 
