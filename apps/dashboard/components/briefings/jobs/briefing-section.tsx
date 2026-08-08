@@ -1,6 +1,6 @@
-import { CreateBriefingForm } from "@/components/settings/create-briefing-form"
-import { JobEnabledSwitch } from "@/components/settings/job-enabled-switch"
-import { JobScheduleForm } from "@/components/settings/job-schedule-form"
+import { CreateBriefingForm } from "@/components/briefings/jobs/create-briefing-form"
+import { JobEnabledSwitch } from "@/components/briefings/jobs/job-enabled-switch"
+import { JobScheduleForm } from "@/components/briefings/jobs/job-schedule-form"
 import { getPrisma } from "@/lib/db"
 import {
   toBriefingSummary,
@@ -10,7 +10,8 @@ import { Badge } from "@workspace/ui/components/badge"
 import { Empty, EmptyDescription } from "@workspace/ui/components/empty"
 
 /**
- * The Briefings section of the settings page.
+ * The whole of `/briefings/jobs` — every briefing the user has, and the form
+ * that adds one.
  *
  * A server component: it reads the jobs and flattens every `Date` to a string
  * before anything crosses into a client component. See `briefing-summary.ts` for

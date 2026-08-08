@@ -3,7 +3,7 @@
 import { startTransition, useActionState, useOptimistic } from "react"
 import { ActionError } from "@/components/forms/action-error"
 
-import { setJobEnabledAction } from "@/app/(app)/settings/actions"
+import { setJobEnabledAction } from "@/app/(app)/briefings/jobs/actions"
 import { IDLE } from "@/lib/actions/action-state"
 import { Switch } from "@workspace/ui/components/switch"
 

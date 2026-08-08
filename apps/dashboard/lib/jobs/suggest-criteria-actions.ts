@@ -27,8 +27,8 @@ import type { CriteriaSuggestionState } from "./criteria-suggestion"
  * cover-letter-actions.ts` beside it, and for the same reason: every
  * authorization branch here turns on who is asking, and a session is exactly
  * what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/settings/actions.ts`, which is `"use server"` and supplies the real
- * dependencies.
+ * `app/(app)/briefings/jobs/actions.ts`, which is `"use server"` and supplies
+ * the real dependencies.
  *
  * Three properties this module exists to hold, none of which is visible from
  * the happy path:
@@ -281,7 +281,7 @@ export function createSuggestCriteriaActions(
       tags: ["dashboard", "search-criteria"],
       traceMetadata: {
         feature: "search-criteria",
-        route: "/settings",
+        route: "/briefings/jobs",
       },
     })
 

@@ -37,7 +37,7 @@ export default function Loading() {
         <section className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
             Every posting your briefings have found, however long ago. Manage
-            schedules and search criteria in Settings.
+            schedules and search criteria in Schedules.
           </p>
 
           <p className="text-sm text-muted-foreground">

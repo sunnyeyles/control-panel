@@ -29,7 +29,7 @@ import { MAX_CRITERIA_ITEMS, searchCriteriaSchema } from "./search-criteria"
  * **Nothing in this file imports Next**, which is what lets the authorization
  * branches be tested at all — every one of them turns on who is asking, and a
  * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/settings/actions.ts`.
+ * `app/(app)/briefings/jobs/actions.ts`.
  *
  * On/off is not a column. `jobs.next_run_at IS NULL` means "not scheduled". So
  * "off" is `pauseJob()` and "on" is `resumeJob()`, and the question "is this

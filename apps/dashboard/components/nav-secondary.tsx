@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 
-import { type NavItem } from "@/lib/nav"
+import { type NavLink } from "@/lib/nav"
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -16,7 +16,12 @@ export function NavSecondary({
   items,
   ...props
 }: {
-  items: readonly NavItem[]
+  /**
+   * Links only. This group draws a flat list, so a `NavGroup` reaching it would
+   * render as a dead item with no way to open — the narrowed type is what makes
+   * that a compile error rather than a bug someone finds in the sidebar.
+   */
+  items: readonly NavLink[]
 } & React.ComponentPropsWithoutRef<typeof SidebarGroup>) {
   return (
     <SidebarGroup {...props}>

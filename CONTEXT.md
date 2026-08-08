@@ -14,7 +14,7 @@ the markdown lives under an object-kind prefix the app holds no grant over.
 
 **Briefing**:
 The recurring thing a user sets up: search on this cadence and file what you
-find. One briefing is one row in `jobs` — the settings page creates, pauses,
+find. One briefing is one row in `jobs` — the Schedules page creates, pauses,
 resumes and reschedules jobs and calls every one of them a briefing. It is the
 user-facing word for a **Job**, and the only one the interface uses.
 
@@ -299,7 +299,7 @@ easily as they can write one. Having nowhere to send it is what makes reading it
 verbatim acceptable; injected text can shape a JSON object the user then reviews,
 and can reach nothing else.
 
-Run from **Suggest from my resume** on the new-briefing form on `/settings`, over
+Run from **Suggest from my resume** on the new-briefing form on `/briefings/jobs`, over
 the newest **Document** labelled Resume — the same `loadCandidateBackground` a
 **Cover Letter** draft reads, so no field of the request picks the document. It
 persists nothing; see **Search Criteria**.

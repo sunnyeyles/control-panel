@@ -1,6 +1,5 @@
 import { Suspense } from "react"
 
-import { BriefingSection } from "@/components/settings/briefing-section"
 import { CoverLetterSection } from "@/components/settings/cover-letter-section"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { requirePageUser } from "@/lib/auth/require-page-user"
@@ -30,21 +29,13 @@ export default async function SettingsPage() {
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-10 px-4 py-8 lg:px-6">
         {/*
           `user.userId` is `users.id` — the platform identity — not the Neon
-          Auth id. It is what `jobs.user_id` references, so it is the only thing
-          that can scope this list.
-        */}
-        {/*
-          ⚠️ **A boundary each, rather than one around both.** The two sections
-          read different backends — `BriefingSection` is one Postgres query,
-          `CoverLetterSection` is Postgres *and* an S3 listing that pays one
-          `HeadObject` per document, which is what {@link maxDuration} above is
-          set for. Sharing a boundary would hold the faster one behind the
-          slower, which is the whole of what this is here to stop.
-        */}
-        <Suspense fallback={<SettingsSectionSkeleton cards={2} />}>
-          <BriefingSection userId={user.userId} />
-        </Suspense>
+          Auth id. It is the only thing that can scope what this section reads.
 
+          Streamed rather than awaited above, so the shell — this section's own
+          heading and the Appearance block below it — paints immediately instead
+          of waiting on the S3 listing `CoverLetterSection` pays for, which is
+          what {@link maxDuration} above is set for.
+        */}
         <Suspense fallback={<SettingsSectionSkeleton cards={1} />}>
           <CoverLetterSection userId={user.userId} />
         </Suspense>
@@ -78,13 +69,17 @@ export default async function SettingsPage() {
 /**
  * Stands in for a settings section while it loads.
  *
- * Shaped against the real markup rather than drawn freehand — both sections
- * open `<section className="flex flex-col gap-4">` with a heading and a
- * paragraph of explanation, then a run of bordered cards. The measurements
- * follow from that: `h-7` is `text-lg`, `h-4` is `text-sm`, and the pair of
- * description lines is what both sections actually run to at this width.
- * Reserving the wrong height is worse than reserving none, because the content
- * arriving then shifts everything below it.
+ * Shaped against the real markup rather than drawn freehand —
+ * `CoverLetterSection` opens `<section className="flex flex-col gap-4">` with
+ * a heading and a paragraph of explanation, then a run of bordered cards. The
+ * measurements follow from that: `h-7` is `text-lg`, `h-4` is `text-sm`, and
+ * the pair of description lines is what the section actually runs to at this
+ * width. Reserving the wrong height is worse than reserving none, because the
+ * content arriving then shifts everything below it.
+ *
+ * `cards` stays a parameter rather than a hardcoded `1`: it is what a second
+ * async section on this page would need again, and the alternative is a
+ * skeleton nobody remembers exists until the next one is built freehand.
  */
 function SettingsSectionSkeleton({ cards }: { cards: number }) {
   return (
