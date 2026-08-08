@@ -18,7 +18,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@workspace/ui/components/dialog"
 import { EditorToolbar } from "@workspace/ui/components/editor-toolbar"
 import { ScrollArea } from "@workspace/ui/components/scroll-area"
@@ -39,8 +38,6 @@ export interface FileEditorDialogProps {
    * Omit it and the component keeps its own copy instead.
    */
   onFilesChange?: (files: MarkdownFile[]) => void
-  /** Replaces the default "Open file editor" button. */
-  trigger?: React.ReactNode
   /** Replaces the default "File editor" heading. */
   title?: React.ReactNode
   /**
@@ -60,15 +57,25 @@ export interface FileEditorDialogProps {
    * message is about.
    */
   footer?: React.ReactNode
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
+  /**
+   * ⚠️ **Required: this dialog renders no trigger of its own.**
+   *
+   * Every caller mounts it only while it is open, so that TipTap — the editor,
+   * its ProseMirror core and the markdown pipeline — is fetched on the first
+   * open rather than shipped with the page. A dialog that rendered its own
+   * trigger could not be mounted lazily, because the trigger is the thing that
+   * has to be on screen *before* the chunk is wanted. Opening is therefore the
+   * caller's business, and this is the only way in.
+   */
+  open: boolean
+  /** Required for the same reason `open` is — nothing here closes itself. */
+  onOpenChange: (open: boolean) => void
   className?: string
 }
 
 function FileEditorDialog({
   files,
   onFilesChange,
-  trigger,
   title = "File editor",
   onSave,
   footer,
@@ -76,13 +83,11 @@ function FileEditorDialog({
   onOpenChange,
   className,
 }: FileEditorDialogProps) {
-  const [internalOpen, setInternalOpen] = useState(false)
   const [internalFiles, setInternalFiles] = useState(files)
   const [activeId, setActiveId] = useState(() => files[0]?.id ?? "")
   const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const isOpen = open ?? internalOpen
   const currentFiles = onFilesChange ? files : internalFiles
 
   const turndown = useMemo(() => createMarkdownSerializer(), [])
@@ -178,8 +183,7 @@ function FileEditorDialog({
     // Save on close too, or everything typed since the last file switch is
     // lost and `onFilesChange` never hears about it.
     if (!next) saveActiveFile()
-    if (open === undefined) setInternalOpen(next)
-    onOpenChange?.(next)
+    onOpenChange(next)
   }
 
   function downloadPdf() {
@@ -218,15 +222,7 @@ function FileEditorDialog({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button size="lg">
-            <FileTextIcon className="size-4" />
-            Open file editor
-          </Button>
-        )}
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         data-slot="file-editor-dialog"
         className={cn(

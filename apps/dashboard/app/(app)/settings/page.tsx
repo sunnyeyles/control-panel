@@ -1,8 +1,11 @@
+import { Suspense } from "react"
+
 import { BriefingSection } from "@/components/settings/briefing-section"
 import { CoverLetterSection } from "@/components/settings/cover-letter-section"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import { Label } from "@workspace/ui/components/label"
+import { Skeleton } from "@workspace/ui/components/skeleton"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
@@ -30,9 +33,21 @@ export default async function SettingsPage() {
           Auth id. It is what `jobs.user_id` references, so it is the only thing
           that can scope this list.
         */}
-        <BriefingSection userId={user.userId} />
+        {/*
+          ⚠️ **A boundary each, rather than one around both.** The two sections
+          read different backends — `BriefingSection` is one Postgres query,
+          `CoverLetterSection` is Postgres *and* an S3 listing that pays one
+          `HeadObject` per document, which is what {@link maxDuration} above is
+          set for. Sharing a boundary would hold the faster one behind the
+          slower, which is the whole of what this is here to stop.
+        */}
+        <Suspense fallback={<SettingsSectionSkeleton cards={2} />}>
+          <BriefingSection userId={user.userId} />
+        </Suspense>
 
-        <CoverLetterSection userId={user.userId} />
+        <Suspense fallback={<SettingsSectionSkeleton cards={1} />}>
+          <CoverLetterSection userId={user.userId} />
+        </Suspense>
 
         <section className="flex flex-col gap-4">
           <div>
@@ -57,5 +72,37 @@ export default async function SettingsPage() {
         </section>
       </div>
     </main>
+  )
+}
+
+/**
+ * Stands in for a settings section while it loads.
+ *
+ * Shaped against the real markup rather than drawn freehand — both sections
+ * open `<section className="flex flex-col gap-4">` with a heading and a
+ * paragraph of explanation, then a run of bordered cards. The measurements
+ * follow from that: `h-7` is `text-lg`, `h-4` is `text-sm`, and the pair of
+ * description lines is what both sections actually run to at this width.
+ * Reserving the wrong height is worse than reserving none, because the content
+ * arriving then shifts everything below it.
+ */
+function SettingsSectionSkeleton({ cards }: { cards: number }) {
+  return (
+    <section
+      aria-busy="true"
+      aria-label="Loading settings"
+      className="flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-2">
+        {/* The `h2`, then the two lines of muted description under it. */}
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+      </div>
+
+      {Array.from({ length: cards }, (_, index) => (
+        <Skeleton key={index} className="h-28 w-full rounded-lg" />
+      ))}
+    </section>
   )
 }
