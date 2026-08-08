@@ -18,6 +18,12 @@ find. One briefing is one row in `jobs` — the Schedules page creates, pauses,
 resumes and reschedules jobs and calls every one of them a briefing. It is the
 user-facing word for a **Job**, and the only one the interface uses.
 
+Briefings divide by what they watch, and the interface groups them by that
+rather than listing them all together. The job-search ones live under a section
+called **Jobs** — `/jobs`, `/jobs/schedules` and `/jobs/letters`, three tabs of
+one thing — which names a job search and still never names a **Posting**. A
+second kind, watching a topic or the news, gets its own section beside it.
+
 Each occurrence is a **briefing run**, and what that run produces is a **Brief**.
 _Avoid_: calling the markdown a briefing — see **Brief**.
 
@@ -71,7 +77,7 @@ It gets **no database row**. `artifacts.run_id` is `NOT NULL` and references
 precedent is the **Document**, which has no row for the same reason. Provenance
 — the Run, the title, the company, the URL — rides in object metadata instead.
 
-Drafted from the dashboard by a button on each **Posting** on `/briefings`. Its
+Drafted from the dashboard by a button on each **Posting** on `/jobs`. Its
 source text is the stored Posting's `payload` — the validated advertisement as
 the Run that found it reported, re-read server-side off the row rather than out
 of that Run's **Findings**, and no part of what the button submitted; the
@@ -111,7 +117,7 @@ field a letter's does not: **which Document it was rewritten from**, because the
 selection rule takes the newest one labelled Resume and that answer changes
 silently the moment another is uploaded.
 
-Generated from a button on each Posting on `/briefings`, beside the Cover Letter
+Generated from a button on each Posting on `/jobs`, beside the Cover Letter
 controls, from the same `postings.payload` and the same `loadCandidateBackground`
 — so a letter and a resume for one advertisement are always drawn from the same
 CV. Downloaded as markdown, or as a **PDF rendered in the browser**: there is no
@@ -139,7 +145,7 @@ _Avoid_: resume writer, CV generator, resume builder
 **Letter Instructions**:
 What the user tells the **Letter Writer** about how they want their letters
 written — held per **User** in `cover_letter_instructions`, edited from
-`/settings`, and applied to every **Cover Letter** they draft. Two fields, and
+`/jobs/letters`, and applied to every **Cover Letter** they draft. Two fields, and
 the split is a correctness decision rather than a tidy one: free-text
 **instructions** ("never use the word 'passionate'", "sign off Kind regards"),
 and an optional **example letter** the user pastes or pulls from a **Document**.
@@ -242,7 +248,7 @@ can drift — a Run rewrites `url` on every sighting — and it would answer onl
 for rows written after it existed, where deriving answers for every row ever
 recorded. `boardForHost()` is the one rule that turns a host into a board;
 `apps/dashboard/lib/postings/posting-source.ts` is the only thing that renders
-the answer, as the Source badge on `/briefings`, and a host no board claims
+the answer, as the Source badge on `/jobs`, and a host no board claims
 shows as the bare hostname rather than as nothing.
 
 `JOB_BOARDS` in `packages/agents/src/job-boards.ts` is **not** a registry of
@@ -299,7 +305,7 @@ easily as they can write one. Having nowhere to send it is what makes reading it
 verbatim acceptable; injected text can shape a JSON object the user then reviews,
 and can reach nothing else.
 
-Run from **Suggest from my resume** on the new-briefing form on `/briefings/jobs`, over
+Run from **Suggest from my resume** on the new-briefing form on `/jobs/schedules`, over
 the newest **Document** labelled Resume — the same `loadCandidateBackground` a
 **Cover Letter** draft reads, so no field of the request picks the document. It
 persists nothing; see **Search Criteria**.
@@ -339,7 +345,7 @@ keeps the diagnostics nothing will ever query, and the report is the only record
 left when a run dies before it can write a row.
 
 A run with no `scheduled_for` is ad-hoc: it occupies no slot, and any number of
-them may exist for one job. The **Run now** button on `/briefings` starts one —
+them may exist for one job. The **Run now** button on `/jobs` starts one —
 the dashboard inserts the row and asks the worker to pick it up, and because the
 run fills no occurrence it neither consumes the next scheduled run nor moves it
 closer, and it works on a **Briefing** that is turned off. `runs.claimed_at` is

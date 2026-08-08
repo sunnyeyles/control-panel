@@ -25,7 +25,7 @@ export interface DocumentSummary {
  * One indexed query. It used to be an S3 `ListObjectsV2` plus a `HeadObject`
  * per document, eight at a time, because the filename and the Document Type
  * lived in S3 user metadata and `ListObjectsV2` does not carry user metadata at
- * all — and this function is reached from `/documents`, from `/settings`, and
+ * all — and this function is reached from `/documents`, from `/jobs/letters`, and
  * from every cover-letter, tailored-resume and suggest-criteria run. `documents`
  * in Postgres is what removed it.
  *

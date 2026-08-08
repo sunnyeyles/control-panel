@@ -95,7 +95,7 @@ run "configured" {
   # error message says what widening it costs.
   #
   # `tailored-resumes` was argued for and added: the dashboard generates those
-  # objects from a button on `/briefings`, serves them back through
+  # objects from a button on `/jobs`, serves them back through
   # `/api/tailored-resumes/[postingId]`, and deletes them alongside the Posting.
   # The worker holds no grant over them, which is what keeps the disjointness
   # asserted below true.

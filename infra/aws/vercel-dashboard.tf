@@ -145,7 +145,7 @@ resource "aws_iam_role" "vercel_dashboard" {
 # pointed at a principal.
 locals {
   # The kinds the dashboard may touch. `briefs` is deliberately absent: the app
-  # holds no grant over what the worker wrote, which is why /briefings renders
+  # holds no grant over what the worker wrote, which is why /jobs renders
   # the Findings on the run row rather than the Brief itself.
   #
   # `tailored-resumes` is here for the same reason `cover-letters` is: the app

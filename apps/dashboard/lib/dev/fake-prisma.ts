@@ -352,7 +352,7 @@ class DevDb {
 
   /**
    * The whole rows, which is the only shape the dashboard asks for — both call
-   * sites (`/briefings` and the settings section) select nothing.
+   * sites (`/jobs` and the settings section) select nothing.
    *
    * It used to answer a second shape too, `select: { runs: … }`, for the
    * deleted `lib/briefings/latest-postings.ts`, which read one Run's findings
@@ -395,7 +395,7 @@ class DevDb {
       if (!(field in job)) {
         throw new DevPrismaError(
           `prisma.job.findMany select.${field}`,
-          "That column is not on a Job. Add it to lib/dev/fixtures.ts, or fix the select in app/(app)/briefings/page.tsx."
+          "That column is not on a Job. Add it to lib/dev/fixtures.ts, or fix the select in app/(app)/jobs/page.tsx."
         )
       }
 

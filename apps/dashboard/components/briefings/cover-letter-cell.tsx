@@ -9,7 +9,7 @@ import { FileTextIcon, TriangleAlertIcon } from "lucide-react"
  * The letters for one page of the table, as the page hands them down.
  *
  * ⚠️ **A promise, not a result, and `null` is not an empty list.** The page no
- * longer awaits the cover letters — see `app/(app)/briefings/page.tsx`. `null`
+ * longer awaits the cover letters — see `app/(app)/jobs/page.tsx`. `null`
  * means the store could not be read; an empty array means it was read and this
  * user has drafted nothing. Collapsing the two would tell someone who has
  * already written a letter that they have not, which is the exact failure the

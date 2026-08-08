@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { useRef, useState } from "react"
 
-import { saveTailoredResumeAction } from "@/app/(app)/briefings/actions"
+import { saveTailoredResumeAction } from "@/app/(app)/jobs/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { returnFocusTo } from "@/lib/focus/return-focus"

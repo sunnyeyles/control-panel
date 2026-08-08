@@ -86,7 +86,7 @@ export function getResumeStore(): ResumeStore {
  * A second facade over the **same** client and the same credentials — the
  * dashboard's Vercel role now holds `prod:resumes` and `prod:cover-letters`,
  * and nothing else. Note what that grant does not include: `prod:briefs`. The
- * app still cannot read what the worker wrote, which is why `/briefings`
+ * app still cannot read what the worker wrote, which is why `/jobs`
  * renders the Findings on the Run row rather than the Brief.
  *
  * ⚠️ **The grant is Terraform, not TypeScript.** A `cover-letters` kind

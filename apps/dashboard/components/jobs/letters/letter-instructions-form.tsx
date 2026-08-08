@@ -4,7 +4,7 @@ import { useActionState, useState } from "react"
 import { ActionAlert } from "@/components/forms/action-alert"
 import { SubmitButton } from "@workspace/ui/components/submit-button"
 
-import { saveLetterInstructionsAction } from "@/app/(app)/settings/actions"
+import { saveLetterInstructionsAction } from "@/app/(app)/jobs/letters/actions"
 import { IDLE } from "@/lib/actions/action-state"
 import {
   MAX_EXAMPLE_LETTER_CHARS,

@@ -30,7 +30,7 @@ import { z } from "zod"
  * **Nothing in this file imports Next**, which is what lets the authorization
  * branches be tested at all — every one of them turns on who is asking, and a
  * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/briefings/actions.ts`, and `refresh()` lives there because it needs
+ * `app/(app)/jobs/actions.ts`, and `refresh()` lives there because it needs
  * Next's request store.
  *
  * `status` is the only column in `postings` a person writes; everything else on

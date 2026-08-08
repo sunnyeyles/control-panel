@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { useRef, useState } from "react"
 
-import { saveCoverLetterAction } from "@/app/(app)/briefings/actions"
+import { saveCoverLetterAction } from "@/app/(app)/jobs/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { returnFocusTo } from "@/lib/focus/return-focus"
@@ -12,7 +12,7 @@ import type { MarkdownFile } from "@workspace/ui/components/file-editor-dialog"
 
 /**
  * ⚠️ **Deferred so TipTap is not in this page's first load.** The editor drags
- * in ProseMirror and the markdown pipeline behind it, and `/briefings` renders
+ * in ProseMirror and the markdown pipeline behind it, and `/jobs` renders
  * one of these buttons per Posting while most visits open none of them. A
  * static import would ship all of that to every visitor to serve the few who
  * click. The type is imported separately above because a `type` import erases

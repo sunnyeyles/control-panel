@@ -10,7 +10,7 @@ import { Badge } from "@workspace/ui/components/badge"
 import { Empty, EmptyDescription } from "@workspace/ui/components/empty"
 
 /**
- * The whole of `/briefings/jobs` — every briefing the user has, and the form
+ * The whole of `/jobs/schedules` — every briefing the user has, and the form
  * that adds one.
  *
  * A server component: it reads the jobs and flattens every `Date` to a string
