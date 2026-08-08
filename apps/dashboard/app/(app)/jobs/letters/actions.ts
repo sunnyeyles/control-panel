@@ -8,7 +8,7 @@ import { getResumeStore } from "@/lib/storage"
 import { refresh } from "next/cache"
 
 /**
- * The settings actions, following the convention
+ * The cover-letter settings actions, following the convention
  * `app/(app)/documents/actions.ts` sets — see its docblock for the six rules.
  * In short: `"use server"` at the top of a dedicated file so the set of POST
  * endpoints is auditable in one place, a thin wrapper over a
@@ -16,9 +16,12 @@ import { refresh } from "next/cache"
  * invalidation here rather than in the core because `refresh()` needs a request
  * store.
  *
- * The briefing actions used to live here too and now sit beside the page that
- * calls them, at `app/(app)/briefings/jobs/actions.ts`. What is left is the
- * cover-letter instructions — which is what `/settings` is for.
+ * **One file per segment, and the two siblings stay separate.** These used to
+ * be `/settings`'s actions; the briefing actions were split out of that same
+ * file earlier for the same reason and now sit at `jobs/schedules/actions.ts`.
+ * Merging the three back together because they are one section again would undo
+ * that — the exported action set of a segment is a security surface, and it is
+ * auditable when it is the four things one page can do rather than fifteen.
  */
 
 /**

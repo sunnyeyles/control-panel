@@ -69,7 +69,7 @@ export function NavMain({ items }: { items: readonly NavItem[] }) {
  * ⚠️ **The children only render while the sidebar is off-canvas.**
  * `SidebarMenuSub` carries `group-data-[collapsible=icon]:hidden`, so under
  * `collapsible="icon"` this group would show a trigger with nothing behind it —
- * and since the trigger has no `url`, `/briefings` would become unreachable
+ * and since the trigger has no `url`, `/jobs` would become unreachable
  * from the sidebar entirely. `app-sidebar.tsx` sets `collapsible="offcanvas"`,
  * and that is load-bearing for this component.
  */
@@ -91,8 +91,8 @@ function NavGroupItem({
    * The seed above runs once and only once. `NavMain` sits in
    * `app/(app)/layout.tsx`, which Next guarantees will "preserve state, remain
    * interactive, and do not rerender" on navigation, so `useState(inGroup)`
-   * covers a deep link to `/briefings/jobs` and nothing else. Without this,
-   * following the prose link from `/briefings` would leave the active child
+   * covers a deep link to `/jobs/schedules` and nothing else. Without this,
+   * following the prose link from `/jobs` would leave the active child
    * hidden behind a collapsed parent — the one place the highlight is most
    * needed.
    *

@@ -11,6 +11,7 @@ import { PostingTable } from "@/components/briefings/posting-table"
 import { PostingTableSkeleton } from "@/components/briefings/posting-table-skeleton"
 import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
 import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
+import { JobTabs } from "@/components/jobs/job-tabs"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import {
   anyRunning,
@@ -165,6 +166,15 @@ export default async function BriefingsPage({
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-8 lg:px-6">
+        {/*
+          ⚠️ **`max-w-6xl` on the container above, on all three routes in this
+          section, and the two narrow panels wrap themselves rather than
+          narrowing it.** The bar is the one element common to every tab, so a
+          container that changed width between them would slide it sideways on
+          every click.
+        */}
+        <JobTabs />
+
         <section className="flex flex-col gap-4">
           {/*
             No heading of its own: `SiteHeader` already renders the `<h1>` for

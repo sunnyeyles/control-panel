@@ -23,7 +23,7 @@ import { cn } from "@workspace/ui/lib/utils"
 /**
  * The table's shape, with no data in it.
  *
- * ⚠️ **Two callers, and they must not drift**: `app/(app)/briefings/loading.tsx`
+ * ⚠️ **Two callers, and they must not drift**: `app/(app)/jobs/loading.tsx`
  * shows it while the route's server render is in flight, and `page.tsx` shows it
  * inside the `<Suspense>` the postings query sits behind. Those are consecutive
  * moments in the same navigation — the route-level fallback is replaced by the

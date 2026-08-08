@@ -42,7 +42,7 @@ import { z } from "zod"
  * **Nothing in this file imports Next**, which is the whole reason the security
  * branches can be tested: every one of them turns on who is asking, and a
  * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/briefings/actions.ts`, which is `"use server"`, supplies the real
+ * `app/(app)/jobs/actions.ts`, which is `"use server"`, supplies the real
  * dependencies, and calls `refresh()`.
  *
  * Three properties this module exists to hold, each of which would be invisible
@@ -578,7 +578,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       tags: ["dashboard", "cover-letter"],
       traceMetadata: {
         feature: "cover-letter",
-        route: "/briefings",
+        route: "/jobs",
       },
     })
 

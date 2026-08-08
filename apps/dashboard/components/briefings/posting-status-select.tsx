@@ -2,7 +2,7 @@
 
 import { startTransition, useActionState, useOptimistic } from "react"
 
-import { setPostingStatusAction } from "@/app/(app)/briefings/actions"
+import { setPostingStatusAction } from "@/app/(app)/jobs/actions"
 import { ActionError } from "@/components/forms/action-error"
 import { IDLE } from "@/lib/actions/action-state"
 import { POSTING_STATUS_LABELS } from "@/lib/postings/posting-status-labels"

@@ -37,7 +37,7 @@ describe("timed", () => {
    * ⚠️ **A rejection is timed and re-thrown, never swallowed.** A load that
    * failed after eight seconds and one that failed instantly are different
    * problems, and the caller's own `try`/`catch` still decides what the user
-   * sees — `PostingsSection` in `app/(app)/briefings/page.tsx` renders its
+   * sees — `PostingsSection` in `app/(app)/jobs/page.tsx` renders its
    * degraded alert from exactly that catch.
    */
   it("times a rejection and re-throws it unchanged", async () => {

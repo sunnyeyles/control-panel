@@ -27,7 +27,7 @@ import { refresh } from "next/cache"
  * `refresh()` rather than `revalidatePath` or `revalidateTag`.
  *
  * `refresh()` takes no path and clears the client router cache, so it covers
- * this segment and `/briefings` alike — which matters more here than it did on
+ * this segment and `/jobs` alike — which matters more here than it did on
  * `/settings`, since the two pages are now one click apart and the postings
  * page reads the same rows for its briefing strip and its empty state.
  */

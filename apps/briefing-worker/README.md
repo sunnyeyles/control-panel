@@ -76,7 +76,7 @@ Neither is in this package either, and confusing them wastes an afternoon.
 | Off                     | Mechanism                                          | Changed by                                                          |
 | ----------------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
 | The tick, for every job | `schedule_enabled` → EventBridge Scheduler `state` | `terraform apply -var="schedule_enabled=false"`, see `DEPLOYING.md` |
-| One job                 | `jobs.next_run_at IS NULL`                         | The dashboard's `/briefings/jobs`, or `pauseJob()`                  |
+| One job                 | `jobs.next_run_at IS NULL`                         | The dashboard's `/jobs/schedules`, or `pauseJob()`                  |
 
 A job is off when it has no `next_run_at` — there is no `enabled` column, and
 `packages/db/prisma/migrations/0001_init/migration.sql` explains why one absence covers both

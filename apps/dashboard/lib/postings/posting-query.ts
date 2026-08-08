@@ -138,8 +138,8 @@ export function parsePostingQuery(params: SearchParams = {}): PostingQuery {
 /**
  * The link to a view, with every default left out.
  *
- * So the canonical first page is a bare `/briefings` rather than
- * `/briefings?sort=lastSeen&dir=desc&page=1` — the same page under a URL nobody
+ * So the canonical first page is a bare `/jobs` rather than
+ * `/jobs?sort=lastSeen&dir=desc&page=1` — the same page under a URL nobody
  * would choose to share.
  *
  * Round-trips through {@link parsePostingQuery}: a non-default direction is
@@ -157,7 +157,7 @@ export function postingsHref(query: PostingQuery): string {
 
   const search = params.toString()
 
-  return search === "" ? "/briefings" : `/briefings?${search}`
+  return search === "" ? "/jobs" : `/jobs?${search}`
 }
 
 /**

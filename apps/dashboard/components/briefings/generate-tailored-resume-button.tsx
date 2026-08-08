@@ -3,7 +3,7 @@
 import { useActionState } from "react"
 import { SparklesIcon } from "lucide-react"
 
-import { generateTailoredResumeAction } from "@/app/(app)/briefings/actions"
+import { generateTailoredResumeAction } from "@/app/(app)/jobs/actions"
 import { ActionAlert } from "@/components/forms/action-alert"
 import { IDLE } from "@/lib/actions/action-state"
 import { SubmitButton } from "@workspace/ui/components/submit-button"

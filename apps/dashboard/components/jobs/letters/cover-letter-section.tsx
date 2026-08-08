@@ -1,8 +1,8 @@
 import {
   ExampleLetterImport,
   type ImportableDocument,
-} from "@/components/settings/example-letter-import"
-import { LetterInstructionsForm } from "@/components/settings/letter-instructions-form"
+} from "@/components/jobs/letters/example-letter-import"
+import { LetterInstructionsForm } from "@/components/jobs/letters/letter-instructions-form"
 import { isReadableProfileExtension } from "@/lib/cover-letters/profile-text"
 import { getPrisma } from "@/lib/db"
 import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
@@ -12,7 +12,8 @@ import { COVER_LETTER_WRITER_SYSTEM_PROMPT } from "@workspace/agents/cover-lette
 import { coverLetterInstructions } from "@workspace/db"
 
 /**
- * The Cover letters section of the settings page.
+ * The whole of `/jobs/letters` — how a cover letter gets written, and what to
+ * learn a voice from.
  *
  * A server component, like `briefing-section.tsx`: it reads the saved row and
  * the user's documents and hands the client components plain strings. Nothing
@@ -24,8 +25,8 @@ export async function CoverLetterSection({ userId }: { userId: string }) {
   const saved = await coverLetterInstructions(getPrisma(), userId)
 
   // A storage outage should cost the import picker and nothing else. The
-  // instructions themselves live in Postgres, and a settings page that cannot
-  // reach S3 must still be able to save them — the same degradation
+  // instructions themselves live in Postgres, and a page that cannot reach S3
+  // must still be able to save them — the same degradation
   // `app/(app)/documents/page.tsx` makes for the same reason.
   let documents: ImportableDocument[] = []
 
@@ -54,13 +55,18 @@ export async function CoverLetterSection({ userId }: { userId: string }) {
 
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-medium">Cover letters</h2>
-        <p className="text-sm text-muted-foreground">
-          What you write here is applied to every letter drafted from a posting,
-          on top of the rules the writer always follows.
-        </p>
-      </div>
+      {/*
+        No heading of its own. This used to be one section of `/settings` under
+        an `<h1>Settings</h1>`, so it needed an `<h2>` to say which; it is now
+        the whole of `/jobs/letters`, and `SiteHeader` already renders
+        "Cover letters" as the `<h1>` off the same `lib/nav.ts` entry the
+        sidebar and the tab bar read. A second one here would have repeated the
+        page title immediately beneath itself.
+      */}
+      <p className="text-sm text-muted-foreground">
+        What you write here is applied to every letter drafted from a posting,
+        on top of the rules the writer always follows.
+      </p>
 
       {/*
         ⚠️ **The writer's real system prompt, rendered verbatim — not a summary

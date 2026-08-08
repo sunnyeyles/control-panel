@@ -72,7 +72,7 @@ export async function createCoverLetterAction(
 
 /**
  * `refresh()` after a success, for the same reason the document actions call
- * it: `/briefings` is `force-dynamic` and `staleTimes.dynamic` lets the client
+ * it: `/jobs` is `force-dynamic` and `staleTimes.dynamic` lets the client
  * router reuse the segment for 30 seconds, so without this the page would keep
  * showing a state that predates the draft.
  *
@@ -177,7 +177,7 @@ export async function saveTailoredResumeAction(
  * Set where one application stands.
  *
  * `refresh()` on success for the reason the draft above gives, with one extra
- * consequence worth naming: `/briefings` is `force-dynamic` and
+ * consequence worth naming: `/jobs` is `force-dynamic` and
  * `staleTimes.dynamic` lets the client router reuse the segment for 30 seconds,
  * so a status set in *another* tab can look stale there for that long. This call
  * covers the tab that made the change, which is the one whose user is watching.

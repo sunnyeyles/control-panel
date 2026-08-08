@@ -8,6 +8,44 @@ import {
 const nextConfig: NextConfig = {
   transpilePackages: ["@workspace/ui"],
 
+  /**
+   * The Jobs section used to be `/briefings`, and these keep the old URLs
+   * working — a bookmark, a link in a run report, an open tab.
+   *
+   * ⚠️ **The only two `/briefings` strings left in the repo on purpose.** A
+   * sweep that renames them to `/jobs` turns each of these into a redirect from
+   * a route to itself, which is a loop rather than a no-op.
+   *
+   * Three things the local docs settle
+   * (`next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/redirects.md`,
+   * and the routing order in `03-file-conventions/proxy.md`):
+   *
+   * - **Query values are forwarded automatically**, so
+   *   `/briefings?sort=title&page=3` lands on `/jobs?sort=title&page=3` with the
+   *   view intact. Writing a query string into `destination` would duplicate
+   *   them rather than set them.
+   * - **`source` is path-anchored and does not match a nested path**, so
+   *   `/briefings` cannot swallow `/briefings/jobs`. The order below is for a
+   *   reader, not for the matcher.
+   * - **Redirects run before `proxy.ts`**, so an unauthenticated hit on an old
+   *   URL is rewritten first and gated second — it lands on the sign-in page
+   *   pointing at the new route, not the old one.
+   *
+   * `permanent: false` (307) rather than 308: a browser that caches a redirect
+   * on your own hostname forever is a debugging trap, and there is no SEO stake
+   * in a single-user app behind a login.
+   */
+  async redirects() {
+    return [
+      {
+        source: "/briefings/jobs",
+        destination: "/jobs/schedules",
+        permanent: false,
+      },
+      { source: "/briefings", destination: "/jobs", permanent: false },
+    ]
+  },
+
   experimental: {
     serverActions: {
       /**

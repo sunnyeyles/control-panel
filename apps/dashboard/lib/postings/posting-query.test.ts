@@ -103,19 +103,19 @@ describe("postingsHref", () => {
   /** The canonical first page is a URL somebody would actually share. */
   it("omits every default", () => {
     expect(postingsHref({ sort: "lastSeen", direction: "desc", page: 1 })).toBe(
-      "/briefings"
+      "/jobs"
     )
   })
 
   it("keeps a non-default direction even on the default sort", () => {
     expect(postingsHref({ sort: "lastSeen", direction: "asc", page: 1 })).toBe(
-      "/briefings?dir=asc"
+      "/jobs?dir=asc"
     )
   })
 
   it("omits a direction that is the column's own default", () => {
     expect(postingsHref({ sort: "title", direction: "asc", page: 1 })).toBe(
-      "/briefings?sort=title"
+      "/jobs?sort=title"
     )
   })
 
@@ -143,11 +143,11 @@ describe("sortHref", () => {
    * someone was looking at is not on the page they would land on.
    */
   it("resets the page", () => {
-    expect(sortHref("company", current)).toBe("/briefings?sort=company")
+    expect(sortHref("company", current)).toBe("/jobs?sort=company")
   })
 
   it("flips the column already sorted", () => {
-    expect(sortHref("title", current)).toBe("/briefings?sort=title&dir=desc")
+    expect(sortHref("title", current)).toBe("/jobs?sort=title&dir=desc")
   })
 
   it("starts another column at its own natural end", () => {
@@ -160,7 +160,7 @@ describe("sortHref", () => {
 describe("pageHref", () => {
   it("keeps the order and changes only the page", () => {
     expect(pageHref(2, { sort: "company", direction: "desc", page: 1 })).toBe(
-      "/briefings?sort=company&dir=desc&page=2"
+      "/jobs?sort=company&dir=desc&page=2"
     )
   })
 })

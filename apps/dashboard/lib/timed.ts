@@ -2,7 +2,7 @@
  * How long one load took, as a line in the function log.
  *
  * ⚠️ **This exists because production is the only place the numbers are real.**
- * `/briefings` is slow on Vercel and fast locally, and the difference is round
+ * `/jobs` is slow on Vercel and fast locally, and the difference is round
  * trips to Neon and S3 from a serverless instance that may have just cold
  * started. A local timing tells you nothing about that, and neither does a
  * test. One line per load in the function log is what makes "the database, the
