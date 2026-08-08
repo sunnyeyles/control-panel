@@ -6,6 +6,7 @@ import {
   devRuns,
 } from "@/lib/dev/fixtures"
 import type {
+  Board,
   CoverLetterInstructions,
   Document,
   Job,
@@ -105,6 +106,16 @@ export function createDevPrisma(): PrismaClient {
         db.findCoverLetterInstructions(query.where.userId),
       upsert: async (query: UpsertCoverLetterInstructions) =>
         db.upsertCoverLetterInstructions(query),
+    },
+    /**
+     * The whiteboard, which starts empty under the flag and stays wherever the
+     * session leaves it. No fixture: a canned diagram is not what anyone is
+     * checking on this page, and an empty canvas is the state the feature has
+     * to work from anyway.
+     */
+    board: {
+      findUnique: async (query: ByUserId) => db.findBoard(query.where.userId),
+      upsert: async (query: UpsertBoard) => db.upsertBoard(query),
     },
     /**
      * Unreachable — `getCurrentUser()` returns before `ensureUserForAuth`.
@@ -264,6 +275,11 @@ interface UpsertCoverLetterInstructions extends ByUserId {
   update: CoverLetterInstructionsValues
 }
 
+interface UpsertBoard extends ByUserId {
+  create: { userId: string; snapshot: unknown }
+  update: { snapshot: unknown }
+}
+
 type JobCreateData = Omit<Job, "id" | "createdAt" | "updatedAt">
 
 /** What `startAdHocRun()` inserts — everything else takes a column default. */
@@ -287,6 +303,8 @@ class DevDb {
     devCoverLetterInstructions()
   private readonly postings: Posting[] = devPostings()
   private readonly documents: Document[] = devDocuments()
+  /** No fixture — the dev whiteboard starts empty. See the accessor above. */
+  private board: Board | undefined
   private nextId = 1
 
   /**
@@ -690,6 +708,28 @@ class DevDb {
 
     this.coverLetterInstructions.push(row)
     return row
+  }
+
+  findBoard(userId: string): Board | null {
+    return this.board?.userId === userId ? this.board : null
+  }
+
+  /**
+   * Replaces the snapshot whole, as the real upsert does. A board is a picture
+   * rather than a patch of one, so there is nothing to merge.
+   */
+  upsertBoard(query: UpsertBoard): Board {
+    const { userId } = query.where
+    const snapshot = this.findBoard(userId)
+      ? query.update.snapshot
+      : query.create.snapshot
+
+    this.board = {
+      userId,
+      snapshot: snapshot as Board["snapshot"],
+      updatedAt: new Date(),
+    }
+    return this.board
   }
 
   /**

@@ -22,6 +22,7 @@ import {
   finishRun,
   latestRunPerJob,
   listDocumentsForUser,
+  loadBoard,
   pauseJob,
   POSTING_STATUSES,
   ownedPostingIds,
@@ -31,6 +32,7 @@ import {
   recordRunFindings,
   resumeJob,
   runningRunForJob,
+  saveBoard,
   saveCoverLetterInstructions,
   setPostingStatus,
   startAdHocRun,
@@ -1217,6 +1219,64 @@ describeWithDatabase("against a real database", () => {
       await expect(
         recordDocument(prisma, aDocument({ id: written.id }))
       ).rejects.toThrow()
+    })
+  })
+
+  describe("boards", () => {
+    it("reads nothing for a user who has never drawn one", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      expect(await loadBoard(prisma, fresh.id)).toBeUndefined()
+    })
+
+    it("round-trips a snapshot unchanged, because it is opaque here", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+      const snapshot = {
+        document: {
+          store: { "shape:s1": { x: 0, y: -12.5, nested: [1, null] } },
+        },
+        session: { currentPageId: "page:page" },
+      }
+
+      await saveBoard(prisma, fresh.id, snapshot)
+
+      expect(await loadBoard(prisma, fresh.id)).toEqual(snapshot)
+    })
+
+    it("replaces the snapshot whole rather than merging into it", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await saveBoard(prisma, fresh.id, { document: { store: { a: 1 } } })
+      await saveBoard(prisma, fresh.id, { document: { store: { b: 2 } } })
+
+      // A board is a picture, not a patch of one — `a` must be gone.
+      expect(await loadBoard(prisma, fresh.id)).toEqual({
+        document: { store: { b: 2 } },
+      })
+    })
+
+    it("keeps at most one row per user, which the primary key enforces", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await saveBoard(prisma, fresh.id, { n: 1 })
+      await saveBoard(prisma, fresh.id, { n: 2 })
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".boards where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.count).toBe("1")
+    })
+
+    it("goes with the user, which is the whole point of the cascade", async () => {
+      const doomed = await prisma.user.create({ data: {} })
+      await saveBoard(prisma, doomed.id, { n: 1 })
+
+      await admin.query(`delete from "${SCHEMA}".users where id = $1`, [
+        doomed.id,
+      ])
+
+      expect(await loadBoard(prisma, doomed.id)).toBeUndefined()
     })
   })
 

@@ -63,4 +63,13 @@ export {
   type JobScoutSession,
 } from "./job-scout.ts"
 
+export {
+  createWhiteboardAgent,
+  WHITEBOARD_MAX_LLM_CALLS,
+  WHITEBOARD_MODEL,
+  WHITEBOARD_SYSTEM_PROMPT,
+  type CreateWhiteboardAgentOptions,
+  type WhiteboardSession,
+} from "./whiteboard.ts"
+
 export type { Agent } from "@workspace/agents-core"

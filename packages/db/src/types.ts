@@ -1,5 +1,6 @@
 import type {
   Artifact as PrismaArtifact,
+  Board as PrismaBoard,
   CoverLetterInstructions as PrismaCoverLetterInstructions,
   Document as PrismaDocument,
   Job as PrismaJob,
@@ -91,3 +92,4 @@ export type Artifact = PrismaArtifact
 export type Posting = PrismaPosting
 export type Document = PrismaDocument
 export type CoverLetterInstructions = PrismaCoverLetterInstructions
+export type Board = PrismaBoard

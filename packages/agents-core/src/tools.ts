@@ -1,5 +1,6 @@
 import { ToolMessage } from "@langchain/core/messages"
 import type { ToolCall } from "@langchain/core/messages/tool"
+import type { RunnableConfig } from "@langchain/core/runnables"
 import type { StructuredToolInterface } from "@langchain/core/tools"
 
 /**
@@ -12,8 +13,16 @@ export type AgentTool = StructuredToolInterface
 export interface ToolRegistry {
   /** Passed to `model.bindTools()`. */
   tools: AgentTool[]
-  /** Run one tool call; every failure becomes a status:"error" ToolMessage. */
-  dispatch(toolCall: ToolCall): Promise<ToolMessage>
+  /**
+   * Run one tool call; every failure becomes a status:"error" ToolMessage.
+   *
+   * `config` is the calling graph node's own `RunnableConfig`, and forwarding
+   * it is what gives a tool `config.writer` — LangGraph's custom-stream
+   * channel. Without it a tool can only reach the caller through its return
+   * value, which the model then has to read; with it, a tool can also push
+   * events straight onto the run's stream while the turn is still going.
+   */
+  dispatch(toolCall: ToolCall, config?: RunnableConfig): Promise<ToolMessage>
 }
 
 function toToolMessage(result: unknown, toolCall: ToolCall): ToolMessage {
@@ -55,7 +64,10 @@ export function createToolRegistry(tools: AgentTool[]): ToolRegistry {
     byName[entry.name] = entry
   }
 
-  const dispatch = async (toolCall: ToolCall): Promise<ToolMessage> => {
+  const dispatch = async (
+    toolCall: ToolCall,
+    config?: RunnableConfig
+  ): Promise<ToolMessage> => {
     const selected = byName[toolCall.name]
 
     if (!selected) {
@@ -68,7 +80,7 @@ export function createToolRegistry(tools: AgentTool[]): ToolRegistry {
     }
 
     try {
-      return toToolMessage(await selected.invoke(toolCall), toolCall)
+      return toToolMessage(await selected.invoke(toolCall, config), toolCall)
     } catch (error) {
       return errorToolMessage(
         toolCall,

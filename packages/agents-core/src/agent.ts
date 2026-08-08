@@ -96,11 +96,15 @@ export function createAgent(options: CreateAgentOptions = {}) {
     return last.tool_calls ?? []
   }
 
-  const callTools: GraphNode<typeof AgentState> = async (state) => ({
+  // `config` is forwarded rather than dropped so a tool can reach the run's
+  // stream through `config.writer` — see `ToolRegistry.dispatch`.
+  const callTools: GraphNode<typeof AgentState> = async (state, config) => ({
     // Claude emits parallel tool calls; run them concurrently and return every
     // result in one update so each tool_use gets its matching tool_result.
     messages: await Promise.all(
-      pendingToolCalls(state).map((toolCall) => registry.dispatch(toolCall))
+      pendingToolCalls(state).map((toolCall) =>
+        registry.dispatch(toolCall, config)
+      )
     ),
   })
 

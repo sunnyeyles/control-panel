@@ -35,6 +35,8 @@ export {
   saveCoverLetterInstructions,
 } from "./cover-letter-instructions.ts"
 
+export { loadBoard, saveBoard } from "./boards.ts"
+
 export {
   claimJob,
   createJob,
@@ -83,6 +85,7 @@ export { computeNextRunAt } from "./schedule.ts"
 
 export type {
   Artifact,
+  Board,
   CoverLetterInstructions,
   Document,
   DocumentType,
