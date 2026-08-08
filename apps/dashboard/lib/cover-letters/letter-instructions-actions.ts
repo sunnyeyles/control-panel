@@ -193,11 +193,11 @@ export function createLetterInstructionsActions(
     let documents: DocumentSummary[]
     try {
       // ⚠️ **The ownership check, and it is structural.** `listDocuments` takes
-      // the session's userId, so the listing it returns is the caller's own
-      // prefix and nothing else. A document id belonging to someone else is
-      // simply absent from it, which is why the refusal below cannot tell the
-      // two apart even in principle.
-      documents = await listDocuments(caller.userId, resumes)
+      // the session's userId, so the rows it returns are the caller's own and
+      // nothing else. A document id belonging to someone else is simply absent
+      // from it, which is why the refusal below cannot tell the two apart even
+      // in principle.
+      documents = await listDocuments(caller.userId, deps.getPrisma())
     } catch (error) {
       return fail(storageMessage("cover-letters: list failed", error))
     }

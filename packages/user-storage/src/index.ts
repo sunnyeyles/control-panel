@@ -54,9 +54,6 @@ export {
 export {
   acceptedResumeExtensions,
   createResumeStore,
-  DOCUMENT_TYPES,
-  isDocumentType,
-  type DocumentType,
   type NewResume,
   type ResumeRef,
   type ResumeStore,

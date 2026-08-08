@@ -40,6 +40,9 @@ function inferDocumentType(filename: string): string {
   if (/cover|letter/.test(name)) return "cover-letter"
   if (/portfolio/.test(name)) return "portfolio"
   if (/reference|referee|recommendation/.test(name)) return "reference"
+  // `certificat` is the stem deliberately, so one rule catches both
+  // "certificate" and "certification".
+  if (/certificat|credential|diploma/.test(name)) return "certification"
 
   return "resume"
 }

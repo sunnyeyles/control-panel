@@ -1,11 +1,10 @@
 import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser } from "@/lib/auth/current-user"
+import { getPrisma } from "@/lib/db"
 import { contentDisposition } from "@/lib/documents/content-disposition"
-import {
-  formatDocumentFile,
-  parseDocumentFile,
-} from "@/lib/documents/document-ref"
+import { parseDocumentFile } from "@/lib/documents/document-ref"
 import { getResumeStore } from "@/lib/storage"
+import { findDocument } from "@workspace/db"
 import { isUserStorageError } from "@workspace/user-storage"
 
 /**
@@ -51,6 +50,22 @@ export async function GET(
   if (!ref) return notFound()
 
   const { resumeId, extension } = ref
+
+  // The row before the bytes, for two reasons. It is the ownership check —
+  // `findDocument` filters on `userId` as well as `id`, so another user's
+  // document is simply not found, with the same 404 as one that does not exist.
+  // And it carries the filename, which is what the download is named after:
+  // `documents.filename` is the user's own text, where the copy stamped on the
+  // object was stripped to printable ASCII on the way in.
+  let document
+  try {
+    document = await findDocument(getPrisma(), caller.userId, resumeId)
+  } catch (error) {
+    console.error("documents: download could not read the row", error)
+    return Response.json({ error: "Download failed" }, { status: 500 })
+  }
+
+  if (!document || document.extension !== extension) return notFound()
 
   let stored
   try {
@@ -105,9 +120,12 @@ export async function GET(
     headers: {
       "Content-Type": stored.contentType,
       "Content-Length": String(stored.bytes.byteLength),
-      "Content-Disposition": contentDisposition(
-        stored.originalFilename ?? formatDocumentFile(ref)
-      ),
+      // From the row, not from the object's metadata. The two can differ: the
+      // metadata copy is stripped to printable ASCII because it travels as an
+      // HTTP header, so `Lebenslauf – 2026.pdf` is stored as
+      // `Lebenslauf  2026.pdf` on the object and intact in Postgres.
+      // `contentDisposition` is what makes the intact one safe to send back.
+      "Content-Disposition": contentDisposition(document.filename),
       // These bytes arrived from outside. `kinds.ts` calls the `attachment`
       // disposition the stored-XSS guard and notes it was belt-and-braces while
       // nothing served uploaded bytes to a browser — this route is what makes

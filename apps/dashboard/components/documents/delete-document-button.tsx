@@ -29,11 +29,9 @@ import { Trash2Icon } from "lucide-react"
  */
 export function DeleteDocumentButton({
   resumeId,
-  extension,
   displayName,
 }: {
   resumeId: string
-  extension: string
   displayName: string
 }) {
   const [state, formAction, pending] = useActionState(
@@ -66,13 +64,16 @@ export function DeleteDocumentButton({
 
         <form action={formAction}>
           {/*
-            Both fields are untrusted, and both are validated server-side. What
-            they cannot do is name another user: the key is built from the
-            session's own userId, so a tampered value here can only ever address
-            something in the caller's own prefix.
+            Untrusted, and validated server-side. What it cannot do is name
+            another user: the row is looked up by `(id, userId)` with the userId
+            coming from the session, so a tampered value here can only ever
+            address something the caller owns.
+
+            The extension used to be a second field beside this one. It comes
+            off the row now — the object key is built from what the database
+            holds rather than from what the browser sent back.
           */}
           <input type="hidden" name="resumeId" value={resumeId} />
-          <input type="hidden" name="extension" value={extension} />
 
           <ActionError state={state} className="mb-4" />
 

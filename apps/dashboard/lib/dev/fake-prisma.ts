@@ -1,11 +1,13 @@
 import {
   devCoverLetterInstructions,
+  devDocuments,
   devJobs,
   devPostings,
   devRuns,
 } from "@/lib/dev/fixtures"
 import type {
   CoverLetterInstructions,
+  Document,
   Job,
   Posting,
   PrismaClient,
@@ -80,6 +82,24 @@ export function createDevPrisma(): PrismaClient {
       deleteMany: async (query: { where: PostingWhere }) =>
         db.deletePostings(query.where),
     },
+    /**
+     * The Documents shelf. Four calls, and the two lookups are both scoped by
+     * owner because in the real thing that scoping *is* the ownership check —
+     * `findDocument` and `deleteDocument` in `@workspace/db` have no other one.
+     * A fake that answered from the id alone would let that scoping be dropped
+     * without anything here noticing, which is the same argument
+     * `posting.findFirst` above makes.
+     */
+    document: {
+      findMany: async (query: DocumentsForUser) =>
+        db.findManyDocuments(query.where.userId),
+      findFirst: async (query: { where: DocumentWhere }) =>
+        db.findDocument(query.where),
+      create: async (query: { data: Document }) =>
+        db.createDocument(query.data),
+      deleteMany: async (query: { where: DocumentWhere }) =>
+        db.deleteDocuments(query.where),
+    },
     coverLetterInstructions: {
       findUnique: async (query: ByUserId) =>
         db.findCoverLetterInstructions(query.where.userId),
@@ -111,6 +131,23 @@ export function createDevPrisma(): PrismaClient {
 /** `{ where: { id } }`, which is how every single-row lookup here is addressed. */
 interface ById {
   where: { id: string }
+}
+
+/**
+ * How the Documents table is addressed: by owner, and by owner plus id.
+ *
+ * **`userId` is not optional and must not become so.** It is the entire
+ * ownership check on both `findDocument` and `deleteDocument` — there is no
+ * second one underneath, the way `assertOwnedBy` sits under the object store.
+ */
+interface DocumentWhere {
+  userId: string
+  id?: string
+}
+
+interface DocumentsForUser {
+  where: { userId: string }
+  orderBy?: unknown
 }
 
 interface FindManyJobs {
@@ -249,7 +286,69 @@ class DevDb {
   private readonly coverLetterInstructions: CoverLetterInstructions[] =
     devCoverLetterInstructions()
   private readonly postings: Posting[] = devPostings()
+  private readonly documents: Document[] = devDocuments()
   private nextId = 1
+
+  /**
+   * One user's Documents, newest first.
+   *
+   * The order is the real query's, restated rather than ignored: it is the
+   * only order the list has, and `loadCandidateBackground` picks "the newest
+   * document labelled resume" by taking the first match out of it. A fake that
+   * answered in insertion order would make that choice look arbitrary here and
+   * correct in production.
+   */
+  findManyDocuments(userId: string): Document[] {
+    return this.documents
+      .filter((document) => document.userId === userId)
+      .sort(
+        (left, right) =>
+          right.uploadedAt.getTime() - left.uploadedAt.getTime() ||
+          right.id.localeCompare(left.id)
+      )
+  }
+
+  findDocument(where: DocumentWhere): Document | null {
+    return (
+      this.documents.find(
+        (document) =>
+          document.userId === where.userId &&
+          (where.id === undefined || document.id === where.id)
+      ) ?? null
+    )
+  }
+
+  createDocument(data: Document): Document {
+    const row: Document = { ...data, uploadedAt: data.uploadedAt ?? new Date() }
+
+    this.documents.push(row)
+
+    return row
+  }
+
+  /**
+   * Splices out of the backing array rather than rebuilding it, for the reason
+   * {@link deletePostings} gives: the field is `readonly` and every other
+   * method reads through it.
+   */
+  deleteDocuments(where: DocumentWhere): { count: number } {
+    let removed = 0
+
+    for (let index = this.documents.length - 1; index >= 0; index -= 1) {
+      const row = this.documents[index]
+
+      if (
+        row &&
+        row.userId === where.userId &&
+        (where.id === undefined || row.id === where.id)
+      ) {
+        this.documents.splice(index, 1)
+        removed += 1
+      }
+    }
+
+    return { count: removed }
+  }
 
   /**
    * The whole rows, which is the only shape the dashboard asks for — both call

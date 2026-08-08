@@ -72,20 +72,18 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
                   code. `noUncheckedIndexedAccess` does not apply to it — a
                   `Record<DocumentType, string>` over a literal union is a
                   mapped type with declared properties, not an index signature,
-                  so the lookup is `string`. The runtime half is covered too:
-                  `head()` in the storage package narrows an unrecognised stored
-                  value to `undefined`, which takes the em-dash branch.
+                  so the lookup is `string`. The runtime half is covered by the
+                  CHECK on `documents.doc_type`: a value outside the six could
+                  not have been written.
+
+                  There used to be an em-dash branch beside this for an
+                  unlabelled document. `doc_type` is NOT NULL, so there is no
+                  such state any more — an upload whose posted label was not
+                  recognised lands on `other`.
                 */}
-                {document.documentType ? (
-                  <Badge variant="secondary">
-                    {DOCUMENT_TYPE_LABELS[document.documentType]}
-                  </Badge>
-                ) : (
-                  // Everything uploaded before document types existed lands
-                  // here, so this fallback is load-bearing rather than
-                  // defensive.
-                  <span className="text-sm text-muted-foreground">—</span>
-                )}
+                <Badge variant="secondary">
+                  {DOCUMENT_TYPE_LABELS[document.documentType]}
+                </Badge>
               </TableCell>
 
               <TableCell className="text-right tabular-nums">
@@ -99,7 +97,6 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
               <TableCell>
                 <DeleteDocumentButton
                   resumeId={document.resumeId}
-                  extension={document.extension}
                   displayName={document.displayName}
                 />
               </TableCell>

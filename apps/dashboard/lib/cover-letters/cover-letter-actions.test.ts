@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises"
 
 import type { CurrentUser } from "@/lib/auth/current-user"
+import {
+  fakeDocumentDb,
+  mergeClients,
+  toFakeDocument,
+} from "@/lib/documents/fake-document-db"
 import type { Agent } from "@workspace/agents"
 import type { LetterInstructions } from "@workspace/agents/cover-letter"
 import {
@@ -9,7 +14,11 @@ import {
 } from "@workspace/agents/cover-letter-writer"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
-import type { PrismaClient } from "@workspace/db"
+import type {
+  Document as DocumentRow,
+  DocumentType,
+  PrismaClient,
+} from "@workspace/db"
 import { createCoverLetterStore } from "@workspace/user-storage/cover-letter-store"
 import { ObjectNotFoundError } from "@workspace/user-storage/errors"
 import { buildObjectKey } from "@workspace/user-storage/keys"
@@ -198,15 +207,27 @@ class MemoryObjects implements UserObjectStore {
 }
 
 /**
- * Just enough {@link ResumeStore} for `loadCandidateBackground`, which lists,
- * heads each item for its document type, and gets the winner's bytes.
+ * Just enough {@link ResumeStore} for `loadCandidateBackground`, plus the rows
+ * that go beside the objects — the label is read out of Postgres now, and only
+ * the bytes come out of the bucket.
  */
 class FakeResumes implements ResumeStore {
   private readonly documents: StoredResume[] = []
+  /**
+   * The rows beside the bytes. `add()` writes both, because a Document is both
+   * — an object nothing has a row for is invisible to every read path.
+   */
+  readonly rows: DocumentRow[] = []
 
   add(
-    document: Partial<StoredResume> & { resumeId: string; extension: string }
+    document: Partial<StoredResume> & {
+      resumeId: string
+      extension: string
+      documentType?: DocumentType
+    }
   ): this {
+    const { documentType, ...object } = document
+
     this.documents.push({
       key: `${ENVIRONMENT}/${USER_ID}/resumes/${document.resumeId}${document.extension}`,
       userId: USER_ID,
@@ -214,8 +235,24 @@ class FakeResumes implements ResumeStore {
       size: CV.length,
       uploadedAt: NOW,
       bytes: new TextEncoder().encode(CV),
-      ...document,
+      ...object,
     })
+
+    this.rows.push(
+      toFakeDocument(
+        USER_ID,
+        {
+          id: document.resumeId,
+          extension: document.extension,
+          ...(document.originalFilename
+            ? { filename: document.originalFilename }
+            : {}),
+          ...(documentType ? { docType: documentType } : {}),
+        },
+        this.rows.length
+      )
+    )
+
     return this
   }
 
@@ -242,15 +279,14 @@ class FakeResumes implements ResumeStore {
 
   async list(userId: string): Promise<StoredResume[]> {
     // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed document has neither a document type nor a filename. Getting that
-    // wrong here would let a broken implementation pass by reading the label
-    // off the listing, which S3 never supplies.
+    // listed object has no filename. Nothing on the draft path calls this any
+    // more — the listing is a query now — and it stays honest so that a future
+    // caller does not read a display name off something S3 never supplies.
     return this.documents
       .filter((document) => document.userId === userId)
       .map((document) => ({
         ...document,
         bytes: undefined,
-        documentType: undefined,
         originalFilename: undefined,
       }))
   }
@@ -440,7 +476,12 @@ function harness(
 
   const actions = createCoverLetterActions({
     getUser: async () => options.user ?? SIGNED_IN,
-    getPrisma: () => db.asPrisma(),
+    // ⚠️ One client, because the action has one. The letter's own tables come
+    // from `FakeDb` and `documents` comes from the rows `FakeResumes.add()`
+    // recorded, so a document either exists for both reads or for neither —
+    // which is the state the two halves of production can actually be in.
+    getPrisma: () =>
+      mergeClients(db.asPrisma(), fakeDocumentDb(USER_ID, resumes.rows)),
     getResumes: () => resumes,
     getCoverLetters: () => createCoverLetterStore(objects),
     // The production default is

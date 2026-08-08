@@ -2,6 +2,7 @@ import {
   listDocuments,
   type DocumentSummary,
 } from "@/lib/documents/list-documents"
+import type { PrismaClient } from "@workspace/db"
 import type { ResumeStore } from "@workspace/user-storage"
 
 import {
@@ -69,16 +70,19 @@ export type CandidateBackground =
  * written from a cover letter they uploaded last month. Recency breaks the tie
  * when there are several, which is the answer that needs no explanation.
  *
- * Built on {@link listDocuments} rather than on `ResumeStore` directly, because
- * that function already owns the awkward part: the document type lives in S3
- * user metadata, `list()` cannot return it, and recovering it costs a bounded
- * `head()` fan-out. Reimplementing that here would be a second copy of an N+1.
+ * Both stores are needed and they answer different questions: Postgres says
+ * which document the user called their resume, and only the bucket has the
+ * bytes. Built on {@link listDocuments} rather than querying directly so that
+ * "newest labelled resume" is decided in one place — this used to be the second
+ * caller of a `head()`-per-document fan-out, and is now a second caller of one
+ * indexed query.
  */
 export async function loadCandidateBackground(
   userId: string,
+  prisma: PrismaClient,
   resumes: ResumeStore
 ): Promise<CandidateBackground> {
-  const documents = await listDocuments(userId, resumes)
+  const documents = await listDocuments(userId, prisma)
   const labelled = documents.filter(
     (document) => document.documentType === "resume"
   )

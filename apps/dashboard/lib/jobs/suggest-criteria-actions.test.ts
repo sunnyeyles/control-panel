@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises"
 
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
+import {
+  fakeDocumentDb,
+  toFakeDocument,
+} from "@/lib/documents/fake-document-db"
 import type { Agent } from "@workspace/agents"
+import type { Document as DocumentRow, DocumentType } from "@workspace/db"
 import {
   StorageUnavailableError,
   type NewResume,
@@ -100,17 +105,29 @@ async function halfAPdf(): Promise<Uint8Array> {
 }
 
 /**
- * Just enough {@link ResumeStore} for `loadCandidateBackground`, which lists,
- * heads each item for its document type, and gets the winner's bytes.
+ * Just enough {@link ResumeStore} for `loadCandidateBackground`, plus the rows
+ * that go beside the objects — the label is read out of Postgres now, and only
+ * the bytes come out of the bucket.
  */
 class FakeResumes implements ResumeStore {
   private readonly documents: StoredResume[] = []
-  /** Set to make `list()` throw, which is the only storage call on this path. */
-  listError: unknown
+  readonly rows: DocumentRow[] = []
+  /**
+   * Set to make `get()` throw. It is the only storage call left on this
+   * path — the listing is a query — so this is what a bucket outage looks like
+   * from here.
+   */
+  getError: unknown
 
   add(
-    document: Partial<StoredResume> & { resumeId: string; extension: string }
+    document: Partial<StoredResume> & {
+      resumeId: string
+      extension: string
+      documentType?: DocumentType
+    }
   ): this {
+    const { documentType, ...object } = document
+
     this.documents.push({
       key: `${ENVIRONMENT}/${USER_ID}/resumes/${document.resumeId}${document.extension}`,
       userId: USER_ID,
@@ -118,13 +135,29 @@ class FakeResumes implements ResumeStore {
       size: CV.length,
       uploadedAt: NOW,
       bytes: new TextEncoder().encode(CV),
-      ...document,
+      ...object,
     })
+
+    this.rows.push(
+      toFakeDocument(
+        USER_ID,
+        {
+          id: document.resumeId,
+          extension: document.extension,
+          ...(document.originalFilename
+            ? { filename: document.originalFilename }
+            : {}),
+          ...(documentType ? { docType: documentType } : {}),
+        },
+        this.rows.length
+      )
+    )
+
     return this
   }
 
   failsWith(error: unknown): this {
-    this.listError = error
+    this.getError = error
     return this
   }
 
@@ -133,6 +166,8 @@ class FakeResumes implements ResumeStore {
   }
 
   async get(ref: ResumeRef): Promise<StoredResume> {
+    if (this.getError) throw this.getError
+
     const found = this.find(ref)
     if (!found) throw new Error(`not stored: ${ref.resumeId}`)
     return found
@@ -150,18 +185,15 @@ class FakeResumes implements ResumeStore {
   }
 
   async list(userId: string): Promise<StoredResume[]> {
-    if (this.listError) throw this.listError
-
     // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed document has neither a document type nor a filename. Getting that
-    // wrong here would let a broken implementation pass by reading the label
-    // off the listing, which S3 never supplies.
+    // listed object has no filename. Nothing on this path calls it any more,
+    // and it stays honest so that a future caller does not read a display name
+    // off something S3 never supplies.
     return this.documents
       .filter((document) => document.userId === userId)
       .map((document) => ({
         ...document,
         bytes: undefined,
-        documentType: undefined,
         originalFilename: undefined,
       }))
   }
@@ -234,6 +266,7 @@ function harness(
   const actions = createSuggestCriteriaActions({
     getUser: async () => options.user ?? SIGNED_IN,
     getResumes: () => resumes,
+    getPrisma: () => fakeDocumentDb(USER_ID, resumes.rows),
     createExtractor: () => {
       builds += 1
       return extractor.asAgent()
@@ -502,12 +535,29 @@ describe("suggestCriteria", () => {
   })
 
   describe("storage is having a bad day", () => {
+    /**
+     * A user whose CV is labelled and listed, and whose bytes are unreachable.
+     *
+     * Both halves are needed to reach the failure at all: the row is what says
+     * this user has a resume, so a store told to fail with no row beside it
+     * would return "no resume" and never touch the bucket.
+     */
+    const unreachable = (error: unknown) =>
+      new FakeResumes()
+        .add({
+          resumeId: "11111111-1111-4111-8111-111111111111",
+          extension: ".md",
+          documentType: "resume",
+          originalFilename: "alice-cv.md",
+        })
+        .failsWith(error)
+
     it("returns a safe message and leaks nothing from the failure", async () => {
       const failure = new StorageUnavailableError(
         "AccessDenied: arn:aws:s3:::control-panel-prod-user-storage"
       )
 
-      subject = harness({ resumes: new FakeResumes().failsWith(failure) })
+      subject = harness({ resumes: unreachable(failure) })
 
       const result = await subject.suggest(SUGGESTION_IDLE, form())
 
@@ -524,9 +574,7 @@ describe("suggestCriteria", () => {
     it("falls back to something generic for a failure it does not recognise", async () => {
       // Branching on `code` and not `instanceof` means an unrecognised error is
       // the ordinary case rather than an impossible one.
-      subject = harness({
-        resumes: new FakeResumes().failsWith(new Error("socket hang up")),
-      })
+      subject = harness({ resumes: unreachable(new Error("socket hang up")) })
 
       const result = await subject.suggest(SUGGESTION_IDLE, form())
 

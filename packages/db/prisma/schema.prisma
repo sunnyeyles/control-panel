@@ -24,8 +24,37 @@ model User {
   jobs                    Job[]
   coverLetterInstructions CoverLetterInstructions?
   postings                Posting[]
+  documents               Document[]
 
   @@map("users")
+}
+
+model Document {
+  // Supplied by the caller, and deliberately without a `@default`. This uuid is
+  // the S3 key segment in `{environment}/{userId}/resumes/{id}{extension}`
+  // before it is a primary key, and the object is written before the row — so a
+  // default that quietly fired would mint a row addressing nothing.
+  id         String   @id @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  // The other half of the key. A CHECK in the migration SQL pins it to the
+  // shape `EXTENSION_SOURCE` in `@workspace/user-storage/keys` accepts.
+  extension  String
+  // What the user called the file. Here rather than in S3 user metadata, which
+  // is an HTTP header and so carries printable ASCII and nothing else — an em
+  // dash in a filename did not survive that round trip.
+  filename   String
+  // text + CHECK in migration SQL rather than a Postgres enum, as `runs.status`
+  // and `postings.status` are. NOT NULL: "unlabelled" was a state for objects
+  // written before the label existed, and `other` is the honest value for an
+  // upload whose posted label we do not recognise.
+  docType    String   @default("other") @map("doc_type")
+  byteSize   Int      @map("byte_size")
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, uploadedAt(sort: Desc), id(sort: Desc)], map: "documents_user_uploaded_idx")
+  @@map("documents")
 }
 
 model CoverLetterInstructions {

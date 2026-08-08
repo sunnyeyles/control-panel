@@ -7,7 +7,6 @@ import { isReadableProfileExtension } from "@/lib/cover-letters/profile-text"
 import { getPrisma } from "@/lib/db"
 import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import { listDocuments } from "@/lib/documents/list-documents"
-import { getResumeStore } from "@/lib/storage"
 import { COVER_LETTER_WRITER_SYSTEM_PROMPT } from "@workspace/agents/cover-letter-writer"
 import { coverLetterInstructions } from "@workspace/db"
 
@@ -23,14 +22,14 @@ import { coverLetterInstructions } from "@workspace/db"
 export async function CoverLetterSection({ userId }: { userId: string }) {
   const saved = await coverLetterInstructions(getPrisma(), userId)
 
-  // A storage outage should cost the import picker and nothing else. The
-  // instructions themselves live in Postgres, and a settings page that cannot
-  // reach S3 must still be able to save them — the same degradation
+  // A failure listing documents should cost the import picker and nothing
+  // else — the instructions themselves are already loaded, and a settings page
+  // must still be able to save them. The same degradation
   // `app/(app)/documents/page.tsx` makes for the same reason.
   let documents: ImportableDocument[] = []
 
   try {
-    const listed = await listDocuments(userId, getResumeStore())
+    const listed = await listDocuments(userId, getPrisma())
 
     documents = listed
       // Only formats `extractProfileText` can actually turn into text. Offering
@@ -41,9 +40,7 @@ export async function CoverLetterSection({ userId }: { userId: string }) {
       .map((document) => ({
         file: document.file,
         name: document.displayName,
-        type: document.documentType
-          ? DOCUMENT_TYPE_LABELS[document.documentType]
-          : "Unlabelled",
+        type: DOCUMENT_TYPE_LABELS[document.documentType],
       }))
   } catch (error) {
     console.error(

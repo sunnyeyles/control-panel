@@ -30,11 +30,18 @@ import {
  * ListObjectsV2 returns no user metadata. For resumes that means a listed one
  * has no `originalFilename`; for tailored resumes it means no provenance and a
  * `generatedAt` off the object's own write time. Both fakes drop it on purpose:
- * supplying it here would make the `head()`-per-item loop on `/documents` look
- * deletable, and would hide that the postings table dates a tailored resume by
- * when the object was written. Cover letters are addressed directly by Posting
- * id and have no `list()` at all, so their metadata is always read through
- * `head()`.
+ * supplying it here would hide that the postings table dates a tailored resume
+ * by when the object was written, and would make the bucket look like a place a
+ * display name can be read from cheaply — which is the assumption `/documents`
+ * was built on before `documents` in Postgres replaced it. Cover letters are
+ * addressed directly by Posting id and have no `list()` at all, so their
+ * metadata is always read through `head()`.
+ *
+ * ⚠️ **The resume fake and `createDevPrisma()` are two halves of one fixture.**
+ * `/documents` reads the rows and downloads the bytes, so an id present in
+ * `devResumes()` and absent from `devDocuments()` — or the reverse — reproduces
+ * a real production state and not a useful default. See the note on
+ * `DEV_DOCUMENT_IDS` in `fixtures.ts`.
  */
 
 /**
@@ -135,7 +142,10 @@ function createDevResumeStore(): ResumeStore {
       ...(resume.originalFilename
         ? { originalFilename: resume.originalFilename }
         : {}),
-      ...(resume.documentType ? { documentType: resume.documentType } : {}),
+      // `documentType` is *not* held. The real store writes it to the object as
+      // provenance and never reads it back — `documents.doc_type` is what the
+      // application sees — so a fake that could answer it would offer something
+      // production cannot.
     }
 
     stored.set(refKey(resume), record)
@@ -167,11 +177,10 @@ function createDevResumeStore(): ResumeStore {
         .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime())
         .map((resume) => {
           // See the warning above: a listing carries no user metadata, so the
-          // name and the type are dropped here on purpose.
-          const { bytes, originalFilename, documentType, ...listed } = resume
+          // filename is dropped here on purpose.
+          const { bytes, originalFilename, ...listed } = resume
           void bytes
           void originalFilename
-          void documentType
           return listed
         })
     },

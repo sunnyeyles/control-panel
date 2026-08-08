@@ -84,6 +84,7 @@ export async function createJobAction(
 const suggestCriteria = createSuggestCriteriaActions({
   getUser: getCurrentUser,
   getResumes: getResumeStore,
+  getPrisma,
 })
 
 /**

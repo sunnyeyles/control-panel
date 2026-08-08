@@ -1,107 +1,95 @@
-import type {
-  ResumeRef,
-  ResumeStore,
-  StoredResume,
-} from "@workspace/user-storage"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import type { Document as DocumentRow } from "@workspace/db"
+import { describe, expect, it } from "vitest"
 
+import { fakeDocumentDb, toFakeDocument } from "./fake-document-db"
 import { listDocuments } from "./list-documents"
 
-const USER_ID = "11111111-2222-4333-8444-555555555555"
+/**
+ * The mapping from rows to what the table renders.
+ *
+ * This used to be a suite about an S3 fan-out — `list()` carries no user
+ * metadata, so a display name cost a `HeadObject` per document, capped at
+ * eight in flight. All of that is gone: `documents` in Postgres holds the
+ * filename and the Document Type, so there is one query, no per-row failure to
+ * degrade, and no ordering decided in memory.
+ */
 
-function stored(
-  resumeId: string,
+const USER_ID = "11111111-2222-4333-8444-555555555555"
+const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
+
+function row(
+  id: string,
   uploadedAt: string,
-  extra: Partial<StoredResume> = {}
-): StoredResume {
+  extra: Partial<DocumentRow> = {}
+): DocumentRow {
   return {
-    key: `prod/${USER_ID}/resumes/${resumeId}.pdf`,
-    userId: USER_ID,
-    resumeId,
-    extension: ".pdf",
-    contentType: "application/pdf",
-    size: 1024,
-    uploadedAt: new Date(uploadedAt),
+    ...toFakeDocument(USER_ID, {
+      id,
+      extension: ".pdf",
+      filename: `${id}.pdf`,
+      docType: "resume",
+      byteSize: 1024,
+      uploadedAt: new Date(uploadedAt),
+    }),
     ...extra,
   }
 }
 
-/**
- * Mirrors the real store's most surprising behaviour: `list()` carries no user
- * metadata, so a filename or type is only available from `head()`.
- */
-function storeOf(
-  items: StoredResume[],
-  heads: Record<string, StoredResume | Error> = {}
-): ResumeStore {
-  return {
-    put: async () => {
-      throw new Error("not used")
-    },
-    get: async () => {
-      throw new Error("not used")
-    },
-    head: async (ref: ResumeRef) => {
-      const head = heads[ref.resumeId]
-      if (head instanceof Error) throw head
-      if (!head) throw new Error(`no head for ${ref.resumeId}`)
-      return head
-    },
-    delete: async () => {},
-    list: async () =>
-      // Stripped exactly as `s3-user-object-store.ts` strips it.
-      items.map((item) => ({
-        ...item,
-        originalFilename: undefined,
-        documentType: undefined,
-      })),
-  }
-}
-
-// Several tests below silence `console.error`, and `vi.spyOn` on an already
-// spied method hands back the *same* mock with its call list intact. Without
-// this, "was nothing logged?" reads calls another test made.
-afterEach(() => {
-  vi.restoreAllMocks()
-})
+const dbOf = (rows: DocumentRow[]) => fakeDocumentDb(USER_ID, rows)
 
 describe("listDocuments", () => {
-  it("recovers the display name and type that list() cannot return", async () => {
-    const items = [stored("a", "2026-07-01T00:00:00Z")]
-    const store = storeOf(items, {
-      a: stored("a", "2026-07-01T00:00:00Z", {
-        originalFilename: "My CV.pdf",
-        documentType: "resume",
-      }),
+  it("maps a row onto the row the table renders", async () => {
+    const [document] = await listDocuments(
+      USER_ID,
+      dbOf([
+        row("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "2026-07-01T00:00:00Z", {
+          filename: "My CV.pdf",
+          docType: "certification",
+          byteSize: 4096,
+        }),
+      ])
+    )
+
+    expect(document).toEqual({
+      resumeId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      extension: ".pdf",
+      displayName: "My CV.pdf",
+      documentType: "certification",
+      size: 4096,
+      uploadedAt: new Date("2026-07-01T00:00:00Z"),
+      file: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.pdf",
     })
-
-    const [document] = await listDocuments(USER_ID, store)
-
-    expect(document?.displayName).toBe("My CV.pdf")
-    expect(document?.documentType).toBe("resume")
   })
 
-  it("sorts newest first, because key order for uuids is arbitrary", async () => {
-    const items = [
-      stored("older", "2026-01-01T00:00:00Z"),
-      stored("newest", "2026-07-01T00:00:00Z"),
-      stored("middle", "2026-04-01T00:00:00Z"),
-    ]
+  it("shows a filename no HTTP header could have carried", async () => {
+    // The visible half of why the metadata moved. `toMetadataValue` strips a
+    // value to printable ASCII because S3 user metadata travels as a header;
+    // the column does not, so the en dash survives to the screen.
+    const [document] = await listDocuments(
+      USER_ID,
+      dbOf([
+        row("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "2026-07-01T00:00:00Z", {
+          filename: "Lebenslauf – 2026.pdf",
+        }),
+      ])
+    )
 
-    const store = storeOf(items, {
-      older: stored("older", "2026-01-01T00:00:00Z", {
-        originalFilename: "old.pdf",
-      }),
-      newest: stored("newest", "2026-07-01T00:00:00Z", {
-        originalFilename: "new.pdf",
-      }),
-      middle: stored("middle", "2026-04-01T00:00:00Z", {
-        originalFilename: "mid.pdf",
-      }),
-    })
+    expect(document?.displayName).toBe("Lebenslauf – 2026.pdf")
+  })
 
-    const documents = await listDocuments(USER_ID, store)
+  it("is newest first", async () => {
+    const documents = await listDocuments(
+      USER_ID,
+      dbOf([
+        row("older", "2026-01-01T00:00:00Z"),
+        row("newest", "2026-07-01T00:00:00Z"),
+        row("middle", "2026-04-01T00:00:00Z"),
+      ])
+    )
 
+    // The index's order, not a sort here. `loadCandidateBackground` takes the
+    // first match out of this list to decide which CV is *the* CV, so the
+    // order is load-bearing rather than cosmetic.
     expect(documents.map((d) => d.resumeId)).toEqual([
       "newest",
       "middle",
@@ -109,49 +97,15 @@ describe("listDocuments", () => {
     ])
   })
 
-  it("degrades one row rather than the page when a head fails", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {})
-
-    const items = [
-      stored("good", "2026-07-01T00:00:00Z"),
-      stored("broken", "2026-06-01T00:00:00Z"),
-    ]
-
-    const store = storeOf(items, {
-      good: stored("good", "2026-07-01T00:00:00Z", {
-        originalFilename: "good.pdf",
-      }),
-      broken: new Error("head failed"),
-    })
-
-    const documents = await listDocuments(USER_ID, store)
-
-    // Both rows survive. Without this, one unreadable object makes the page
-    // throw and the user cannot even delete the thing causing it.
-    expect(documents).toHaveLength(2)
-    expect(documents[0]?.displayName).toBe("good.pdf")
-    expect(documents[1]?.displayName).toBe("broken.pdf")
-    expect(documents[1]?.documentType).toBeUndefined()
-  })
-
-  it("falls back to the id when there is no stored filename", async () => {
-    const items = [stored("abc", "2026-07-01T00:00:00Z")]
-    const store = storeOf(items, { abc: stored("abc", "2026-07-01T00:00:00Z") })
-
-    const [document] = await listDocuments(USER_ID, store)
-
-    expect(document?.displayName).toBe("abc.pdf")
-  })
-
   it("builds the download segment from the id and extension", async () => {
-    const items = [stored("abc", "2026-07-01T00:00:00Z")]
-    const store = storeOf(items, {
-      abc: stored("abc", "2026-07-01T00:00:00Z", {
-        originalFilename: "anything at all.pdf",
-      }),
-    })
-
-    const [document] = await listDocuments(USER_ID, store)
+    const [document] = await listDocuments(
+      USER_ID,
+      dbOf([
+        row("abc", "2026-07-01T00:00:00Z", {
+          filename: "anything at all.pdf",
+        }),
+      ])
+    )
 
     // Never the filename: it is attacker-controlled text and this ends up in a
     // URL path.
@@ -159,111 +113,17 @@ describe("listDocuments", () => {
   })
 
   it("returns nothing for a user with no documents", async () => {
-    expect(await listDocuments(USER_ID, storeOf([]))).toEqual([])
+    expect(await listDocuments(USER_ID, dbOf([]))).toEqual([])
   })
 
-  it("keeps size and uploadedAt from the listing, which always has them", async () => {
-    const items = [stored("a", "2026-07-01T00:00:00Z", { size: 4096 })]
-    const store = storeOf(items, { a: new Error("head failed") })
-
-    vi.spyOn(console, "error").mockImplementation(() => {})
-
-    const [document] = await listDocuments(USER_ID, store)
-
-    expect(document?.size).toBe(4096)
-    expect(document?.uploadedAt).toEqual(new Date("2026-07-01T00:00:00Z"))
-  })
-
-  it("logs the key and the reason when a head fails", async () => {
-    // The degradation above is silent by design, so this log is the only place
-    // the failure exists. Without it a broken IAM attachment renders every row
-    // as a raw uuid and looks exactly like a user who never named their files.
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
-
-    const reason = new Error("head failed")
-    const items = [stored("broken", "2026-07-01T00:00:00Z")]
-
-    await listDocuments(USER_ID, storeOf(items, { broken: reason }))
-
-    expect(logged).toHaveBeenCalledWith(
-      expect.stringContaining("could not read metadata"),
-      `prod/${USER_ID}/resumes/broken.pdf`,
-      reason
-    )
-  })
-
-  it("says nothing when every head succeeds", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
-
-    const items = [stored("a", "2026-07-01T00:00:00Z")]
-    const store = storeOf(items, {
-      a: stored("a", "2026-07-01T00:00:00Z", { originalFilename: "cv.pdf" }),
-    })
-
-    await listDocuments(USER_ID, store)
-
-    expect(logged).not.toHaveBeenCalled()
-  })
-})
-
-describe("listDocuments — the head() fan-out", () => {
-  /**
-   * A store that records how many `head()` calls overlap.
-   *
-   * Built by swapping one method on {@link storeOf} rather than writing a
-   * second `ResumeStore` from scratch. Written out separately it immediately
-   * drifted on the one behaviour this file exists to model: its `list()`
-   * returned user metadata, which neither the real store nor `storeOf` does,
-   * so the fan-out tests were measuring a store unlike every other test here.
-   */
-  function countingStore(count: number) {
-    const items = Array.from({ length: count }, (_, index) =>
-      stored(`doc-${index}`, "2026-07-01T00:00:00Z")
-    )
-
-    let inFlight = 0
-    let peak = 0
-
-    const store: ResumeStore = {
-      ...storeOf(items),
-      head: async (ref: ResumeRef) => {
-        inFlight += 1
-        peak = Math.max(peak, inFlight)
-
-        // A real timer rather than a microtask, so the measurement is
-        // deterministic: every worker the pool starts calls `head()` and
-        // increments the counter before any of them suspends, making `peak`
-        // exactly the pool size rather than whatever the scheduler interleaved.
-        await new Promise((resolve) => setTimeout(resolve, 0))
-
-        inFlight -= 1
-        return stored(ref.resumeId, "2026-07-01T00:00:00Z", {
-          originalFilename: `${ref.resumeId}.pdf`,
-        })
-      },
+  it("returns nothing for a user whose documents all belong to someone else", async () => {
+    // The scoping is the whole of the ownership check on this path, and it is
+    // one `where` clause away from being dropped.
+    const theirs = {
+      ...row("theirs", "2026-07-01T00:00:00Z"),
+      userId: OTHER_USER_ID,
     }
 
-    return { store, peak: () => peak }
-  }
-
-  it("caps how many head() calls overlap, without dropping rows", async () => {
-    // 30 documents is not a realistic number for one person. That is the
-    // point: the burst is bounded by this code rather than by how few files
-    // the user happens to have.
-    const counting = countingStore(30)
-
-    const documents = await listDocuments(USER_ID, counting.store)
-
-    expect(counting.peak()).toBe(8)
-    // Bounded, not truncated — every row still comes back, only slower.
-    expect(documents).toHaveLength(30)
-  })
-
-  it("does not spawn workers it has no items for", async () => {
-    const counting = countingStore(3)
-
-    await listDocuments(USER_ID, counting.store)
-
-    expect(counting.peak()).toBe(3)
+    expect(await listDocuments(USER_ID, dbOf([theirs]))).toEqual([])
   })
 })

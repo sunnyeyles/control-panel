@@ -382,10 +382,19 @@ Something the user uploaded themselves — a CV, a cover letter, whatever they w
 kept beside their job search. The dashboard section is called **Documents**, and
 it is the user-facing word for the whole shelf.
 
+**A Document is two things, written in that order**: an object in the bucket
+holding the bytes, and a row in `documents` holding everything about it — the
+filename, the **Document Type**, the size, when it landed. The row's `id` _is_
+the object's key segment, which is why the id is minted by the application
+rather than by the database: the object has to be written first, so that a
+failure leaves an object nothing points at rather than a row pointing at
+nothing. The row is what every read path uses; the bucket is consulted only for
+bytes.
+
 ⚠️ **Four different meanings of "resume" collide here, and two of them are key
 segments.** The storage _kind_ is `resumes`, so an object key reads
 `prod/{userId}/resumes/{id}.pdf` no matter what the document actually is; a cover
-letter is stored under `resumes` too. Meanwhile **Resume** is also one of the five
+letter is stored under `resumes` too. Meanwhile **Resume** is also one of the six
 selectable **Document Types**. The kind is not renamed because a kind is a key
 segment, an object tag and a file-type allowlist at once — the tag is what the S3
 lifecycle rules filter on, so renaming it would orphan every existing object's
@@ -403,15 +412,23 @@ _Avoid_: file, attachment, upload (as a noun)
 
 **Document Type**:
 What the user says a **Document** is: `resume`, `cover-letter`, `portfolio`,
-`reference` or `other`. Stored as S3 object metadata (`document-type`) within the
-one `resumes` kind, **not** as a kind of its own — a separate kind buys only
-separate retention and separate accepted file types, and these five want neither.
+`reference`, `certification` or `other`. A `doc_type` column on `documents`, text
+plus a CHECK rather than a Postgres enum, exactly as `runs.status` and
+`postings.status` are. Emphatically **not** a storage kind of its own — a
+separate kind buys only separate retention and separate accepted file types, and
+these six want neither: one shelf, one retention policy, seven file types,
+labelled.
 
-Fixed at upload. S3 metadata cannot be changed without copying the object onto
-itself, which `UserObjectStore` deliberately does not expose, so relabelling means
-re-uploading. Absent is a legitimate value: nothing uploaded before the field
-existed carries one, and the list view shows those as unlabelled rather than
-guessing.
+`NOT NULL`, defaulting to `other`. There is no "unlabelled" state: an upload
+whose posted label is not one of the six lands on `other`, which exists for
+exactly that and reads as an answer rather than a gap.
+
+It used to be S3 object metadata, which meant it was fixed at write time —
+metadata cannot be changed without copying the object onto itself, which
+`UserObjectStore` deliberately does not expose, so relabelling meant uploading
+the document again. A column can be updated, so that constraint is gone; a
+relabel control is simply not built yet. The old `document-type` metadata is
+still stamped on each object as provenance and is read by nothing.
 _Avoid_: category, kind (which means the storage kind), tag (which means the S3
 tag that drives retention)
 

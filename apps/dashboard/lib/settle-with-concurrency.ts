@@ -13,16 +13,6 @@
  */
 
 /**
- * How many `head()` calls may be in flight at once for document and
- * cover-letter metadata reads.
- *
- * Eight is chosen to be uninteresting: comfortably faster than serial for the
- * handful of objects these lists realistically hold, and bounded for the case
- * nobody planned for. One constant so the two callers cannot drift apart.
- */
-export const HEAD_CONCURRENCY = 8
-
-/**
  * Same contract as `allSettled` — results are positional and a rejection never
  * fails the whole batch — which is what lets a caller keep treating each row
  * independently.

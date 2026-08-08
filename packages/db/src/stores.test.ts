@@ -12,15 +12,20 @@ import {
   coverLetterInstructions,
   createJob,
   createPrismaClient,
+  deleteDocument,
   deletePostings,
+  DOCUMENT_TYPES,
   dueJobs,
   ensureUserForAuth,
   failRun,
+  findDocument,
   finishRun,
   latestRunPerJob,
+  listDocumentsForUser,
   pauseJob,
   POSTING_STATUSES,
   ownedPostingIds,
+  recordDocument,
   recordArtifact,
   recordPostings,
   recordRunFindings,
@@ -30,7 +35,9 @@ import {
   setPostingStatus,
   startAdHocRun,
   updateJobSchedule,
+  type DocumentType,
   type DueJob,
+  type NewDocument,
   type NewPosting,
   type PostingStatus,
   type PrismaClient,
@@ -1053,6 +1060,163 @@ describeWithDatabase("against a real database", () => {
       ])
 
       expect(await coverLetterInstructions(prisma, doomed.id)).toBeUndefined()
+    })
+  })
+
+  describe("documents", () => {
+    let index = 0
+
+    /** A row whose id is a fresh uuid, because the id is not defaulted here. */
+    function aDocument(overrides: Partial<NewDocument> = {}): NewDocument {
+      index += 1
+
+      return {
+        id: randomUUID(),
+        userId,
+        extension: ".pdf",
+        filename: `cv-${index}.pdf`,
+        docType: "resume",
+        byteSize: 1024,
+        ...overrides,
+      }
+    }
+
+    it("round-trips a document and reads it back by owner", async () => {
+      const written = await recordDocument(prisma, aDocument())
+
+      const read = await findDocument(prisma, userId, written.id)
+
+      expect(read).toMatchObject({
+        id: written.id,
+        userId,
+        extension: ".pdf",
+        docType: "resume",
+        byteSize: 1024,
+      })
+    })
+
+    it("keeps a filename S3 user metadata could not have carried", async () => {
+      // The reason this column exists. A metadata value travels as an HTTP
+      // header, so `toMetadataValue` strips it to printable ASCII; `text` does
+      // not, which is why the filename moved here and not the other way.
+      const written = await recordDocument(
+        prisma,
+        aDocument({ filename: "Lebenslauf – 2026 ✅.pdf" })
+      )
+
+      expect((await findDocument(prisma, userId, written.id))?.filename).toBe(
+        "Lebenslauf – 2026 ✅.pdf"
+      )
+    })
+
+    it("accepts each of the six document types and refuses a seventh", async () => {
+      for (const docType of DOCUMENT_TYPES) {
+        const written = await recordDocument(prisma, aDocument({ docType }))
+        expect((await findDocument(prisma, userId, written.id))?.docType).toBe(
+          docType
+        )
+      }
+
+      // The compiler forbids a seventh, so the cast is what makes this a test
+      // of the CHECK rather than of the type.
+      const seventh = "diploma" as string as DocumentType
+
+      await expect(
+        recordDocument(prisma, aDocument({ docType: seventh }))
+      ).rejects.toThrow()
+    })
+
+    it("refuses an extension that could not be part of an object key", async () => {
+      // `documents_extension_check` mirrors `EXTENSION_SOURCE` in
+      // `@workspace/user-storage/keys`. A row holding one of these would
+      // address an object nothing could ever have written.
+      for (const extension of ["", "pdf", ".PDF", ".p df", "../etc", ".pdf."]) {
+        await expect(
+          recordDocument(prisma, aDocument({ extension }))
+        ).rejects.toThrow()
+      }
+    })
+
+    it("refuses an empty filename and a negative size", async () => {
+      await expect(
+        recordDocument(prisma, aDocument({ filename: "" }))
+      ).rejects.toThrow()
+
+      await expect(
+        recordDocument(prisma, aDocument({ byteSize: -1 }))
+      ).rejects.toThrow()
+    })
+
+    it("defaults an unspecified type to `other` rather than to NULL", async () => {
+      const id = randomUUID()
+
+      await prisma.$executeRaw`
+        INSERT INTO documents (id, user_id, extension, filename, byte_size)
+        VALUES (${id}::uuid, ${userId}::uuid, '.pdf', 'unlabelled.pdf', 1)
+      `
+
+      expect((await findDocument(prisma, userId, id))?.docType).toBe("other")
+    })
+
+    it("lists newest first, tie-broken so a row cannot move between reads", async () => {
+      const owner = await prisma.user.create({ data: {} })
+      const at = (iso: string) => new Date(iso)
+
+      const older = await recordDocument(
+        prisma,
+        aDocument({ userId: owner.id }),
+        at("2026-01-01T00:00:00.000Z")
+      )
+      const newest = await recordDocument(
+        prisma,
+        aDocument({ userId: owner.id }),
+        at("2026-07-01T00:00:00.000Z")
+      )
+      const middle = await recordDocument(
+        prisma,
+        aDocument({ userId: owner.id }),
+        at("2026-04-01T00:00:00.000Z")
+      )
+
+      const listed = await listDocumentsForUser(prisma, owner.id)
+
+      expect(listed.map((row) => row.id)).toEqual([
+        newest.id,
+        middle.id,
+        older.id,
+      ])
+    })
+
+    it("does not read or delete another user's document", async () => {
+      // ⚠️ The `userId` filter is the *whole* ownership check on both calls —
+      // there is nothing underneath it the way `assertOwnedBy` sits under the
+      // object store. Dropping it would be invisible without this.
+      const stranger = await prisma.user.create({ data: {} })
+      const mine = await recordDocument(prisma, aDocument())
+
+      expect(await findDocument(prisma, stranger.id, mine.id)).toBeUndefined()
+      expect(await deleteDocument(prisma, stranger.id, mine.id)).toBe(false)
+      expect(await findDocument(prisma, userId, mine.id)).toBeDefined()
+    })
+
+    it("reports whether a delete found anything, rather than throwing", async () => {
+      const written = await recordDocument(prisma, aDocument())
+
+      expect(await deleteDocument(prisma, userId, written.id)).toBe(true)
+      // The second call is the ordinary case, not an error: two tabs, one
+      // document. `deleteMany` is what makes it an answer instead of a throw.
+      expect(await deleteDocument(prisma, userId, written.id)).toBe(false)
+      expect(await findDocument(prisma, userId, written.id)).toBeUndefined()
+    })
+
+    it("refuses two documents with the same id", async () => {
+      // The id is also the S3 key segment, so a duplicate would mean two rows
+      // claiming the same object.
+      const written = await recordDocument(prisma, aDocument())
+
+      await expect(
+        recordDocument(prisma, aDocument({ id: written.id }))
+      ).rejects.toThrow()
     })
   })
 

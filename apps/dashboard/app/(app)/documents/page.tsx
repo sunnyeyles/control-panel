@@ -1,11 +1,11 @@
 import { DocumentList } from "@/components/documents/document-list"
 import { DocumentUploader } from "@/components/documents/document-uploader"
 import { requirePageUser } from "@/lib/auth/require-page-user"
+import { getPrisma } from "@/lib/db"
 import {
   listDocuments,
   type DocumentSummary,
 } from "@/lib/documents/list-documents"
-import { getResumeStore } from "@/lib/storage"
 import { acceptedResumeExtensions } from "@workspace/user-storage"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 
@@ -22,14 +22,15 @@ export const maxDuration = 30
 export default async function DocumentsPage() {
   const user = await requirePageUser()
 
-  // A storage outage should degrade this page to "upload is unavailable", not
-  // replace it with an error boundary — the user can still read what the page
-  // is for, and the upload form's own error handling takes over from there.
+  // A database outage should degrade this page to "your documents could not be
+  // loaded", not replace it with an error boundary — the user can still read
+  // what the page is for, and the upload form's own error handling takes over
+  // from there.
   let documents: DocumentSummary[] = []
   let listFailed = false
 
   try {
-    documents = await listDocuments(user.userId, getResumeStore())
+    documents = await listDocuments(user.userId, getPrisma())
   } catch (error) {
     console.error("documents: could not list", error)
     listFailed = true
