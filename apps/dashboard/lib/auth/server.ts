@@ -35,6 +35,41 @@ function required(name: string): string {
 }
 
 /**
+ * Same as `required()`, for the one variable Vercel's Neon integration owns.
+ *
+ * The integration writes `storage_NEON_AUTH_BASE_URL`, and its value is an
+ * `integration-store-secret` reference Vercel resolves per deployment — which
+ * is how a preview deployment reaches the auth instance Neon provisioned for
+ * *its own* branch. Each of those instances maintains its own trusted-domain
+ * list, and the integration adds the deployment's URLs to it automatically, so
+ * on this path preview sign-in needs no allowlist upkeep at all.
+ *
+ * A hand-added plain `NEON_AUTH_BASE_URL` on Vercel's Preview environment
+ * shadows the reference and pins every preview to whichever branch it names —
+ * main, here — which is the state that made preview sign-in depend on main's
+ * allowlist in the first place.
+ *
+ * The bare name still wins where it is set: production sets it, and so does a
+ * local `.env.local`, which the integration knows nothing about.
+ *
+ * ⚠️ **`NEON_AUTH_COOKIE_SECRET` deliberately does not go through here.** It is
+ * ours, not Neon's — `neon env pull` does not supply it and the integration
+ * does not either, so there is no prefixed variant to fall back to.
+ */
+function requiredFromIntegration(name: string): string {
+  const value =
+    process.env[name]?.trim() || process.env[`storage_${name}`]?.trim()
+  if (!value) {
+    throw new Error(
+      `Neither ${name} nor storage_${name} is set. Vercel's Neon integration ` +
+        `provisions the prefixed name; locally, run \`neon link\` (or ` +
+        `\`neon env pull\`) to write the bare one into .env.local.`
+    )
+  }
+  return value
+}
+
+/**
  * The placeholder branch is what lets `DEV_AUTH_BYPASS=1` run with no `NEON_*`
  * variables at all.
  *
@@ -58,7 +93,7 @@ export const auth = createNeonAuth(
         cookies: { secret: "dev-auth-bypass-placeholder-not-a-real-key" },
       }
     : {
-        baseUrl: required("NEON_AUTH_BASE_URL"),
+        baseUrl: requiredFromIntegration("NEON_AUTH_BASE_URL"),
         cookies: {
           // Signs the session_data cookie cache (HMAC-SHA256), which is what
           // lets the proxy verify a session without a round trip to the auth
