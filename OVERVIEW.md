@@ -21,7 +21,7 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                                                  |
 | A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                               |
 | One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                               |
-| What `jobs.config` means                     | `apps/briefing-worker/src/job-search-config.ts`                                                                                          |
+| What `jobs.config` means                     | `packages/job-search/src/job-search-config.ts`                                                                                          |
 | The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                              |
 | The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                        |
 | The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                        |

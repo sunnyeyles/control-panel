@@ -8,6 +8,13 @@ import {
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
 import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
+import {
+  API_TOKEN,
+  fakeFetch,
+  jsonResponse,
+  requestBody,
+  type Capture,
+} from "./test-support/search-fakes.ts"
 
 /**
  * The board-independent half of a search tool, driven by a spec that belongs to
@@ -19,38 +26,6 @@ import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
  * own test still owns is its request body, its field mapping, and whatever is
  * true of that actor alone.
  */
-
-const API_TOKEN = "apify-test-token"
-
-interface Capture {
-  url: string
-  init: RequestInit
-}
-
-/**
- * A `fetch` that records the request and replies from a script. An `Error`
- * reply is thrown rather than returned, standing in for a transport fault.
- */
-function fakeFetch(reply: Response | Error, captured: Capture[]) {
-  return (async (url: string | URL | Request, init?: RequestInit) => {
-    captured.push({ url: String(url), init: init ?? {} })
-    if (reply instanceof Error) throw reply
-    // Cloned, not returned directly: a Response body reads once, and some tests
-    // drive the same fake through several calls.
-    return reply.clone()
-  }) as unknown as typeof globalThis.fetch
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  })
-}
-
-function requestBody(capture: Capture): Record<string, unknown> {
-  return JSON.parse(String(capture.init.body)) as Record<string, unknown>
-}
 
 interface FakeItem {
   name?: string

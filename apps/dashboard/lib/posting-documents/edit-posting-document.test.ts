@@ -192,6 +192,39 @@ describe("the gates", () => {
     expect(objects.puts).toEqual([])
     expect(objects.keys()).toEqual([])
   })
+
+  it("stores LF line endings whatever was sent", async () => {
+    // ⚠️ The *direct-POST* path, not anything a user can do. ProseMirror
+    // normalizes CRLF while parsing the clipboard and Turndown emits LF (pinned
+    // in the UI package's `markdown.test.ts`), so the editor cannot send CRLF —
+    // a hand-made FormData against the action can. Normalized above the facade
+    // (`edit-posting-document.ts`), so one kind proves it for both.
+    await seed()
+
+    await edit({ ...VALID, markdown: "# Title\r\n\r\nEdited.\r\n" })
+
+    const stored = await objects.get({
+      userId: USER_ID,
+      kind: "cover-letters",
+      segments: [POSTING_ID],
+      extension: ".md",
+    })
+    expect(stored.text()).toBe("# Title\n\nEdited.")
+  })
+
+  it("cannot reach the same Posting's document under another user", async () => {
+    await seed()
+
+    // Same Posting id, different session. The key is built from the session's
+    // user — identically for both kinds — so this addresses a prefix with
+    // nothing in it rather than reaching the document seeded above; the
+    // refusal is a consequence of the address, not of a comparison somebody
+    // has to remember to write.
+    const result = await edit(VALID, { ...SIGNED_IN, userId: OTHER_USER_ID })
+
+    expect(result).toEqual({ ok: false, reason: "not-found" })
+    expect(objects.puts).toHaveLength(1)
+  })
 })
 
 /**
@@ -305,35 +338,6 @@ describe.each(KINDS)("$name", (kind) => {
       "run-id": RUN_ID,
       ...kind.extraProvenance,
     })
-  })
-
-  it("stores LF line endings whatever was sent", async () => {
-    await kind.seed(objects)
-
-    await edit({ ...VALID, markdown: "# Title\r\n\r\nEdited.\r\n" })
-
-    // ⚠️ The *direct-POST* path, not anything a user can do. ProseMirror
-    // normalizes CRLF while parsing the clipboard and Turndown emits LF (pinned
-    // in the UI package's `markdown.test.ts`), so the editor cannot send CRLF —
-    // a hand-made FormData against the action can.
-    expect((await objects.get(ref)).text()).toBe("# Title\n\nEdited.")
-  })
-
-  it("cannot reach the same Posting's document under another user", async () => {
-    await kind.seed(objects)
-
-    // Same Posting id, different session. The key is built from the session's
-    // user, so this addresses a prefix with nothing in it rather than reaching
-    // the document seeded above — the refusal is a consequence of the address,
-    // not of a comparison somebody has to remember to write.
-    const result = await kind.edit(
-      objects,
-      { ...SIGNED_IN, userId: OTHER_USER_ID },
-      form(VALID)
-    )
-
-    expect(result).toEqual({ ok: false, reason: "not-found" })
-    expect(objects.keys()).toEqual([EXPECTED_KEY])
   })
 })
 

@@ -1,8 +1,7 @@
 import {
-  createAgent,
-  type Agent,
-  type CreateAgentOptions,
-} from "@workspace/agents-core"
+  defineToollessAgent,
+  type ToollessAgentOptions,
+} from "./agent-options.ts"
 
 export const BRIEF_WRITER_SYSTEM_PROMPT = [
   "You turn a set of job findings into a short markdown brief for the candidate who asked for it.",
@@ -18,7 +17,7 @@ export const BRIEF_WRITER_SYSTEM_PROMPT = [
   "Return the markdown itself — no code fence around it, no preamble, no sign-off.",
 ].join("\n")
 
-export type CreateBriefWriterOptions = Omit<CreateAgentOptions, "tools">
+export type CreateBriefWriterOptions = ToollessAgentOptions
 
 /**
  * The writer: composes the brief, and can do nothing else.
@@ -28,10 +27,4 @@ export type CreateBriefWriterOptions = Omit<CreateAgentOptions, "tools">
  * cannot write anywhere, so uploading stays the worker's job. What reaches the
  * candidate is exactly what the scout found, rendered.
  */
-export function createBriefWriter(
-  options: CreateBriefWriterOptions = {}
-): Agent {
-  const { systemPrompt = BRIEF_WRITER_SYSTEM_PROMPT, ...rest } = options
-
-  return createAgent({ ...rest, systemPrompt, tools: [] })
-}
+export const createBriefWriter = defineToollessAgent(BRIEF_WRITER_SYSTEM_PROMPT)

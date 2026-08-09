@@ -1,7 +1,7 @@
 import { DeleteDocumentButton } from "@/components/documents/delete-document-button"
 import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import type { DocumentSummary } from "@/lib/documents/list-documents"
-import { formatCalendarDate } from "@/lib/format-calendar-date"
+import { formatCalendarDate } from "@/lib/format-dates"
 import { Badge } from "@workspace/ui/components/badge"
 import { Empty, EmptyDescription } from "@workspace/ui/components/empty"
 import {

@@ -26,6 +26,7 @@
     "@langchain/core": "^1.2.3",
     "@workspace/agents": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/job-search": "workspace:*",
     "@workspace/langfuse": "workspace:*",
     "@workspace/user-storage": "workspace:*",
     "zod": "^4.4.3"

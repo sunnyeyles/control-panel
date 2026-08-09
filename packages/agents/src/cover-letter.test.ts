@@ -9,32 +9,7 @@ import {
   UndraftableError,
   type CoverLetterRequest,
 } from "./cover-letter.ts"
-
-/**
- * The Posting half is shaped like what a SEEK search actually returns: a
- * teaser-level record, with `highlights` copied off the advertisement and
- * `summary`/`matchReason` composed by the scout.
- */
-const CORE = {
-  title: "Senior Backend Engineer",
-  company: "Morgan McKinley",
-  location: "Sydney NSW (Hybrid)",
-  url: "https://www.seek.com.au/job/93431609",
-  summary: "A backend role on a real-time data product.",
-  matchReason: "Backend, Sydney, and the stack the candidate asked for.",
-}
-
-/** Copied off the advertisement, which is what makes them safe to reproduce. */
-const HIGHLIGHTS = [
-  "Senior Backend Engineer (Python/AWS) - real-time data product, global clients",
-  "Own async pipelines & AWS infra - queues, workers, full ownership",
-]
-
-const POSTING = { ...CORE, postedAt: "2026-07-21", highlights: HIGHLIGHTS }
-
-/** Both optional fields are genuinely absent often, so both get a variant. */
-const WITHOUT_HIGHLIGHTS = { ...CORE, postedAt: "2026-07-21" }
-const UNDATED = { ...CORE, highlights: HIGHLIGHTS }
+import { POSTING, WITHOUT_HIGHLIGHTS } from "./test-support/posting-fixtures.ts"
 
 const BACKGROUND = `I am a backend engineer with six years on data-heavy services. ${"Details of what I built, in my own words. ".repeat(
   5
@@ -50,6 +25,10 @@ function background(length: number): string {
   return "a".repeat(length)
 }
 
+/**
+ * `TailoredResumeRequestSchema` is this same object under the other feature's
+ * name, so this suite is the request shape's one home.
+ */
 describe("CoverLetterRequestSchema", () => {
   it("parses a request whose Posting carries no highlights", () => {
     const result = CoverLetterRequestSchema.safeParse({
@@ -67,6 +46,15 @@ describe("CoverLetterRequestSchema", () => {
       CoverLetterRequestSchema.safeParse({
         posting: { ...POSTING, url: "seek, the one with the pipelines" },
         profile: { background: BACKGROUND },
+      }).success
+    ).toBe(false)
+  })
+
+  it("requires a background, since it is the document being worked from", () => {
+    expect(
+      CoverLetterRequestSchema.safeParse({
+        posting: POSTING,
+        profile: { name: "Alex Rivers" },
       }).success
     ).toBe(false)
   })
@@ -156,72 +144,27 @@ describe("assertDraftable", () => {
   })
 })
 
+/**
+ * The body — verbatim carry-through, the quoted-material fence, the omitted
+ * sections — is `toPostingRequestPrompt`'s contract, asserted once in
+ * `posting-prompt.test.ts`. What this wrapper owns is its three sentences.
+ */
 describe("toCoverLetterPrompt", () => {
   const prompt = toCoverLetterPrompt(REQUEST)
 
-  it("carries the Posting URL through verbatim", () => {
-    expect(prompt).toContain(POSTING.url)
-  })
-
-  it("carries the background text through verbatim", () => {
-    expect(prompt).toContain(BACKGROUND)
-  })
-
-  it("carries every highlight through verbatim", () => {
-    for (const highlight of POSTING.highlights) {
-      expect(prompt).toContain(highlight)
-    }
-  })
-
-  it("carries the rest of the Posting record", () => {
-    expect(prompt).toContain(POSTING.title)
-    expect(prompt).toContain(POSTING.company)
-    expect(prompt).toContain(POSTING.location)
-    expect(prompt).toContain(POSTING.summary)
-    expect(prompt).toContain(POSTING.matchReason)
-    expect(prompt).toContain(POSTING.postedAt)
-  })
-
-  it("names the candidate when the caller knows the name", () => {
-    expect(prompt).toContain("Alex Rivers")
-  })
-
-  it("says nothing about a name the caller did not supply", () => {
-    const anonymous = toCoverLetterPrompt({
-      posting: POSTING,
-      profile: { background: BACKGROUND },
-    })
-
-    expect(anonymous).not.toMatch(/My name is/)
-    expect(anonymous).toContain(BACKGROUND)
-  })
-
-  it("omits the highlights section rather than inventing one", () => {
-    const thin = toCoverLetterPrompt({
-      posting: WITHOUT_HIGHLIGHTS,
-      profile: { background: BACKGROUND },
-    })
-
-    expect(thin).not.toMatch(/copied word for word/i)
-    expect(thin).toContain(WITHOUT_HIGHLIGHTS.url)
-  })
-
-  it("omits postedAt rather than guessing at it", () => {
+  it("opens by asking for a cover letter", () => {
     expect(
-      toCoverLetterPrompt({ posting: UNDATED, profile: REQUEST.profile })
-    ).not.toMatch(/^Posted:/m)
+      prompt.startsWith("Write my cover letter for the posting below.")
+    ).toBe(true)
   })
 
-  /**
-   * `highlights` is attacker-influenced text that reaches the model unchanged,
-   * which is the trade `tools: []` pays for. The prompt has to at least frame
-   * it as quoted material — the system prompt does the rest.
-   */
-  it("frames the copied advertisement text as data rather than instruction", () => {
-    expect(prompt).toMatch(/not instruction/i)
+  it("introduces the background as the source every claim must trace to", () => {
+    expect(prompt).toContain("## My background")
+    expect(prompt).toMatch(/traceable to it/i)
   })
 
-  it("is pure — the same request gives the same prompt", () => {
-    expect(toCoverLetterPrompt(REQUEST)).toBe(toCoverLetterPrompt(REQUEST))
+  it("carries the posting and the background through the shared body", () => {
+    expect(prompt).toContain(POSTING.url)
+    expect(prompt).toContain(BACKGROUND)
   })
 })

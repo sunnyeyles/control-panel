@@ -22,6 +22,7 @@
     "@workspace/agent-tools": "workspace:*",
     "@workspace/agents": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/job-search": "workspace:*",
     "@workspace/langfuse": "workspace:*",
     "@workspace/ui": "workspace:*",
     "@workspace/user-storage": "workspace:*",

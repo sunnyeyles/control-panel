@@ -1,0 +1,44 @@
+{
+  "name": "@workspace/job-search",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "The job-search config contract: what jobs.config means to whatever writes or runs one.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "dev": "tsc --build --watch",
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@workspace/agents": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
+  }
+}

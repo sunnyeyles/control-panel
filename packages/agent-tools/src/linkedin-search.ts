@@ -1,8 +1,8 @@
-import { tool, type StructuredToolInterface } from "@langchain/core/tools"
-import * as z from "zod"
+import type { StructuredToolInterface } from "@langchain/core/tools"
 
 import {
   apifyBoardSearch,
+  createBoardSearchTool,
   type ApifyBoardSpec,
   type BoardSearchDeps,
   type BoardSearchInput,
@@ -182,7 +182,7 @@ function buildSearchUrl(search: ResolvedBoardSearch): string {
   return `https://www.linkedin.com/jobs/search/?${query}`
 }
 
-const LINKEDIN_SPEC: ApifyBoardSpec<LinkedinJob> = {
+export const LINKEDIN_SPEC: ApifyBoardSpec<LinkedinJob> = {
   board: "LinkedIn",
   actorId: ACTOR_ID,
   defaultMaxResults: DEFAULT_MAX_RESULTS,
@@ -247,46 +247,14 @@ export async function apifyLinkedinSearch(
 export function createLinkedinSearch(
   catalog: PostingCatalog
 ): StructuredToolInterface {
-  return tool(
-    async (input: LinkedinSearchInput) => apifyLinkedinSearch(input, catalog),
-    {
-      name: LINKEDIN_TOOL_NAME,
-      description:
-        "Search LinkedIn's live job listings for currently-open postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.",
-      schema: z.object({
-        query: z
-          .string()
-          .describe(
-            'Role title or keywords, e.g. "software engineer TypeScript".'
-          ),
-        location: z
-          .string()
-          .optional()
-          .describe(
-            'Where, as LinkedIn writes it — "Sydney, New South Wales, Australia", "Melbourne, Victoria, Australia", "Australia". Defaults to all of Australia.'
-          ),
-        maxResults: z
-          .number()
-          .int()
-          .min(1)
-          .max(MAX_RESULTS_LIMIT)
-          .optional()
-          .describe(
-            `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
-          ),
-        daysOld: z
-          .number()
-          .int()
-          .min(1)
-          .optional()
-          .describe(
-            `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
-          ),
-        workType: z
-          .enum(WORK_TYPES)
-          .optional()
-          .describe("Restrict to one employment type. Omit for all."),
-      }),
-    }
-  )
+  // "live listings for currently-open job postings", via the shared template —
+  // this description had drifted into a transposition of the other boards'.
+  return createBoardSearchTool(LINKEDIN_SPEC, catalog, {
+    name: LINKEDIN_TOOL_NAME,
+    source: "LinkedIn",
+    locationDescription:
+      'Where, as LinkedIn writes it — "Sydney, New South Wales, Australia", "Melbourne, Victoria, Australia", "Australia". Defaults to all of Australia.',
+    workTypes: WORK_TYPES,
+    workTypeDescription: "Restrict to one employment type. Omit for all.",
+  })
 }

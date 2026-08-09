@@ -1,5 +1,7 @@
 import type { Job } from "@workspace/db"
 
+import { formatInStoredZone } from "@/lib/format-dates"
+
 import { describeInterval, fromCron, type IntervalHours } from "./interval"
 
 /**
@@ -52,43 +54,7 @@ export function toBriefingSummary(job: Job): BriefingSummary {
       ? describeInterval(intervalHours)
       : job.scheduleCron,
     ...(job.nextRunAt
-      ? { nextRun: formatInZone(job.nextRunAt, job.scheduleTimezone) }
+      ? { nextRun: formatInStoredZone(job.nextRunAt, job.scheduleTimezone) }
       : {}),
   }
-}
-
-/**
- * The occurrence in the job's own stored zone.
- *
- * The zone is named in the output rather than assumed. New briefings are all
- * written in UTC — see `SCHEDULE_TIMEZONE` — so a next run reading "10:00" with
- * no zone beside it would be read as local time and be wrong by hours.
- *
- * A fixed locale, not the runtime's: the server's default is whatever the
- * platform decides, which is neither stable across deploys nor the user's.
- *
- * The `try` is not defensive padding. `Intl` throws a `RangeError` on a zone it
- * does not recognise, and while `createJob()` and `updateJobSchedule()` both
- * validate, a row inserted by hand in psql has been through neither — and an
- * unrecognised zone should not take down the whole schedules page.
- */
-function formatInZone(date: Date, timeZone: string): string {
-  try {
-    return format(date, timeZone)
-  } catch {
-    return `${format(date, "UTC")} (UTC)`
-  }
-}
-
-function format(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-AU", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZoneName: "short",
-    timeZone,
-  }).format(date)
 }

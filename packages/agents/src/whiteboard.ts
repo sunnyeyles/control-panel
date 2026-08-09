@@ -5,13 +5,9 @@ import {
 import { renderBoardContext } from "@workspace/agent-tools/board-render"
 import { createCanvasTools } from "@workspace/agent-tools/canvas"
 import type { BoardContext } from "@workspace/agent-tools/canvas-schema"
-import {
-  createAgent,
-  createModel,
-  type Agent,
-  type AgentTool,
-  type CreateAgentOptions,
-} from "@workspace/agents-core"
+import { createAgent, createModel, type Agent } from "@workspace/agents-core"
+
+import type { ExtraToolsAgentOptions } from "./agent-options.ts"
 
 /**
  * The agent that draws.
@@ -88,16 +84,11 @@ export interface WhiteboardSession {
   board: BoardSession
 }
 
-export interface CreateWhiteboardAgentOptions extends Omit<
-  CreateAgentOptions,
-  "tools"
-> {
+export interface CreateWhiteboardAgentOptions extends ExtraToolsAgentOptions {
   /** The board as the browser reported it, at the start of this turn. */
   context: BoardContext
   /** Groups this turn's ops so the browser can undo them as one step. */
   turnId: string
-  /** Appended to the eight canvas tools. */
-  extraTools?: AgentTool[]
 }
 
 export function createWhiteboardAgent(

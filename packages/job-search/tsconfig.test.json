@@ -1,0 +1,17 @@
+{
+  // Tests are excluded from tsconfig.json so they never reach `dist/`, which
+  // is this package's entire published surface. That exclusion also means
+  // `tsc --noEmit` would not look at them at all, and Vitest only transpiles —
+  // it does not typecheck. This config closes that gap; `pnpm typecheck` runs
+  // both. Same arrangement as `@workspace/agents`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    // Nothing is emitted here, and `vitest.config.ts` sits above `src/`, so
+    // the inherited rootDir would reject it for no benefit.
+    "rootDir": "."
+  },
+  "include": ["src", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

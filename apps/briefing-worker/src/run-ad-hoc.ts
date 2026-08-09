@@ -2,13 +2,11 @@ import {
   claimAdHocRun,
   failRun,
   finishRun,
-  recordArtifact,
-  recordPostings,
-  recordRunFindings,
   type PrismaClient,
 } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
+import { prismaRecorders } from "./recorders.ts"
 import { runBriefing } from "./run-briefing.ts"
 
 /**
@@ -131,26 +129,14 @@ export async function runAdHocBriefing(
       // `claimed.startedAt` — the row's own value — rather than `now`. The
       // object key partitions on this, and taking it from the row is what keeps
       // the key derivable from the run alone, exactly as a claimed slot is for
-      // a scheduled run.
+      // a scheduled run. The recorders take the same instant; see `recorders.ts`.
       slot: { runId: request.runId, scheduledFor: claimed.startedAt },
       trigger: "manual",
       briefs,
-      recordArtifact: (runId, objectKey) =>
-        recordArtifact(prisma, runId, objectKey),
-      recordFindings: (runId, findings) =>
-        recordRunFindings(prisma, runId, findings),
-      // A run someone asked for finds the same advertisements a scheduled one
-      // does, so it feeds the same cumulative record. `claimed.startedAt` is
-      // this run's occurrence — the row's own value, which the object key also
-      // partitions on — rather than `now`, so what a run says it saw and when
-      // it says it saw it come from one place.
-      recordPostings: (runId, postings) =>
-        recordPostings(prisma, {
-          userId: job.userId,
-          runId,
-          seenAt: claimed.startedAt,
-          postings,
-        }),
+      ...prismaRecorders(prisma, {
+        userId: job.userId,
+        seenAt: claimed.startedAt,
+      }),
     })
 
     // Third argument, usually `undefined`. A run that produced a brief but could

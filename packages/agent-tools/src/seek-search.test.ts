@@ -1,7 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 
-import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
-import { apifySeekSearch, type SeekSearchDeps } from "./seek-search.ts"
+import type { PostingCatalog } from "./posting-catalog.ts"
+import {
+  apifySeekSearch,
+  SEEK_SPEC,
+  type SeekSearchDeps,
+} from "./seek-search.ts"
+import {
+  API_TOKEN,
+  fakeFetch,
+  jsonResponse,
+  requestBody,
+  sequentialCatalog,
+  type Capture,
+} from "./test-support/search-fakes.ts"
 
 /**
  * What is true of SEEK and of no other board: the actor it runs, the request
@@ -14,33 +26,6 @@ import { apifySeekSearch, type SeekSearchDeps } from "./seek-search.ts"
  * `web-search.test.ts` does it: a tool's schema describes what the *model*
  * passes and has nowhere to carry a fake `fetch`.
  */
-
-const API_TOKEN = "apify-test-token"
-
-interface Capture {
-  url: string
-  init: RequestInit
-}
-
-function fakeFetch(reply: Response, captured: Capture[]) {
-  return (async (url: string | URL | Request, init?: RequestInit) => {
-    captured.push({ url: String(url), init: init ?? {} })
-    // Cloned, not returned directly: a Response body reads once, and some tests
-    // drive the same fake through several calls.
-    return reply.clone()
-  }) as unknown as typeof globalThis.fetch
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  })
-}
-
-function requestBody(capture: Capture): Record<string, unknown> {
-  return JSON.parse(String(capture.init.body)) as Record<string, unknown>
-}
 
 /** One item, shaped as the actor's dataset returns it: a bare array. */
 const ONE_JOB = [
@@ -58,25 +43,10 @@ const ONE_JOB = [
   },
 ]
 
-/**
- * The run's catalog, handing out `id1`, `id2`, … in the order postings arrive.
- *
- * Readable ids rather than the platform's hashes: how an id is derived is
- * `posting-id.test.ts`'s subject in `@workspace/agents`, and what matters here
- * is that this board's URL reaches the catalog and its description with it.
- */
 let catalog: PostingCatalog
-let ids: Map<string, string>
 
 beforeEach(() => {
-  ids = new Map()
-  catalog = createPostingCatalog({
-    idFor: (url) => {
-      const held = ids.get(url) ?? `id${ids.size + 1}`
-      ids.set(url, held)
-      return held
-    },
-  })
+  catalog = sequentialCatalog()
 })
 
 /** `apifySeekSearch` against the catalog this test is holding. */
@@ -86,10 +56,6 @@ function seekSearch(
 ): Promise<string> {
   return apifySeekSearch(input, catalog, deps)
 }
-
-afterEach(() => {
-  delete process.env.APIFY_TOKEN
-})
 
 describe("apifySeekSearch", () => {
   it("sends the query to SEEK's actor and renders its fields", async () => {
@@ -233,13 +199,10 @@ describe("apifySeekSearch", () => {
     expect(body.location).toBe("All Australia")
   })
 
-  it("names SEEK when there is nothing to report", async () => {
-    const output = await seekSearch(
-      { query: "zeppelin wrangler" },
-      { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse([]), []) }
-    )
-
-    expect(output).toContain("No currently-listed SEEK postings")
-    expect(output).toContain("zeppelin wrangler")
+  it("declares the board name the empty-result sentence renders", () => {
+    // The sentence itself — "No currently-listed <board> postings", echoing
+    // the query — is `formatSearchResults`'s, owned by `apify-search.test.ts`.
+    // What is SEEK's alone is the spelling.
+    expect(SEEK_SPEC.board).toBe("SEEK")
   })
 })

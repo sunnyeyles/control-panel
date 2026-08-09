@@ -18,7 +18,7 @@ asks Postgres what is due, and a private per-user S3 bucket for what the runs
 produce. The job-search briefing is one instance of that machinery. The
 repository is called `control-panel` for a reason.
 
-`apps/briefing-worker/src/job-search-config.ts:8-10` states the intended
+`packages/job-search/src/job-search-config.ts:8-10` states the intended
 property:
 
 > Keeping the schema out of the database package is what lets a second kind of

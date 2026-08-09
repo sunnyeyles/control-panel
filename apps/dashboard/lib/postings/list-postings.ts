@@ -8,8 +8,7 @@ import {
   type PrismaClient,
 } from "@workspace/db"
 
-import { formatCalendarDate } from "@/lib/format-calendar-date"
-import { formatUtcDateTime } from "@/lib/format-utc-datetime"
+import { formatCalendarDate, formatUtcDateTime } from "@/lib/format-dates"
 
 import { PAGE_SIZE, type PostingQuery, type PostingSort } from "./posting-query"
 import { postingSource, type PostingSource } from "./posting-source"
