@@ -3,7 +3,7 @@ import {
   type ImportableDocument,
 } from "@/components/jobs/letters/example-letter-import"
 import { LetterInstructionsForm } from "@/components/jobs/letters/letter-instructions-form"
-import { isReadableProfileExtension } from "@/lib/cover-letters/profile-text"
+import { isReadableProfileExtension } from "@/lib/candidate/profile-text"
 import { getPrisma } from "@/lib/db"
 import { DOCUMENT_TYPE_LABELS } from "@/lib/documents/document-type-labels"
 import { listDocuments } from "@/lib/documents/list-documents"

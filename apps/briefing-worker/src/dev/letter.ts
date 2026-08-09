@@ -64,7 +64,7 @@ call, no tools, no network beyond the model: OPENAI_API_KEY must be set.
  * The formats a profile may arrive in.
  *
  * Narrower than the app's, deliberately. The dashboard reads a PDF and a DOCX
- * since #86, through `apps/dashboard/lib/cover-letters/profile-text.ts`; this is
+ * since #86, through `apps/dashboard/lib/candidate/profile-text.ts`; this is
  * a dev harness under `dev/` that exists to make one model call from a file on
  * disk, and adding `unpdf` and `mammoth` to the worker to save a `--profile`
  * flag pointing at a `.md` is not a trade worth making. Anyone who wants a

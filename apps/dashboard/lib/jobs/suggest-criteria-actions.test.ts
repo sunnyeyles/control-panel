@@ -97,7 +97,7 @@ const CRITERIA = {
 async function halfAPdf(): Promise<Uint8Array> {
   const whole = new Uint8Array(
     await readFile(
-      new URL("../cover-letters/__fixtures__/alice-cv.pdf", import.meta.url)
+      new URL("../candidate/__fixtures__/alice-cv.pdf", import.meta.url)
     )
   )
 

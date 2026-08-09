@@ -240,7 +240,9 @@ class FakeResumes implements ResumeStore {
 /** The same real PDF and DOCX `profile-text.test.ts` and the draft suite use. */
 async function fixtureBytes(name: string): Promise<Uint8Array> {
   return new Uint8Array(
-    await readFile(new URL(`./__fixtures__/${name}`, import.meta.url))
+    await readFile(
+      new URL(`../candidate/__fixtures__/${name}`, import.meta.url)
+    )
   )
 }
 

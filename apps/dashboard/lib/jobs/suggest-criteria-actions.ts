@@ -4,7 +4,7 @@ import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   loadCandidateBackground,
   type NoBackgroundReason,
-} from "@/lib/cover-letters/candidate-background"
+} from "@/lib/candidate/candidate-background"
 import type { Agent } from "@workspace/agents"
 import type { PrismaClient } from "@workspace/db"
 import {

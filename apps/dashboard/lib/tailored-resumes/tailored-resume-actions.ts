@@ -6,7 +6,7 @@ import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   loadCandidateBackground,
   type NoBackgroundReason,
-} from "@/lib/cover-letters/candidate-background"
+} from "@/lib/candidate/candidate-background"
 import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
 import {
   loadStoredPosting,

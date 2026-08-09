@@ -106,7 +106,9 @@ const LETTER = "Dear Hiring Team,\n\nI would like to apply. [start date]"
  */
 async function fixtureBytes(name: string): Promise<Uint8Array> {
   return new Uint8Array(
-    await readFile(new URL(`./__fixtures__/${name}`, import.meta.url))
+    await readFile(
+      new URL(`../candidate/__fixtures__/${name}`, import.meta.url)
+    )
   )
 }
 
