@@ -37,8 +37,8 @@ import {
   SIGNED_IN,
   USER_ID,
 } from "@/lib/test-support/identities"
+import { BAD_REQUEST } from "./posting-document-ref"
 import {
-  BAD_REQUEST,
   preparePostingDocument,
   type PreparePostingDocumentDeps,
 } from "./prepare-posting-document"

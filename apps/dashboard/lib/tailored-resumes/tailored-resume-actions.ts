@@ -1,15 +1,11 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
-import { requireUser } from "@/lib/actions/require-user"
 import { storageMessage } from "@/lib/actions/storage-message"
 import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { NoBackgroundReason } from "@/lib/candidate/candidate-background"
-import { POSTING_ID_PATTERN } from "@/lib/posting-documents/posting-document-ref"
-import {
-  BAD_REQUEST,
-  preparePostingDocument,
-} from "@/lib/posting-documents/prepare-posting-document"
+import { editPostingDocument } from "@/lib/posting-documents/edit-posting-document"
+import { preparePostingDocument } from "@/lib/posting-documents/prepare-posting-document"
 import type { Agent } from "@workspace/agents"
 import type { UndraftableError } from "@workspace/agents/cover-letter"
 import { createResumeTailor } from "@workspace/agents/resume-tailor"
@@ -19,13 +15,7 @@ import {
   type TailoredResumeRequest,
 } from "@workspace/agents/tailored-resume"
 import type { PrismaClient } from "@workspace/db"
-import {
-  isUserStorageError,
-  type ResumeStore,
-  type StoredTailoredResume,
-  type TailoredResumeStore,
-} from "@workspace/user-storage"
-import { z } from "zod"
+import type { ResumeStore, TailoredResumeStore } from "@workspace/user-storage"
 
 /**
  * Rewriting one resume for one Posting, as plain functions over injected
@@ -90,19 +80,16 @@ export { POSTING_NOT_FOUND }
 const KIND = "tailored-resumes"
 
 /**
- * ⚠️ **Generating has no schema of its own, and that is the two actions agreeing
- * rather than a duplication to collapse.** A tailored resume is addressed by
- * `(user, Posting)` however it came to exist, so generating asks for exactly one
- * identifier — which is `preparePostingDocument`'s own parse, shared with the
- * letters because it is the same field refused for the same reason. Saving keeps
- * its own schema below: tying what a generation accepts to what an edit accepts
- * is the pair most worth leaving free to diverge, since one of them takes resume
- * text from the caller and the other must never.
+ * ⚠️ **Neither action in this file parses its own form, and the two parses are
+ * still separate.** Generating asks for one identifier and saving asks for an
+ * identifier and a body, and each of those schemas lives with the shared
+ * function that enforces it — `preparePostingDocument` and `editPostingDocument`
+ * respectively. That pair is the one most worth leaving free to diverge, since
+ * one of them takes resume text from the caller and the other must never; two
+ * modules is what keeps it so. What both spell the same way is the Posting id,
+ * and there is one copy of that rule — see
+ * `lib/posting-documents/posting-document-ref.ts`.
  */
-const saveSchema = z.object({
-  postingId: z.string().regex(POSTING_ID_PATTERN),
-  markdown: z.string(),
-})
 
 /**
  * There is no tailored resume at that address to edit.
@@ -274,19 +261,15 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
    * different shape: **no model, and no CV read.** The editor already contains
    * the user's own words.
    *
-   * Three things this holds, in order:
-   *
-   * 1. **Who is asking, before the body is touched.** Same reasoning as the
-   *    generate action: for a Server Action `proxy.ts` cannot evaluate the
-   *    session on a POST, so this is the only real check.
-   * 2. **The resume must already exist** — see {@link RESUME_NOT_FOUND}, which
-   *    is where the reasoning lives, because it is the property that keeps an
-   *    action accepting resume text from being a way to create one.
-   * 3. **`generatedAt` and provenance are carried across, never restamped.** An
-   *    edit is not a generation. The detail panel renders "Generated <date>" and
-   *    names the source Document — a save that restamped either would have the
-   *    page report that the model rewrote the resume just now, or would attribute
-   *    it to whichever CV happens to be newest today.
+   * The order the checks run in — who is asking, then the shape of the id, then
+   * the text, then whether there is anything at that address to overwrite — is
+   * `editPostingDocument`'s and is a property rather than plumbing; only the
+   * three sentences below are this feature's to write. In particular the second
+   * of them, {@link RESUME_NOT_FOUND}, is the property that keeps an action
+   * accepting resume text from being a way to create one, and `generatedAt` and
+   * provenance are carried across rather than restamped because an edit is not a
+   * generation — the detail panel renders "Generated <date>" and names the
+   * source Document.
    */
   async function saveTailoredResume(
     state: ActionState,
@@ -294,63 +277,28 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    const caller = await requireUser(deps.getUser, KIND)
-    if (!caller.ok) return fail(caller.message)
+    const edited = await editPostingDocument(
+      deps,
+      formData,
+      deps.getTailoredResumes(),
+      { kind: KIND, maxChars: MAX_RESUME_CHARS }
+    )
 
-    const parsed = saveSchema.safeParse({
-      postingId: formData.get("postingId"),
-      markdown: formData.get("markdown"),
-    })
-
-    if (!parsed.success) return fail(BAD_REQUEST)
-
-    // Normalized before it is measured and before it is stored, for the reasons
-    // `cover-letter-actions.ts` sets out at length: ProseMirror already
-    // normalizes `\r\n` on the way in, so this line is unreachable through the
-    // UI and stays because a Server Action is reachable by direct POST with a
-    // FormData nobody typed — and the store is told `text/markdown`. `trim()`
-    // because a document that is only whitespace is an empty one however much of
-    // it there is, and Turndown leaves a trailing newline on nearly everything.
-    const markdown = parsed.data.markdown.replace(/\r\n/g, "\n").trim()
-
-    if (markdown.length === 0) return fail(EMPTY_RESUME)
-    if (markdown.length > MAX_RESUME_CHARS) return fail(RESUME_TOO_LONG)
-
-    const resumes = deps.getTailoredResumes()
-
-    // ⚠️ **The session's userId, never anything from the form** — the same rule
-    // as the generate action, and the reason a request naming another user's
-    // document cannot be spelled rather than merely being refused.
-    const ref = { userId: caller.userId, postingId: parsed.data.postingId }
-
-    let existing: StoredTailoredResume
-    try {
-      existing = await resumes.head(ref)
-    } catch (error) {
-      if (
-        isUserStorageError(error) &&
-        (error.code === "object_not_found" ||
-          error.code === "object_ownership" ||
-          error.code === "invalid_object_key")
-      ) {
-        return fail(RESUME_NOT_FOUND)
+    if (!edited.ok) {
+      switch (edited.reason) {
+        case "refused":
+          return fail(edited.message)
+        case "empty":
+          return fail(EMPTY_RESUME)
+        case "too-long":
+          return fail(RESUME_TOO_LONG)
+        case "not-found":
+          return fail(RESUME_NOT_FOUND)
+        default: {
+          const _exhaustive: never = edited
+          return _exhaustive
+        }
       }
-
-      // Anything else is the bucket being unreachable, which must not be
-      // reported as "you have not generated this" — that would tell a user
-      // their document is gone during an outage.
-      return fail(storageMessage(`${KIND}: read failed`, error))
-    }
-
-    try {
-      await resumes.put({
-        ...ref,
-        markdown,
-        generatedAt: existing.generatedAt,
-        provenance: existing.provenance,
-      })
-    } catch (error) {
-      return fail(storageMessage(`${KIND}: write failed`, error))
     }
 
     return {

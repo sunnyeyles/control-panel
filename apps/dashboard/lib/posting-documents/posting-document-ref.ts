@@ -68,3 +68,23 @@ export const POSTING_ID_PATTERN = /^[0-9a-f]{16}$/
 export function isPostingId(value: unknown): value is string {
   return typeof value === "string" && POSTING_ID_PATTERN.test(value)
 }
+
+/**
+ * What a value that failed {@link POSTING_ID_PATTERN} is answered with.
+ *
+ * Reachable only by posting a form directly; every button sends an id the app
+ * itself derived. It sits beside the pattern rather than beside either gate
+ * because both of them refuse the same field for the same reason —
+ * `prepare-posting-document.ts` before a model is asked for a document, and
+ * `edit-posting-document.ts` before a stored one is overwritten — and a second
+ * copy is how one of them ends up saying something the other does not.
+ *
+ * One string for both kinds, because it names the **Posting** rather than the
+ * document — the same reason `POSTING_NOT_FOUND` is shared.
+ *
+ * ⚠️ **Not the answer for a *download*.** `downloadPostingDocument` refuses the
+ * same shape with `not-found` and no sentence at all, because there a malformed
+ * id and an absent object must be indistinguishable; here the caller is holding
+ * a form and being told it is unusable.
+ */
+export const BAD_REQUEST = "That posting could not be identified."
