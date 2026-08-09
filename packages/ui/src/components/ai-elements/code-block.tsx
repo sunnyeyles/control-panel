@@ -27,7 +27,6 @@ import type {
   HighlighterGeneric,
   ThemedToken,
 } from "shiki"
-import { createHighlighter } from "shiki"
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 // oxlint-disable-next-line eslint(no-bitwise)
@@ -163,10 +162,17 @@ const getHighlighter = (
     return cached
   }
 
-  const highlighterPromise = createHighlighter({
-    langs: [language],
-    themes: ["github-light", "github-dark"],
-  })
+  // shiki is fetched here rather than imported at the top of the file. Every
+  // caller already goes through this promise, `createRawTokens` renders
+  // unhighlighted text in the meantime, and the type imports above erase — so
+  // moving the one value import behind `import()` keeps shiki and its grammars
+  // out of any chunk loaded before a code block exists on screen.
+  const highlighterPromise = import("shiki").then(({ createHighlighter }) =>
+    createHighlighter({
+      langs: [language],
+      themes: ["github-light", "github-dark"],
+    })
+  )
 
   highlighterCache.set(language, highlighterPromise)
   return highlighterPromise

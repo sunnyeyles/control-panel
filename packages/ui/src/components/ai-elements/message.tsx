@@ -12,10 +12,11 @@ import {
   TooltipTrigger,
 } from "@workspace/ui/components/tooltip"
 import { cn } from "@workspace/ui/lib/utils"
+import {
+  detectMarkdownPlugins,
+  type MarkdownPlugin,
+} from "@workspace/ui/lib/markdown-plugins"
 import { cjk } from "@streamdown/cjk"
-import { code } from "@streamdown/code"
-import { math } from "@streamdown/math"
-import { mermaid } from "@streamdown/mermaid"
 import type { UIMessage } from "ai"
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react"
@@ -29,6 +30,7 @@ import {
   useState,
 } from "react"
 import { Streamdown } from "streamdown"
+import type { PluginConfig } from "streamdown"
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"]
@@ -321,19 +323,91 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>
 
-const streamdownPlugins = { cjk, code, math, mermaid }
+/**
+ * Three of Streamdown's four plugins are the most expensive thing the chat page
+ * can load, and none of them is needed to render prose.
+ *
+ * `@streamdown/mermaid` does `import mermaid from "mermaid"` at module scope,
+ * `@streamdown/math` pulls KaTeX, and `@streamdown/code` evaluates shiki's
+ * `bundledLanguages` at module scope — every grammar in the bundle. Naming all
+ * four in one module constant meant a landing page with no messages on it paid
+ * for all three. They are now fetched when a message actually contains the
+ * markdown that needs them, and never before.
+ *
+ * `cjk` stays static: it is a pair of remark plugins with no heavy dependency,
+ * and it changes how emphasis parses, so loading it late would reflow text that
+ * had already rendered.
+ */
+const basePlugins: PluginConfig = { cjk }
+
+const pluginLoaders: Record<MarkdownPlugin, () => Promise<PluginConfig>> = {
+  code: () => import("@streamdown/code").then(({ code }) => ({ code })),
+  math: () => import("@streamdown/math").then(({ math }) => ({ math })),
+  mermaid: () =>
+    import("@streamdown/mermaid").then(({ mermaid }) => ({ mermaid })),
+}
+
+/**
+ * The plugin set for one message, growing as its content asks for more.
+ *
+ * Deliberately per-message state rather than something lifted to the chat: a
+ * plugin arriving from a parent would be dropped by the `memo` comparator
+ * below, which compares only `children` and `isAnimating`. A component's own
+ * `setState` is not filtered by its own `memo`, so keeping it here is what
+ * makes the late arrival actually render.
+ *
+ * Runs from an effect, so it is client-only by construction — the heavy modules
+ * never enter the server bundle either (`bundle-conditional`).
+ */
+const useMarkdownPlugins = (markdown: string): PluginConfig => {
+  const needed = useMemo(() => detectMarkdownPlugins(markdown), [markdown])
+  const [plugins, setPlugins] = useState<PluginConfig>(basePlugins)
+
+  useEffect(() => {
+    const missing = needed.filter((name) => !(name in plugins))
+    if (missing.length === 0) return
+
+    let cancelled = false
+
+    Promise.all(missing.map((name) => pluginLoaders[name]()))
+      .then((loaded) => {
+        if (!cancelled) {
+          setPlugins((current) => Object.assign({}, current, ...loaded))
+        }
+      })
+      .catch((error: unknown) => {
+        // The markdown still renders, just without highlighting, equations or
+        // a diagram — so this is worth reporting and not worth throwing over.
+        console.error("Failed to load a Streamdown plugin:", error)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [needed, plugins])
+
+  return plugins
+}
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className
-      )}
-      plugins={streamdownPlugins}
-      {...props}
-    />
-  ),
+  ({ className, children, ...props }: MessageResponseProps) => {
+    const plugins = useMarkdownPlugins(
+      typeof children === "string" ? children : ""
+    )
+
+    return (
+      <Streamdown
+        className={cn(
+          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
+        plugins={plugins}
+        {...props}
+      >
+        {children}
+      </Streamdown>
+    )
+  },
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     nextProps.isAnimating === prevProps.isAnimating
