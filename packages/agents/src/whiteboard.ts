@@ -33,7 +33,7 @@ import type { ExtraToolsAgentOptions } from "./agent-options.ts"
  * that model consistent across ten or more tool calls. The mini model draws
  * boxes on top of each other and loses track of which id it just made.
  */
-export const WHITEBOARD_MODEL = "gpt-5.4"
+const WHITEBOARD_MODEL = "gpt-5.4"
 
 /**
  * Enough turns to draw a real diagram.

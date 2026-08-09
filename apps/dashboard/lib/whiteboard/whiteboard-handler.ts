@@ -44,7 +44,7 @@ import { z } from "zod"
  * `"custom"` is what makes `runtime.writer` exist inside the canvas tools; drop
  * it and every tool still succeeds while the canvas silently never changes.
  */
-export const WHITEBOARD_STREAM_MODE: ["values", "messages", "custom"] = [
+const WHITEBOARD_STREAM_MODE: ["values", "messages", "custom"] = [
   "values",
   "messages",
   "custom",

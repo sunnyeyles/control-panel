@@ -216,14 +216,7 @@ export async function postingPayload(
  * Four, and no more. Every entry here is a column with an ordering the table
  * offers; adding one is a decision about the index, not a convenience.
  */
-export const POSTING_ORDERS = [
-  "lastSeenAt",
-  "title",
-  "company",
-  "postedAt",
-] as const
-
-export type PostingOrder = (typeof POSTING_ORDERS)[number]
+export type PostingOrder = "lastSeenAt" | "title" | "company" | "postedAt"
 
 export type PostingDirection = "asc" | "desc"
 

@@ -1,5 +1,4 @@
 export {
-  DEFAULT_MAX_POSTINGS,
   JobSearchConfigSchema,
   parseJobSearchConfig,
   scoutLlmCallBudget,

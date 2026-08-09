@@ -88,7 +88,7 @@ const DEFAULT_DIRECTIONS = {
  * The same order as `postings_user_last_seen_idx`, tie-break included, so the
  * page nobody has sorted is an index scan.
  */
-export const DEFAULT_SORT: PostingSort = "lastSeen"
+const DEFAULT_SORT: PostingSort = "lastSeen"
 
 export interface PostingQuery {
   sort: PostingSort

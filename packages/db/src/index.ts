@@ -77,7 +77,6 @@ export {
   listPostingPage,
   ownedPostingIds,
   postingPayload,
-  POSTING_ORDERS,
   POSTING_STATUSES,
   recordPostings,
   setPostingStatus,

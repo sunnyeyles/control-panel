@@ -228,7 +228,7 @@ export async function listPostings(
  *
  * ⚠️ **Two enums, and the mapping between them is the point.**
  * `POSTING_SORTS` in `posting-query.ts` is how a *URL* spells a sort;
- * `POSTING_ORDERS` in `@workspace/db` is what the query orders by. Keeping them
+ * `PostingOrder` in `@workspace/db` is what the query orders by. Keeping them
  * separate is what stops an address bar from naming a database column — a value
  * arriving from outside has to survive this table, rather than being handed to
  * the query because it happened to parse. Two of the four differ in spelling for

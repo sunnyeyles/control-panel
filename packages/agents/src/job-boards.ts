@@ -32,7 +32,7 @@ export interface JobBoard {
   trackingParameters: readonly string[]
 }
 
-export const JOB_BOARDS: readonly JobBoard[] = [
+const JOB_BOARDS: readonly JobBoard[] = [
   {
     name: "SEEK",
     hosts: ["seek.com.au"],

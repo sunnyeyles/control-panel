@@ -88,14 +88,14 @@ export interface PreparedPostingDocument {
  * re-worded any of these would be re-opening a decision made for it — and in two
  * of the four cases the identity of the string is a security property.
  */
-export interface RefusedDocument {
+interface RefusedDocument {
   ok: false
   reason: "refused"
   message: string
 }
 
 /** There is no Document to write from. The feature says what to do about it. */
-export interface NoBackgroundDocument {
+interface NoBackgroundDocument {
   ok: false
   reason: "no-background"
   missing: NoBackgroundReason
@@ -108,7 +108,7 @@ export interface NoBackgroundDocument {
  * background is loaded and parsed before this runs rather than after. A 200 KB
  * PDF whose text layer is a name and a phone number is `too-short`.
  */
-export interface UndraftableDocument {
+interface UndraftableDocument {
   ok: false
   reason: "undraftable"
   error: UndraftableError
