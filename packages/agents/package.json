@@ -24,6 +24,7 @@
     "build": "tsc --build",
     "clean": "rm -rf dist .turbo *.tsbuildinfo",
     "dev": "tsc --build --watch",
+    "eval": "tsx evals/run.ts",
     "lint": "eslint",
     "format": "prettier --write \"**/*.ts\"",
     "test": "vitest run",
@@ -38,9 +39,11 @@
   "devDependencies": {
     "@types/node": "^20",
     "@workspace/eslint-config": "workspace:*",
+    "@workspace/langfuse": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "@workspace/user-storage": "workspace:*",
     "eslint": "^9",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

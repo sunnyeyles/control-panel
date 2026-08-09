@@ -418,3 +418,396 @@ describe("connections", () => {
     ])
   })
 })
+
+/** Every pair in a set that shares any area. Empty is the property under test. */
+function overlappingPairs(shapes: BoardShape[]): string[] {
+  const pairs: string[] = []
+  for (let i = 0; i < shapes.length; i += 1) {
+    for (let j = i + 1; j < shapes.length; j += 1) {
+      const a = shapes[i]
+      const b = shapes[j]
+      if (!a || !b) continue
+      if (
+        a.x < b.x + b.w &&
+        b.x < a.x + a.w &&
+        a.y < b.y + b.h &&
+        b.y < a.y + a.h
+      ) {
+        pairs.push(`${a.text ?? a.id} and ${b.text ?? b.id}`)
+      }
+    }
+  }
+  return pairs
+}
+
+describe("overlap reporting", () => {
+  it("says nothing when a new shape lands clear", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1", x: 0, y: 0 })] })
+    )
+
+    expect(
+      session.createShape({ kind: "rectangle", x: 400, y: 0 })
+    ).not.toContain("overlaps")
+  })
+
+  it("names what a new shape landed on, and still creates it", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1", x: 0, y: 0 })] })
+    )
+
+    const message = session.createShape({ kind: "rectangle", x: 50, y: 50 })
+
+    expect(message).toContain("overlaps s1")
+    expect(message).toContain("draw_diagram")
+    // Reported, not refused — the shape exists and the op went out.
+    expect(session.shapes()).toHaveLength(2)
+    expect(session.flush()).toHaveLength(1)
+  })
+
+  it("exempts a text caption laid over a diagram", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1", x: 0, y: 0 })] })
+    )
+
+    expect(session.createShape({ kind: "text", x: 10, y: 10 })).not.toContain(
+      "overlaps"
+    )
+  })
+
+  it("flags a move that lands on something", () => {
+    const session = createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 0, y: 0 }),
+          shape({ id: "s2", x: 500, y: 0 }),
+        ],
+      })
+    )
+
+    expect(session.moveShape({ id: "s2", x: 20, y: 20 })).toContain(
+      "now overlaps s1"
+    )
+  })
+
+  it("admits it when align-left stacks two shapes", () => {
+    // The layout did exactly what was asked and the result is unreadable. The
+    // prompt used to claim arranging could not do this. It can.
+    const session = createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 0, y: 0 }),
+          shape({ id: "s2", x: 600, y: 40 }),
+        ],
+      })
+    )
+
+    const message = session.arrangeShapes({
+      ids: ["s1", "s2"],
+      layout: "align-left",
+    })
+
+    expect(message).toContain("s1 and s2 now overlap")
+  })
+
+  it("says nothing about overlap after a row, which cannot produce one", () => {
+    const session = createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 0, y: 0 }),
+          shape({ id: "s2", x: 600, y: 40 }),
+        ],
+      })
+    )
+
+    expect(
+      session.arrangeShapes({ ids: ["s1", "s2"], layout: "row" })
+    ).not.toContain("overlap")
+  })
+})
+
+describe("flow layouts", () => {
+  /** Three boxes in a chain, deliberately placed in the wrong visual order. */
+  function chain() {
+    return createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 800, y: 300, text: "Client" }),
+          shape({ id: "s2", x: 0, y: 0, text: "API" }),
+          shape({ id: "s3", x: 400, y: 600, text: "DB" }),
+        ],
+        connections: [
+          { id: "s4", fromId: "s1", toId: "s2" },
+          { id: "s5", fromId: "s2", toId: "s3" },
+        ],
+      })
+    )
+  }
+
+  it("orders shapes by the arrows, not by where they happen to sit", () => {
+    const session = chain()
+
+    session.arrangeShapes({ ids: ["s1", "s2", "s3"], layout: "flow-right" })
+    const at = new Map(session.shapes().map((s) => [s.id, s]))
+
+    expect(at.get("s1")!.x).toBeLessThan(at.get("s2")!.x)
+    expect(at.get("s2")!.x).toBeLessThan(at.get("s3")!.x)
+  })
+
+  it("ranks downward for flow-down", () => {
+    const session = chain()
+
+    session.arrangeShapes({ ids: ["s1", "s2", "s3"], layout: "flow-down" })
+    const at = new Map(session.shapes().map((s) => [s.id, s]))
+
+    expect(at.get("s1")!.y).toBeLessThan(at.get("s2")!.y)
+    expect(at.get("s2")!.y).toBeLessThan(at.get("s3")!.y)
+  })
+
+  it("anchors at the selection's existing top-left rather than teleporting it", () => {
+    const session = chain()
+
+    session.arrangeShapes({ ids: ["s1", "s2", "s3"], layout: "flow-right" })
+    const shapes = session.shapes()
+
+    expect(Math.min(...shapes.map((s) => s.x))).toBe(0)
+    expect(Math.min(...shapes.map((s) => s.y))).toBe(0)
+  })
+
+  it("leaves no overlap behind", () => {
+    const session = chain()
+
+    session.arrangeShapes({ ids: ["s1", "s2", "s3"], layout: "flow-right" })
+
+    expect(overlappingPairs(session.shapes())).toEqual([])
+  })
+
+  it("ignores arrows to shapes outside the selection", () => {
+    const session = createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 0, y: 0 }),
+          shape({ id: "s2", x: 300, y: 0 }),
+          shape({ id: "s3", x: 600, y: 0 }),
+        ],
+        connections: [{ id: "s4", fromId: "s3", toId: "s1" }],
+      })
+    )
+
+    // s3 is not being arranged, so its arrow must not rank s1 behind it.
+    const message = session.arrangeShapes({
+      ids: ["s1", "s2"],
+      layout: "flow-right",
+    })
+
+    expect(message).toContain("flow-right")
+    expect(message).not.toContain("overlap")
+  })
+})
+
+describe("draw_diagram", () => {
+  it("draws boxes and arrows in one call, with no coordinates given", () => {
+    const session = createBoardSession(context())
+
+    const message = session.drawDiagram({
+      nodes: [
+        { key: "client", text: "Client" },
+        { key: "api", text: "API" },
+        { key: "db", text: "Postgres" },
+      ],
+      edges: [
+        { from: "client", to: "api" },
+        { from: "api", to: "db", label: "writes" },
+      ],
+    })
+
+    expect(message).toContain("Drew 3 shape(s) and 2 arrow(s)")
+    expect(message).toContain("client=s1")
+    expect(session.shapes()).toHaveLength(3)
+    expect(session.connections()).toHaveLength(2)
+  })
+
+  it("emits every op in one batch, so the turn undoes as one step", () => {
+    const session = createBoardSession(context())
+
+    session.drawDiagram({
+      nodes: [
+        { key: "a", text: "A" },
+        { key: "b", text: "B" },
+      ],
+      edges: [{ from: "a", to: "b" }],
+    })
+
+    expect(session.flush().map((op) => op.op)).toEqual([
+      "create",
+      "create",
+      "connect",
+    ])
+  })
+
+  it("lays the boxes out in flow order, not listing order", () => {
+    const session = createBoardSession(context())
+
+    session.drawDiagram({
+      nodes: [
+        { key: "c", text: "C" },
+        { key: "a", text: "A" },
+        { key: "b", text: "B" },
+      ],
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "c" },
+      ],
+    })
+
+    const at = new Map(session.shapes().map((s) => [s.text, s]))
+    expect(at.get("A")!.x).toBeLessThan(at.get("B")!.x)
+    expect(at.get("B")!.x).toBeLessThan(at.get("C")!.x)
+  })
+
+  it("ranks downward when asked to", () => {
+    const session = createBoardSession(context())
+
+    session.drawDiagram({
+      nodes: [
+        { key: "a", text: "A" },
+        { key: "b", text: "B" },
+      ],
+      edges: [{ from: "a", to: "b" }],
+      direction: "down",
+    })
+
+    const at = new Map(session.shapes().map((s) => [s.text, s]))
+    expect(at.get("A")!.y).toBeLessThan(at.get("B")!.y)
+  })
+
+  it("never overlaps, however many boxes", () => {
+    const session = createBoardSession(context())
+
+    session.drawDiagram({
+      nodes: "abcdefgh".split("").map((key) => ({ key, text: key })),
+      edges: [
+        { from: "a", to: "b" },
+        { from: "a", to: "c" },
+        { from: "b", to: "d" },
+        { from: "c", to: "d" },
+        { from: "d", to: "e" },
+        { from: "e", to: "f" },
+        { from: "e", to: "g" },
+        { from: "g", to: "h" },
+      ],
+    })
+
+    expect(overlappingPairs(session.shapes())).toEqual([])
+  })
+
+  it("attaches to a shape already on the board without moving it", () => {
+    // "Add a cache between the API and the database" — one call.
+    const session = createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 0, y: 0, text: "API" }),
+          shape({ id: "s2", x: 400, y: 0, text: "Postgres" }),
+        ],
+      })
+    )
+
+    const message = session.drawDiagram({
+      nodes: [{ key: "cache", text: "Redis" }],
+      edges: [
+        { from: "s1", to: "cache" },
+        { from: "cache", to: "s2" },
+      ],
+    })
+
+    expect(message).toContain("Drew 1 shape(s) and 2 arrow(s)")
+    expect(session.connections().map((c) => [c.fromId, c.toId])).toEqual([
+      ["s1", "s3"],
+      ["s3", "s2"],
+    ])
+    // The user's two shapes are exactly where they were.
+    const at = new Map(session.shapes().map((s) => [s.id, s]))
+    expect(at.get("s1")).toMatchObject({ x: 0, y: 0 })
+    expect(at.get("s2")).toMatchObject({ x: 400, y: 0 })
+    expect(session.flush().some((op) => op.op === "move")).toBe(false)
+  })
+
+  it("places a new block clear of everything already drawn", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1", x: 400, y: 300, w: 600, h: 400 })] })
+    )
+
+    session.drawDiagram({
+      nodes: [
+        { key: "a", text: "A" },
+        { key: "b", text: "B" },
+      ],
+      edges: [{ from: "a", to: "b" }],
+    })
+
+    expect(overlappingPairs(session.shapes())).toEqual([])
+  })
+
+  it("honours an explicit origin", () => {
+    const session = createBoardSession(context())
+
+    session.drawDiagram({ nodes: [{ key: "a", text: "A" }], x: 1000, y: 500 })
+
+    expect(session.shapes()[0]).toMatchObject({ x: 1000, y: 500 })
+  })
+
+  it("reports an arrow that names nothing, and draws the rest", () => {
+    const session = createBoardSession(context())
+
+    const message = session.drawDiagram({
+      nodes: [
+        { key: "a", text: "A" },
+        { key: "b", text: "B" },
+      ],
+      edges: [
+        { from: "a", to: "b" },
+        { from: "a", to: "ghost" },
+      ],
+    })
+
+    expect(message).toContain("Drew 2 shape(s) and 1 arrow(s)")
+    expect(message).toContain("a -> ghost")
+  })
+
+  it("refuses an empty node list rather than drawing nothing quietly", () => {
+    const session = createBoardSession(context())
+
+    expect(session.drawDiagram({ nodes: [] })).toContain("at least one node")
+    expect(session.flush()).toEqual([])
+  })
+
+  it("draws a duplicated key once", () => {
+    const session = createBoardSession(context())
+
+    session.drawDiagram({
+      nodes: [
+        { key: "a", text: "A" },
+        { key: "a", text: "Again" },
+      ],
+    })
+
+    expect(session.shapes()).toHaveLength(1)
+  })
+
+  it("defaults to rectangles and honours a kind where one is given", () => {
+    const session = createBoardSession(context())
+
+    session.drawDiagram({
+      nodes: [
+        { key: "a", text: "A" },
+        { key: "b", text: "B?", kind: "diamond" },
+      ],
+      edges: [{ from: "a", to: "b" }],
+    })
+
+    expect(session.shapes().map((s) => s.kind)).toEqual([
+      "rectangle",
+      "diamond",
+    ])
+  })
+})

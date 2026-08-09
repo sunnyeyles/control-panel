@@ -37,9 +37,26 @@ import {
   type ShapeColor,
   type ShapeKind,
 } from "./canvas-schema.ts"
+import {
+  boundsOf,
+  findFreeOrigin,
+  layerGraph,
+  overlaps,
+  PLACEMENT_GAP,
+  type FlowDirection,
+  type LayoutBox,
+} from "./graph-layout.ts"
 
 /** How many ids a correction lists before it gives up and says "and N more". */
 const MAX_IDS_IN_CORRECTION = 20
+
+/**
+ * A flow layout's gap along the arrows, relative to the gap across them.
+ *
+ * The along axis is the one an arrow crosses, and a labelled arrow needs
+ * somewhere to put the label, so it gets half again the breathing room.
+ */
+const ALONG_GAP_RATIO = 1.5
 
 export interface CreateShapeInput {
   kind: ShapeKind
@@ -65,6 +82,39 @@ export interface ArrangeShapesInput {
   gap?: number
 }
 
+/**
+ * One box in a diagram, as the model describes it: a name to refer to it by, a
+ * label to put in it, and nothing about where it goes.
+ *
+ * `key` is the model's own word — "api", "postgres" — and exists only so the
+ * edges have something to name before any id has been allocated. It never
+ * reaches the canvas.
+ */
+export interface DiagramNodeInput {
+  key: string
+  text: string
+  kind?: ShapeKind
+  color?: ShapeColor
+  w?: number
+  h?: number
+}
+
+/** An arrow. Endpoints are node keys, or the ids of shapes already on the board. */
+export interface DiagramEdgeInput {
+  from: string
+  to: string
+  label?: string
+}
+
+export interface DrawDiagramInput {
+  nodes: DiagramNodeInput[]
+  edges?: DiagramEdgeInput[]
+  direction?: FlowDirection
+  /** Top-left of the whole block. Omit it and free space is chosen. */
+  x?: number
+  y?: number
+}
+
 export interface BoardSession {
   /** The shadow board as it now stands, in creation order. */
   shapes(): BoardShape[]
@@ -87,6 +137,11 @@ export interface BoardSession {
   deleteShapes(ids: string[]): string
   connectShapes(input: { fromId: string; toId: string; label?: string }): string
   arrangeShapes(input: ArrangeShapesInput): string
+  /**
+   * Create a whole diagram — boxes and the arrows between them — from a
+   * description that carries no coordinates at all. See the method.
+   */
+  drawDiagram(input: DrawDiagramInput): string
   focusViewport(ids?: string[]): string
 }
 
@@ -178,6 +233,87 @@ export function createBoardSession(context: BoardContext): BoardSession {
     `${shape.id} (${shape.kind}${shape.text ? ` "${shape.text}"` : ""}) at (${shape.x}, ${shape.y}) ${shape.w}x${shape.h}`
 
   /**
+   * Which shapes this one is sitting on top of.
+   *
+   * Reported rather than prevented, which is this module's standing bargain
+   * with the model: state what happened, including what went wrong, and let it
+   * decide. Refusing the create would be worse — the model would have no shape
+   * and no way to see why, where a note names the obstacle and the two tools
+   * that fix it.
+   *
+   * `text` is exempt at both ends. A bare caption laid over a diagram is a
+   * caption, not a collision, and flagging it would train the model out of the
+   * one kind it should be layering.
+   */
+  const collidingWith = (subject: BoardShape): string[] => {
+    if (subject.kind === "text") return []
+    return [...shapes.values()]
+      .filter(
+        (other) =>
+          other.id !== subject.id &&
+          other.kind !== "text" &&
+          overlaps(subject, other)
+      )
+      .map((other) => other.id)
+  }
+
+  /** `"s1 and s2"` for every overlapping pair within a set. Empty when clean. */
+  const overlappingPairs = (subjects: BoardShape[]): string[] => {
+    const pairs: string[] = []
+    for (let i = 0; i < subjects.length; i += 1) {
+      for (let j = i + 1; j < subjects.length; j += 1) {
+        const a = subjects[i]
+        const b = subjects[j]
+        if (!a || !b) continue
+        if (a.kind === "text" || b.kind === "text") continue
+        if (overlaps(a, b)) pairs.push(`${a.id} and ${b.id}`)
+      }
+    }
+    return pairs
+  }
+
+  /**
+   * Put a shape on the shadow board and record the op.
+   *
+   * Split out from `createShape` because `drawDiagram` needs the shape itself —
+   * it has a dozen to place and an arrow list to resolve against them, and the
+   * prose `createShape` returns is written for a model reading one result.
+   */
+  const addShape = (input: CreateShapeInput): BoardShape => {
+    const id = allocateId()
+    const shape: BoardShape = {
+      id,
+      kind: input.kind,
+      x: round(input.x),
+      y: round(input.y),
+      w: round(input.w ?? DEFAULT_SHAPE_WIDTH),
+      h: round(input.h ?? DEFAULT_SHAPE_HEIGHT),
+      ...(input.text ? { text: input.text } : {}),
+      ...(input.color ? { color: input.color } : {}),
+    }
+    shapes.set(id, shape)
+    emit({ op: "create", ...shape })
+    return shape
+  }
+
+  /** As {@link addShape}, for an arrow. Both terminals must already resolve. */
+  const addConnection = (
+    fromId: string,
+    toId: string,
+    label?: string
+  ): BoardConnection => {
+    const connection: BoardConnection = {
+      id: allocateId(),
+      fromId,
+      toId,
+      ...(label ? { label } : {}),
+    }
+    connections.push(connection)
+    emit({ op: "connect", ...connection })
+    return connection
+  }
+
+  /**
    * Reposition a set of shapes, returning the new top-left of each.
    *
    * Ordering is by current position rather than by the order the model listed
@@ -196,6 +332,30 @@ export function createBoardSession(context: BoardContext): BoardSession {
     const minY = Math.min(...subjects.map((s) => s.y))
     const maxRight = Math.max(...subjects.map((s) => s.x + s.w))
     const maxBottom = Math.max(...subjects.map((s) => s.y + s.h))
+
+    // The two layouts that read the board's arrows rather than only its
+    // geometry. Anchored at the selection's existing top-left, because tidying
+    // a diagram must not also teleport it somewhere else on the page.
+    if (layout === "flow-right" || layout === "flow-down") {
+      const within = new Set(subjects.map((shape) => shape.id))
+      const placed = layerGraph(
+        subjects.map((shape) => ({ key: shape.id, w: shape.w, h: shape.h })),
+        connections
+          .filter((c) => within.has(c.fromId) && within.has(c.toId))
+          .map((c) => ({ from: c.fromId, to: c.toId })),
+        {
+          direction: layout === "flow-right" ? "right" : "down",
+          gapAlong: round(gap * ALONG_GAP_RATIO),
+          gapAcross: gap,
+        }
+      )
+      for (const shape of subjects) {
+        const at = placed.get(shape.id)
+        if (at)
+          moves.set(shape.id, { x: round(minX + at.x), y: round(minY + at.y) })
+      }
+      return moves
+    }
 
     switch (layout) {
       case "row": {
@@ -273,6 +433,55 @@ export function createBoardSession(context: BoardContext): BoardSession {
     return moves
   }
 
+  /**
+   * Where a new diagram's top-left corner goes.
+   *
+   * Three answers, in order. An explicit position wins, because a caller that
+   * worked one out had a reason. Otherwise, if the diagram attaches to shapes
+   * already on the board, it lands just below them — an extension that appears
+   * next to what it extends reads as connected, where one placed across the
+   * page reads as a second, unrelated drawing. Failing both, free space near
+   * what the user is looking at.
+   *
+   * What it never does is land on existing work. That is the one outcome that
+   * destroys something, and it is the reason this is not simply the viewport
+   * centre.
+   */
+  const resolveOrigin = (
+    input: DrawDiagramInput,
+    block: LayoutBox,
+    existing: BoardShape[],
+    edges: DiagramEdgeInput[],
+    newKeys: Set<string>
+  ): { x: number; y: number } => {
+    if (input.x !== undefined && input.y !== undefined) {
+      return { x: round(input.x), y: round(input.y) }
+    }
+
+    const anchors = new Set<string>()
+    for (const edge of edges) {
+      for (const raw of [edge.from, edge.to]) {
+        if (newKeys.has(raw.trim())) continue
+        const id = normaliseId(raw)
+        if (shapes.has(id)) anchors.add(id)
+      }
+    }
+
+    const anchored = boundsOf(existing.filter((shape) => anchors.has(shape.id)))
+    if (anchored) {
+      const below = {
+        x: round(anchored.x),
+        y: round(anchored.y + anchored.h + PLACEMENT_GAP),
+      }
+      const clear = existing.every(
+        (shape) => !overlaps({ ...below, w: block.w, h: block.h }, shape)
+      )
+      if (clear) return below
+    }
+
+    return findFreeOrigin(existing, block.w, block.h, context.viewport)
+  }
+
   return {
     context,
     shapes: () => [...shapes.values()],
@@ -285,20 +494,11 @@ export function createBoardSession(context: BoardContext): BoardSession {
     },
 
     createShape(input) {
-      const id = allocateId()
-      const shape: BoardShape = {
-        id,
-        kind: input.kind,
-        x: round(input.x),
-        y: round(input.y),
-        w: round(input.w ?? DEFAULT_SHAPE_WIDTH),
-        h: round(input.h ?? DEFAULT_SHAPE_HEIGHT),
-        ...(input.text ? { text: input.text } : {}),
-        ...(input.color ? { color: input.color } : {}),
-      }
-      shapes.set(id, shape)
-      emit({ op: "create", ...shape })
-      return `Created ${describe(shape)}.`
+      const shape = addShape(input)
+      const clash = collidingWith(shape)
+      if (clash.length === 0) return `Created ${describe(shape)}.`
+
+      return `Created ${describe(shape)}. It overlaps ${clash.join(", ")} — move it, or draw the whole group with draw_diagram, which works the positions out for you.`
     },
 
     updateShape(input) {
@@ -332,7 +532,11 @@ export function createBoardSession(context: BoardContext): BoardSession {
         x: found.shape.x,
         y: found.shape.y,
       })
-      return `Moved ${describe(found.shape)}.`
+
+      const clash = collidingWith(found.shape)
+      if (clash.length === 0) return `Moved ${describe(found.shape)}.`
+
+      return `Moved ${describe(found.shape)}. It now overlaps ${clash.join(", ")} — move it somewhere clear, or arrange the group instead.`
     },
 
     deleteShapes(ids) {
@@ -401,16 +605,8 @@ export function createBoardSession(context: BoardContext): BoardSession {
         return `Cannot connect ${from.shape.id} to itself.`
       }
 
-      const id = allocateId()
-      const connection: BoardConnection = {
-        id,
-        fromId: from.shape.id,
-        toId: to.shape.id,
-        ...(input.label ? { label: input.label } : {}),
-      }
-      connections.push(connection)
-      emit({ op: "connect", ...connection })
-      return `Connected ${from.shape.id} to ${to.shape.id}${input.label ? ` labelled "${input.label}"` : ""} (arrow ${id}).`
+      const connection = addConnection(from.shape.id, to.shape.id, input.label)
+      return `Connected ${from.shape.id} to ${to.shape.id}${input.label ? ` labelled "${input.label}"` : ""} (arrow ${connection.id}).`
     },
 
     arrangeShapes(input) {
@@ -456,9 +652,132 @@ export function createBoardSession(context: BoardContext): BoardSession {
 
       const note =
         missing.length > 0 ? ` No shape matched ${missing.join(", ")}.` : ""
+
+      // `align-*` and `distribute-*` move along one axis and leave the other
+      // alone, so either can finish with two shapes on top of each other and be
+      // exactly what was asked for. Saying so is the difference between the
+      // model noticing and the user finding it.
+      const left = overlappingPairs(subjects)
+      const clash =
+        left.length > 0
+          ? ` ${left.join(", ")} now overlap — a flow-right, flow-down, row, column or grid layout separates them.`
+          : ""
+
       return ops.length === 0
-        ? `Those ${subjects.length} shapes are already arranged as ${input.layout}.${note}`
-        : `Arranged ${ops.length} shape(s) as ${input.layout} with a gap of ${gap}.${note}`
+        ? `Those ${subjects.length} shapes are already arranged as ${input.layout}.${note}${clash}`
+        : `Arranged ${ops.length} shape(s) as ${input.layout} with a gap of ${gap}.${note}${clash}`
+    },
+
+    /**
+     * A whole diagram in one call, from a description with no coordinates.
+     *
+     * This is the method the rest of the file exists to make possible, and the
+     * answer to the agent's oldest weakness: drawing eight boxes and ten arrows
+     * used to be eighteen model round trips of arithmetic the model is bad at
+     * and cannot see the result of. Here it names the boxes and the arrows,
+     * `graph-layout.ts` ranks them by those arrows, and every position is
+     * computed against the real board.
+     *
+     * **Edges may name a shape already on the canvas.** That is what makes
+     * "add a cache between the API and the database" a single call: the cache
+     * is a new node, and both its arrows land on ids the board already had.
+     * Existing shapes are never *moved* by this — a diagram appearing is not a
+     * licence to rearrange the user's work — so the new block is placed clear
+     * of everything, preferring just below whatever it was anchored to.
+     */
+    drawDiagram(input) {
+      const seen = new Set<string>()
+      const nodes: DiagramNodeInput[] = []
+      for (const node of input.nodes) {
+        const key = node.key.trim()
+        if (key.length === 0 || seen.has(key)) continue
+        seen.add(key)
+        nodes.push({ ...node, key })
+      }
+
+      if (nodes.length === 0) {
+        return "draw_diagram needs at least one node, each with a key and a label."
+      }
+
+      const edges = input.edges ?? []
+      const direction: FlowDirection = input.direction ?? "right"
+
+      const placed = layerGraph(
+        nodes.map((node) => ({
+          key: node.key,
+          w: round(node.w ?? DEFAULT_SHAPE_WIDTH),
+          h: round(node.h ?? DEFAULT_SHAPE_HEIGHT),
+        })),
+        // Only the edges between two *new* nodes shape the layout. One pointing
+        // at an existing shape says nothing about where this block should rank,
+        // because that shape is staying where it is.
+        edges
+          .filter((edge) => seen.has(edge.from) && seen.has(edge.to))
+          .map((edge) => ({ from: edge.from, to: edge.to })),
+        { direction }
+      )
+
+      const block = boundsOf(
+        nodes.map((node) => {
+          const at = placed.get(node.key) ?? { x: 0, y: 0 }
+          return {
+            ...at,
+            w: round(node.w ?? DEFAULT_SHAPE_WIDTH),
+            h: round(node.h ?? DEFAULT_SHAPE_HEIGHT),
+          }
+        })
+      ) ?? { x: 0, y: 0, w: 0, h: 0 }
+
+      const existing = [...shapes.values()]
+      const origin = resolveOrigin(input, block, existing, edges, seen)
+
+      const idByKey = new Map<string, string>()
+      for (const node of nodes) {
+        const at = placed.get(node.key) ?? { x: 0, y: 0 }
+        const shape = addShape({
+          kind: node.kind ?? "rectangle",
+          x: origin.x + at.x,
+          y: origin.y + at.y,
+          ...(node.w === undefined ? {} : { w: node.w }),
+          ...(node.h === undefined ? {} : { h: node.h }),
+          ...(node.text ? { text: node.text } : {}),
+          ...(node.color ? { color: node.color } : {}),
+        })
+        idByKey.set(node.key, shape.id)
+      }
+
+      // A key names a box just drawn; anything else has to be a shape already
+      // on the board, or it names nothing and the arrow cannot be drawn.
+      const resolveEndpoint = (raw: string): string | undefined => {
+        const byKey = idByKey.get(raw.trim())
+        if (byKey) return byKey
+        const id = normaliseId(raw)
+        return shapes.has(id) ? id : undefined
+      }
+
+      let drawn = 0
+      const unresolved: string[] = []
+      for (const edge of edges) {
+        const from = resolveEndpoint(edge.from)
+        const to = resolveEndpoint(edge.to)
+        if (!from || !to) {
+          unresolved.push(`${edge.from} -> ${edge.to}`)
+          continue
+        }
+        if (from === to) continue
+        addConnection(from, to, edge.label)
+        drawn += 1
+      }
+
+      const naming = nodes
+        .map((node) => `${node.key}=${idByKey.get(node.key) ?? "?"}`)
+        .join(", ")
+      const missed =
+        unresolved.length > 0
+          ? ` These arrows named something that is not a node here and not a shape on the board, so they were skipped: ${unresolved.join("; ")}.`
+          : ""
+
+      return `Drew ${nodes.length} shape(s) and ${drawn} arrow(s), laid out ${direction === "right" ? "left to right" : "top to bottom"}. Ids: ${naming}.${missed}`
     },
 
     focusViewport(ids) {

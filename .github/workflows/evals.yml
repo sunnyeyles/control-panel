@@ -1,0 +1,109 @@
+name: Whiteboard evals
+
+# ⚠️ **A separate workflow rather than a job in `test.yml`, and that is not
+# tidiness.** `test.yml` runs on a fork's pull request *by design* — its whole
+# dependency set is a Postgres container that needs no secret, and its own
+# comments say so. This job spends `OPENAI_API_KEY`, so adding it there would
+# either leak the key's availability into a workflow that must not need one, or
+# force a fork guard onto a workflow that currently has no reason for one.
+#
+# Never on push, and never on an ordinary pull request. A full pass is nineteen
+# cases and somewhere around sixty model calls, and the scores are stochastic: a
+# case that scores 0.9 today can score 0.8 tomorrow with nothing changed. Wired
+# to a required check, that would be a flaky gate people learn to re-run past.
+# It is opt-in instead — the label, or the button.
+on:
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "Comma-separated case names. Empty runs all of them."
+        required: false
+        type: string
+      repeats:
+        description: "Runs per case. 3 is enough to see variance."
+        required: false
+        default: "1"
+        type: string
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+# `cancel-in-progress: false`, unlike `test.yml`. A superseded test run is of no
+# interest; a superseded eval run has already spent most of its money.
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evals:
+    # The label is the opt-in on a pull request, and the repository check is the
+    # same guard `migrate.yml` uses on its own secret-consuming jobs: secrets are
+    # absent on a fork's pull request, so without this the job would start and
+    # then fail on an empty key.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'run-evals' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EVAL_CASES: ${{ inputs.cases }}
+      EVAL_REPEATS: ${{ inputs.repeats || '1' }}
+      # Optional. Absent keys make every function in `@workspace/langfuse` a
+      # no-op, so the run works without them — it is simply not traceable.
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+
+    steps:
+      # Before the install, which is the pattern `migrate.yml` sets: a job that
+      # cannot possibly succeed should say why in ten seconds rather than after
+      # two minutes of dependency resolution.
+      - name: Check the OPENAI_API_KEY secret is set
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::OPENAI_API_KEY is not set for this repository."
+            echo "These evals call a real model; add the secret in Settings → Secrets → Actions."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `turbo run eval` and not `tsx` directly: the task dependsOn `^build`, so
+      # the packages this consumes as `dist/` are compiled first. `run` is
+      # explicit because `generate` is a Turborepo builtin and the bare form is
+      # ambiguous once a task name could collide with one.
+      - name: Run the evals
+        run: pnpm turbo run eval --filter=@workspace/agents
+
+      # `always()`, because a run that scored badly is exactly the one whose
+      # report someone wants to read. The step above only fails when a case
+      # *crashed*, but a low-scoring pass still writes everything.
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whiteboard-evals
+          path: packages/agents/evals/results/
+          if-no-files-found: warn
+
+      # The report is the deliverable, so it goes where the person who clicked
+      # the button is already looking rather than three clicks into an artifact.
+      - name: Summarise
+        if: always()
+        run: cat packages/agents/evals/results/*.md >> "$GITHUB_STEP_SUMMARY" || true

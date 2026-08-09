@@ -74,8 +74,17 @@ export type ShapeColor = z.infer<typeof shapeColorSchema>
  * as ordinary move ops, so the model never computes a coordinate. That is the
  * single biggest quality lever for "clean this diagram up": a model asked for
  * twelve positions will produce eleven good ones and one that overlaps.
+ *
+ * **`flow-*` is the only pair that reads the arrows**, and it is what "tidy
+ * this diagram" should almost always mean. The other seven treat the selection
+ * as an unordered bag of boxes, so they can line up a pipeline in the wrong
+ * order and be perfectly correct about it; a flow layout ranks the shapes by
+ * the connections already on the board, so the arrows come out pointing the way
+ * the reader scans. See `graph-layout.ts`.
  */
 export const layoutSchema = z.enum([
+  "flow-right",
+  "flow-down",
   "row",
   "column",
   "grid",

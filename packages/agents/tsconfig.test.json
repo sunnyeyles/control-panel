@@ -12,6 +12,9 @@
     // the inherited rootDir would reject it for no benefit.
     "rootDir": "."
   },
-  "include": ["src", "vitest.config.ts"],
+  // `evals/` sits outside `src/`, so without naming it here it would be
+  // invisible to both configs — not emitted, which is right, but also never
+  // typechecked, which is not.
+  "include": ["src", "evals", "vitest.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

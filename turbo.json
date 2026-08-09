@@ -50,6 +50,23 @@
     "test": {
       "dependsOn": ["^build", "generate"]
     },
+    "eval": {
+      "dependsOn": ["^build", "generate"],
+      // Never cached, and not for the usual reason. A run calls a real model,
+      // so its result is different every time even when nothing changed —
+      // `OPENAI_API_KEY` is already in `globalEnv`, so a cache hit would skip
+      // the run entirely and print yesterday's scores as today's.
+      "cache": false,
+      // Task-scoped rather than added to `globalEnv`, which would rehash every
+      // other task in the repo for variables only this one reads.
+      "env": [
+        "EVAL_MODEL",
+        "EVAL_JUDGE_MODEL",
+        "EVAL_REPEATS",
+        "EVAL_CASES",
+        "EVAL_WRITE_BASELINE"
+      ]
+    },
     "zip": {
       "dependsOn": ["build"],
       "outputs": ["lambda.zip"]

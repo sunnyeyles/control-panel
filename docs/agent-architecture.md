@@ -208,7 +208,35 @@ than module singletons, because each is bound to one run's catalog.
 | `createResumeTailor`      | `[]`                                                           | The Letter Writer's case, unchanged: the same CV, the same advertisement copied verbatim beside it                                                                                                                                                                                                                                                                                                                              |
 | `createProfileExtractor`  | `[]`                                                           | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                                                                                                          |
 | `createAssistant`         | `allTools` + `extraTools`                                      | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                                                                                                         |
-| `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Mutates one in-memory board session for the turn; no board search, no fetch, no S3. The dashboard imports the canvas schema and session helpers from `@workspace/agent-tools` so the UI and the agent agree on the board shape                                                                                                                                                                                                  |
+| `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Nine verbs over one in-memory board session for the turn; no board search, no fetch, no S3. The dashboard imports the canvas schema and session helpers from `@workspace/agent-tools` so the UI and the agent agree on the board shape                                                                                                                                                                                          |
+
+### Why the whiteboard agent does not compute coordinates
+
+`draw_diagram` is the largest of the nine tools and the one the prompt steers
+everything past two boxes toward. It takes nodes and arrows and **no positions
+at all**; `packages/agent-tools/src/graph-layout.ts` ranks them by those arrows
+— cycle break, longest-path layering, barycentre ordering, then a separation
+pass — and returns a position per node.
+
+Two things follow, and both were previously impossible:
+
+- **Overlap is a property of the algorithm rather than of the model's luck.**
+  The model cannot see the canvas, so a box it puts on top of another stays
+  there; `create_shape` now at least says so in its reply, but the real fix is
+  not asking it for the coordinate. `arrange_shapes` gained `flow-right` and
+  `flow-down` for the same reason — they are the only layouts that read the
+  board's existing arrows, which is what "clean this diagram up" needs.
+- **A diagram costs one round trip instead of eighteen.** Six boxes and seven
+  arrows used to be thirteen tool calls against a budget of 24. That is why
+  `WHITEBOARD_MAX_LLM_CALLS` stayed at 24 rather than falling with it: drawing
+  no longer spends the budget, editing does.
+
+The board reaches the model **inside its system prompt**, via
+`renderBoardContext`, which means every shape label the user has typed is
+rendered into the most privileged part of the request. The prompt therefore
+carries the same quoted-material fence as the tool-less agents below, in its own
+wording — a shape labelled like an instruction is a shape with a strange label.
+`packages/agents/evals/cases/injection.ts` is what keeps that clause honest.
 
 ### Why the Letter Writer, the Resume Tailor and the Profile Extractor have no tools
 
@@ -447,9 +475,9 @@ down with it.
 
 ## Where things live
 
-| Package                | Holds                                                                                                                                                                                                                                                                                                    |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `whiteboard`, plus the two schema contracts — `findings` (Scout → Brief Writer) and `criteria` (Profile Extractor → whoever stores them) — and `cover-letter`, `tailored-resume` and `posting-id` |
-| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                              |
-| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                             |
-| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                               |
+| Package                | Holds                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `whiteboard`, plus the two schema contracts — `findings` (Scout → Brief Writer) and `criteria` (Profile Extractor → whoever stores them) — and `cover-letter`, `tailored-resume` and `posting-id`. Also `evals/`, the scored whiteboard harness, which is outside `src/` and outside `pnpm test` |
+| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                                                                                                                             |
+| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts` / `graph-layout.ts`; and `index.ts` with `allTools`                                                                                                                        |
+| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                                                                                                                              |

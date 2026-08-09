@@ -116,6 +116,29 @@ In the six that emit `dist/` the same arrangement repeats and is deliberate:
 transpiles without typechecking. `typecheck` runs both. The dashboard and
 `@workspace/ui` need neither half — both are `noEmit` already.
 
+**Evals are a separate task, and `pnpm test` never runs one.** A test asserts
+and fails; an eval calls a real model, scores the result between 0 and 1, and is
+read as a delta against a committed baseline. Only `@workspace/agents` has one
+today, covering the whiteboard agent:
+
+```bash
+pnpm turbo run eval --filter=@workspace/agents     # needs OPENAI_API_KEY
+```
+
+The task is `cache: false` — `OPENAI_API_KEY` is in `globalEnv`, so a cached hit
+would skip the run and print yesterday's scores as today's. It is not in CI on
+push or on an ordinary pull request, because a stochastic check behind a
+required gate is one people learn to re-run past; `.github/workflows/evals.yml`
+runs on `workflow_dispatch` or the `run-evals` label, and needs an
+`OPENAI_API_KEY` repository secret that does not exist yet.
+
+**The graders are not part of that and do run in `pnpm test`.** They are pure
+functions under `packages/agents/evals/graders/`, and they are the measuring
+instrument: one that reported "no overlap" while two boxes were stacked would
+make every number downstream a lie. That is why `packages/agents` is the one
+workspace whose vitest `include` reaches outside `src/`, and why `evals` is named
+in its `tsconfig.test.json`. See `packages/agents/evals/README.md`.
+
 **`@workspace/ui` is tested only under `src/lib/`, and that boundary is the
 point.** Everything under `src/components/` is React over a DOM, which would
 mean a browser environment and — for the editor — ProseMirror. What is covered

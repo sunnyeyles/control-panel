@@ -1,10 +1,17 @@
 /**
- * The eight canvas tools — the agent's entire vocabulary for touching a board.
+ * The nine canvas tools — the agent's entire vocabulary for touching a board.
  *
  * The model never generates drawing code, and never computes a layout. It names
  * a semantic shape and a position; the session validates that against the
  * shadow board, does any arithmetic, and records ops. That containment is the
- * point: the surface a bad model call can reach is exactly these eight verbs.
+ * point: the surface a bad model call can reach is exactly these nine verbs.
+ *
+ * **`draw_diagram` is the one that carries the weight**, and the others are
+ * increasingly the editing verbs around it. It takes boxes and arrows with no
+ * coordinates at all and lays them out by rank, which turns eighteen round
+ * trips of coordinate arithmetic into one call whose positions are computed
+ * rather than guessed. `create_shape` remains for adding a single box to
+ * something that already exists.
  *
  * **Two channels leave every tool, and they carry different things.** The
  * return value is prose for the model — what happened, or what to do instead.
@@ -153,10 +160,91 @@ export function createCanvasTools(
     }
   )
 
+  const drawDiagram = tool(withOps(session.drawDiagram.bind(session)), {
+    name: "draw_diagram",
+    description:
+      "Draw a whole diagram at once — the boxes and the arrows between them. You supply NO coordinates: the positions are worked out from the arrows, so the boxes come out in reading order, evenly spaced and never on top of each other or on top of anything already on the board. Use this for anything with more than two boxes. An arrow may also point at a shape already on the board by its id, which is how you extend an existing diagram; those shapes are never moved.",
+    schema: z.object({
+      nodes: z
+        .array(
+          z.object({
+            key: z
+              .string()
+              .describe(
+                'A short name for this box, used only to refer to it in `edges` — e.g. "api". It is not drawn.'
+              ),
+            text: z
+              .string()
+              .describe(
+                "The label inside the box. Two or three words — a name, not a sentence."
+              ),
+            kind: shapeKindSchema
+              .optional()
+              .describe(
+                'What to draw. Defaults to "rectangle". Use "cloud" for external systems, "diamond" for decisions, "ellipse" for start and end points.'
+              ),
+            color: shapeColorSchema
+              .optional()
+              .describe("Use it to group related boxes; omit for the default."),
+            w: z
+              .number()
+              .optional()
+              .describe(`Width in pixels. Defaults to ${DEFAULT_SHAPE_WIDTH}.`),
+            h: z
+              .number()
+              .optional()
+              .describe(
+                `Height in pixels. Defaults to ${DEFAULT_SHAPE_HEIGHT}.`
+              ),
+          })
+        )
+        .min(1)
+        .describe("Every box in the diagram."),
+      edges: z
+        .array(
+          z.object({
+            from: z
+              .string()
+              .describe(
+                "The key of the box the arrow starts at, or the id of a shape already on the board."
+              ),
+            to: z
+              .string()
+              .describe(
+                "The key of the box the arrow points to, or the id of a shape already on the board."
+              ),
+            label: z
+              .string()
+              .optional()
+              .describe(
+                'A couple of words on the arrow, e.g. "writes". Leave it off when the relationship is obvious.'
+              ),
+          })
+        )
+        .optional()
+        .describe(
+          "The arrows, pointing the way data or control actually flows. These decide the layout, so give every relationship you mean."
+        ),
+      direction: z
+        .enum(["right", "down"])
+        .optional()
+        .describe(
+          'Which way the diagram reads. "right" for a pipeline or a flow of data, "down" for a hierarchy or a decision tree. Defaults to "right".'
+        ),
+      x: z
+        .number()
+        .optional()
+        .describe(
+          "Left edge of the whole block. Omit this — and y — to have clear space chosen for you, which is almost always what you want."
+        ),
+      y: z.number().optional().describe("Top edge of the whole block."),
+    }),
+  })
+
   const createShape = tool(withOps(session.createShape.bind(session)), {
     name: "create_shape",
     description:
-      "Add one shape to the board and get back the id it was given. Positions are page coordinates in pixels: x grows to the right and y grows DOWNWARD, so a shape below another has a larger y. Leave a gap of about 80 between neighbours. Call this once per shape; you do not need to read the board in between.",
+      "Add ONE shape to the board and get back the id it was given. For a diagram of several boxes use draw_diagram instead — it works the positions out, and this does not. Positions here are page coordinates in pixels: x grows to the right and y grows DOWNWARD, so a shape below another has a larger y. Leave a gap of about 80 between neighbours; the reply tells you if you landed on something.",
     schema: z.object({
       kind: shapeKindSchema.describe(
         'What to draw. Use "rectangle" for services and components, "cloud" for external systems, "diamond" for decisions, "ellipse" for start and end points, "note" for a sticky note, "text" for a bare caption or heading.'
@@ -247,14 +335,14 @@ export function createCanvasTools(
   const arrangeShapes = tool(withOps(session.arrangeShapes.bind(session)), {
     name: "arrange_shapes",
     description:
-      "Tidy several shapes into an arrangement — this is how you clean up a diagram. Positions are worked out for you, so prefer this over moving shapes one at a time whenever you want them lined up or evenly spaced.",
+      "Tidy shapes that are already on the board — this is how you clean a diagram up. Positions are worked out for you, so prefer this over moving shapes one at a time. Start with flow-right or flow-down: those two read the arrows between the shapes and put them in the order the diagram actually runs.",
     schema: z.object({
       ids: z
         .array(z.string())
         .min(2)
         .describe("The ids to arrange, at least two."),
       layout: layoutSchema.describe(
-        'How to arrange them: "row" or "column" to lay them out in order with even gaps, "grid" for a block, "align-*" to line up one edge without changing the other axis, "distribute-*" to even out the space between shapes while leaving the outermost two where they are.'
+        'How to arrange them. "flow-right" and "flow-down" rank the shapes by the arrows already between them and lay them out in that order, left to right or top to bottom — use these to tidy a diagram. "row", "column" and "grid" lay them out in their current order with even gaps, ignoring the arrows. "align-*" lines up one edge without touching the other axis and "distribute-*" evens out the space between them; both can leave shapes overlapping, and the reply says so when they do.'
       ),
       gap: z
         .number()
@@ -280,7 +368,11 @@ export function createCanvasTools(
     }
   )
 
+  // `draw_diagram` leads because the order a tool list is given in is a weak
+  // but real signal about which one to reach for, and reaching for it first is
+  // right for every request that draws more than a single box.
   return [
+    drawDiagram,
     readBoard,
     createShape,
     updateShape,
