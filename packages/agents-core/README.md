@@ -13,6 +13,12 @@ carries tool calls, and `tools` loops back. If the model-call budget runs out
 first, the run is diverted to a `halt` node that answers every outstanding tool
 call with an error — an unanswered tool call would be rejected on the next turn.
 
+**The compiled graph carries its own `recursionLimit`**, `recursionLimitFor(maxLlmCalls)`
+— `2n + 1`, because `model` and `tools` are one LangGraph super-step each. Left
+at LangGraph's default of 25 any budget above 12 is unreachable: the run throws
+`GraphRecursionError` part-way through instead of arriving at `halt`, which is
+the graceful stop `halt` exists to be. A caller passing its own limit still wins.
+
 ## Where this sits
 
 This package is the runtime only. It ships **no tools and no agents**: the

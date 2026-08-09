@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react"
 import type { CanvasOp } from "@workspace/agent-tools/canvas-schema"
 import { Button } from "@workspace/ui/components/button"
+import { cn } from "@workspace/ui/lib/utils"
 import { PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react"
 import type { Editor } from "tldraw"
 
@@ -63,14 +64,23 @@ export function WhiteboardSurface({ snapshot }: WhiteboardSurfaceProps) {
         <WhiteboardCanvas onEditor={handleEditor} snapshot={snapshot} />
       </div>
 
-      {chatOpen && (
-        <aside className="flex h-full w-[380px] shrink-0 flex-col border-l bg-background">
-          <WhiteboardChat
-            applyCanvasOps={applyCanvasOps}
-            readBoard={readBoard}
-          />
-        </aside>
-      )}
+      {/*
+        Hidden, never unmounted. The conversation lives in the chat panel's own
+        state — the messages, the session id the trace is keyed on, and the ops
+        the browser could not apply and still owes the model — so taking it out
+        of the tree throws all three away. Hiding it mid-stream would be worse
+        still: `onData` goes with it, and every remaining op of that turn is
+        dropped while the agent goes on describing what it drew.
+      */}
+      <aside
+        className={cn(
+          "flex h-full w-[380px] shrink-0 flex-col border-l bg-background",
+          !chatOpen && "hidden"
+        )}
+        inert={!chatOpen}
+      >
+        <WhiteboardChat applyCanvasOps={applyCanvasOps} readBoard={readBoard} />
+      </aside>
 
       <Button
         aria-label={chatOpen ? "Hide the assistant" : "Show the assistant"}

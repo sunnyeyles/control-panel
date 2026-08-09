@@ -261,6 +261,33 @@ describe("the cap", () => {
   })
 })
 
+describe("known ids", () => {
+  it("reports an arrow that was too loose to be a connection", () => {
+    const from = geo("s1")
+    const to = geo("s2", { x: 400 })
+    const arrow: ShapeLike = { id: "shape:s3", type: "arrow", x: 0, y: 0 }
+
+    const board = toBoardContext(
+      input([from, to, arrow], { boundsById: boundsFor([from, to]) })
+    )
+
+    expect(board.connections).toEqual([])
+    expect(board.knownIds).toEqual(["s1", "s2", "s3"])
+  })
+
+  it("reports the shapes the cap dropped", () => {
+    const shapes = Array.from({ length: MAX_DETAILED_SHAPES + 5 }, (_, index) =>
+      geo(`s${index + 1}`, { y: index * 200 })
+    )
+
+    const board = toBoardContext(input(shapes))
+
+    expect(board.shapes).toHaveLength(MAX_DETAILED_SHAPES)
+    expect(board.knownIds).toHaveLength(MAX_DETAILED_SHAPES + 5)
+    expect(board.knownIds).toContain(`s${MAX_DETAILED_SHAPES + 5}`)
+  })
+})
+
 describe("reference signals", () => {
   it("passes selection and recent edits through as short ids", () => {
     const shapes = [geo("s1"), geo("s2")]

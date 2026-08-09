@@ -163,6 +163,17 @@ export const boardContextSchema = z.object({
    * how it learns that a shape it moved had already been deleted.
    */
   lastTurnErrors: z.array(z.string()).optional(),
+  /**
+   * Every id on the canvas, including the ones this board leaves out. For
+   * allocation only — the model is never shown it.
+   *
+   * `shapes` and `connections` are both filtered: by the viewport cap, and by
+   * the rule that an arrow is only a connection when both terminals are bound
+   * to something visible. Without this list a server allocating `s5` cannot
+   * tell that `s5` is a shape it simply was not shown, and tldraw's `store.put`
+   * overwrites rather than refuses — so the user loses a shape.
+   */
+  knownIds: z.array(z.string()).optional(),
 })
 export type BoardContext = z.infer<typeof boardContextSchema>
 

@@ -229,7 +229,7 @@ export function createCanvasTools(
     {
       name: "delete_shape",
       description:
-        "Remove shapes from the board. Any arrows attached to them go too. Deleting is not reversible from your side, so only delete what the user asked you to.",
+        "Remove shapes from the board. Any arrows attached to them go too, and an arrow's own id can be passed here to remove just that arrow. Deleting is not reversible from your side, so only delete what the user asked you to.",
       schema: z.object({
         ids: z
           .array(z.string())

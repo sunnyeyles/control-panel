@@ -32,6 +32,19 @@ export const DEFAULT_SYSTEM_PROMPT = [
 export const DEFAULT_MAX_LLM_CALLS = 5
 
 /**
+ * Super-steps a run of `maxLlmCalls` model calls needs.
+ *
+ * A full run is `model`, `tools`, `model`, … — one super-step each — so the
+ * worst case is `maxLlmCalls` model steps, one fewer tool steps between them,
+ * and `halt` at the end: `2 * maxLlmCalls`. The spare step is slack, because a
+ * recursion limit reached is a thrown `GraphRecursionError` rather than a
+ * graceful stop, and `halt` is the graceful stop this graph already has.
+ */
+export function recursionLimitFor(maxLlmCalls: number): number {
+  return maxLlmCalls * 2 + 1
+}
+
+/**
  * The minimal chat-model surface the graph needs: bind tools, then invoke.
  * Structural on purpose — any tool-capable LangChain chat model (ChatOpenAI,
  * ChatAnthropic, ...) satisfies it, and so does a hand-rolled fake, which is
@@ -73,6 +86,9 @@ export interface CreateAgentOptions {
  * model call budget is exhausted the run is diverted to `halt`, which answers
  * every outstanding tool call with an error so the transcript stays
  * well-formed — an unanswered tool call would be rejected on the next turn.
+ *
+ * Binds {@link recursionLimitFor} so a budget above 12 is reachable — LangGraph's
+ * default of 25 would throw first. A caller passing its own limit still wins.
  */
 export function createAgent(options: CreateAgentOptions = {}) {
   const model = options.model ?? createModel()
@@ -134,6 +150,7 @@ export function createAgent(options: CreateAgentOptions = {}) {
     .addEdge("tools", "model")
     .addEdge("halt", END)
     .compile({ checkpointer: options.checkpointer })
+    .withConfig({ recursionLimit: recursionLimitFor(maxLlmCalls) })
 }
 
 export type Agent = ReturnType<typeof createAgent>

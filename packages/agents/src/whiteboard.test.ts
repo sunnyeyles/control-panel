@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   createWhiteboardAgent,
+  WHITEBOARD_MAX_LLM_CALLS,
   WHITEBOARD_SYSTEM_PROMPT,
 } from "./whiteboard.ts"
 
@@ -216,6 +217,33 @@ describe("the shadow board", () => {
     await collectCustom(session)
 
     expect(session.board.shapes()).toMatchObject([{ id: "s1", kind: "note" }])
+  })
+})
+
+describe("the call budget", () => {
+  it("is reachable — the graph does not hit LangGraph's recursion limit first", async () => {
+    const session = createWhiteboardAgent({
+      context: EMPTY_BOARD,
+      turnId: "turn-6",
+      model: {
+        bindTools() {
+          return {
+            async invoke(): Promise<AIMessage> {
+              return callTurn(
+                toolCall("create_shape", { kind: "rectangle", x: 0, y: 0 })
+              )
+            },
+          }
+        },
+      },
+    })
+
+    const result = await session.agent.invoke({ messages: [] })
+
+    expect(result.llmCalls).toBe(WHITEBOARD_MAX_LLM_CALLS)
+    expect(result.messages.at(-1)?.content).toContain(
+      `budget of ${WHITEBOARD_MAX_LLM_CALLS} model calls`
+    )
   })
 })
 
