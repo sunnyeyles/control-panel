@@ -55,27 +55,62 @@ something it half-remembers. Not to be confused with the LangGraph runtime in
 `agents-core`.
 _Avoid_: synthesiser, orchestrator
 
+**Posting Document**:
+Something written for one **Posting** on the candidate's behalf, from that
+Posting plus the candidate's own background text. There are two — the **Cover
+Letter** and the **Tailored Resume** — and this is the name for what they are
+both an instance of.
+
+The word earns its place because the two agree on everything except what they
+say. Both are addressed by `(User, Posting)` and by nothing else, so
+re-generating overwrites one object rather than accumulating drafts. Both take
+the never-expiring `resumes` retention posture, because the text is the user's
+own voice and they may already have relied on it. Both get **no database row**,
+because `artifacts.run_id` is `NOT NULL` and generating one is not an execution
+of a briefing **Job**. Both are drawn from the stored Posting's `payload` and the
+newest **Document** the user labelled a resume — so a letter and a resume for one
+advertisement always describe the same candidate. Both carry provenance in object
+metadata rather than in a column. Every one of those is a decision that was taken
+once and then copied; naming the concept is what stops the third one from copying
+it again.
+
+**It is not an object kind, and there is no `posting-documents` prefix in the
+bucket.** The kinds stay `cover-letters` and `tailored-resumes`, because they
+hold different things and a reader listing the bucket should be able to tell
+which is which. What the term names is the shape they share, which in the tree is
+`apps/dashboard/lib/posting-documents/` and
+`packages/user-storage/src/posting-document-store.ts`.
+
+⚠️ **Not a Document.** A **Document** is something the _user_ uploaded and the
+system reads; a Posting Document is something the system wrote and the user
+edits. The two travel in opposite directions, and a Posting Document never
+appears in the Documents list.
+
+**What the two deliberately do not share is every sentence a user reads.** A
+letter with no CV behind it and a resume with no CV behind it are the same
+condition and the same reason code, and they are still told to the user
+differently, because the next thing to do about it differs. Shared modules here
+return a reason; the feature owns the wording.
+_Avoid_: artifact (that is a row in `artifacts`), application document, generated
+document, posting artefact
+
 **Cover Letter**:
-A first-person draft for one **Posting**, written in the candidate's voice by
-the **Letter Writer** from that Posting plus the candidate's own background
-text. A draft the user edits, never a submittable letter: where a fact was not
-supplied — a start date, a salary, a named recipient — it carries a literal
-`[bracketed placeholder]`, because a plausible invention attributed to the user
-is a lie.
+A **Posting Document** — a first-person draft for one **Posting**, written in the
+candidate's voice by the **Letter Writer** from that Posting plus the candidate's
+own background text. A draft the user edits, never a submittable letter: where a
+fact was not supplied — a start date, a salary, a named recipient — it carries a
+literal `[bracketed placeholder]`, because a plausible invention attributed to
+the user is a lie.
 
 Stored under its own object kind, `cover-letters`, at
-`{environment}/{userId}/cover-letters/{postingId}.md` — **keyed on the Posting,
+`{environment}/{userId}/cover-letters/{postingId}.md`. **Keyed on the Posting,
 not on the Run**, so re-drafting the same advertisement overwrites one object and
-the previous draft survives as a non-current version. Two Runs a week apart that
+the previous draft survives as a non-current version — two Runs a week apart that
 find the same advertisement agree on the id because `postingId()` derives it from
-the URL. Retention is the `resumes` posture, never expiring: the text is the
-user's own voice and they may already have relied on it.
-
-It gets **no database row**. `artifacts.run_id` is `NOT NULL` and references
-`runs`, and drafting is not an execution of a briefing job — minting an ad-hoc
-**Run** per click would put rows that are not briefings into a job's history. The
-precedent is the **Document**, which has no row for the same reason. Provenance
-— the Run, the title, the company, the URL — rides in object metadata instead.
+the URL. The never-expiring retention, the absent database row and the metadata
+provenance are the **Posting Document** rules, and the reasoning for each is
+there rather than repeated here. What rides in this kind's metadata is the Run,
+the title, the company and the URL.
 
 Drafted from the dashboard by a button on each **Posting** on `/jobs`. Its
 source text is the stored Posting's `payload` — the validated advertisement as
@@ -98,8 +133,9 @@ that never sees the profile.
 _Avoid_: applicant agent, cover-letter bot
 
 **Tailored Resume**:
-The candidate's own CV rewritten for one **Posting** by the **Resume Tailor** —
-the relevant experience led with, the irrelevant cut, the wording turned towards
+A **Posting Document** — the candidate's own CV rewritten for one **Posting** by
+the **Resume Tailor**, the relevant experience led with, the irrelevant cut, the
+wording turned towards
 the advertisement. **A rearrangement, never an addition**: every line must have a
 counterpart in the source **Document**, so no employer, date, metric,
 qualification or technology appears that was not already there. Unlike a **Cover
@@ -108,14 +144,12 @@ facts, and a gap marker in one is a broken document rather than a visible
 omission, so anything unknown is simply left out.
 
 Stored under its own object kind, `tailored-resumes`, at
-`{environment}/{userId}/tailored-resumes/{postingId}.md` — **keyed on the
-Posting, exactly as a Cover Letter is**, so re-generating overwrites one object
-and the previous one survives as a non-current version. Retention is the
-`resumes` posture, never expiring. It gets **no database row**, for the reason a
-Cover Letter gets none. Provenance rides in object metadata, and carries one
-field a letter's does not: **which Document it was rewritten from**, because the
-selection rule takes the newest one labelled Resume and that answer changes
-silently the moment another is uploaded.
+`{environment}/{userId}/tailored-resumes/{postingId}.md`. The Posting key, the
+never-expiring retention and the absent database row are the **Posting Document**
+rules; it follows them and adds nothing to them. Its metadata carries one field a
+letter's does not: **which Document it was rewritten from**, because the selection
+rule takes the newest one labelled Resume and that answer changes silently the
+moment another is uploaded.
 
 Generated from a button on each Posting on `/jobs`, beside the Cover Letter
 controls, from the same `postings.payload` and the same `loadCandidateBackground`
