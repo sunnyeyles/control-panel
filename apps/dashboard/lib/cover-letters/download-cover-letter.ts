@@ -1,7 +1,5 @@
-import {
-  coverLetterFilename,
-  isPostingId,
-} from "@/lib/cover-letters/cover-letter-ref"
+import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
+import { isPostingId } from "@/lib/posting-documents/posting-document-ref"
 import {
   isUserStorageError,
   type CoverLetterStore,

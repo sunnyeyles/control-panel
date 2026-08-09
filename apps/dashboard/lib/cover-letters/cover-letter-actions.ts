@@ -7,7 +7,7 @@ import {
   loadCandidateBackground,
   type NoBackgroundReason,
 } from "@/lib/candidate/candidate-background"
-import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
+import { POSTING_ID_PATTERN } from "@/lib/posting-documents/posting-document-ref"
 import {
   loadStoredPosting,
   storedPostingMessage,
@@ -102,12 +102,13 @@ export { POSTING_NOT_FOUND }
 const BAD_REQUEST = "That posting could not be identified."
 
 /**
- * The Posting id shape, from `cover-letter-ref.ts`.
+ * The Posting id shape, from `lib/posting-documents/posting-document-ref.ts`.
  *
- * It lived here until the download route needed the same rule; the reasoning
- * for why it is restated at all rather than exported from `@workspace/agents`
- * moved with it. One copy, because it is what makes every value reaching the
- * store a legal key segment by construction.
+ * It lived here until the download route needed the same rule, and moved again
+ * once the tailored resume turned out to be addressed by the same value; the
+ * reasoning for why it is restated at all rather than exported from
+ * `@workspace/agents` moved with it. One copy, because it is what makes every
+ * value reaching the store a legal key segment by construction.
  *
  * ⚠️ **This is now {@link saveSchema} without its `markdown`, and that is the
  * two actions agreeing rather than a duplication to collapse.** A letter is

@@ -1,57 +1,22 @@
 import {
   postingDocumentFilename,
   type PostingDocumentNameParts,
-} from "@/lib/postings/posting-document-filename"
+} from "@/lib/posting-documents/posting-document-filename"
 
 /**
- * Addressing one stored cover letter, and naming the file a download produces.
+ * Naming the file a cover-letter download produces.
  *
  * Imports nothing from Next, for the reason `lib/documents/document-ref.ts`
  * gives about itself: a test can reach it, and the shape a value must have
  * before it becomes a key segment is exactly the thing worth testing.
  *
- * There is no composite `{id}{extension}` here as there is for documents,
- * because a letter has no extension to carry — `cover-letter-store.ts` fixes it
- * at `.md`. The address is the Posting id and nothing else, which is why the
- * download route's path segment is the bare id.
+ * ⚠️ **`POSTING_ID_PATTERN` is no longer here**, and the move is what the
+ * **Posting Document** entry in `CONTEXT.md` describes: a letter and a tailored
+ * resume are addressed by exactly the same value, so the rule that value passes
+ * belongs to neither feature. It lives in
+ * `lib/posting-documents/posting-document-ref.ts`, whose comment explains at
+ * length why there is one copy of it.
  */
-
-/**
- * The shape `postingId()` produces: sixteen lowercase hex characters.
- *
- * Restated here rather than exported from `@workspace/agents`, because what is
- * being enforced is *the shape of a value arriving from outside* — a form
- * field, a URL segment — and not that function's contract. The two agree today
- * and this check must fail closed whatever the function does tomorrow.
- *
- * It is deliberately tighter than the key-segment rule in
- * `@workspace/user-storage`, for the same reason `document-ref.ts` pins the
- * uuid shape: every value that passes here is a legal key segment by
- * construction, so a malformed one is refused where the wording fits rather
- * than deep in the store.
- *
- * **One copy, in this module.** It began in `cover-letter-actions.ts`, and the
- * download route needed the same rule the moment a letter could be fetched
- * back. Two copies of a pattern that gates key construction is how one of them
- * gets relaxed alone.
- *
- * **The shape is stated a second time, in SQL, and that one is deliberate.**
- * `packages/db/prisma/migrations/0005_postings/migration.sql` constrains
- * `postings.posting_id` with `postings_posting_id_check` — the same sixteen hex
- * characters, in a different language doing a different job. This pattern
- * validates *untrusted input* on its way to a key segment, and stays the only
- * copy of that; the CHECK refuses to *store* a value that could never be a key
- * segment at all, exactly as `artifacts_object_key_check` refuses a URL where a
- * key belongs. Neither can stand in for the other — a database cannot see a
- * form field, and a TypeScript guard cannot see a row a backfill wrote — so the
- * rule against a second copy of *this* check is unaffected by it.
- */
-export const POSTING_ID_PATTERN = /^[0-9a-f]{16}$/
-
-/** Whether a value from a form or a URL can address a letter at all. */
-export function isPostingId(value: unknown): value is string {
-  return typeof value === "string" && POSTING_ID_PATTERN.test(value)
-}
 
 /** What is known about the Posting a letter was drafted for, for naming it. */
 export type CoverLetterNameParts = PostingDocumentNameParts
@@ -59,10 +24,11 @@ export type CoverLetterNameParts = PostingDocumentNameParts
 /**
  * The filename a download is offered under.
  *
- * The naming rule moved to `lib/postings/posting-document-filename.ts` when the
- * tailored resume needed the identical one — the two differ by a label and by
- * nothing else, and the character cleaning inside it is the half worth having
- * one copy of. This stays as the name the letter's own call sites use.
+ * The naming rule lives in `lib/posting-documents/posting-document-filename.ts`
+ * because the tailored resume needs the identical one — the two differ by a
+ * label and by nothing else, and the character cleaning inside it is the half
+ * worth having one copy of. This stays as the name the letter's own call sites
+ * use.
  */
 export function coverLetterFilename(parts: CoverLetterNameParts): string {
   return postingDocumentFilename("Cover letter", parts)

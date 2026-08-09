@@ -2,7 +2,7 @@ import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
-import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
+import { POSTING_ID_PATTERN } from "@/lib/posting-documents/posting-document-ref"
 import {
   loadPostingDetail,
   type PostingDetailView,
@@ -177,9 +177,9 @@ export interface PostingActionsDeps {
  * shape `postingId()` produces before it reaches a query — and is never trusted
  * to name an *owner*, which the session supplies.
  *
- * **The pattern is imported, not restated.** `cover-letter-ref.ts` keeps the one
- * copy and says why: it gates storage-key construction as well as this query,
- * and two copies of such a rule is how one of them gets relaxed alone.
+ * **The pattern is imported, not restated.** `posting-document-ref.ts` keeps
+ * the one copy and says why: it gates storage-key construction as well as this
+ * query, and two copies of such a rule is how one of them gets relaxed alone.
  */
 const postingIdSchema = z.string().regex(POSTING_ID_PATTERN)
 

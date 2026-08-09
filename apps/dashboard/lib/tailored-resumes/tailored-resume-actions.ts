@@ -7,7 +7,7 @@ import {
   loadCandidateBackground,
   type NoBackgroundReason,
 } from "@/lib/candidate/candidate-background"
-import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
+import { POSTING_ID_PATTERN } from "@/lib/posting-documents/posting-document-ref"
 import {
   loadStoredPosting,
   storedPostingMessage,
