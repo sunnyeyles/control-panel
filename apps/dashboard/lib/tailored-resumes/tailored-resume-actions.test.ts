@@ -2,36 +2,28 @@ import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   fakeDocumentDb,
   mergeClients,
-  toFakeDocument,
-} from "@/lib/documents/fake-document-db"
+} from "@/lib/test-support/fake-document-db"
 import type { Agent } from "@workspace/agents"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
-import type {
-  Document as DocumentRow,
-  DocumentType,
-  PrismaClient,
-} from "@workspace/db"
-import { ObjectNotFoundError } from "@workspace/user-storage/errors"
-import { buildObjectKey } from "@workspace/user-storage/keys"
-import type {
-  NewResume,
-  ResumeRef,
-  ResumeStore,
-  StoredResume,
-} from "@workspace/user-storage/resume-store"
+import type { PrismaClient } from "@workspace/db"
 import { createTailoredResumeStore } from "@workspace/user-storage/tailored-resume-store"
-import type {
-  FetchedObject,
-  NewObject,
-  ObjectRef,
-  StoredObject,
-  UserObjectStore,
-} from "@workspace/user-storage/user-object-store"
 import { beforeEach, describe, expect, it } from "vitest"
 
 import { IDLE } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
+import { FakeResumes } from "@/lib/test-support/fake-resumes"
+import {
+  ANONYMOUS,
+  ENVIRONMENT,
+  OTHER_USER_ID,
+  REFUSED,
+  RESET_KEY,
+  RUN_ID,
+  SIGNED_IN,
+  USER_ID,
+} from "@/lib/test-support/identities"
+import { MemoryObjects } from "@/lib/test-support/memory-objects"
 import {
   createTailoredResumeActions,
   MAX_RESUME_CHARS,
@@ -58,26 +50,7 @@ import {
  * cover letter's.
  */
 
-const ENVIRONMENT = "test"
-const USER_ID = "11111111-2222-4333-8444-555555555555"
-const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
-const RUN_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-const RESET_KEY = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
 const NOW = new Date("2026-08-06T04:15:00.000Z")
-
-const SIGNED_IN: CurrentUser = {
-  status: "ok",
-  userId: USER_ID,
-  email: "alice@example.com",
-  name: "Alice",
-}
-
-const REFUSED: CurrentUser = {
-  status: "refused",
-  email: "mallory@example.com",
-}
-
-const ANONYMOUS: CurrentUser = { status: "anonymous" }
 
 /** Comfortably over `MIN_BACKGROUND_CHARS`, so `assertDraftable` passes. */
 const CV = [
@@ -106,177 +79,6 @@ function posting(overrides: Partial<Posting> = {}): Posting {
 
 const POSTING = posting()
 const POSTING_ID = postingId(POSTING)
-
-/**
- * An in-memory {@link UserObjectStore} that builds real keys.
- *
- * `buildObjectKey` rather than a template string, so a change to the key layout
- * — or to the segment rule that layout depends on — fails here rather than
- * quietly producing a test that agrees with itself.
- */
-class MemoryObjects implements UserObjectStore {
-  readonly puts: NewObject[] = []
-  private readonly stored = new Map<string, StoredObject & { body: Buffer }>()
-
-  private keyOf(ref: ObjectRef): string {
-    return buildObjectKey({ environment: ENVIRONMENT, ...ref })
-  }
-
-  async put(object: NewObject): Promise<StoredObject> {
-    this.puts.push(object)
-
-    const body =
-      typeof object.body === "string"
-        ? Buffer.from(object.body, "utf8")
-        : Buffer.from(object.body)
-
-    const entry = {
-      key: this.keyOf(object),
-      environment: ENVIRONMENT,
-      userId: object.userId,
-      kind: object.kind,
-      segments: object.segments,
-      extension: object.extension,
-      contentType: "text/markdown; charset=utf-8",
-      size: body.byteLength,
-      storedAt: NOW,
-      metadata: object.metadata ?? {},
-      body,
-    }
-
-    this.stored.set(entry.key, entry)
-    return entry
-  }
-
-  async get(ref: ObjectRef): Promise<FetchedObject> {
-    const found = this.stored.get(this.keyOf(ref))
-    if (!found) throw new ObjectNotFoundError(this.keyOf(ref))
-
-    return {
-      ...found,
-      body: found.body,
-      text: () => found.body.toString("utf8"),
-    }
-  }
-
-  // `ObjectNotFoundError` rather than a bare `Error`, because that is what the
-  // S3 store raises and `saveTailoredResume` branches on the code to tell
-  // "nothing generated yet" apart from "the bucket is unreachable". A plain
-  // throw here would send the missing-object case down the outage path and the
-  // refusal being asserted below would pass for the wrong reason.
-  async head(ref: ObjectRef): Promise<StoredObject> {
-    const found = this.stored.get(this.keyOf(ref))
-    if (!found) throw new ObjectNotFoundError(this.keyOf(ref))
-    return found
-  }
-
-  async delete(ref: ObjectRef): Promise<void> {
-    this.stored.delete(this.keyOf(ref))
-  }
-
-  async list(userId: string, kind: ObjectRef["kind"]): Promise<StoredObject[]> {
-    return [...this.stored.values()]
-      .filter((o) => o.userId === userId && o.kind === kind)
-      .sort((a, b) => a.key.localeCompare(b.key))
-  }
-
-  keys(): string[] {
-    return [...this.stored.keys()]
-  }
-}
-
-/**
- * Just enough {@link ResumeStore} for `loadCandidateBackground`, which lists,
- * heads each item for its document type, and gets the winner's bytes.
- */
-class FakeResumes implements ResumeStore {
-  private readonly documents: StoredResume[] = []
-  /**
-   * The rows beside the bytes. `add()` writes both, because a Document is
-   * both — an object nothing has a row for is invisible to every read path.
-   */
-  readonly rows: DocumentRow[] = []
-
-  add(
-    document: Partial<StoredResume> & {
-      resumeId: string
-      extension: string
-      documentType?: DocumentType
-    }
-  ): this {
-    const { documentType, ...object } = document
-
-    this.documents.push({
-      key: `${ENVIRONMENT}/${USER_ID}/resumes/${document.resumeId}${document.extension}`,
-      userId: USER_ID,
-      contentType: "text/markdown; charset=utf-8",
-      size: CV.length,
-      uploadedAt: NOW,
-      bytes: new TextEncoder().encode(CV),
-      ...object,
-    })
-
-    this.rows.push(
-      toFakeDocument(
-        USER_ID,
-        {
-          id: document.resumeId,
-          extension: document.extension,
-          ...(document.originalFilename
-            ? { filename: document.originalFilename }
-            : {}),
-          ...(documentType ? { docType: documentType } : {}),
-        },
-        this.rows.length
-      )
-    )
-
-    return this
-  }
-
-  async put(resume: NewResume): Promise<StoredResume> {
-    throw new Error(`unexpected put: ${resume.resumeId}`)
-  }
-
-  async get(ref: ResumeRef): Promise<StoredResume> {
-    const found = this.find(ref)
-    if (!found) throw new Error(`not stored: ${ref.resumeId}`)
-    return found
-  }
-
-  async head(ref: ResumeRef): Promise<StoredResume> {
-    const found = this.find(ref)
-    if (!found) throw new Error(`not stored: ${ref.resumeId}`)
-    return { ...found, bytes: undefined }
-  }
-
-  async delete(): Promise<void> {
-    throw new Error("unexpected delete")
-  }
-
-  async list(userId: string): Promise<StoredResume[]> {
-    // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed object has no filename. Nothing on this path calls it any more,
-    // and it stays honest so that a future caller does not read a display name
-    // off something S3 never supplies.
-    return this.documents
-      .filter((document) => document.userId === userId)
-      .map((document) => ({
-        ...document,
-        bytes: undefined,
-        originalFilename: undefined,
-      }))
-  }
-
-  private find(ref: ResumeRef): StoredResume | undefined {
-    return this.documents.find(
-      (document) =>
-        document.userId === ref.userId &&
-        document.resumeId === ref.resumeId &&
-        document.extension === ref.extension
-    )
-  }
-}
 
 /**
  * A stand-in for the tailor.
@@ -386,8 +188,8 @@ let db: FakeDb
 let tailor: FakeTailor
 
 beforeEach(() => {
-  objects = new MemoryObjects()
-  resumes = new FakeResumes().add({
+  objects = new MemoryObjects(NOW)
+  resumes = new FakeResumes(CV, NOW).add({
     resumeId: "3f8d1b2a-0000-4000-8000-0000000000c1",
     extension: ".md",
     documentType: "resume",
@@ -539,7 +341,7 @@ describe("generateTailoredResume", () => {
      * whole reason the read happens before the agent is constructed.
      */
     it("refuses before the tailor is built when nothing is labelled Resume", async () => {
-      resumes = new FakeResumes().add({
+      resumes = new FakeResumes(CV, NOW).add({
         resumeId: "3f8d1b2a-0000-4000-8000-0000000000c9",
         extension: ".md",
         originalFilename: "notes.md",
@@ -559,7 +361,7 @@ describe("generateTailoredResume", () => {
     })
 
     it("names the formats it cannot read rather than refusing flatly", async () => {
-      resumes = new FakeResumes().add({
+      resumes = new FakeResumes(CV, NOW).add({
         resumeId: "3f8d1b2a-0000-4000-8000-0000000000c8",
         extension: ".rtf",
         documentType: "resume",
@@ -583,7 +385,7 @@ describe("generateTailoredResume", () => {
      * resume built from two sentences would be invented rather than rewritten.
      */
     it("refuses a CV with too little in it, naming the document", async () => {
-      resumes = new FakeResumes().add({
+      resumes = new FakeResumes(CV, NOW).add({
         resumeId: "3f8d1b2a-0000-4000-8000-0000000000c7",
         extension: ".md",
         documentType: "resume",

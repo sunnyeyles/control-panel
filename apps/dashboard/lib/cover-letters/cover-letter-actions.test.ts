@@ -4,8 +4,7 @@ import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   fakeDocumentDb,
   mergeClients,
-  toFakeDocument,
-} from "@/lib/documents/fake-document-db"
+} from "@/lib/test-support/fake-document-db"
 import type { Agent } from "@workspace/agents"
 import type { LetterInstructions } from "@workspace/agents/cover-letter"
 import {
@@ -14,31 +13,24 @@ import {
 } from "@workspace/agents/cover-letter-writer"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
-import type {
-  Document as DocumentRow,
-  DocumentType,
-  PrismaClient,
-} from "@workspace/db"
+import type { PrismaClient } from "@workspace/db"
 import { createCoverLetterStore } from "@workspace/user-storage/cover-letter-store"
-import { ObjectNotFoundError } from "@workspace/user-storage/errors"
-import { buildObjectKey } from "@workspace/user-storage/keys"
-import type {
-  NewResume,
-  ResumeRef,
-  ResumeStore,
-  StoredResume,
-} from "@workspace/user-storage/resume-store"
-import type {
-  FetchedObject,
-  NewObject,
-  ObjectRef,
-  StoredObject,
-  UserObjectStore,
-} from "@workspace/user-storage/user-object-store"
 import { beforeEach, describe, expect, it } from "vitest"
 
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
+import { FakeResumes } from "@/lib/test-support/fake-resumes"
+import {
+  ANONYMOUS,
+  ENVIRONMENT,
+  OTHER_USER_ID,
+  REFUSED,
+  RESET_KEY,
+  RUN_ID,
+  SIGNED_IN,
+  USER_ID,
+} from "@/lib/test-support/identities"
+import { MemoryObjects } from "@/lib/test-support/memory-objects"
 import {
   createCoverLetterActions,
   LETTER_NOT_FOUND,
@@ -63,26 +55,7 @@ import {
  * together, which is what makes "writes the expected key" mean anything.
  */
 
-const ENVIRONMENT = "test"
-const USER_ID = "11111111-2222-4333-8444-555555555555"
-const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
-const RUN_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-const RESET_KEY = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
 const NOW = new Date("2026-08-03T04:15:00.000Z")
-
-const SIGNED_IN: CurrentUser = {
-  status: "ok",
-  userId: USER_ID,
-  email: "alice@example.com",
-  name: "Alice",
-}
-
-const REFUSED: CurrentUser = {
-  status: "refused",
-  email: "mallory@example.com",
-}
-
-const ANONYMOUS: CurrentUser = { status: "anonymous" }
 
 /** Comfortably over `MIN_BACKGROUND_CHARS`, so `assertDraftable` passes. */
 const CV = [
@@ -126,182 +99,6 @@ function posting(overrides: Partial<Posting> = {}): Posting {
 
 const POSTING = posting()
 const POSTING_ID = postingId(POSTING)
-
-/**
- * An in-memory {@link UserObjectStore} that builds real keys.
- *
- * `buildObjectKey` rather than a template string, so a change to the key layout
- * — or to the segment rule that layout depends on — fails here rather than
- * quietly producing a test that agrees with itself.
- */
-class MemoryObjects implements UserObjectStore {
-  readonly puts: NewObject[] = []
-  /** Every key the store was *asked* about, however the ask turned out. */
-  readonly reads: string[] = []
-  private readonly stored = new Map<string, StoredObject & { body: Buffer }>()
-
-  private keyOf(ref: ObjectRef): string {
-    return buildObjectKey({ environment: ENVIRONMENT, ...ref })
-  }
-
-  async put(object: NewObject): Promise<StoredObject> {
-    this.puts.push(object)
-
-    const body =
-      typeof object.body === "string"
-        ? Buffer.from(object.body, "utf8")
-        : Buffer.from(object.body)
-
-    const entry = {
-      key: this.keyOf(object),
-      environment: ENVIRONMENT,
-      userId: object.userId,
-      kind: object.kind,
-      segments: object.segments,
-      extension: object.extension,
-      contentType: "text/markdown; charset=utf-8",
-      size: body.byteLength,
-      storedAt: NOW,
-      metadata: object.metadata ?? {},
-      body,
-    }
-
-    this.stored.set(entry.key, entry)
-    return entry
-  }
-
-  async get(ref: ObjectRef): Promise<FetchedObject> {
-    const found = this.stored.get(this.keyOf(ref))
-    if (!found) throw new ObjectNotFoundError(this.keyOf(ref))
-
-    return {
-      ...found,
-      body: found.body,
-      text: () => found.body.toString("utf8"),
-    }
-  }
-
-  // `ObjectNotFoundError` rather than a bare `Error`, because that is what the
-  // S3 store raises and `saveCoverLetter` branches on the code to tell "no
-  // letter drafted yet" apart from "the bucket is unreachable". A plain throw
-  // here would send the missing-object case down the outage path and the
-  // refusal being asserted below would pass for the wrong reason.
-  async head(ref: ObjectRef): Promise<StoredObject> {
-    this.reads.push(this.keyOf(ref))
-    const found = this.stored.get(this.keyOf(ref))
-    if (!found) throw new ObjectNotFoundError(this.keyOf(ref))
-    return found
-  }
-
-  async delete(ref: ObjectRef): Promise<void> {
-    this.stored.delete(this.keyOf(ref))
-  }
-
-  async list(userId: string, kind: ObjectRef["kind"]): Promise<StoredObject[]> {
-    return [...this.stored.values()]
-      .filter((o) => o.userId === userId && o.kind === kind)
-      .sort((a, b) => a.key.localeCompare(b.key))
-  }
-
-  keys(): string[] {
-    return [...this.stored.keys()]
-  }
-}
-
-/**
- * Just enough {@link ResumeStore} for `loadCandidateBackground`, plus the rows
- * that go beside the objects — the label is read out of Postgres now, and only
- * the bytes come out of the bucket.
- */
-class FakeResumes implements ResumeStore {
-  private readonly documents: StoredResume[] = []
-  /**
-   * The rows beside the bytes. `add()` writes both, because a Document is both
-   * — an object nothing has a row for is invisible to every read path.
-   */
-  readonly rows: DocumentRow[] = []
-
-  add(
-    document: Partial<StoredResume> & {
-      resumeId: string
-      extension: string
-      documentType?: DocumentType
-    }
-  ): this {
-    const { documentType, ...object } = document
-
-    this.documents.push({
-      key: `${ENVIRONMENT}/${USER_ID}/resumes/${document.resumeId}${document.extension}`,
-      userId: USER_ID,
-      contentType: "text/markdown; charset=utf-8",
-      size: CV.length,
-      uploadedAt: NOW,
-      bytes: new TextEncoder().encode(CV),
-      ...object,
-    })
-
-    this.rows.push(
-      toFakeDocument(
-        USER_ID,
-        {
-          id: document.resumeId,
-          extension: document.extension,
-          ...(document.originalFilename
-            ? { filename: document.originalFilename }
-            : {}),
-          ...(documentType ? { docType: documentType } : {}),
-        },
-        this.rows.length
-      )
-    )
-
-    return this
-  }
-
-  async put(resume: NewResume): Promise<StoredResume> {
-    throw new Error(`unexpected put: ${resume.resumeId}`)
-  }
-
-  async get(ref: ResumeRef): Promise<StoredResume> {
-    const found = this.find(ref)
-    if (!found) throw new Error(`not stored: ${ref.resumeId}`)
-    return found
-  }
-
-  async head(ref: ResumeRef): Promise<StoredResume> {
-    const found = this.find(ref)
-    if (!found) throw new Error(`not stored: ${ref.resumeId}`)
-    // Metadata is what a head() is for; the bytes are not transferred.
-    return { ...found, bytes: undefined }
-  }
-
-  async delete(): Promise<void> {
-    throw new Error("unexpected delete")
-  }
-
-  async list(userId: string): Promise<StoredResume[]> {
-    // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed object has no filename. Nothing on the draft path calls this any
-    // more — the listing is a query now — and it stays honest so that a future
-    // caller does not read a display name off something S3 never supplies.
-    return this.documents
-      .filter((document) => document.userId === userId)
-      .map((document) => ({
-        ...document,
-        bytes: undefined,
-        originalFilename: undefined,
-      }))
-  }
-
-  private find(ref: ResumeRef): StoredResume | undefined {
-    return this.documents.find(
-      (document) =>
-        document.userId === ref.userId &&
-        document.resumeId === ref.resumeId &&
-        document.extension === ref.extension
-    )
-  }
-}
 
 /**
  * A stand-in for the writer.
@@ -464,10 +261,10 @@ function harness(
     db?: FakeDb
   } = {}
 ): Harness {
-  const objects = new MemoryObjects()
+  const objects = new MemoryObjects(NOW)
   const resumes =
     options.resumes ??
-    new FakeResumes().add({
+    new FakeResumes(CV, NOW).add({
       resumeId: "11111111-1111-4111-8111-111111111111",
       extension: ".md",
       documentType: "resume",
@@ -681,7 +478,7 @@ describe("draftCoverLetter", () => {
   describe("the candidate's background", () => {
     it("refuses without calling the model when nothing is labelled a resume", async () => {
       subject = harness({
-        resumes: new FakeResumes().add({
+        resumes: new FakeResumes(CV, NOW).add({
           resumeId: "22222222-2222-4222-8222-222222222222",
           extension: ".md",
           documentType: "cover-letter",
@@ -705,7 +502,7 @@ describe("draftCoverLetter", () => {
       // therefore still exists and has to name those three rather than the
       // formats that now work.
       subject = harness({
-        resumes: new FakeResumes().add({
+        resumes: new FakeResumes(CV, NOW).add({
           resumeId: "33333333-3333-4333-8333-333333333333",
           extension: ".rtf",
           documentType: "resume",
@@ -726,7 +523,7 @@ describe("draftCoverLetter", () => {
       // more about why that matters. Here the claim is the end-to-end one #86
       // makes: a user whose CV is a PDF gets a letter.
       subject = harness({
-        resumes: new FakeResumes().add({
+        resumes: new FakeResumes(CV, NOW).add({
           resumeId: "55555555-5555-4555-8555-555555555555",
           extension: ".pdf",
           documentType: "resume",
@@ -747,7 +544,7 @@ describe("draftCoverLetter", () => {
 
     it("drafts from a real DOCX resume", async () => {
       subject = harness({
-        resumes: new FakeResumes().add({
+        resumes: new FakeResumes(CV, NOW).add({
           resumeId: "66666666-6666-4666-8666-666666666666",
           extension: ".docx",
           documentType: "resume",
@@ -769,7 +566,7 @@ describe("draftCoverLetter", () => {
       const whole = await fixtureBytes("alice-cv.pdf")
 
       subject = harness({
-        resumes: new FakeResumes().add({
+        resumes: new FakeResumes(CV, NOW).add({
           resumeId: "77777777-7777-4777-8777-777777777777",
           extension: ".pdf",
           documentType: "resume",
@@ -791,7 +588,7 @@ describe("draftCoverLetter", () => {
 
     it("refuses a text file that was renamed .pdf", async () => {
       subject = harness({
-        resumes: new FakeResumes().add({
+        resumes: new FakeResumes(CV, NOW).add({
           resumeId: "88888888-8888-4888-8888-888888888888",
           extension: ".pdf",
           documentType: "resume",
@@ -819,7 +616,7 @@ describe("draftCoverLetter", () => {
       expect(bytes.byteLength).toBeGreaterThan(1_000)
 
       subject = harness({
-        resumes: new FakeResumes().add({
+        resumes: new FakeResumes(CV, NOW).add({
           resumeId: "99999999-9999-4999-8999-999999999999",
           extension: ".pdf",
           documentType: "resume",
@@ -842,7 +639,7 @@ describe("draftCoverLetter", () => {
     })
 
     it("refuses without calling the model when the resume is too thin to write from", async () => {
-      const thin = new FakeResumes().add({
+      const thin = new FakeResumes(CV, NOW).add({
         resumeId: "44444444-4444-4444-8444-444444444444",
         extension: ".txt",
         documentType: "resume",

@@ -7,7 +7,7 @@ import type { Document, DocumentType, PrismaClient } from "@workspace/db"
  * here rather than being restated in each suite because four of them need the
  * same thing: `listDocuments` and `findDocument` now read Postgres, so any test
  * of a path that reaches a document has to supply rows as well as bytes.
- * `lib/dev/fake-prisma.ts` is the sibling of this for `DEV_AUTH_BYPASS=1`, and
+ * `lib/dev/fake-prisma.ts` is the `DEV_AUTH_BYPASS=1` fake, and
  * is deliberately not reused — it is seeded from the fixed dev fixtures and
  * answers for one hardcoded user.
  *

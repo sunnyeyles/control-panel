@@ -4,28 +4,25 @@ import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   fakeDocumentDb,
   mergeClients,
-  toFakeDocument,
-} from "@/lib/documents/fake-document-db"
+} from "@/lib/test-support/fake-document-db"
 import {
   MAX_EXAMPLE_LETTER_CHARS,
   MAX_INSTRUCTIONS_CHARS,
 } from "@workspace/agents/cover-letter"
-import type {
-  CoverLetterInstructions,
-  Document as DocumentRow,
-  DocumentType,
-  PrismaClient,
-} from "@workspace/db"
-import type {
-  NewResume,
-  ResumeRef,
-  ResumeStore,
-  StoredResume,
-} from "@workspace/user-storage/resume-store"
+import type { CoverLetterInstructions, PrismaClient } from "@workspace/db"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
+import { FakeResumes } from "@/lib/test-support/fake-resumes"
+import {
+  ANONYMOUS,
+  OTHER_USER_ID,
+  REFUSED,
+  RESET_KEY,
+  SIGNED_IN,
+  USER_ID,
+} from "@/lib/test-support/identities"
 import {
   createLetterInstructionsActions,
   DOCUMENT_NOT_FOUND,
@@ -50,25 +47,8 @@ import {
  * calls one.
  */
 
-const USER_ID = "11111111-2222-4333-8444-555555555555"
-const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
-const RESET_KEY = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
 const DOCUMENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 const NOW = new Date("2026-08-04T00:00:00.000Z")
-
-const SIGNED_IN: CurrentUser = {
-  status: "ok",
-  userId: USER_ID,
-  email: "alice@example.com",
-  name: "Alice",
-}
-
-const REFUSED: CurrentUser = {
-  status: "refused",
-  email: "mallory@example.com",
-}
-
-const ANONYMOUS: CurrentUser = { status: "anonymous" }
 
 const INSTRUCTIONS = 'Never use the word "passionate". Sign off "Kind regards".'
 const EXAMPLE = "Dear Hiring Team,\n\nI read the advertisement twice."
@@ -139,104 +119,6 @@ class SpyDb {
   }
 }
 
-/**
- * Just enough {@link ResumeStore} for the `get()` the import does for the
- * bytes, plus the rows that go beside the objects — `listDocuments` is a query
- * now, so the label and the filename come out of `rows`.
- */
-class FakeResumes implements ResumeStore {
-  private readonly documents: StoredResume[] = []
-  /**
-   * The rows beside the bytes. `add()` writes both, and both carry the same
-   * owner — a row belonging to someone else is what makes their document
-   * *absent* from this user's listing rather than merely unselected, which is
-   * the property the ownership test turns on.
-   */
-  readonly rows: DocumentRow[] = []
-
-  add(
-    document: Partial<StoredResume> & {
-      resumeId: string
-      extension: string
-      documentType?: DocumentType
-    }
-  ): this {
-    const { documentType, ...object } = document
-    const bytes = document.bytes ?? new TextEncoder().encode(EXAMPLE)
-
-    this.documents.push({
-      key: `test/${document.userId ?? USER_ID}/resumes/${document.resumeId}${document.extension}`,
-      userId: USER_ID,
-      contentType: "text/markdown; charset=utf-8",
-      size: bytes.byteLength,
-      uploadedAt: NOW,
-      ...object,
-      bytes,
-    })
-
-    this.rows.push(
-      toFakeDocument(
-        document.userId ?? USER_ID,
-        {
-          id: document.resumeId,
-          extension: document.extension,
-          ...(document.originalFilename
-            ? { filename: document.originalFilename }
-            : {}),
-          ...(documentType ? { docType: documentType } : {}),
-        },
-        this.rows.length
-      )
-    )
-
-    return this
-  }
-
-  async put(resume: NewResume): Promise<StoredResume> {
-    throw new Error(`unexpected put: ${resume.resumeId}`)
-  }
-
-  async get(ref: ResumeRef): Promise<StoredResume> {
-    const found = this.find(ref)
-    if (!found) throw new Error(`not stored: ${ref.resumeId}`)
-    return found
-  }
-
-  async head(ref: ResumeRef): Promise<StoredResume> {
-    const found = this.find(ref)
-    if (!found) throw new Error(`not stored: ${ref.resumeId}`)
-    // Metadata is what a head() is for; the bytes are not transferred.
-    return { ...found, bytes: undefined }
-  }
-
-  async delete(): Promise<void> {
-    throw new Error("unexpected delete")
-  }
-
-  async list(userId: string): Promise<StoredResume[]> {
-    // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed object has no filename. Nothing on this path calls it any more —
-    // the listing is a query, and `rows` is what carries the ownership
-    // property this file tests.
-    return this.documents
-      .filter((document) => document.userId === userId)
-      .map((document) => ({
-        ...document,
-        bytes: undefined,
-        originalFilename: undefined,
-      }))
-  }
-
-  private find(ref: ResumeRef): StoredResume | undefined {
-    return this.documents.find(
-      (document) =>
-        document.userId === ref.userId &&
-        document.resumeId === ref.resumeId &&
-        document.extension === ref.extension
-    )
-  }
-}
-
 /** The same real PDF and DOCX `profile-text.test.ts` and the draft suite use. */
 async function fixtureBytes(name: string): Promise<Uint8Array> {
   return new Uint8Array(
@@ -252,7 +134,7 @@ let resumes: FakeResumes
 beforeEach(() => {
   store = new SpyDb()
   store.installMocks()
-  resumes = new FakeResumes().add({
+  resumes = new FakeResumes(EXAMPLE, NOW).add({
     resumeId: DOCUMENT_ID,
     extension: ".md",
     documentType: "cover-letter",
@@ -535,7 +417,7 @@ describe("importExampleLetter", () => {
   })
 
   it("imports a real PDF", async () => {
-    resumes = new FakeResumes().add({
+    resumes = new FakeResumes(EXAMPLE, NOW).add({
       resumeId: DOCUMENT_ID,
       extension: ".pdf",
       documentType: "cover-letter",
@@ -556,7 +438,7 @@ describe("importExampleLetter", () => {
   })
 
   it("imports a real DOCX", async () => {
-    resumes = new FakeResumes().add({
+    resumes = new FakeResumes(EXAMPLE, NOW).add({
       resumeId: DOCUMENT_ID,
       extension: ".docx",
       documentType: "cover-letter",
@@ -578,7 +460,7 @@ describe("importExampleLetter", () => {
   it("refuses another user's document in the same words as a missing one", async () => {
     // ⚠️ One message for both, or a picker that takes a uuid becomes an oracle
     // for whether another user's document is real.
-    resumes = new FakeResumes().add({
+    resumes = new FakeResumes(EXAMPLE, NOW).add({
       resumeId: DOCUMENT_ID,
       extension: ".md",
       userId: OTHER_USER_ID,
@@ -591,7 +473,7 @@ describe("importExampleLetter", () => {
       importForm()
     )
 
-    resumes = new FakeResumes()
+    resumes = new FakeResumes(EXAMPLE, NOW)
 
     const missing = await actionsFor(SIGNED_IN).importExampleLetter(
       IDLE,
@@ -621,7 +503,7 @@ describe("importExampleLetter", () => {
     // `resumes` accepts `.doc`, `.odt` and `.rtf` on upload and still has no
     // parser for them, so the user is being refused a document this app already
     // took — without the extension in the sentence that reads as a bug.
-    resumes = new FakeResumes().add({
+    resumes = new FakeResumes(EXAMPLE, NOW).add({
       resumeId: DOCUMENT_ID,
       extension: ".rtf",
       documentType: "cover-letter",
@@ -644,7 +526,7 @@ describe("importExampleLetter", () => {
   it("turns a ProfileTextError into a message naming the document, never a throw", async () => {
     const whole = await fixtureBytes("alice-cv.pdf")
 
-    resumes = new FakeResumes().add({
+    resumes = new FakeResumes(EXAMPLE, NOW).add({
       resumeId: DOCUMENT_ID,
       extension: ".pdf",
       documentType: "cover-letter",
@@ -666,7 +548,7 @@ describe("importExampleLetter", () => {
   })
 
   it("refuses a document with no text in it rather than clearing the field", async () => {
-    resumes = new FakeResumes().add({
+    resumes = new FakeResumes(EXAMPLE, NOW).add({
       resumeId: DOCUMENT_ID,
       extension: ".txt",
       documentType: "cover-letter",
@@ -687,7 +569,7 @@ describe("importExampleLetter", () => {
   it("refuses extracted text over the cap, naming the document and both numbers", async () => {
     const overCap = "z".repeat(MAX_EXAMPLE_LETTER_CHARS + 12)
 
-    resumes = new FakeResumes().add({
+    resumes = new FakeResumes(EXAMPLE, NOW).add({
       resumeId: DOCUMENT_ID,
       extension: ".txt",
       documentType: "cover-letter",
