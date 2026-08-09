@@ -62,6 +62,17 @@ endpoint, its own users and its own JWKS, so a preview branch is a different
 auth environment — not a different view of the same one. Never hand-write the
 value; re-pull it.
 
+**A preview reaches its own auth instance through the integration's variables, not ours.** Neon provisions an auth instance and a copy-on-write database branch per pull request, and Vercel's Neon integration writes `storage_NEON_AUTH_BASE_URL` and `storage_DATABASE_URL` as `integration-store-secret` references it resolves per deployment. `requiredFromIntegration()` in `apps/dashboard/lib/auth/server.ts` and `required()` in `packages/db/src/config.ts` read the bare name first and fall back to the prefixed one, so production and `.env.local` are unaffected. **Do not add a plain `NEON_AUTH_BASE_URL` or `DATABASE_URL` to Vercel's Preview environment** — it shadows the reference and pins every preview to whichever branch it names, which is what made preview sign-in depend on main's allowlist, and what left `migrate.yml` applying each pull request's migrations to a `preview/<branch>` the deployed app never connected to.
+
+**The trusted-domain list is maintained by CI, not by hand** —
+`.github/workflows/preview-auth-domain.yml` adds a pull request's Vercel branch
+alias when it opens and removes it when it closes, against `main`'s auth
+instance, which is the one Vercel's Preview environment points every preview at.
+Sign-in on a preview is impossible without that entry: Neon Auth checks
+`callbackURL` against the list _before_ it checks the provider and answers
+`403 INVALID_CALLBACKURL`. It needs a `VERCEL_TOKEN` secret alongside
+`NEON_API_KEY`. See `apps/dashboard/CLAUDE.md`.
+
 **`NEON_AUTH_COOKIE_SECRET` is ours, not Neon's**, so `env pull` does not
 supply it. Generate with `openssl rand -base64 32`; the SDK requires 32+
 characters.
@@ -187,6 +198,8 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 **`.npmrc` pins `symlink=true`, and that line is load-bearing.** pnpm can be configured globally with `symlink=false` (this machine is), which downloads packages into `node_modules/.pnpm` but creates no `node_modules` links — so every `workspace:*` dependency becomes unresolvable by both Node and `tsc`, and `pnpm install` still exits 0. The repo-level setting overrides that. If a workspace import suddenly reports `Cannot find module '@workspace/…'`, check this before anything else. It is deliberately the only line in the file: the linker mode itself is left to whatever the machine prefers.
 
 **ESLint never fails.** `eslint-plugin-only-warn` is in the base config, so every rule downgrades to a warning and `pnpm lint` exits 0 regardless. Read the warnings; do not treat a clean exit code as a clean lint.
+
+**Turborepo runs in strict env mode, so a variable absent from `turbo.json` does not reach the task.** It is removed from the environment, not merely unhashed — the process genuinely cannot see it. Setting a variable in Vercel is therefore only half of making it available; `globalEnv` is the other half, and the failure looks nothing like a missing variable. Vercel's Neon integration provisions its whole set under a `storage_` prefix, none of which were declared, so `storage_NEON_AUTH_BASE_URL` was invisible to every build and the dashboard died at `Failed to collect page data for /api/auth/[...path]` — the one route that evaluates `lib/auth/server.ts` at module scope. `"storage_*"` in `globalEnv` covers the set; Turborepo prints the undeclared names in each build's log, so **read that warning rather than trusting the Vercel dashboard.**
 
 **TypeScript is strict, including `noUncheckedIndexedAccess`** (`packages/typescript-config/base.json`). Indexed reads are `T | undefined` — narrow them. The base config is `NodeNext`; the Next.js preset overrides to `ESNext`/`Bundler` with `noEmit`.
 
