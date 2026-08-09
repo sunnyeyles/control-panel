@@ -37,7 +37,7 @@ export interface NavLink {
  * left are what say these belong to the item above. A field the renderer will
  * never read is a field somebody later has to guess the meaning of.
  */
-export interface NavChild {
+interface NavChild {
   title: string
   url: string
 }

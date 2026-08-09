@@ -45,8 +45,6 @@ import type {
 } from "./posting-catalog.ts"
 import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
 
-export type { BoardPosting } from "./posting-catalog.ts"
-
 /** Caps every actor run server-side, in seconds. */
 const RUN_TIMEOUT_SECONDS = 120
 

@@ -18,8 +18,8 @@ export interface DatabaseConfig {
  * re-provision them; it consumes what the integration sets. Both point at the
  * same database and differ only in which endpoint they terminate on.
  */
-export const DATABASE_URL = "DATABASE_URL"
-export const DATABASE_URL_UNPOOLED = "DATABASE_URL_UNPOOLED"
+const DATABASE_URL = "DATABASE_URL"
+const DATABASE_URL_UNPOOLED = "DATABASE_URL_UNPOOLED"
 
 /**
  * The connection the application uses at runtime — the **pooled** endpoint.
