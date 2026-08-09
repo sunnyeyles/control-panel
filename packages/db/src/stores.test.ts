@@ -22,6 +22,7 @@ import {
   finishRun,
   latestRunPerJob,
   listDocumentsForUser,
+  listPostingPage,
   loadBoard,
   pauseJob,
   POSTING_STATUSES,
@@ -42,6 +43,7 @@ import {
   type DueJob,
   type NewDocument,
   type NewPosting,
+  type PostingPageQuery,
   type PostingStatus,
   type PrismaClient,
 } from "./index.ts"
@@ -916,6 +918,202 @@ describeWithDatabase("against a real database", () => {
     it("takes an empty list as nothing to do, without a query", async () => {
       expect(await ownedPostingIds(prisma, userId, [])).toEqual([])
       expect(await deletePostings(prisma, userId, [])).toBe(0)
+    })
+
+    /**
+     * One page of the table, against a real index and a real planner.
+     *
+     * ⚠️ **These are the assertions that could not be written before
+     * `listPostingPage` existed.** The dashboard's suite ran the ordering
+     * against JavaScript somebody wrote to match what Postgres was believed to
+     * do — so "NULLS LAST in both directions" and "a row cannot appear on two
+     * pages" were checked against the belief rather than against the database.
+     * A tie-break at a page boundary in particular is unfalsifiable that way: a
+     * fake that sorts a stable array has no ties to break.
+     *
+     * Each block seeds **its own user**, because the postings above accumulate
+     * across this file and `total` is a count of everything one user has. That
+     * also makes every `total` here an assertion that a second user's rows —
+     * which the shared `userId` certainly has by now — are not counted.
+     */
+    describe("reading a page", () => {
+      /** Two ends of the alphabet per column, so no two orders agree. */
+      const ORDERED = [
+        { title: "Alpha", company: "Zulu", posted: "2026-07-01" },
+        { title: "Bravo", company: "Yankee", posted: undefined },
+        { title: "Charlie", company: "X-ray", posted: "2026-07-03" },
+        { title: "Delta", company: "Whisky", posted: "2026-07-02" },
+      ] as const
+
+      /** One sighting per row, ascending, so `lastSeenAt` orders them too. */
+      const SIGHTINGS = [
+        new Date("2026-08-01T00:00:00.000Z"),
+        new Date("2026-08-02T00:00:00.000Z"),
+        new Date("2026-08-03T00:00:00.000Z"),
+        new Date("2026-08-04T00:00:00.000Z"),
+      ]
+
+      let readerId: string
+
+      async function freshUser(): Promise<string> {
+        return (await ensureUserForAuth(prisma, `auth_${randomUUID()}`)).id
+      }
+
+      function page(
+        forUser: string,
+        overrides: Partial<PostingPageQuery> = {}
+      ) {
+        return listPostingPage(prisma, forUser, {
+          order: "lastSeenAt",
+          direction: "desc",
+          page: 1,
+          pageSize: 25,
+          ...overrides,
+        })
+      }
+
+      const titles = (result: { rows: { title: string }[] }) =>
+        result.rows.map((row) => row.title)
+
+      beforeAll(async () => {
+        readerId = await freshUser()
+
+        for (const [index, row] of ORDERED.entries()) {
+          await recordPostings(prisma, {
+            userId: readerId,
+            runId: await aRun(),
+            seenAt: SIGHTINGS[index] as Date,
+            postings: [
+              aPosting({
+                title: row.title,
+                company: row.company,
+                ...(row.posted ? { postedAt: new Date(row.posted) } : {}),
+              }),
+            ],
+          })
+        }
+      })
+
+      it("orders by each column, both ways", async () => {
+        expect(titles(await page(readerId, { order: "lastSeenAt" }))).toEqual([
+          "Delta",
+          "Charlie",
+          "Bravo",
+          "Alpha",
+        ])
+        expect(
+          titles(
+            await page(readerId, { order: "lastSeenAt", direction: "asc" })
+          )
+        ).toEqual(["Alpha", "Bravo", "Charlie", "Delta"])
+
+        expect(
+          titles(await page(readerId, { order: "title", direction: "asc" }))
+        ).toEqual(["Alpha", "Bravo", "Charlie", "Delta"])
+        expect(titles(await page(readerId, { order: "title" }))).toEqual([
+          "Delta",
+          "Charlie",
+          "Bravo",
+          "Alpha",
+        ])
+
+        // Company runs the opposite way to title, which is what makes this an
+        // assertion about the column rather than about insertion order.
+        expect(
+          titles(await page(readerId, { order: "company", direction: "asc" }))
+        ).toEqual(["Delta", "Charlie", "Bravo", "Alpha"])
+        expect(titles(await page(readerId, { order: "company" }))).toEqual([
+          "Alpha",
+          "Bravo",
+          "Charlie",
+          "Delta",
+        ])
+      })
+
+      it("keeps a stated-no-date row at the bottom whichever way posted runs", async () => {
+        // ⚠️ NULLS LAST in *both* directions. Bravo stated no date, and Postgres
+        // would default to putting it first under DESC — every row that says
+        // nothing above every row that says something.
+        expect(titles(await page(readerId, { order: "postedAt" }))).toEqual([
+          "Charlie",
+          "Delta",
+          "Alpha",
+          "Bravo",
+        ])
+        expect(
+          titles(await page(readerId, { order: "postedAt", direction: "asc" }))
+        ).toEqual(["Alpha", "Delta", "Charlie", "Bravo"])
+      })
+
+      it("names the briefing that last found each row", async () => {
+        const { rows } = await page(readerId)
+
+        // Flattened out of `last_seen_run_id` → `runs.job_id` → `jobs.name` by
+        // the query, so no caller is handed a nested relation to walk.
+        expect(rows.map((row) => row.briefing)).toEqual(
+          rows.map(() => "postings-fixture")
+        )
+      })
+
+      it("counts only this user's rows", async () => {
+        const {
+          total,
+          pageCount,
+          page: rendered,
+        } = await page(readerId, {
+          pageSize: 3,
+        })
+
+        expect(total).toBe(ORDERED.length)
+        expect(pageCount).toBe(2)
+        expect(rendered).toBe(1)
+      })
+
+      it("renders the last page for one past the end", async () => {
+        // Not an empty page with working controls under it: the page asked for
+        // is clamped to the real page count, which only the count knows.
+        const result = await page(readerId, { pageSize: 3, page: 99 })
+
+        expect(result.page).toBe(2)
+        expect(result.rows).toHaveLength(1)
+      })
+
+      it("answers page one for a user with nothing", async () => {
+        const empty = await page(await freshUser())
+
+        expect(empty).toEqual({ rows: [], total: 0, page: 1, pageCount: 1 })
+      })
+
+      it("shows no row twice across a boundary when the sort column ties", async () => {
+        // ⚠️ **The single best reason this function exists.** Thirty rows
+        // recorded by one statement share a `last_seen_at` exactly, so offset
+        // pagination over `last_seen_at` alone lets the planner choose freely
+        // among equal rows — the same row can land on page 1 and page 2 while
+        // another lands on neither. The `postingId` tie-break is what forbids
+        // it, and nothing that sorts a JavaScript array can be made to fail
+        // this.
+        const tiedId = await freshUser()
+        const tied = Array.from({ length: 30 }, () => aPosting())
+
+        await recordPostings(prisma, {
+          userId: tiedId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: tied,
+        })
+
+        const seen: string[] = []
+        for (const which of [1, 2, 3]) {
+          const { rows } = await page(tiedId, { pageSize: 10, page: which })
+          expect(rows).toHaveLength(10)
+          seen.push(...rows.map((row) => row.postingId))
+        }
+
+        expect(new Set(seen).size).toBe(30)
+        expect(new Set(seen)).toEqual(
+          new Set(tied.map((posting) => posting.postingId))
+        )
+      })
     })
   })
 
