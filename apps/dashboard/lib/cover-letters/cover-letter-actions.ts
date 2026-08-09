@@ -1,4 +1,5 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import { storageMessage } from "@/lib/actions/storage-message"
@@ -26,7 +27,6 @@ import {
   createCoverLetterWriter,
 } from "@workspace/agents/cover-letter-writer"
 import { coverLetterInstructions, type PrismaClient } from "@workspace/db"
-import { createLangfuseCallback } from "@workspace/langfuse"
 import {
   isUserStorageError,
   type CoverLetterStore,
@@ -550,59 +550,22 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
   /**
    * One model call, traced.
    *
-   * ⚠️ **The callback is not optional decoration.** Every other agent run in
-   * this repository reports to Langfuse — `generate-briefing` from the worker,
-   * `chat-response` from the dashboard — and one that did not would be the only
-   * agent invocation whose prompt and output nobody can inspect after the fact,
-   * which for a document written in the user's own voice is the worst place to
-   * lose the transcript. The shape is `lib/chat-handler.ts`'s: a handler per
-   * invocation (they retain run state, so sharing one would mix traces),
-   * `langfuseUserId`/`langfuseSessionId` in metadata, and the callback spread in
-   * only when Langfuse is configured — it is `undefined` without keys, and
-   * `callbacks: [undefined]` is not the same as no callbacks.
-   *
-   * `.invoke()` rather than `.stream()`: the writer has no tools, so the graph
-   * is START → model → END and there are no intermediate steps for a stream to
-   * be interesting about. The `letter` CLI makes the same call for the same
-   * reason.
+   * Tracing, the empty-answer throw and the choice of `.invoke()` over
+   * `.stream()` all belong to {@link invokeTracedAgent}, which says why. What is
+   * this feature's own is the writer the instructions were baked into, and the
+   * prompt.
    */
   async function draft(
     request: CoverLetterRequest,
     userId: string,
     extras: LetterInstructions
   ): Promise<string> {
-    const writer = createWriter(extras)
-    const sessionId = crypto.randomUUID()
-
-    const callback = createLangfuseCallback({
+    return invokeTracedAgent(createWriter(extras), {
+      name: "cover-letter",
+      route: "/jobs",
       userId,
-      sessionId,
-      tags: ["dashboard", "cover-letter"],
-      traceMetadata: {
-        feature: "cover-letter",
-        route: "/jobs",
-      },
+      prompt: toCoverLetterPrompt(request),
     })
-
-    const result = await writer.invoke(
-      { messages: [{ role: "user", content: toCoverLetterPrompt(request) }] },
-      {
-        runName: "cover-letter",
-        metadata: {
-          langfuseUserId: userId,
-          langfuseSessionId: sessionId,
-        },
-        ...(callback ? { callbacks: [callback] } : {}),
-      }
-    )
-
-    const letter = result.messages.at(-1)?.text.trim() ?? ""
-
-    if (letter.length === 0) {
-      throw new Error("The writer returned an empty letter.")
-    }
-
-    return letter
   }
 
   return { createCoverLetter, draftCoverLetter, saveCoverLetter }

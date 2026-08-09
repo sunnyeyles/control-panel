@@ -1,4 +1,5 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
+import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import { storageMessage } from "@/lib/actions/storage-message"
@@ -24,7 +25,6 @@ import {
   type TailoredResumeRequest,
 } from "@workspace/agents/tailored-resume"
 import type { PrismaClient } from "@workspace/db"
-import { createLangfuseCallback } from "@workspace/langfuse"
 import {
   isUserStorageError,
   type ResumeStore,
@@ -405,61 +405,21 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
   /**
    * One model call, traced.
    *
-   * ⚠️ **The callback is not optional decoration.** Every other agent run in
-   * this repository reports to Langfuse — `generate-briefing` from the worker,
-   * `chat-response` and `cover-letter` from the dashboard — and one that did not
-   * would be the only agent invocation whose prompt and output nobody can inspect
-   * after the fact. For a document that makes factual claims in the user's name
-   * that is the worst place to lose the transcript: "did the model invent this
-   * employer, or was it in the CV" is answerable from a trace and from nothing
-   * else. The shape is `lib/chat-handler.ts`'s: a handler per invocation (they
-   * retain run state, so sharing one would mix traces), `langfuseUserId` and
-   * `langfuseSessionId` in metadata, and the callback spread in only when
-   * Langfuse is configured — it is `undefined` without keys, and
-   * `callbacks: [undefined]` is not the same as no callbacks.
-   *
-   * `.invoke()` rather than `.stream()`: the tailor has no tools, so the graph is
-   * START → model → END and there are no intermediate steps for a stream to be
-   * interesting about.
+   * Tracing, the empty-answer throw and the choice of `.invoke()` over
+   * `.stream()` all belong to {@link invokeTracedAgent}, which says why — and in
+   * particular why losing this run's transcript would be worse than losing most.
+   * What is this feature's own is the prompt.
    */
   async function tailor(
     request: TailoredResumeRequest,
     userId: string
   ): Promise<string> {
-    const agent = createTailor()
-    const sessionId = crypto.randomUUID()
-
-    const callback = createLangfuseCallback({
+    return invokeTracedAgent(createTailor(), {
+      name: "tailored-resume",
+      route: "/jobs",
       userId,
-      sessionId,
-      tags: ["dashboard", "tailored-resume"],
-      traceMetadata: {
-        feature: "tailored-resume",
-        route: "/jobs",
-      },
+      prompt: toTailoredResumePrompt(request),
     })
-
-    const result = await agent.invoke(
-      {
-        messages: [{ role: "user", content: toTailoredResumePrompt(request) }],
-      },
-      {
-        runName: "tailored-resume",
-        metadata: {
-          langfuseUserId: userId,
-          langfuseSessionId: sessionId,
-        },
-        ...(callback ? { callbacks: [callback] } : {}),
-      }
-    )
-
-    const resume = result.messages.at(-1)?.text.trim() ?? ""
-
-    if (resume.length === 0) {
-      throw new Error("The tailor returned an empty resume.")
-    }
-
-    return resume
   }
 
   return { generateTailoredResume, saveTailoredResume }
