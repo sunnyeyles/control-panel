@@ -5,11 +5,12 @@ import { storageMessage } from "@/lib/actions/storage-message"
 import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { NoBackgroundReason } from "@/lib/candidate/candidate-background"
-import { POSTING_ID_PATTERN } from "@/lib/posting-documents/posting-document-ref"
+import { editPostingDocument } from "@/lib/posting-documents/edit-posting-document"
 import {
   BAD_REQUEST,
-  preparePostingDocument,
-} from "@/lib/posting-documents/prepare-posting-document"
+  POSTING_ID_PATTERN,
+} from "@/lib/posting-documents/posting-document-ref"
+import { preparePostingDocument } from "@/lib/posting-documents/prepare-posting-document"
 import {
   loadStoredPosting,
   storedPostingMessage,
@@ -31,7 +32,6 @@ import {
   isUserStorageError,
   type CoverLetterStore,
   type ResumeStore,
-  type StoredCoverLetter,
 } from "@workspace/user-storage"
 import { z } from "zod"
 
@@ -102,18 +102,23 @@ export { POSTING_NOT_FOUND }
 const KIND = "cover-letters"
 
 /**
- * ⚠️ **Drafting has no schema of its own, and that is the two actions agreeing
- * rather than a duplication to collapse.** A letter is addressed by
- * `(user, Posting)` however it came to be written, so drafting asks for exactly
- * one identifier — which is `preparePostingDocument`'s own parse, shared with
- * the tailored resume because it is the same field refused for the same reason.
- * {@link saveSchema} below stays this file's: tying what a draft accepts to what
- * an edit accepts is the pair most worth leaving free to diverge, since one of
- * them takes letter text from the caller and the other must never.
+ * ⚠️ **Only one of the three actions here parses its own form, and that is the
+ * other two agreeing rather than a duplication to collapse.** A letter is
+ * addressed by `(user, Posting)` however it came to be written, so drafting asks
+ * for exactly one identifier and saving asks for an identifier and a body — each
+ * of those schemas lives with the shared function that enforces it,
+ * `preparePostingDocument` and `editPostingDocument` respectively, and both are
+ * shared with the tailored resume because they refuse the same fields for the
+ * same reasons. Keeping them two modules rather than one is what leaves the pair
+ * most worth diverging free to: one of them takes letter text from the caller and
+ * the other must never.
  *
- * `POSTING_ID_PATTERN` is still imported here because the two write actions do
- * spell it — see `lib/posting-documents/posting-document-ref.ts` for why there
- * is one copy of it.
+ * {@link createSchema} below is this file's alone, because manual creation is
+ * this feature's alone — see {@link RESUME_NOT_FOUND} in
+ * `tailored-resume-actions.ts` for why there is no resume counterpart.
+ *
+ * `POSTING_ID_PATTERN` is imported rather than restated — see
+ * `lib/posting-documents/posting-document-ref.ts` for why there is one copy of it.
  */
 
 /**
@@ -156,11 +161,13 @@ const EMPTY_LETTER = "There is nothing to save — the letter is empty."
 const LETTER_TOO_LONG = `That letter is too long to save. The limit is ${MAX_LETTER_CHARS.toLocaleString("en-AU")} characters.`
 
 /**
+ * What {@link createCoverLetterActions.createCoverLetter} accepts.
+ *
  * ⚠️ **`markdown` is bounded below, not here.** A `.max()` on the schema would
  * report a 60,000-character letter with the same message as a missing field,
  * and the two are nothing alike from the user's side.
  */
-const saveSchema = z.object({
+const createSchema = z.object({
   postingId: z.string().regex(POSTING_ID_PATTERN),
   markdown: z.string(),
 })
@@ -334,7 +341,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     const caller = await requireUser(deps.getUser, KIND)
     if (!caller.ok) return fail(caller.message)
 
-    const parsed = saveSchema.safeParse({
+    const parsed = createSchema.safeParse({
       postingId: formData.get("postingId"),
       markdown: formData.get("markdown"),
     })
@@ -401,20 +408,14 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
    * so the Run that found the Posting is neither needed nor asked for — it is
    * already recorded in the letter's own provenance, and that is where it stays.
    *
-   * Three things this holds, in order:
-   *
-   * 1. **Who is asking, before the body is touched.** Same reasoning as the
-   *    draft action: for a Server Action `proxy.ts` cannot evaluate the session
-   *    on a POST, so this is the only real check.
-   * 2. **The letter must already exist** — see {@link LETTER_NOT_FOUND}, which
-   *    is where the reasoning lives, because it is the property that keeps an
-   *    action accepting letter text from being a way to create one.
-   * 3. **`draftedAt` and provenance are carried across, never restamped.** An
-   *    edit is not a drafting. The Posting card renders "Cover letter drafted
-   *    <date>", and the letters list renders the title and company out of
-   *    provenance — a save that dropped either would have the page report that
-   *    the model rewrote the letter just now, or blank a row down to a hex
-   *    digest.
+   * The order the checks run in — who is asking, then the shape of the id, then
+   * the text, then whether there is anything at that address to overwrite — is
+   * `editPostingDocument`'s and is a property rather than plumbing; only the
+   * three sentences below are this feature's to write. In particular the second
+   * of them, {@link LETTER_NOT_FOUND}, is the property that keeps an action
+   * accepting letter text from being a way to create one, and
+   * `draftedAt` and provenance are carried across rather than restamped because
+   * an edit is not a drafting.
    */
   async function saveCoverLetter(
     state: ActionState,
@@ -422,81 +423,28 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    const caller = await requireUser(deps.getUser, KIND)
-    if (!caller.ok) return fail(caller.message)
+    const edited = await editPostingDocument(
+      deps,
+      formData,
+      deps.getCoverLetters(),
+      { kind: KIND, maxChars: MAX_LETTER_CHARS }
+    )
 
-    const parsed = saveSchema.safeParse({
-      postingId: formData.get("postingId"),
-      markdown: formData.get("markdown"),
-    })
-
-    if (!parsed.success) return fail(BAD_REQUEST)
-
-    // Normalized before it is measured and before it is stored. Two separate
-    // reasons:
-    //
-    // ⚠️ **`\r\n` is for the POST, not for the editor — nothing the UI does can
-    // produce it.** ProseMirror normalizes `\r\n` to `\n` as it parses the
-    // clipboard, so a letter pasted out of a Windows editor is already LF before
-    // it is a document; Turndown then emits LF, which
-    // `packages/ui/src/lib/markdown.test.ts` pins. Both halves of the only path
-    // a user has are covered, and this line is unreachable through it.
-    //
-    // It stays because a Server Action is reachable by direct POST with a
-    // FormData nobody typed — see `apps/dashboard/CLAUDE.md` — and the store is
-    // told `text/markdown`. Cheaper to normalize than to reason about later.
-    // Do not read it as evidence the editor emits CRLF; two comments here have
-    // now claimed a source for it that does not hold.
-    //
-    // ⚠️ **Line endings are the only normalization this side does, and the
-    // larger half is not here.** Whether an *unedited* save is a no-op depends
-    // on the markdown dialect the editor round-trips through, which is fixed in
-    // `createMarkdownSerializer()` and asserted there. This action cannot check
-    // it: by the time the bytes arrive they are already serialized.
-    //
-    // `trim()` because a letter that is only whitespace is an empty one however
-    // much of it there is, and Turndown leaves a trailing newline on nearly
-    // everything.
-    const markdown = parsed.data.markdown.replace(/\r\n/g, "\n").trim()
-
-    if (markdown.length === 0) return fail(EMPTY_LETTER)
-    if (markdown.length > MAX_LETTER_CHARS) return fail(LETTER_TOO_LONG)
-
-    const letters = deps.getCoverLetters()
-
-    // ⚠️ **The session's userId, never anything from the form** — the same rule
-    // as the draft action, and the reason a request naming another user's
-    // letter cannot be spelled rather than merely being refused.
-    const ref = { userId: caller.userId, postingId: parsed.data.postingId }
-
-    let existing: StoredCoverLetter
-    try {
-      existing = await letters.head(ref)
-    } catch (error) {
-      if (
-        isUserStorageError(error) &&
-        (error.code === "object_not_found" ||
-          error.code === "object_ownership" ||
-          error.code === "invalid_object_key")
-      ) {
-        return fail(LETTER_NOT_FOUND)
+    if (!edited.ok) {
+      switch (edited.reason) {
+        case "refused":
+          return fail(edited.message)
+        case "empty":
+          return fail(EMPTY_LETTER)
+        case "too-long":
+          return fail(LETTER_TOO_LONG)
+        case "not-found":
+          return fail(LETTER_NOT_FOUND)
+        default: {
+          const _exhaustive: never = edited
+          return _exhaustive
+        }
       }
-
-      // Anything else is the bucket being unreachable, which must not be
-      // reported as "you have not drafted this" — that would tell a user their
-      // letter is gone during an outage.
-      return fail(storageMessage(`${KIND}: read failed`, error))
-    }
-
-    try {
-      await letters.put({
-        ...ref,
-        markdown,
-        draftedAt: existing.draftedAt,
-        provenance: existing.provenance,
-      })
-    } catch (error) {
-      return fail(storageMessage(`${KIND}: write failed`, error))
     }
 
     return {

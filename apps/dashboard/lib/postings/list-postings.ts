@@ -1,6 +1,9 @@
 import { PostingSchema } from "@workspace/agents/findings"
 import {
+  listPostingPage,
   POSTING_STATUSES,
+  type PostingListRow,
+  type PostingOrder,
   type PostingStatus,
   type PrismaClient,
 } from "@workspace/db"
@@ -8,7 +11,7 @@ import {
 import { formatCalendarDate } from "@/lib/format-calendar-date"
 import { formatUtcDateTime } from "@/lib/format-utc-datetime"
 
-import { PAGE_SIZE, type PostingQuery } from "./posting-query"
+import { PAGE_SIZE, type PostingQuery, type PostingSort } from "./posting-query"
 import { postingSource, type PostingSource } from "./posting-source"
 
 /**
@@ -129,77 +132,42 @@ export interface PostingPage {
 }
 
 /**
- * One page of this user's Postings, in the order the query asks for.
+ * One page of this user's Postings, as the table renders it.
  *
- * ⚠️ **`where: { userId }` is the whole of the row scoping, and it is not
- * optional.** The page guard establishes *who is asking*; it says nothing about
- * which rows they may read. A Posting is not addressable without naming a user
- * — `(user_id, posting_id)` is the natural key — so this filter is the check
- * rather than a shortcut past one, and `list-postings.test.ts` asserts against a
- * second user's rows.
+ * ⚠️ **The query is `listPostingPage` in `@workspace/db`, and everything about
+ * *reading* a page belongs to it** — the `userId` scoping that is the ownership
+ * check rather than a filter in front of one, the count issued alongside the
+ * page, the clamp against the real page count and the re-fetch when a requested
+ * page overshot, the `postingId` tie-break that stops a row appearing on two
+ * pages, and NULLS LAST on `postedAt` in both directions. The reasoning for each
+ * is there, next to the SQL it is about, and `stores.test.ts` exercises it
+ * against a real Postgres — which is the point: those are properties of an index
+ * and a planner, and a hand-written fake could only agree with whoever wrote it.
  *
- * ⚠️ **The count and the page are asked for together, and the re-fetch below is
- * what keeps that safe.** `?page=99` on a three-page table must render the last
- * page, not an empty one with working controls underneath it — so the page
- * still has to be clamped against a total only the count knows. Doing that in
- * order meant two serial round trips on *every* render to pay for a case that
- * almost never happens. Asking for both at once and re-fetching only when the
- * requested page really did overshoot costs one round trip in the common case
- * and the original two in the rare one. The clamp itself is unchanged, and
- * `list-postings.test.ts` asserts it from the outside.
+ * What stays here is everything the database has no opinion about: mapping the
+ * URL's sort vocabulary onto the column vocabulary, parsing `payload` against a
+ * schema `@workspace/db` deliberately cannot see, formatting every instant on
+ * the server, and deciding what a row that answered nothing degrades to.
  *
- * The price is a query that is sometimes wasted: an empty table and an
- * overshooting page both issue a fetch whose result is discarded. Neither costs
- * wall-clock, because it ran alongside the count either way — and an empty
- * table is the cheapest query this schema has.
- *
- * ⚠️ **A hand-typed `?page=9999` now reaches `skip` before the clamp, and that
- * is survivable rather than an oversight.** `OFFSET` can only discard rows that
- * exist, so the work is bounded by how many Postings the *user* has and not by
- * the number they typed — a huge offset over a small table scans the same index
- * entries and returns nothing. `MAX_PAGE` in `posting-query.ts` is still what
- * keeps the value finite, and it is now the only bound in front of this query
- * rather than the outer of two.
- *
- * ⚠️ **`orderBy` is tie-broken on `postingId`, and that is a correctness fix,
- * not a nicety.** Offset pagination over a non-unique key — every sort here but
- * the dates is non-unique, and two Runs in one slot can share a `last_seen_at`
- * too — lets the database choose freely among equal rows, so the same row can
- * appear on page 1 and page 2 while another appears on neither. The tie-break
- * is in the same direction as the sort so that the default order stays a scan
- * of `postings_user_last_seen_idx`, which carries `(last_seen_at DESC,
- * posting_id DESC)`.
- *
- * **Text ordering follows the database's collation.** Neon's default sorts
- * naturally; a `C`-collation database would put every uppercase title before
- * every lowercase one. One line to know about rather than something to work
- * around in the query.
+ * ⚠️ **Two clamps, two owners.** `MAX_PAGE` in `posting-query.ts` bounds the
+ * app's first untrusted GET input before anything has been counted; the clamp
+ * against the *real* page count is the query's. Neither stands in for the other.
  */
 export async function listPostings(
   prisma: PrismaClient,
   userId: string,
   query: PostingQuery
 ): Promise<PostingPage> {
-  const [total, requested] = await Promise.all([
-    prisma.posting.count({ where: { userId } }),
-    findPage(prisma, userId, query, query.page),
-  ])
-
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
-
-  if (total === 0) {
-    return { postings: [], total, page: 1, pageCount, pageSize: PAGE_SIZE }
-  }
-
-  const page = Math.min(query.page, pageCount)
-
-  // The speculative fetch was for the page that was asked for. When that was
-  // past the end it returned nothing and is discarded, and the clamped page is
-  // fetched properly — the only path that still pays two round trips.
-  const rows =
-    page === query.page
-      ? requested
-      : await findPage(prisma, userId, query, page)
+  const { rows, total, page, pageCount } = await listPostingPage(
+    prisma,
+    userId,
+    {
+      order: ORDER_FOR[query.sort],
+      direction: query.direction,
+      page: query.page,
+      pageSize: PAGE_SIZE,
+    }
+  )
 
   // One instant for the whole page, read once rather than per row, so twenty-five
   // sightings a few milliseconds apart cannot be described relative to twenty-five
@@ -218,7 +186,7 @@ export async function listPostings(
     const parsed = PostingSchema.safeParse(row.payload)
 
     if (!parsed.success) unreadable += 1
-    if (briefingName(row.lastSeenRun) === undefined) unnamed += 1
+    if (briefingName(row.briefing) === undefined) unnamed += 1
 
     return toView(row, parsed, now)
   })
@@ -257,122 +225,25 @@ export async function listPostings(
 }
 
 /**
- * One slice of `postings`, in the order the query asks for.
+ * The URL's sort vocabulary, mapped onto the column vocabulary.
  *
- * Split out of {@link listPostings} because it is now issued from two places —
- * speculatively for the page that was asked for, and again for the clamped page
- * when that overshot. The projection has to be identical in both, which is what
- * having one function guarantees.
+ * ⚠️ **Two enums, and the mapping between them is the point.**
+ * `POSTING_SORTS` in `posting-query.ts` is how a *URL* spells a sort;
+ * `POSTING_ORDERS` in `@workspace/db` is what the query orders by. Keeping them
+ * separate is what stops an address bar from naming a database column — a value
+ * arriving from outside has to survive this table, rather than being handed to
+ * the query because it happened to parse. Two of the four differ in spelling for
+ * exactly that reason.
  *
- * `page` is a parameter rather than being read off `query`, precisely because
- * the two disagree in the case this exists to serve.
+ * A `satisfies`-checked record rather than a switch, so a sort added to either
+ * enum without the other fails to compile.
  */
-function findPage(
-  prisma: PrismaClient,
-  userId: string,
-  query: PostingQuery,
-  page: number
-) {
-  return prisma.posting.findMany({
-    where: { userId },
-    orderBy: orderByFor(query),
-    skip: (page - 1) * PAGE_SIZE,
-    take: PAGE_SIZE,
-    select: {
-      postingId: true,
-      title: true,
-      company: true,
-      location: true,
-      url: true,
-      status: true,
-      postedAt: true,
-      payload: true,
-      firstSeenAt: true,
-      lastSeenAt: true,
-      // Which Briefing found it, asked for with the page rather than resolved
-      // row by row afterwards: `postings.last_seen_run_id` → `runs.job_id` →
-      // `jobs.name`. **`lastSeenRun`, not `firstSeenRun`** — the Briefing that
-      // most recently found the advertisement is the one whose criteria still
-      // match it, and it is the sighting the default sort orders on.
-      lastSeenRun: { select: { job: { select: { name: true } } } },
-    },
-  })
-}
-
-/**
- * The order one page is read in, written out per column rather than built from
- * a computed key.
- *
- * The query string never names a database column: `sort=title` selects a branch
- * here, so the set of orderable fields is this function and not "whatever
- * `postings` happens to have". A `{ [field]: direction }` object would be the
- * same handful of lines with the column name arriving as a string, which is both
- * untypeable against Prisma's input and a shape a reader has to check by hand.
- *
- * **Every branch carries the `postingId` tie-break, in the same direction.**
- * See {@link listPostings} for why a page boundary without it shows one row
- * twice and skips another.
- *
- * ⚠️ **`posted` is NULLS LAST in *both* directions, and that asymmetry is the
- * point.** It is the one nullable column here, and NULL does not mean "long
- * ago": it means the advertisement did not state a date, or stated one the
- * write path would not read as a date. Postgres would default to NULLS FIRST
- * under `DESC`, which puts every row that says nothing above every row that
- * says something — the opposite of what someone clicking "Posted" is asking
- * for. Sorting ascending does not make those rows interesting either, so they
- * stay at the bottom whichever way the column runs.
- */
-function orderByFor(query: PostingQuery) {
-  const to = query.direction
-
-  switch (query.sort) {
-    case "lastSeen":
-      return [{ lastSeenAt: to }, { postingId: to }]
-
-    case "title":
-      return [{ title: to }, { postingId: to }]
-
-    case "company":
-      return [{ company: to }, { postingId: to }]
-
-    case "posted":
-      // `as const` so `nulls` narrows to `Prisma.NullsOrder` rather than
-      // widening to `string`, which the generated input type refuses.
-      return [
-        { postedAt: { sort: to, nulls: "last" as const } },
-        { postingId: to },
-      ]
-  }
-}
-
-/** The columns this module reads off a `postings` row, and all it reads. */
-interface PostingRow {
-  postingId: string
-  title: string
-  company: string
-  location: string
-  url: string
-  status: string
-  /** NULL when the advertisement stated no date, or stated a non-date. */
-  postedAt: Date | null
-  payload: unknown
-  firstSeenAt: Date
-  lastSeenAt: Date
-  /**
-   * The Briefing that most recently found this Posting, as the nested `select`
-   * asks for it.
-   *
-   * ⚠️ **Both halves are typed nullable although neither relation is optional
-   * in the schema.** `postings.last_seen_run_id` and `runs.job_id` are NOT NULL
-   * with `onDelete: Restrict`, so Postgres cannot answer with a hole — the
-   * nullability is not a claim about the database. It is what keeps a client
-   * that answered *less* than it was asked from taking the whole page down with
-   * a `TypeError` on `.job`: the `DEV_AUTH_BYPASS` fake did exactly that until
-   * it learned to apply `select`, and a future caller narrowing the projection
-   * would do it again.
-   */
-  lastSeenRun: { job: { name: string } | null } | null
-}
+const ORDER_FOR = {
+  lastSeen: "lastSeenAt",
+  title: "title",
+  company: "company",
+  posted: "postedAt",
+} as const satisfies Record<PostingSort, PostingOrder>
 
 /**
  * A row as the table renders it.
@@ -396,7 +267,7 @@ interface PostingRow {
  * describes.
  */
 function toView(
-  row: PostingRow,
+  row: PostingListRow,
   parsed: ReturnType<typeof PostingSchema.safeParse>,
   now: Date
 ): PostingView {
@@ -417,7 +288,7 @@ function toView(
     firstSeenExact: formatUtcDateTime(row.firstSeenAt),
     lastSeen: formatSeenAgo(row.lastSeenAt, now),
     lastSeenExact: formatUtcDateTime(row.lastSeenAt),
-    briefing: briefingName(row.lastSeenRun) ?? UNKNOWN_BRIEFING,
+    briefing: briefingName(row.briefing) ?? UNKNOWN_BRIEFING,
     // The column when the write path could read a date out of the
     // advertisement, the advertisement's own words when it could not, and
     // nothing when it said nothing. See {@link PostingView.postedAt} for why
@@ -439,12 +310,18 @@ function toView(
 const UNKNOWN_BRIEFING = "Unknown briefing"
 
 /**
- * The Briefing's name as the relation answered, or `undefined` when it did not.
+ * The Briefing's name as the row carries it, or `undefined` when it has none.
+ *
+ * ⚠️ **A display rule, which is why it stayed here** when the relation walk
+ * moved into `listPostingPage`. That function flattens `lastSeenRun.job.name`
+ * to `string | null` and stops there; **blank counting as no answer is this
+ * side's judgement** — `jobs.name` has no emptiness constraint, and an empty
+ * string renders as a missing value rather than as one. A database has no view
+ * about that.
  *
  * Deliberately pure — no logging — because {@link listPostings} reports these
  * once per page rather than once per row, and it needs this same rule to count
- * them. Blank counts as no answer: `jobs.name` has no emptiness constraint, and
- * an empty string renders as a missing value rather than as one.
+ * them.
  *
  * ⚠️ **The caller degrades rather than drops.** The row keeps its place with
  * {@link UNKNOWN_BRIEFING} in place of the name, for the reason {@link toView}
@@ -452,12 +329,8 @@ const UNKNOWN_BRIEFING = "Unknown briefing"
  * provenance, and the advertisement is what the user came for. Losing the label
  * must not look like a Posting nobody ever found.
  */
-function briefingName(
-  lastSeenRun: PostingRow["lastSeenRun"]
-): string | undefined {
-  const name = lastSeenRun?.job?.name
-
-  return name === undefined || name === "" ? undefined : name
+function briefingName(briefing: string | null): string | undefined {
+  return briefing === null || briefing === "" ? undefined : briefing
 }
 
 /**

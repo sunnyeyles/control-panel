@@ -18,7 +18,7 @@ import type { PrismaClient } from "@workspace/db"
 import type { ResumeStore } from "@workspace/user-storage"
 import { z } from "zod"
 
-import { POSTING_ID_PATTERN } from "./posting-document-ref"
+import { BAD_REQUEST, POSTING_ID_PATTERN } from "./posting-document-ref"
 
 /**
  * Everything that has to be true before a model is asked to write a **Posting
@@ -62,14 +62,6 @@ import { POSTING_ID_PATTERN } from "./posting-document-ref"
 const requestSchema = z.object({
   postingId: z.string().regex(POSTING_ID_PATTERN),
 })
-
-/**
- * Reachable only by posting a form directly; the buttons always send it.
- *
- * One string for both kinds, because it names the **Posting** rather than the
- * document — the same reason `POSTING_NOT_FOUND` is shared.
- */
-export const BAD_REQUEST = "That posting could not be identified."
 
 /** Everything the caller needs, once none of the refusals applied. */
 export interface PreparedPostingDocument {

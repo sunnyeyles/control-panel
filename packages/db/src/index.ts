@@ -41,6 +41,7 @@ export {
   claimJob,
   createJob,
   dueJobs,
+  findJob,
   pauseJob,
   resumeJob,
   updateJobSchedule,
@@ -73,12 +74,21 @@ export {
 
 export {
   deletePostings,
+  listPostingPage,
   ownedPostingIds,
+  postingPayload,
+  POSTING_ORDERS,
   POSTING_STATUSES,
   recordPostings,
   setPostingStatus,
   type NewPosting,
+  type PostingDirection,
+  type PostingListPage,
+  type PostingListRow,
+  type PostingOrder,
+  type PostingPageQuery,
   type SeenPostings,
+  type StoredPostingPayload,
 } from "./postings.ts"
 
 export { computeNextRunAt } from "./schedule.ts"

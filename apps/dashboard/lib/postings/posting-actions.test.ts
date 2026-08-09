@@ -25,6 +25,8 @@ const POSTING_ID = "0123456789abcdef"
 const OTHERS_POSTING_ID = "fedcba9876543210"
 const MISSING_POSTING_ID = "aaaaaaaaaaaaaaaa"
 const RESET_KEY = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
+/** `postingPayload` returns it beside the payload; nothing here reads it. */
+const RUN_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 
 const NOW = new Date("2026-08-05T00:00:00.000Z")
 
@@ -136,23 +138,28 @@ class FakeDb {
             .map((row) => ({ postingId: row.postingId })),
 
         /**
-         * Filters on **both** halves of the natural key, like `updateMany`
-         * above and for the same reason: that filter is the ownership check,
-         * so a fake that ignored `userId` would let the stranger test pass
-         * over an implementation that had stopped scoping.
+         * Addressed by **both** halves of the natural key, like `updateMany`
+         * above and for the same reason: that pair is the ownership check, so a
+         * fake that answered from `postingId` alone would let the stranger test
+         * pass over an implementation that had stopped scoping.
+         *
+         * The compound `userId_postingId` rather than a plain `where`, because
+         * `postingPayload` in `@workspace/db` addresses the unique index.
          */
-        findFirst: async (query: {
-          where: { userId: string; postingId: string }
+        findUnique: async (query: {
+          where: { userId_postingId: { userId: string; postingId: string } }
         }) => {
-          this.reads.push(query)
+          const where = query.where.userId_postingId
+          this.reads.push({ where })
 
           const found = this.rows.find(
             (row) =>
-              row.userId === query.where.userId &&
-              row.postingId === query.where.postingId
+              row.userId === where.userId && row.postingId === where.postingId
           )
 
-          return found ? { payload: found.payload } : null
+          return found
+            ? { payload: found.payload, lastSeenRunId: RUN_ID }
+            : null
         },
 
         deleteMany: async (query: { where: PostingWhere }) => {
@@ -966,7 +973,7 @@ describe("loadPostingDetail", () => {
       getPrisma: () =>
         ({
           posting: {
-            findFirst: async () => {
+            findUnique: async () => {
               throw new Error("connection reset")
             },
           },

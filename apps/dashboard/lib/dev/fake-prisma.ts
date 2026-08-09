@@ -62,20 +62,21 @@ export function createDevPrisma(): PrismaClient {
     posting: {
       count: async (query: PostingsForUser) => db.countPostings(query.where),
       findMany: async (query: FindManyPostings) => db.findManyPostings(query),
+      /**
+       * Both single-row reads, because there is one.
+       *
+       * `loadStoredPosting` and `loadPostingDetail` used to spell the same
+       * lookup two ways — one compound `findUnique`, one plain `findFirst` — and
+       * this delegate carried both. They share `postingPayload` in
+       * `@workspace/db` now, so `findFirst` went with the second spelling.
+       *
+       * Answering from **both** halves of the natural key is the part that must
+       * not be relaxed: that pair *is* the ownership check, so a fake that
+       * answered from `postingId` alone would let the real one stop scoping
+       * without anything here noticing.
+       */
       findUnique: async (query: ByUserAndPostingId) =>
         db.findPosting(query.where.userId_postingId),
-      /**
-       * Addressed by the two columns rather than by the compound key, which is
-       * why it cannot go through `findUnique` above.
-       *
-       * `loadPostingDetail` is the only caller, and it filters on `userId` and
-       * `postingId` as a plain `where` — that filter *is* the ownership check,
-       * so a fake that answered from `postingId` alone would let the real one
-       * stop scoping without anything here noticing.
-       */
-      findFirst: async (query: {
-        where: { userId: string; postingId: string }
-      }) => db.findPosting(query.where),
       updateMany: async (query: {
         where: { userId: string; postingId: string }
         data: Partial<Posting>
