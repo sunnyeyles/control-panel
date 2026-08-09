@@ -1,66 +1,45 @@
-import { toMetadataRecord } from "./metadata.ts"
-import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
+import {
+  createPostingDocumentStore,
+  type PostingDocumentProvenance,
+  type PostingDocumentRef,
+  type StoredPostingDocument,
+} from "./posting-document-store.ts"
+import type { UserObjectStore } from "./user-object-store.ts"
 
-/** Tailored resumes are Markdown and nothing else. */
-const EXTENSION = ".md"
 const KIND = "tailored-resumes" as const
 
 /**
- * Provenance, as metadata keys.
+ * The metadata key holding the generating instant.
  *
- * Lowercase because S3 lowercases metadata names in transit; written from these
- * constants on both sides so the round trip cannot drift.
+ * ⚠️ **`generated-at`, and a Cover Letter's is `drafted-at`.** The two must keep
+ * differing forever, for the reason set out on
+ * {@link PostingDocumentStoreOptions.instantKey}: both are stamped on objects
+ * that already exist, and nothing can rewrite them.
  */
 const GENERATED_AT = "generated-at"
-const RUN_ID = "run-id"
-const POSTING_TITLE = "posting-title"
-const POSTING_COMPANY = "posting-company"
-const POSTING_URL = "posting-url"
-/** The Document this was rewritten from, by its display name. */
-const SOURCE_DOCUMENT = "source-document"
 
 /**
  * Addresses one tailored resume.
  *
- * ⚠️ **The unit of identity is (user, Posting)** — the same as a Cover
- * Letter's, and for the same reason. `postingId()` in `@workspace/agents` is
- * derived from the advertisement's normalised URL, so two Runs a week apart that
- * find the same job agree on what to call it, and re-generating overwrites one
- * object rather than orphaning the first. There is no Run in the key; the Run
- * that most recently reported the advertisement rides in metadata below.
+ * ⚠️ **The unit of identity is (user, Posting)** — the same as a Cover Letter's,
+ * and for the same reason. See {@link PostingDocumentRef}.
  */
-export interface TailoredResumeRef {
-  userId: string
-  /**
-   * The Posting's derived id — `postingId()` from `@workspace/agents`.
-   *
-   * That function's output satisfies the key-segment rule in `keys.ts`
-   * unmodified, which is why it can be a key segment without escaping.
-   */
-  postingId: string
-}
+export type TailoredResumeRef = PostingDocumentRef
 
-/** The Posting a resume was tailored for, as far as provenance is concerned. */
-export interface TailoredResumeProvenance {
-  /** The Run whose Findings the Posting was read out of, if there was one. */
-  runId?: string
-  title?: string
-  company?: string
-  url?: string
-  /**
-   * Which of the user's Documents it was rewritten from, by display name.
-   *
-   * ⚠️ **This one has no counterpart on a Cover Letter, and it earns its place.**
-   * A letter is written *about* a CV and the reader can see whether it fits.
-   * A tailored resume *is* the CV, rewritten — so "which of my three uploads
-   * produced this" is the first question anyone asks when the output looks
-   * wrong, and the selection rule (`loadCandidateBackground` takes the newest
-   * document labelled Resume) means the answer changes silently the moment a
-   * new one is uploaded. Without this, the only way to know is to reason about
-   * what the shelf looked like at the time.
-   */
-  sourceDocument?: string
-}
+/**
+ * The Posting a resume was tailored for, as far as provenance is concerned.
+ *
+ * ⚠️ **This carries one field a letter's does not: {@link
+ * PostingDocumentProvenance.sourceDocument}, and it earns its place.** A letter
+ * is written *about* a CV and the reader can see whether it fits. A tailored
+ * resume *is* the CV, rewritten — so "which of my three uploads produced this"
+ * is the first question anyone asks when the output looks wrong, and the
+ * selection rule (`loadCandidateBackground` takes the newest document labelled
+ * Resume) means the answer changes silently the moment a new one is uploaded.
+ * Without it, the only way to know is to reason about what the shelf looked like
+ * at the time.
+ */
+export type TailoredResumeProvenance = PostingDocumentProvenance
 
 /** A tailored resume on its way in. */
 export interface NewTailoredResume extends TailoredResumeRef {
@@ -69,15 +48,9 @@ export interface NewTailoredResume extends TailoredResumeRef {
   /** When it was generated. Carried into metadata; the key holds no time. */
   generatedAt: Date
   /**
-   * Where it came from.
-   *
-   * ⚠️ **Every value here is model- or user-supplied text and is cleaned before
-   * it becomes a header.** `title` and `company` are transcribed by the scout out
-   * of an advertisement whoever paid for it wrote, and `sourceDocument` is an
-   * uploaded filename — so a newline or an em dash in one is ordinary rather than
-   * exotic, and S3 user metadata travels in HTTP headers. {@link
-   * toMetadataRecord} strips each value to printable ASCII and drops anything
-   * that leaves nothing behind.
+   * Where it came from. Every value is model- or user-supplied text and is
+   * cleaned before it becomes a header — see
+   * `NewPostingDocument.provenance` in `posting-document-store.ts`.
    */
   provenance?: TailoredResumeProvenance
 }
@@ -95,17 +68,13 @@ export interface StoredTailoredResume extends TailoredResumeRef {
 /**
  * Resumes tailored to a Posting.
  *
- * A facade over {@link UserObjectStore}, not a second implementation — the same
- * arrangement as `BriefStore`, `ResumeStore` and `CoverLetterStore`, and for the
- * same reason: it knows this kind's key shape and single file type so a call
- * site cannot get them wrong.
+ * A **Posting Document** kind: everything about how one is addressed, stored and
+ * read back is {@link createPostingDocumentStore}'s, and this names the half a
+ * tailored resume owns — its kind, its metadata key, and the `sourceDocument`
+ * a letter has no use for.
  *
- * **No database row, deliberately**, on the precedent a Cover Letter set:
- * `artifacts.run_id` is `NOT NULL` and references `runs`, and generating a
- * resume is not an execution of a briefing job — minting an ad-hoc Run per click
- * would put rows that are not briefings into a job's history. The key is fully
- * derivable from the user and the Posting, so a row buys no addressability that
- * {@link TailoredResumeStore.head} does not already give.
+ * **No database row, deliberately**, on the precedent a Cover Letter set; see
+ * {@link PostingDocumentStore}.
  */
 export interface TailoredResumeStore {
   /**
@@ -123,22 +92,12 @@ export interface TailoredResumeStore {
   /**
    * Every tailored resume one user has.
    *
-   * ⚠️ **`CoverLetterStore` has no counterpart to this, and the asymmetry is
-   * the point rather than an oversight to even out.**
-   * `docs/cover-letter-existence-plan.md` documents what the letters pay for
-   * lacking it: rendering "does one exist for this Posting" down a page of
-   * twenty-five costs twenty-five `HeadObject` calls, on every render, including
-   * the five-second poll a running briefing turns on. That plan's recommended
-   * fix is exactly this method, and building the second feature the same way
-   * would have doubled a cost already written down as a problem.
+   * This feature had one from the start rather than a per-row `head()`, because
+   * building it the letters' way would have doubled a cost
+   * `docs/cover-letter-existence-plan.md` had already written down as a problem.
+   * A Cover Letter has the same method now, and that plan is what put it there.
    *
-   * ⚠️ **A listing carries no user metadata**, because ListObjectsV2 does not
-   * return it — so every entry here has an empty {@link
-   * StoredTailoredResume.provenance} and a `generatedAt` taken from the object's
-   * own write time rather than from the `generated-at` header. That is enough for
-   * "exists, and roughly when", which is the whole of what a table column needs;
-   * anything that renders provenance must `get()` or `head()` the one object it
-   * is actually showing. Do not reach for this to populate a filename.
+   * A listing carries no user metadata; see {@link PostingDocumentStore.list}.
    */
   list(userId: string): Promise<StoredTailoredResume[]>
 }
@@ -146,110 +105,41 @@ export interface TailoredResumeStore {
 export function createTailoredResumeStore(
   objects: UserObjectStore
 ): TailoredResumeStore {
-  const refFor = (ref: TailoredResumeRef) => ({
-    userId: ref.userId,
+  const documents = createPostingDocumentStore(objects, {
     kind: KIND,
-    segments: [ref.postingId],
-    extension: EXTENSION,
+    instantKey: GENERATED_AT,
   })
+
+  const toResume = (document: StoredPostingDocument): StoredTailoredResume => {
+    const { writtenAt, markdown, ...rest } = document
+
+    return {
+      ...rest,
+      generatedAt: writtenAt,
+      ...(markdown === undefined ? {} : { markdown }),
+    }
+  }
 
   return {
     async put(resume: NewTailoredResume): Promise<StoredTailoredResume> {
-      const stored = await objects.put({
-        ...refFor(resume),
-        body: resume.markdown,
-        metadata: toMetadataRecord({
-          [GENERATED_AT]: resume.generatedAt.toISOString(),
-          [RUN_ID]: resume.provenance?.runId,
-          [POSTING_TITLE]: resume.provenance?.title,
-          [POSTING_COMPANY]: resume.provenance?.company,
-          [POSTING_URL]: resume.provenance?.url,
-          [SOURCE_DOCUMENT]: resume.provenance?.sourceDocument,
-        }),
-      })
-
-      return {
-        key: stored.key,
-        userId: resume.userId,
-        postingId: resume.postingId,
-        size: stored.size,
-        generatedAt: resume.generatedAt,
-        provenance: toProvenance(stored.metadata),
-      }
+      const { generatedAt, ...rest } = resume
+      return toResume(await documents.put({ ...rest, writtenAt: generatedAt }))
     },
 
     async get(ref: TailoredResumeRef): Promise<StoredTailoredResume> {
-      const fetched = await objects.get(refFor(ref))
-
-      return {
-        ...toStoredTailoredResume(ref.userId, fetched),
-        markdown: fetched.text(),
-      }
+      return toResume(await documents.get(ref))
     },
 
     async head(ref: TailoredResumeRef): Promise<StoredTailoredResume> {
-      const stored = await objects.head(refFor(ref))
-      return toStoredTailoredResume(ref.userId, stored)
+      return toResume(await documents.head(ref))
     },
 
     async delete(ref: TailoredResumeRef): Promise<void> {
-      await objects.delete(refFor(ref))
+      await documents.delete(ref)
     },
 
     async list(userId: string): Promise<StoredTailoredResume[]> {
-      const listed = await objects.list(userId, KIND)
-      return listed.map((object) => toStoredTailoredResume(userId, object))
+      return (await documents.list(userId)).map(toResume)
     },
   }
-}
-
-function toStoredTailoredResume(
-  userId: string,
-  object: StoredObject
-): StoredTailoredResume {
-  // segments is [postingId] by construction, and parseObjectKey has already
-  // validated it.
-  const [postingId] = object.segments
-
-  return {
-    key: object.key,
-    userId,
-    postingId: postingId ?? "",
-    size: object.size,
-    generatedAt: instantFrom(object.metadata, object.storedAt),
-    provenance: toProvenance(object.metadata),
-  }
-}
-
-function toProvenance(
-  metadata: Record<string, string>
-): TailoredResumeProvenance {
-  return {
-    ...(metadata[RUN_ID] ? { runId: metadata[RUN_ID] } : {}),
-    ...(metadata[POSTING_TITLE] ? { title: metadata[POSTING_TITLE] } : {}),
-    ...(metadata[POSTING_COMPANY]
-      ? { company: metadata[POSTING_COMPANY] }
-      : {}),
-    ...(metadata[POSTING_URL] ? { url: metadata[POSTING_URL] } : {}),
-    ...(metadata[SOURCE_DOCUMENT]
-      ? { sourceDocument: metadata[SOURCE_DOCUMENT] }
-      : {}),
-  }
-}
-
-/**
- * Metadata holds the generating instant; fall back to the object's own write
- * time when it is absent or unparseable, which is close enough and never
- * missing.
- *
- * The fallback is not the edge case it looks like here: {@link
- * TailoredResumeStore.list} reaches this with an empty metadata record for
- * *every* entry, because a listing carries none. `storedAt` is what that whole
- * path renders.
- */
-function instantFrom(metadata: Record<string, string>, storedAt: Date): Date {
-  const raw = metadata[GENERATED_AT]
-  const parsed = raw ? new Date(raw) : undefined
-
-  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : storedAt
 }
