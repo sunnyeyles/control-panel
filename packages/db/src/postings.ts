@@ -148,6 +148,59 @@ export async function recordPostings(
   `)
 }
 
+/** One Posting's stored payload, and the Run that most recently reported it. */
+export interface StoredPostingPayload {
+  /**
+   * The advertisement as its producer validated it, opaque to this package.
+   *
+   * The caller parses it. `@workspace/db` must not depend on the agent stack, so
+   * the schema that would say whether this is still readable lives on the other
+   * side of the seam — which is why both callers own a "the stored payload no
+   * longer parses" branch rather than being handed one.
+   */
+  payload: PostingPayload
+  /** `last_seen_run_id`: provenance, and no part of the identity. */
+  lastSeenRunId: string
+}
+
+/**
+ * The stored payload for one owned Posting, or `undefined` when there is none.
+ *
+ * ⚠️ **`(userId, postingId)` is the whole of the ownership check, and it is not
+ * a shortcut past one.** A Posting is not addressable without naming a user —
+ * that pair is the natural key — so filtering on both *is* the check, exactly as
+ * {@link setPostingStatus} describes. "No such Posting" and "someone else's" come
+ * back as the same `undefined`, which is what stops the distinction being leaked:
+ * Posting ids are derived from an advertisement's URL, so a caller that could
+ * tell them apart would be an oracle for whether a stranger has been shown one.
+ *
+ * ⚠️ **`findUnique`, not `findFirst`.** The pair is a unique index, so this is a
+ * single index probe rather than a scan the planner has to be trusted to stop
+ * early. One of the two callers spelled it the other way, which is the sort of
+ * difference two copies of a read acquire and nobody notices.
+ *
+ * The `postingId` reaching this must already have been checked against the shape
+ * an id can have — `POSTING_ID_PATTERN` in the dashboard. This does not restate
+ * that rule, and the CHECK on the column is not a stand-in for it.
+ */
+export async function postingPayload(
+  prisma: DbClient,
+  userId: string,
+  postingId: string
+): Promise<StoredPostingPayload | undefined> {
+  const row = await prisma.posting.findUnique({
+    where: { userId_postingId: { userId, postingId } },
+    select: { payload: true, lastSeenRunId: true },
+  })
+
+  if (!row) return undefined
+
+  return {
+    payload: row.payload as PostingPayload,
+    lastSeenRunId: row.lastSeenRunId,
+  }
+}
+
 /**
  * Set the status a person chose. `false` means no such Posting for this user.
  *

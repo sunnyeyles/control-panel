@@ -26,6 +26,7 @@ import {
   pauseJob,
   POSTING_STATUSES,
   ownedPostingIds,
+  postingPayload,
   recordDocument,
   recordArtifact,
   recordPostings,
@@ -737,6 +738,79 @@ describeWithDatabase("against a real database", () => {
       const row = await readBack(posting.postingId)
       expect(row?.status).toBe("new")
       expect(row?.statusChangedAt).toBeNull()
+    })
+
+    /**
+     * ⚠️ **The read two Posting Document actions and the detail panel write
+     * from.** Everything downstream of it — a cover letter, a tailored resume —
+     * is text put in the user's own name, so "can this be reached by naming
+     * somebody else's id" is the question worth asking against a real index
+     * rather than against a fake that agrees with whoever wrote it.
+     */
+    describe("reading the stored payload", () => {
+      it("hands back the payload and the run that last saw it", async () => {
+        const runId = await aRun()
+        const posting = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId,
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        expect(await postingPayload(prisma, userId, posting.postingId)).toEqual(
+          { payload: posting.payload, lastSeenRunId: runId }
+        )
+      })
+
+      it("cannot be reached with another user's id", async () => {
+        const runId = await aRun()
+        const posting = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId,
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        const stranger = await ensureUserForAuth(prisma, `auth_${randomUUID()}`)
+
+        // The same `undefined` a Posting nobody has produces, and deliberately
+        // so: Posting ids are derived from an advertisement's URL, so a caller
+        // able to tell the two apart would be an oracle for whether a stranger
+        // has been shown one.
+        expect(
+          await postingPayload(prisma, stranger.id, posting.postingId)
+        ).toBeUndefined()
+        expect(
+          await postingPayload(prisma, userId, derivedId())
+        ).toBeUndefined()
+      })
+
+      it("follows the payload the newest sighting wrote", async () => {
+        // `recordPostings` re-reads `payload` on every sighting that is not
+        // older than the last, so this read must not be answered from a cached
+        // or first-seen copy.
+        const posting = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        const refound = await aRun()
+        await recordPostings(prisma, {
+          userId,
+          runId: refound,
+          seenAt: SECOND_SIGHTING,
+          postings: [{ ...posting, payload: { matchReason: "rewritten" } }],
+        })
+
+        expect(await postingPayload(prisma, userId, posting.postingId)).toEqual(
+          { payload: { matchReason: "rewritten" }, lastSeenRunId: refound }
+        )
+      })
     })
 
     it("refuses to delete a run a posting still names", async () => {

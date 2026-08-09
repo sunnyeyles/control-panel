@@ -74,11 +74,13 @@ export {
 export {
   deletePostings,
   ownedPostingIds,
+  postingPayload,
   POSTING_STATUSES,
   recordPostings,
   setPostingStatus,
   type NewPosting,
   type SeenPostings,
+  type StoredPostingPayload,
 } from "./postings.ts"
 
 export { computeNextRunAt } from "./schedule.ts"

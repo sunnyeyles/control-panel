@@ -1,5 +1,5 @@
 import { PostingSchema } from "@workspace/agents/findings"
-import type { PrismaClient } from "@workspace/db"
+import { postingPayload, type PrismaClient } from "@workspace/db"
 
 /**
  * The part of a Posting that only the expanded row shows.
@@ -40,25 +40,28 @@ export interface PostingDetailView {
 /**
  * The detail for one Posting, or `undefined` when there is no such row.
  *
- * ⚠️ **`where: { userId, postingId }` is the whole of the ownership check, and
- * it is not a shortcut past one.** A Posting is not addressable without naming
- * a user — `(user_id, posting_id)` is the natural key — so filtering on both
- * *is* the check, exactly as `setPostingStatus` in `posting-actions.ts`
- * describes. "No such Posting" and "someone else's" come back as the same
- * `undefined`, which is what stops the distinction being leaked.
+ * ⚠️ **The read is `postingPayload` in `@workspace/db`, and the `(userId,
+ * postingId)` in it is the whole of the ownership check.** A Posting is not
+ * addressable without naming a user — that pair is the natural key — so
+ * filtering on both *is* the check rather than a shortcut past one, and "no
+ * such Posting" and "someone else's" come back as the same `undefined`. The
+ * reasoning lives with the query; what stays here is that this function passes
+ * it the session's user id and a checked Posting id, and nothing else.
+ *
+ * It is the same read `load-stored-posting.ts` performs, which is why it is one
+ * function now — this side used to spell it `findFirst` against a pair that is a
+ * unique index.
  *
  * The `postingId` reaching this must already have been checked against
- * `POSTING_ID_PATTERN` by its caller; this function does not restate that rule.
+ * `POSTING_ID_PATTERN` by its caller; neither this function nor the query
+ * restates that rule.
  */
 export async function loadPostingDetail(
   prisma: PrismaClient,
   userId: string,
   postingId: string
 ): Promise<PostingDetailView | undefined> {
-  const row = await prisma.posting.findFirst({
-    where: { userId, postingId },
-    select: { payload: true },
-  })
+  const row = await postingPayload(prisma, userId, postingId)
 
   if (!row) return undefined
 

@@ -1,6 +1,6 @@
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { PostingSchema, type Posting } from "@workspace/agents/findings"
-import type { PrismaClient } from "@workspace/db"
+import { postingPayload, type PrismaClient } from "@workspace/db"
 
 /**
  * Reading one owned Posting, for the actions that write a document about it.
@@ -37,6 +37,13 @@ import type { PrismaClient } from "@workspace/db"
  * here lands on every caller at once.** Both consumers spend a model call
  * downstream of this function; loosening what it accepts loosens what they will
  * write a document from.
+ *
+ * **The query itself is `postingPayload` in `@workspace/db`**, shared with
+ * `load-posting-detail.ts` — the two had written the same read twice and had
+ * already drifted, one spelling it `findFirst` and the other `findUnique`. What
+ * stays on this side is everything the database cannot answer: parsing the
+ * payload against the schema `@workspace/db` deliberately cannot see, and
+ * turning each way that fails into an outcome with a sentence.
  */
 
 export type StoredPosting =
@@ -71,10 +78,7 @@ export async function loadStoredPosting(
 ): Promise<StoredPosting> {
   let row
   try {
-    row = await prisma.posting.findUnique({
-      where: { userId_postingId: { userId, postingId } },
-      select: { payload: true, lastSeenRunId: true },
-    })
+    row = await postingPayload(prisma, userId, postingId)
   } catch (error) {
     console.error(`${domain}: could not load the posting`, error)
     return { status: "failed" }
