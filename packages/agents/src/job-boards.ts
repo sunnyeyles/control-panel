@@ -32,7 +32,14 @@ export interface JobBoard {
   trackingParameters: readonly string[]
 }
 
-const JOB_BOARDS: readonly JobBoard[] = [
+/**
+ * Exported so `board-fetch.test.ts` can pair every key of `BOARD_FETCHERS`
+ * against a board this registry actually names. That agreement is a string
+ * between two files, and a typo in it disables a board silently — which looks
+ * exactly like the feature working. Not dead code; do not un-export it without
+ * replacing the check.
+ */
+export const JOB_BOARDS: readonly JobBoard[] = [
   {
     name: "SEEK",
     hosts: ["seek.com.au"],
