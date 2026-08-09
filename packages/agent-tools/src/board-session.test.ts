@@ -68,6 +68,16 @@ describe("id allocation", () => {
 
     expect(session.createShape({ kind: "note", x: 0, y: 0 })).toContain("s1")
   })
+
+  it("skips an id the board describes nowhere but `knownIds` reports", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1" })], knownIds: ["s1", "s2", "s3"] })
+    )
+
+    session.createShape({ kind: "rectangle", x: 0, y: 0 })
+
+    expect(session.shapes().at(-1)?.id).toBe("s4")
+  })
 })
 
 describe("ops", () => {
@@ -173,6 +183,31 @@ describe("validation", () => {
 
     expect(session.connections()).toEqual([])
   })
+
+  it("deletes an arrow named on its own, leaving both endpoints", () => {
+    const session = createBoardSession(
+      context({
+        shapes: [shape({ id: "s1" }), shape({ id: "s2" })],
+        connections: [{ id: "s3", fromId: "s1", toId: "s2" }],
+      })
+    )
+
+    expect(session.deleteShapes(["s3"])).toContain("Deleted s3")
+    expect(session.connections()).toEqual([])
+    expect(session.shapes().map((s) => s.id)).toEqual(["s1", "s2"])
+    expect(session.flush()).toEqual([{ op: "delete", ids: ["s3"] }])
+  })
+
+  it("lists the arrows too when it deleted nothing at all", () => {
+    const session = createBoardSession(
+      context({
+        shapes: [shape({ id: "s1" }), shape({ id: "s2" })],
+        connections: [{ id: "s3", fromId: "s1", toId: "s2" }],
+      })
+    )
+
+    expect(session.deleteShapes(["s9"])).toContain("s1, s2, s3")
+  })
 })
 
 describe("layouts", () => {
@@ -258,6 +293,27 @@ describe("layouts", () => {
       { id: "s2", x: 500 },
       { id: "s3", x: 250 },
     ])
+  })
+
+  it("does not overlap shapes wider than the extent they sit in", () => {
+    // 300px of shape in a 220px span — without the clamp the step goes
+    // negative and the layout walks backwards over itself.
+    const session = createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 0, y: 0, w: 100, h: 100 }),
+          shape({ id: "s2", x: 60, y: 0, w: 100, h: 100 }),
+          shape({ id: "s3", x: 120, y: 0, w: 100, h: 100 }),
+        ],
+      })
+    )
+
+    session.arrangeShapes({
+      ids: ["s1", "s2", "s3"],
+      layout: "distribute-horizontal",
+    })
+
+    expect(session.shapes().map((s) => s.x)).toEqual([0, 100, 200])
   })
 
   it("will not distribute two shapes, because there is no space to even out", () => {

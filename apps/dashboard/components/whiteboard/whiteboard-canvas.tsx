@@ -70,6 +70,12 @@ export function WhiteboardCanvas({
   const editorRef = useRef<Editor | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // The same editor as `editorRef`, in state as well, purely so the theme
+  // effect below has something to depend on. tldraw builds its editor in a
+  // layout effect of a later render, so an effect that only reads the ref runs
+  // once against `null` and is never given a reason to run again.
+  const [mountedEditor, setMountedEditor] = useState<Editor | null>(null)
+
   // Frozen at the first render, deliberately. `snapshot` is a fresh object
   // every time the server component re-renders, so depending on it directly
   // would rebuild `handleMount`, remount `<Tldraw>`, and throw away whatever
@@ -80,6 +86,7 @@ export function WhiteboardCanvas({
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor
+      setMountedEditor(editor)
 
       if (initialSnapshot && typeof initialSnapshot === "object") {
         try {
@@ -102,9 +109,11 @@ export function WhiteboardCanvas({
 
       onEditor(editor)
 
-      // `source: "user"` is the whole point of the filter. The agent's edits
-      // arrive through `applyOps`, and without it every shape the agent drew
-      // would come back to it next turn labelled as the user's work.
+      // `source: "user"` excludes changes tldraw itself synthesises, and
+      // nothing else: in `@tldraw/store` it means *local*, so the agent's
+      // writes through `applyOps` arrive here too. Telling those apart is
+      // `recent-edits.ts`'s job, and the reason it cannot be done with the
+      // source filter is written up there.
       //
       // `onMount` may return a cleanup function, so the two subscriptions are
       // composed into one and torn down with the editor.
@@ -135,6 +144,7 @@ export function WhiteboardCanvas({
 
       return () => {
         if (saveTimer.current) clearTimeout(saveTimer.current)
+        setMountedEditor(null)
         stopTracking()
         stopSaving()
       }
@@ -143,14 +153,16 @@ export function WhiteboardCanvas({
   )
 
   // tldraw keeps its own light/dark preference, which knows nothing about
-  // next-themes. Without this the canvas stays light inside a dark app.
+  // next-themes, and its default is light — so without this a dark-mode user
+  // gets a white canvas. Depending on the editor and not only the theme is what
+  // makes it fire at all: the editor arrives after this component's first
+  // effects have run, and `resolvedTheme` may never change again.
   useEffect(() => {
-    const editor = editorRef.current
-    if (!editor || !resolvedTheme) return
-    editor.user.updateUserPreferences({
+    if (!mountedEditor || !resolvedTheme) return
+    mountedEditor.user.updateUserPreferences({
       colorScheme: resolvedTheme === "dark" ? "dark" : "light",
     })
-  }, [resolvedTheme])
+  }, [mountedEditor, resolvedTheme])
 
   return (
     <div

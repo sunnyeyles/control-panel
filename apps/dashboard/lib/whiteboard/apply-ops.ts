@@ -15,6 +15,7 @@ import {
   type CanvasOp,
 } from "@workspace/agent-tools/canvas-schema"
 
+import { noteAgentEdit } from "./recent-edits"
 import { geoValueFor, isGeoKind, shapeTypeFor } from "./shape-kinds"
 
 /**
@@ -24,6 +25,11 @@ import { geoValueFor, isGeoKind, shapeTypeFor } from "./shape-kinds"
  * behalf, and it is deliberately dumb: it translates, it does not decide. Every
  * judgement — where a shape goes, whether an id exists, how a row is spaced —
  * was made server-side against the shadow board before the op was written.
+ *
+ * Being the only such place is also why attribution lives here. tldraw's change
+ * feed cannot tell the agent's writes from the user's, so each one is claimed
+ * with `noteAgentEdit` on the way past; see `recent-edits.ts` for why that is a
+ * claim consumed later rather than a flag held now.
  *
  * **Ops are applied on a best-effort basis and never throw.** The user has been
  * drawing the whole time the agent was thinking, so an op can legitimately
@@ -73,6 +79,8 @@ export function applyOps(
     if (mark) editor.markHistoryStoppingPoint(mark)
 
     for (const op of ops) {
+      for (const id of writes(op)) noteAgentEdit(id)
+
       try {
         applyOne(editor, op)
       } catch (error) {
@@ -83,6 +91,31 @@ export function applyOps(
   })
 
   return { errors }
+}
+
+/**
+ * The shape records this op will add or change.
+ *
+ * Only these need claiming for the agent. A delete shows up in the store feed
+ * as a `removed` change and a focus moves the camera, which is instance scope —
+ * the tracker in `whiteboard-canvas.tsx` reads neither.
+ */
+function writes(op: CanvasOp): TLShapeId[] {
+  switch (op.op) {
+    case "create":
+    case "update":
+    case "move":
+    // The arrow, not its endpoints: binding two shapes does not rewrite them.
+    case "connect":
+      return [toShapeId(op.id)]
+    case "delete":
+    case "focus":
+      return []
+    default: {
+      const _exhaustive: never = op
+      return _exhaustive
+    }
+  }
 }
 
 function describe(op: CanvasOp): string {

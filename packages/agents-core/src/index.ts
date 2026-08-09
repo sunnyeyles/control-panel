@@ -8,6 +8,7 @@ export {
   createAgent,
   DEFAULT_MAX_LLM_CALLS,
   DEFAULT_SYSTEM_PROMPT,
+  recursionLimitFor,
   type Agent,
   type ChatModelLike,
   type CreateAgentOptions,
