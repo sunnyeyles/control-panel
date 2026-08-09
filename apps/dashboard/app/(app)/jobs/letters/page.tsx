@@ -9,17 +9,18 @@ import { requirePageUser } from "@/lib/auth/require-page-user"
 export const dynamic = "force-dynamic"
 
 /**
- * Raised because this section lists documents.
+ * Raised for the example-letter import action, not for the listing.
  *
- * `listDocuments()` pays one `HeadObject` per document — S3's listing carries
- * no user metadata, so a display name costs a round trip — and that fan-out
- * happens here as well as on `/documents`, which sets the same 30 for the same
- * reason. Without it a user with a shelf full of documents gets a page that
- * times out, and only that user, which is the worst way for it to fail.
+ * `listDocuments()` is one indexed Postgres query now — the old S3
+ * `HeadObject` fan-out is gone — so painting this page no longer needs a
+ * raised ceiling. A Server Action runs under the duration of the segment that
+ * invoked it, and importing an example letter still `get`s the chosen
+ * document's bytes from the object store. Without the raise, a slow get of a
+ * multi-megabyte CV can be cut off mid-read.
  *
  * **It moved here from `/settings` with the section that needs it.** That page
- * raised the ceiling for this fan-out and nothing else, so it dropped back to
- * the default when this left.
+ * raised the ceiling when this section lived there; it dropped back to the
+ * default when the section left.
  */
 export const maxDuration = 30
 
@@ -59,9 +60,9 @@ export default async function CoverLetterSettingsPage() {
             Auth id. It is the only thing that can scope what this section reads.
 
             Streamed rather than awaited above, so the tab bar and the shell
-            paint immediately instead of waiting on the S3 listing
-            `CoverLetterSection` pays for, which is what {@link maxDuration}
-            above is set for.
+            paint immediately instead of waiting on the document listing
+            `CoverLetterSection` pays for. {@link maxDuration} above is for
+            the import action, not this read.
           */}
           <Suspense fallback={<CoverLetterSectionSkeleton cards={1} />}>
             <CoverLetterSection userId={user.userId} />

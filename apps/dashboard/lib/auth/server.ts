@@ -65,6 +65,25 @@ export const auth = createNeonAuth(
           // server on every request. 32+ characters is an SDK requirement, not
           // a suggestion.
           secret: required("NEON_AUTH_COOKIE_SECRET"),
+          /**
+           * ⚠️ **OAuth return is a top-level cross-site navigation.** After
+           * Google, Neon Auth redirects back to this origin with a verifier
+           * query param; the middleware only exchanges it when the
+           * `__Secure-neon-auth.session_challange` cookie is also present
+           * (`needsSessionVerification` in `@neondatabase/auth`).
+           *
+           * The SDK default is `strict`, which browsers do not send on that
+           * return — so the exchange never runs, no session cookie is minted,
+           * and the user lands back on `/auth/sign-in`. An already-open
+           * session still works for same-site browsing (the mobile symptom),
+           * which is why a fresh desktop login fails while a phone that never
+           * signed out still looks fine.
+           *
+           * `lax` is the previous hard-coded SDK behaviour and the value the
+           * docs name for top-level cross-site navigations. Do not "harden"
+           * this back to `strict`.
+           */
+          sameSite: "lax",
         },
       }
 )

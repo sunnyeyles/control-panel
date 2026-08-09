@@ -95,17 +95,17 @@ flowchart TB
   class pab,own,tls,lc guard
 ```
 
-| Resource                       | Why                                                                                      |
-| ------------------------------ | ---------------------------------------------------------------------------------------- |
-| Bucket                         | one bucket, environments separated by the leading key segment                            |
-| Public access block            | all four flags, pinned at the bucket rather than trusting the account                    |
-| Ownership controls             | `BucketOwnerEnforced` — a `public-read` object is not merely blocked but unrepresentable |
-| Versioning                     | an overwrite supersedes and a delete leaves a marker; both are undoable                  |
-| Default encryption             | SSE-S3, or a customer-managed KMS key when `kms_key_arn` is set                          |
-| Bucket policy                  | denies any request where `aws:SecureTransport` is false                                  |
+| Resource                       | Why                                                                                                |
+| ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Bucket                         | one bucket, environments separated by the leading key segment                                      |
+| Public access block            | all four flags, pinned at the bucket rather than trusting the account                              |
+| Ownership controls             | `BucketOwnerEnforced` — a `public-read` object is not merely blocked but unrepresentable           |
+| Versioning                     | an overwrite supersedes and a delete leaves a marker; both are undoable                            |
+| Default encryption             | SSE-S3, or a customer-managed KMS key when `kms_key_arn` is set                                    |
+| Bucket policy                  | denies any request where `aws:SecureTransport` is false                                            |
 | Lifecycle **per kind, by tag** | briefs expire after a year; resumes, cover letters and tailored resumes never expire automatically |
-| IAM per environment            | every kind in that environment — the broad grant                                         |
-| IAM per environment **× kind** | one category only — the narrow grant, and the one to prefer                              |
+| IAM per environment            | every kind in that environment — the broad grant                                                   |
+| IAM per environment **× kind** | one category only — the narrow grant, and the one to prefer                                        |
 
 There is no website configuration, no ACL, and no presigned-URL machinery. An
 object is read back through the application using the caller's own credentials.

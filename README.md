@@ -26,7 +26,7 @@ is a **posting**.
 ```bash
 pnpm dev         # next dev for apps/dashboard
 pnpm build       # turbo build
-pnpm test        # turbo test — only seven workspaces have any
+pnpm test        # turbo test — only eight workspaces have any
 pnpm lint        # eslint; never fails, so read the warnings
 pnpm typecheck   # tsc --noEmit per workspace
 ```

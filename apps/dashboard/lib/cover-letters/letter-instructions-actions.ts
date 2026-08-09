@@ -33,8 +33,8 @@ import {
  * **Nothing in this file imports Next**, which is what lets the authorization
  * branches be tested at all — every one of them turns on who is asking, and a
  * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/settings/actions.ts`, which is `"use server"`, supplies the real
- * dependencies, and calls `refresh()`.
+ * `app/(app)/jobs/letters/actions.ts`, which is `"use server"`, supplies the
+ * real dependencies, and calls `refresh()`.
  *
  * Two properties hold across both actions, and neither is visible from the
  * happy path:
