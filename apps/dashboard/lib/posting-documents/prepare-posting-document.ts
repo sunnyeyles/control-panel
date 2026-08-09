@@ -13,7 +13,7 @@ import {
   assertDraftable,
   UndraftableError,
 } from "@workspace/agents/cover-letter"
-import type { Posting } from "@workspace/agents/findings"
+import type { StoredPosting } from "@workspace/agents/stored-posting"
 import type { PrismaClient } from "@workspace/db"
 import type { ResumeStore } from "@workspace/user-storage"
 import { z } from "zod"
@@ -70,9 +70,15 @@ export interface PreparedPostingDocument {
   userId: string
   postingId: string
   /** Read out of `postings.payload`, not out of the request. */
-  posting: Posting
-  /** The Run that most recently reported the advertisement, for provenance. */
-  lastSeenRunId: string
+  posting: StoredPosting
+  /**
+   * The Run that most recently reported the advertisement, for provenance.
+   *
+   * `null` for a Posting the user added by pasting its link: no Run has ever
+   * seen it, and there is nothing to name. A caller stamping provenance leaves
+   * the field off rather than substituting a placeholder for it.
+   */
+  lastSeenRunId: string | null
   /** The candidate's own words, extracted from the Document they labelled. */
   background: string
   /** What that Document is called, for a message that names it. */

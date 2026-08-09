@@ -230,7 +230,9 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
         // Each value is model- or user-copied text and is stripped to what an
         // HTTP header can carry by the store; see `toMetadataRecord`.
         provenance: {
-          runId: lastSeenRunId,
+          // Absent for a Posting added by link — see the same spread in
+          // `cover-letter-actions.ts`.
+          ...(lastSeenRunId ? { runId: lastSeenRunId } : {}),
           title: posting.title,
           company: posting.company,
           url: posting.url,

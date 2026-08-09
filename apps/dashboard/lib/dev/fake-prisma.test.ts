@@ -121,9 +121,15 @@ describe("the DEV_AUTH_BYPASS fake database", () => {
       pages.flatMap((page) => page.postings.map((row) => row.briefing))
     )
 
-    // Both fixture briefings and nothing else — no row degraded to the
-    // fallback, which is what a relation the fake did not answer would produce.
-    expect(named).toEqual(new Set([active?.name, paused?.name]))
+    // Both fixture briefings, plus the one Posting the fixtures add by link —
+    // and nothing else. "Unknown briefing" appearing here is the fallback, and
+    // is what a relation the fake did not answer would produce; "Added by
+    // link" is a row that legitimately has no Run and must not be confused
+    // with it.
+    expect(named).toEqual(
+      new Set([active?.name, paused?.name, "Added by link"])
+    )
+    expect(named).not.toContain("Unknown briefing")
   })
 
   /**

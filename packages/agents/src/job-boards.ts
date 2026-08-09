@@ -32,13 +32,33 @@ export interface JobBoard {
   trackingParameters: readonly string[]
 }
 
-const JOB_BOARDS: readonly JobBoard[] = [
+/**
+ * Exported so `board-fetch.test.ts` can pair every key of `BOARD_FETCHERS`
+ * against a board this registry actually names. That agreement is a string
+ * between two files, and a typo in it disables a board silently — which looks
+ * exactly like the feature working. Not dead code; do not un-export it without
+ * replacing the check.
+ */
+export const JOB_BOARDS: readonly JobBoard[] = [
   {
     name: "SEEK",
     hosts: ["seek.com.au"],
-    // `ref` and `origin` are the two SEEK stamps, and both are already on the
-    // global tracking list — this entry adds nothing and exists to say so.
-    trackingParameters: [],
+    // `ref` and `origin` are the two SEEK stamps a Run ever sees, and both are
+    // already on the global tracking list.
+    //
+    // `type` is here for the other producer. SEEK's actor reports a bare
+    // `seek.com.au/job/{id}`, so a Run never meets one — but the link in a
+    // person's address bar is
+    // `…/job/93431609?type=standard&ref=search-standalone`, and `type` names the
+    // advertising product the employer bought rather than which posting this is.
+    // Without dropping it, a pasted link and the same advertisement found by a
+    // Run are two Postings, and the status somebody set on one does not follow
+    // them to the other.
+    //
+    // Reasoned from SEEK's own link format rather than measured over paired
+    // runs, unlike the notes below — and it changes no stored id, because every
+    // row written before this came from the actor's canonical form.
+    trackingParameters: ["type"],
   },
   {
     name: "Indeed",
@@ -47,7 +67,15 @@ const JOB_BOARDS: readonly JobBoard[] = [
     // `viewjob?jk=…` link, and all four postings that appeared in two separate
     // runs hashed identically without any stripping. The tracking junk
     // (`from`, `tk`, `vjk`) rides on `externalApplyLink`, which no tool reads.
-    trackingParameters: [],
+    //
+    // `from` and `tk` are dropped anyway, for the reason `type` is dropped on
+    // SEEK: they ride on the link a person copies out of their browser, where
+    // they record which result page and which session reached the posting. `jk`
+    // is the identity and is kept. `vjk` is deliberately not on this list —
+    // it names a *different* posting, the one open in a search page's preview
+    // pane, and a parameter that can change which advertisement a URL refers to
+    // is not decoration.
+    trackingParameters: ["from", "tk"],
   },
   {
     name: "LinkedIn",

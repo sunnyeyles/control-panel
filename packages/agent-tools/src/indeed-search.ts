@@ -258,6 +258,48 @@ export const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
       description: job.description,
     }
   },
+
+  // One named advertisement rather than a search. `position` is absent
+  // deliberately — the actor's `startUrls` accepts "category/search URLs,
+  // company jobs URL … or detail/product URLs", so a query beside a start URL
+  // would give it two jobs to do. `maxItemsPerSearch: 1` bounds what a URL that
+  // is *not* a job page can turn into, and the identity check in
+  // `board-posting.ts` is what refuses the result when it does.
+  //
+  // The three flags carry over from the search body unchanged, for the reasons
+  // stated there: no company profile, no apply-redirect chasing — which is also
+  // the path that produces tracking-laden links — and unique items only.
+  byUrl: {
+    buildRequestBody(url: string): Record<string, unknown> {
+      return {
+        startUrls: [{ url }],
+        maxItemsPerSearch: 1,
+        saveOnlyUniqueItems: true,
+        parseCompanyDetails: false,
+        followApplyRedirects: false,
+      }
+    },
+
+    toAdvertisement(job: IndeedJob) {
+      return {
+        // `url`, never `externalApplyLink` — see the note on IndeedJob. It is
+        // also what the identity check matches on, so the canonical form is the
+        // only one that can agree with the pasted link.
+        url: job.url,
+        title: job.positionName,
+        company: job.company,
+        location: job.location,
+        // Same rule as the search rendering: passed through when it parses and
+        // dropped when it does not, so a value this tool could not read is never
+        // stored as a date.
+        postedAt:
+          listedAtMillis(job) === undefined ? undefined : job.postingDateParsed,
+        // Indeed publishes no teaser, so the summary comes off the head of the
+        // description — which is where a job advertisement puts its substance.
+        description: job.description,
+      }
+    },
+  },
 }
 
 /**

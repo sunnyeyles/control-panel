@@ -497,7 +497,9 @@ class DevDb {
       }
 
       if (field === "lastSeenRun" && isBriefingNameSelect(wanted)) {
-        projected[field] = { job: { name: this.briefingThatFound(row) } }
+        const briefing = this.briefingThatFound(row)
+        projected[field] =
+          briefing === null ? null : { job: { name: briefing } }
         continue
       }
 
@@ -520,12 +522,17 @@ class DevDb {
    * copied onto a Posting could disagree with the Briefing that fixture claims
    * to have come from, and disagree silently.
    *
-   * ⚠️ **A dangling reference throws.** Both foreign keys are NOT NULL with
-   * `ON DELETE RESTRICT`, so this is not a state the page has to survive — it
-   * is a fixture that has drifted, and it should say so by name here rather
-   * than reach `list-postings.ts` as an unnamed Briefing.
+   * ⚠️ **`null` and a dangling reference are not the same thing.** A Posting
+   * with no `lastSeenRunId` is one the user added by pasting its link, which
+   * `0009` made legal and which the page renders as "Added by link" — so it
+   * answers `null` rather than throwing. An id that names *no* run still
+   * throws: the foreign key makes that impossible in Postgres, so it is a
+   * fixture that has drifted, and it should say so by name here rather than
+   * reach `list-postings.ts` as an unnamed Briefing.
    */
-  private briefingThatFound(row: Posting): string {
+  private briefingThatFound(row: Posting): string | null {
+    if (row.lastSeenRunId === null) return null
+
     const run = this.runs.find(
       (candidate) => candidate.id === row.lastSeenRunId
     )

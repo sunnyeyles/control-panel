@@ -28,14 +28,23 @@
  * validate a request stay with the features that accept one.
  */
 
-/** The Posting fields the prompt reads — the shape `PostingSchema` parses to. */
+/**
+ * The Posting fields the prompt reads — the shape `StoredPostingSchema` parses
+ * to.
+ *
+ * `matchReason` is optional because a Posting the user added by pasting its
+ * link was matched against no criteria and legitimately has none. See
+ * `stored-posting.ts`; the block below is simply left out when it is absent,
+ * which is the only honest thing to do with a heading whose content would have
+ * to be made up.
+ */
 export interface PromptPosting {
   title: string
   company: string
   location: string
   url: string
   summary: string
-  matchReason: string
+  matchReason?: string | undefined
   postedAt?: string | undefined
   highlights?: string[] | undefined
 }
@@ -75,14 +84,11 @@ export function toPostingRequestPrompt(
 
   if (posting.postedAt) lines.push(`Posted: ${posting.postedAt}`)
 
-  lines.push(
-    "",
-    "What the search recorded about the role:",
-    posting.summary,
-    "",
-    "Why it was matched to me:",
-    posting.matchReason
-  )
+  lines.push("", "What the search recorded about the role:", posting.summary)
+
+  if (posting.matchReason) {
+    lines.push("", "Why it was matched to me:", posting.matchReason)
+  }
 
   if (posting.highlights && posting.highlights.length > 0) {
     lines.push(

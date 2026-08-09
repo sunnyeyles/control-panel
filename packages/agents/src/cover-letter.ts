@@ -1,7 +1,7 @@
 import * as z from "zod"
 
-import { PostingSchema } from "./findings.ts"
 import { toPostingRequestPrompt } from "./posting-prompt.ts"
+import { StoredPostingSchema } from "./stored-posting.ts"
 
 /**
  * The contract for one cover letter.
@@ -105,7 +105,10 @@ export const CandidateProfileSchema = z.object({
 })
 
 export const CoverLetterRequestSchema = z.object({
-  posting: PostingSchema,
+  // The *stored* shape, not `PostingSchema`: a Posting the user added by
+  // pasting its link carries no `matchReason`, and refusing to draft a letter
+  // for one would be refusing over a field the letter does not need.
+  posting: StoredPostingSchema,
   profile: CandidateProfileSchema,
 })
 

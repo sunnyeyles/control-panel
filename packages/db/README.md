@@ -181,6 +181,21 @@ Postgres:
   the prompt built from them fences each differently — rules are followed, an
   example letter is imitated and never mined for facts — and one column could
   not express that distinction.
+- **A Posting may have no Run at either end, and NULL is what says so.**
+  `first_seen_run_id` and `last_seen_run_id` are nullable as of `0009`: pasting
+  an advertisement's link on `/jobs` adds a Posting directly, and minting a
+  synthetic `jobs` row and `runs` row to satisfy a foreign key would put an
+  execution in the database that never executed. There is no `source` column and
+  there must not be one — the fact is already on the row, and a second copy can
+  drift. Same idiom as `next_run_at IS NULL` and `scheduled_for IS NULL`.
+- **`recordLinkedPosting` is `ON CONFLICT DO NOTHING`, and that is the whole
+  reason it is a second function rather than a flag on `recordPostings`.** A
+  link may create a Posting and may never revise one. Every update it could make
+  destroys something: `status` is the one column a person writes; overwriting
+  `last_seen_run_id` with the NULL this path carries erases which Run last found
+  the advertisement; and a Run-written `payload` carries a `matchReason` a
+  pasted link has none of. A `false` return means "already tracked", which is an
+  ordinary answer rather than a failure.
 - **A Posting's identity is `(user_id, posting_id)`, with no Run in it.**
   `posting_id` is the id `postingId()` derives from the advertisement's
   normalised URL — the same value a stored cover letter is keyed on, so the two

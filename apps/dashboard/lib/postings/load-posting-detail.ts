@@ -1,4 +1,4 @@
-import { PostingSchema } from "@workspace/agents/findings"
+import { StoredPostingSchema } from "@workspace/agents/stored-posting"
 import { postingPayload, type PrismaClient } from "@workspace/db"
 
 /**
@@ -65,7 +65,7 @@ export async function loadPostingDetail(
 
   if (!row) return undefined
 
-  const parsed = PostingSchema.safeParse(row.payload)
+  const parsed = StoredPostingSchema.safeParse(row.payload)
 
   if (!parsed.success) {
     // Once, and naming the row: a payload the schema stopped matching is a

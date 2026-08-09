@@ -29,6 +29,13 @@ export {
   type CreateCoverLetterWriterOptions,
 } from "./cover-letter-writer.ts"
 
+export {
+  BOARDS_FETCHED_BY_URL,
+  fetchPostingByUrl,
+  type PostingFetch,
+  type PostingFetchDeps,
+} from "./board-fetch.ts"
+
 export { parseSearchCriteria } from "./criteria.ts"
 
 export {
@@ -41,7 +48,22 @@ export {
   type ScoutPosting,
 } from "./findings.ts"
 
+export { parsePostedAt } from "./posted-at.ts"
+
 export { postingId } from "./posting-id.ts"
+
+export {
+  createPostingExtractor,
+  parsePostingExtraction,
+  POSTING_EXTRACTOR_SYSTEM_PROMPT,
+  PostingExtractionSchema,
+  toPostingExtractionPrompt,
+  type CreatePostingExtractorOptions,
+  type ExtractedPosting,
+  type PostingExtraction,
+} from "./posting-extractor.ts"
+
+export { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
 
 export {
   createProfileExtractor,

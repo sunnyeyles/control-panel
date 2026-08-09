@@ -1,5 +1,8 @@
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
-import { PostingSchema, type Posting } from "@workspace/agents/findings"
+import {
+  StoredPostingSchema,
+  type StoredPosting,
+} from "@workspace/agents/stored-posting"
 import { postingPayload, type PrismaClient } from "@workspace/db"
 
 /**
@@ -46,8 +49,13 @@ import { postingPayload, type PrismaClient } from "@workspace/db"
  * turning each way that fails into an outcome with a sentence.
  */
 
-export type StoredPosting =
-  | { status: "found"; posting: Posting; lastSeenRunId: string }
+export type StoredPostingResult =
+  | {
+      status: "found"
+      posting: StoredPosting
+      /** NULL for a Posting the user added by link, which no Run has seen. */
+      lastSeenRunId: string | null
+    }
   | { status: "not-found" | "unreadable" | "failed" }
 
 /**
@@ -75,7 +83,7 @@ export async function loadStoredPosting(
   userId: string,
   postingId: string,
   domain: string
-): Promise<StoredPosting> {
+): Promise<StoredPostingResult> {
   let row
   try {
     row = await postingPayload(prisma, userId, postingId)
@@ -86,7 +94,7 @@ export async function loadStoredPosting(
 
   if (!row) return { status: "not-found" }
 
-  const parsed = PostingSchema.safeParse(row.payload)
+  const parsed = StoredPostingSchema.safeParse(row.payload)
   if (!parsed.success) {
     console.error(`${domain}: the stored posting is unreadable`, postingId)
     return { status: "unreadable" }
@@ -108,7 +116,7 @@ export async function loadStoredPosting(
  * has been shown it.
  */
 export function storedPostingMessage(
-  result: Exclude<StoredPosting, { status: "found" }>
+  result: Exclude<StoredPostingResult, { status: "found" }>
 ): string {
   switch (result.status) {
     case "not-found":

@@ -148,6 +148,74 @@ export async function recordPostings(
   `)
 }
 
+/** One Posting somebody added by pasting its link. */
+export interface LinkedPosting {
+  userId: string
+  /**
+   * When they added it. Both `first_seen_at` and `last_seen_at` take it, for
+   * the reason {@link SeenPostings.seenAt} gives: the caller owns the clock.
+   */
+  seenAt: Date
+  posting: NewPosting
+}
+
+/**
+ * Record a Posting no Run found. Answers whether a row was actually inserted.
+ *
+ * Both run columns are absent from the column list, so they take the NULL that
+ * `0009` made legal — which is the whole of how a link-added Posting is
+ * distinguishable from a found one. There is no `source` column.
+ *
+ * ⚠️ **`DO NOTHING`, and that is the entire safety argument for this function
+ * existing beside {@link recordPostings} rather than as a flag on it.** A link
+ * may *create* a Posting and may never *revise* one. Every way of writing an
+ * update here is a way of destroying something:
+ *
+ * - `status` is the one column a person writes, and re-pasting a link for an
+ *   advertisement already marked `applied` must not walk it back to `new`.
+ * - `last_seen_run_id` records which Run most recently found it. Overwriting a
+ *   Run's id with the NULL this path carries would erase provenance and make a
+ *   Posting several Runs have found read as one nobody ever did.
+ * - `payload` written by a Run carries a `matchReason` this path has none of, so
+ *   an update would swap a fuller record for a thinner one.
+ *
+ * The caller checks for an existing Posting before it spends a page fetch and a
+ * model call, so a duplicate paste normally never reaches this statement. What
+ * this clause covers is the race the check cannot: two submissions in flight at
+ * once, and a Run recording the same advertisement in between.
+ *
+ * A `false` return is therefore not a failure — it means the advertisement is
+ * already tracked, which is an ordinary thing to tell somebody.
+ */
+export async function recordLinkedPosting(
+  prisma: DbClient,
+  linked: LinkedPosting
+): Promise<boolean> {
+  const { posting } = linked
+
+  const inserted = await prisma.$executeRaw(Prisma.sql`
+    INSERT INTO postings (
+      user_id, posting_id, title, company, location, url, posted_at, payload,
+      first_seen_at, last_seen_at
+    )
+    VALUES (
+      ${linked.userId}::uuid,
+      ${posting.postingId},
+      ${posting.title},
+      ${posting.company},
+      ${posting.location},
+      ${posting.url},
+      ${posting.postedAt ?? null}::timestamptz,
+      ${JSON.stringify(posting.payload)}::jsonb,
+      ${linked.seenAt}::timestamptz,
+      ${linked.seenAt}::timestamptz
+    )
+    ON CONFLICT (user_id, posting_id) DO NOTHING
+  `)
+
+  return inserted > 0
+}
+
 /** One Posting's stored payload, and the Run that most recently reported it. */
 export interface StoredPostingPayload {
   /**
@@ -159,8 +227,15 @@ export interface StoredPostingPayload {
    * longer parses" branch rather than being handed one.
    */
   payload: PostingPayload
-  /** `last_seen_run_id`: provenance, and no part of the identity. */
-  lastSeenRunId: string
+  /**
+   * `last_seen_run_id`: provenance, and no part of the identity.
+   *
+   * `null` for a Posting the user added by pasting its link, which no Run has
+   * ever seen. Callers that stamp provenance onto something they generate — a
+   * cover letter, a tailored resume — leave the field off rather than
+   * substituting anything for it.
+   */
+  lastSeenRunId: string | null
 }
 
 /**
@@ -258,13 +333,27 @@ export interface PostingListRow {
    * reimplement the shape, and what made a fake that answered *less* than it was
    * asked take a whole page down with a `TypeError` on `.job`.
    *
-   * `null` when the relation answered nothing. Both foreign keys are NOT NULL
-   * with `onDelete: Restrict`, so Postgres cannot produce that — the null is for
-   * a client that narrowed the projection, not a claim about the database. **A
-   * blank name is not treated as absent here**; that is a display rule and
-   * belongs with whatever renders it.
+   * `null` in two quite different situations, which {@link addedByLink}
+   * separates. Either no Run has ever seen this advertisement — the user added
+   * it by pasting its link, and there is no Briefing to name — or the relation
+   * answered nothing when it should have, which is a client that narrowed the
+   * projection rather than anything Postgres can produce. **A blank name is not
+   * treated as absent here**; that is a display rule and belongs with whatever
+   * renders it.
    */
   briefing: string | null
+  /**
+   * No Run has ever found this: `first_seen_run_id IS NULL`, which the user
+   * pasting a link is the only way to produce.
+   *
+   * Derived rather than stored, for the reason `posting-source.ts` gives about
+   * the board a Posting came from: the row already carries the fact, and a
+   * second copy is a second thing to keep true. It is on the row rather than
+   * left to the caller so that {@link briefing} being `null` stays a reportable
+   * fault — a page full of link-added Postings must not read as a page full of
+   * broken relations.
+   */
+  addedByLink: boolean
 }
 
 export interface PostingListPage {
@@ -389,6 +478,10 @@ function findPostingPage(
       // on. Flattened before it leaves this module; see
       // {@link PostingListRow.briefing}.
       lastSeenRun: { select: { job: { select: { name: true } } } },
+      // Not rendered, and not carried past {@link toListRow}: it is what tells
+      // "no Run has ever seen this" apart from "the relation answered nothing",
+      // which are the same `briefing: null` and are not the same fault.
+      firstSeenRunId: true,
     },
   })
 }
@@ -451,6 +544,7 @@ function toListRow(row: {
   firstSeenAt: Date
   lastSeenAt: Date
   lastSeenRun: { job: { name: string } | null } | null
+  firstSeenRunId: string | null
 }): PostingListRow {
   return {
     postingId: row.postingId,
@@ -468,6 +562,7 @@ function toListRow(row: {
     // database — it is what keeps a client that answered *less* than it was
     // asked from taking a whole page down with a `TypeError` on `.job`.
     briefing: row.lastSeenRun?.job?.name ?? null,
+    addedByLink: row.firstSeenRunId === null,
   }
 }
 
