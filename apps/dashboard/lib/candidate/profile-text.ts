@@ -1,9 +1,10 @@
 /**
  * Turning an uploaded document into the candidate's words.
  *
- * **Nothing here imports Next**, like everything else under this directory —
- * see `cover-letter-actions.ts` for why that matters. It also imports nothing
- * from this app: an extension and some bytes in, text or a refusal out.
+ * **Nothing under `lib/candidate/` imports Next**, which is the rule the whole
+ * of `lib/` follows — see the Server Action section of `apps/dashboard/CLAUDE.md`
+ * for why. This file goes further and imports nothing from this app either: an
+ * extension and some bytes in, text or a refusal out.
  *
  * This module is the whole of #86. The `resumes` kind has always accepted a
  * PDF and a DOCX on upload, and drafting has always refused them — an upload

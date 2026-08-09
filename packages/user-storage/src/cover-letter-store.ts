@@ -1,55 +1,47 @@
-import { toMetadataRecord } from "./metadata.ts"
-import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
+import {
+  createPostingDocumentStore,
+  type PostingDocumentProvenance,
+  type PostingDocumentRef,
+  type StoredPostingDocument,
+} from "./posting-document-store.ts"
+import type { UserObjectStore } from "./user-object-store.ts"
 
-/** Letters are Markdown and nothing else. */
-const EXTENSION = ".md"
 const KIND = "cover-letters" as const
 
 /**
- * Provenance, as metadata keys.
+ * The metadata key holding the drafting instant.
  *
- * Lowercase because S3 lowercases metadata names in transit; written from these
- * constants on both sides so the round trip cannot drift.
+ * ⚠️ **`drafted-at`, and a Tailored Resume's is `generated-at`.** The two must
+ * keep differing forever: both are stamped on objects that already exist and
+ * `UserObjectStore` exposes no copy-onto-itself, so unifying them would silently
+ * drop the recorded instant on every letter drafted before the change. See
+ * {@link PostingDocumentStoreOptions.instantKey}.
  */
 const DRAFTED_AT = "drafted-at"
-const RUN_ID = "run-id"
-const POSTING_TITLE = "posting-title"
-const POSTING_COMPANY = "posting-company"
-const POSTING_URL = "posting-url"
 
 /**
  * Addresses one cover letter.
  *
- * ⚠️ **The unit of identity is (user, Posting), and there is no Run in it.**
- * The same advertisement found by two Runs a week apart is one thing a person
- * wants one letter for, and `postingId()` in `@workspace/agents` is derived
- * from the Posting's URL precisely so both Runs agree on what to call it. A Run
- * id in the key would mean a second click produced a second object, with the
- * first one orphaned and nothing pointing at it.
- *
- * The Run is still recorded — as metadata, below — because "which Run found
- * this" is worth knowing and is not worth an extra object.
+ * ⚠️ **The unit of identity is (user, Posting), and there is no Run in it** —
+ * see {@link PostingDocumentRef}, which says why, and which a Tailored Resume's
+ * ref is the same shape of for the same reason.
  */
-export interface CoverLetterRef {
-  userId: string
-  /**
-   * The Posting's derived id — `postingId()` from `@workspace/agents`.
-   *
-   * That function's output satisfies the key-segment rule in `keys.ts`
-   * unmodified, which is why it can be a key segment without escaping. It is
-   * asserted there against this package's own predicate rather than restated.
-   */
-  postingId: string
-}
+export type CoverLetterRef = PostingDocumentRef
 
-/** The Posting a letter was drafted for, as far as provenance is concerned. */
-export interface CoverLetterProvenance {
-  /** The Run whose Findings the Posting was read out of, if there was one. */
-  runId?: string
-  title?: string
-  company?: string
-  url?: string
-}
+/**
+ * The Posting a letter was drafted for, as far as provenance is concerned.
+ *
+ * ⚠️ **No `sourceDocument`, unlike a Tailored Resume's.** A letter is written
+ * *about* a CV and a reader can see whether it fits; a tailored resume *is* the
+ * CV, so which upload produced it is the first question anyone asks. Omitting
+ * the field here rather than leaving it optional-and-unset is what makes that a
+ * decision rather than an oversight — nothing that drafts a letter can supply
+ * one.
+ */
+export type CoverLetterProvenance = Omit<
+  PostingDocumentProvenance,
+  "sourceDocument"
+>
 
 /** A letter on its way in. */
 export interface NewCoverLetter extends CoverLetterRef {
@@ -58,15 +50,9 @@ export interface NewCoverLetter extends CoverLetterRef {
   /** When it was drafted. Carried into metadata; the key holds no time. */
   draftedAt: Date
   /**
-   * Where it came from.
-   *
-   * ⚠️ **Every value here is model-copied text and is cleaned before it becomes
-   * a header.** `title` and `company` are transcribed by the scout out of an
-   * advertisement whoever paid for it wrote, so a newline or an em dash in one
-   * is ordinary rather than exotic — and S3 user metadata travels in HTTP
-   * headers. {@link toMetadataRecord} strips each value to printable ASCII and
-   * drops anything that leaves nothing behind. That is the same treatment an
-   * uploaded filename gets in `resume-store.ts`, from the same module.
+   * Where it came from. Every value is model-copied text and is cleaned before
+   * it becomes a header — see `NewPostingDocument.provenance` in
+   * `posting-document-store.ts`.
    */
   provenance?: CoverLetterProvenance
 }
@@ -84,21 +70,17 @@ export interface StoredCoverLetter extends CoverLetterRef {
 /**
  * Cover letters drafted for a Posting.
  *
- * A facade over {@link UserObjectStore}, not a second implementation — the same
- * arrangement as `BriefStore` and `ResumeStore`, and for the same reason: it
- * knows this kind's key shape and single file type so a call site cannot get
- * them wrong.
+ * A **Posting Document** kind: everything about how one is addressed, stored and
+ * read back is {@link createPostingDocumentStore}'s, and this names the half a
+ * letter owns — its kind, its metadata key, and the fact that it has no
+ * `sourceDocument`.
  *
- * **A letter has no database row, deliberately.** `artifacts.run_id` is
- * `NOT NULL` and references `runs`, and drafting is not an execution of a
- * briefing job — minting an ad-hoc Run per click would put rows that are not
- * briefings into a job's history. The key is fully derivable from the user and
- * the Posting, so a row buys no addressability that `head()` does not already
- * give. Uploaded documents have no row for exactly this reason.
+ * **A letter has no database row, deliberately**; the reasoning is on
+ * {@link PostingDocumentStore}, which a Tailored Resume follows too.
  */
 export interface CoverLetterStore {
   /**
-   * Write a letter, superseding whatever was at the same address.
+   * Draft a letter, superseding whatever was at the same address.
    *
    * Re-drafting the same Posting therefore overwrites one object rather than
    * accumulating. The bucket is versioned, so the previous draft survives as a
@@ -112,25 +94,15 @@ export interface CoverLetterStore {
   /**
    * Every letter a user has, oldest key first.
    *
-   * **This is the "which of these have one" question, and it is why the facade
-   * has a `list` at all.** The postings table shows per row whether a letter
-   * has been drafted; answering that with `head()` cost one `HeadObject` per
-   * visible posting, twenty-five per render, re-issued on every sort click and
-   * every five-second poll. One `ListObjectsV2` answers it for the whole page,
-   * because the last key segment **is** the posting id — see
-   * {@link CoverLetterRef}.
+   * **This method is why the facade has a `list` at all, and it was won rather
+   * than assumed.** `docs/cover-letter-existence-plan.md` recorded what the
+   * per-row `head()` cost — twenty-five `HeadObject` calls per render, re-issued
+   * on every sort click and every five-second poll of a running briefing — and
+   * this is that plan's recommended fix. The Tailored Resume was built with one
+   * from the start because building the second feature the letters' way would
+   * have doubled a number already written down as a problem.
    *
-   * ⚠️ **A listing carries less than `head()` does, and the difference is not a
-   * bug to work around here.** `ListObjectsV2` returns no user metadata, so
-   * `provenance` comes back empty and `draftedAt` falls back to the object's
-   * write time. That is enough for existence and for "drafted <when>"; a caller
-   * that needs the stored title, company or URL must `head()` the one letter it
-   * cares about. `facades.test.ts` pins this for resumes and the same holds
-   * here.
-   *
-   * O(letters this user has) rather than O(postings on the page), so it
-   * degrades slowly for a heavy drafter where the per-row `head()` degraded
-   * immediately.
+   * A listing carries no user metadata; see {@link PostingDocumentStore.list}.
    */
   list(userId: string): Promise<StoredCoverLetter[]>
 }
@@ -138,98 +110,41 @@ export interface CoverLetterStore {
 export function createCoverLetterStore(
   objects: UserObjectStore
 ): CoverLetterStore {
-  const refFor = (ref: CoverLetterRef) => ({
-    userId: ref.userId,
+  const documents = createPostingDocumentStore(objects, {
     kind: KIND,
-    segments: [ref.postingId],
-    extension: EXTENSION,
+    instantKey: DRAFTED_AT,
   })
+
+  const toLetter = (document: StoredPostingDocument): StoredCoverLetter => {
+    const { writtenAt, markdown, ...rest } = document
+
+    return {
+      ...rest,
+      draftedAt: writtenAt,
+      ...(markdown === undefined ? {} : { markdown }),
+    }
+  }
 
   return {
     async put(letter: NewCoverLetter): Promise<StoredCoverLetter> {
-      const stored = await objects.put({
-        ...refFor(letter),
-        body: letter.markdown,
-        metadata: toMetadataRecord({
-          [DRAFTED_AT]: letter.draftedAt.toISOString(),
-          [RUN_ID]: letter.provenance?.runId,
-          [POSTING_TITLE]: letter.provenance?.title,
-          [POSTING_COMPANY]: letter.provenance?.company,
-          [POSTING_URL]: letter.provenance?.url,
-        }),
-      })
-
-      return {
-        key: stored.key,
-        userId: letter.userId,
-        postingId: letter.postingId,
-        size: stored.size,
-        draftedAt: letter.draftedAt,
-        provenance: toProvenance(stored.metadata),
-      }
+      const { draftedAt, ...rest } = letter
+      return toLetter(await documents.put({ ...rest, writtenAt: draftedAt }))
     },
 
     async get(ref: CoverLetterRef): Promise<StoredCoverLetter> {
-      const fetched = await objects.get(refFor(ref))
-
-      return {
-        ...toStoredCoverLetter(ref.userId, fetched),
-        markdown: fetched.text(),
-      }
+      return toLetter(await documents.get(ref))
     },
 
     async head(ref: CoverLetterRef): Promise<StoredCoverLetter> {
-      const stored = await objects.head(refFor(ref))
-      return toStoredCoverLetter(ref.userId, stored)
+      return toLetter(await documents.head(ref))
     },
 
     async delete(ref: CoverLetterRef): Promise<void> {
-      await objects.delete(refFor(ref))
+      await documents.delete(ref)
     },
 
     async list(userId: string): Promise<StoredCoverLetter[]> {
-      const found = await objects.list(userId, KIND)
-      return found.map((object) => toStoredCoverLetter(userId, object))
+      return (await documents.list(userId)).map(toLetter)
     },
   }
-}
-
-function toStoredCoverLetter(
-  userId: string,
-  object: StoredObject
-): StoredCoverLetter {
-  // segments is [postingId] by construction, and parseObjectKey has already
-  // validated it.
-  const [postingId] = object.segments
-
-  return {
-    key: object.key,
-    userId,
-    postingId: postingId ?? "",
-    size: object.size,
-    draftedAt: instantFrom(object.metadata, object.storedAt),
-    provenance: toProvenance(object.metadata),
-  }
-}
-
-function toProvenance(metadata: Record<string, string>): CoverLetterProvenance {
-  return {
-    ...(metadata[RUN_ID] ? { runId: metadata[RUN_ID] } : {}),
-    ...(metadata[POSTING_TITLE] ? { title: metadata[POSTING_TITLE] } : {}),
-    ...(metadata[POSTING_COMPANY]
-      ? { company: metadata[POSTING_COMPANY] }
-      : {}),
-    ...(metadata[POSTING_URL] ? { url: metadata[POSTING_URL] } : {}),
-  }
-}
-
-/**
- * Metadata holds the drafting instant; fall back to the object's own write time
- * when it is absent or unparseable, which is close enough and never missing.
- */
-function instantFrom(metadata: Record<string, string>, storedAt: Date): Date {
-  const raw = metadata[DRAFTED_AT]
-  const parsed = raw ? new Date(raw) : undefined
-
-  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : storedAt
 }

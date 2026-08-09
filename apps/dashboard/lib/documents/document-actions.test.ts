@@ -19,7 +19,7 @@ import {
   fakeDocumentDb,
   mergeClients,
   toFakeDocument,
-} from "./fake-document-db"
+} from "@/lib/test-support/fake-document-db"
 import { MAX_DOCUMENT_BYTES } from "./upload-validation"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"

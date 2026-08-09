@@ -1,10 +1,11 @@
 import { requireUser } from "@/lib/actions/require-user"
+import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import { storageMessage } from "@/lib/actions/storage-message"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import {
   loadCandidateBackground,
   type NoBackgroundReason,
-} from "@/lib/cover-letters/candidate-background"
+} from "@/lib/candidate/candidate-background"
 import type { Agent } from "@workspace/agents"
 import type { PrismaClient } from "@workspace/db"
 import {
@@ -16,7 +17,6 @@ import {
   createProfileExtractor,
   toProfilePrompt,
 } from "@workspace/agents/profile-extractor"
-import { createLangfuseCallback } from "@workspace/langfuse"
 import { type ResumeStore } from "@workspace/user-storage"
 
 import type { CriteriaSuggestionState } from "./criteria-suggestion"
@@ -280,39 +280,16 @@ export function createSuggestCriteriaActions(
    * would mean three catches producing one message.
    */
   async function extract(background: string, userId: string) {
-    const extractor = createExtractor()
-    const sessionId = crypto.randomUUID()
-
-    const callback = createLangfuseCallback({
+    // The empty answer throws inside `invokeTracedAgent`, which is distinct from
+    // unparseable output only in the log: a model that answered with nothing has
+    // told us nothing about the CV, so proposing empty criteria would be
+    // proposing a search for everything. Both leave by the same catch below.
+    const text = await invokeTracedAgent(createExtractor(), {
+      name: "search-criteria",
+      route: "/jobs/schedules",
       userId,
-      sessionId,
-      tags: ["dashboard", "search-criteria"],
-      traceMetadata: {
-        feature: "search-criteria",
-        route: "/jobs/schedules",
-      },
+      prompt: toProfilePrompt(background),
     })
-
-    const result = await extractor.invoke(
-      { messages: [{ role: "user", content: toProfilePrompt(background) }] },
-      {
-        runName: "search-criteria",
-        metadata: {
-          langfuseUserId: userId,
-          langfuseSessionId: sessionId,
-        },
-        ...(callback ? { callbacks: [callback] } : {}),
-      }
-    )
-
-    const text = result.messages.at(-1)?.text.trim() ?? ""
-
-    if (text.length === 0) {
-      // Distinct from unparseable output only in the log. A model that answered
-      // with nothing has told us nothing about the CV, so proposing empty
-      // criteria would be proposing a search for everything.
-      throw new Error("The profile extractor returned an empty message.")
-    }
 
     return parseSearchCriteria(text)
   }

@@ -2,31 +2,31 @@ import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import { storageMessage } from "@/lib/actions/storage-message"
+import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import type { CurrentUser } from "@/lib/auth/current-user"
+import type { NoBackgroundReason } from "@/lib/candidate/candidate-background"
+import { POSTING_ID_PATTERN } from "@/lib/posting-documents/posting-document-ref"
 import {
-  loadCandidateBackground,
-  type NoBackgroundReason,
-} from "@/lib/cover-letters/candidate-background"
-import { POSTING_ID_PATTERN } from "@/lib/cover-letters/cover-letter-ref"
+  BAD_REQUEST,
+  preparePostingDocument,
+} from "@/lib/posting-documents/prepare-posting-document"
 import {
   loadStoredPosting,
   storedPostingMessage,
 } from "@/lib/postings/load-stored-posting"
 import type { Agent } from "@workspace/agents"
 import {
-  assertDraftable,
   CoverLetterRequestSchema,
   toCoverLetterPrompt,
-  UndraftableError,
   type CoverLetterRequest,
   type LetterInstructions,
+  type UndraftableError,
 } from "@workspace/agents/cover-letter"
 import {
   coverLetterSystemPrompt,
   createCoverLetterWriter,
 } from "@workspace/agents/cover-letter-writer"
 import { coverLetterInstructions, type PrismaClient } from "@workspace/db"
-import { createLangfuseCallback } from "@workspace/langfuse"
 import {
   isUserStorageError,
   type CoverLetterStore,
@@ -98,28 +98,23 @@ import { z } from "zod"
  */
 export { POSTING_NOT_FOUND }
 
-/** Reachable only by posting a form directly; the buttons always send it. */
-const BAD_REQUEST = "That posting could not be identified."
+/** The object kind. Reaches a log line and the storage prefix, never a user. */
+const KIND = "cover-letters"
 
 /**
- * The Posting id shape, from `cover-letter-ref.ts`.
+ * ⚠️ **Drafting has no schema of its own, and that is the two actions agreeing
+ * rather than a duplication to collapse.** A letter is addressed by
+ * `(user, Posting)` however it came to be written, so drafting asks for exactly
+ * one identifier — which is `preparePostingDocument`'s own parse, shared with
+ * the tailored resume because it is the same field refused for the same reason.
+ * {@link saveSchema} below stays this file's: tying what a draft accepts to what
+ * an edit accepts is the pair most worth leaving free to diverge, since one of
+ * them takes letter text from the caller and the other must never.
  *
- * It lived here until the download route needed the same rule; the reasoning
- * for why it is restated at all rather than exported from `@workspace/agents`
- * moved with it. One copy, because it is what makes every value reaching the
- * store a legal key segment by construction.
- *
- * ⚠️ **This is now {@link saveSchema} without its `markdown`, and that is the
- * two actions agreeing rather than a duplication to collapse.** A letter is
- * addressed by `(user, Posting)` however it came to be written, so each action
- * asks for exactly one identifier. Sharing one schema would tie what a draft
- * accepts to what an edit accepts, which is the pair most worth leaving free to
- * diverge: one of them takes letter text from the caller, and the other must
- * never.
+ * `POSTING_ID_PATTERN` is still imported here because the two write actions do
+ * spell it — see `lib/posting-documents/posting-document-ref.ts` for why there
+ * is one copy of it.
  */
-const draftSchema = z.object({
-  postingId: z.string().regex(POSTING_ID_PATTERN),
-})
 
 /**
  * There is no letter at that address to edit.
@@ -217,69 +212,37 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    // Before the body is touched at all. For a Server Action this is not a
-    // second layer: `proxy.ts` cannot evaluate a POST session — the auth SDK's
-    // fast path is guarded by `method === "GET"` — so it degrades to checking
-    // that some session-cookie substring is present. This is the only real
-    // check on the path.
-    const caller = await requireUser(deps.getUser, "cover-letters")
-    if (!caller.ok) return fail(caller.message)
+    // Who is asking, which Posting, whether there is a CV, and whether it is
+    // enough of one — all of it before the writer is constructed, so a user with
+    // nothing to write from spends nothing. The order is
+    // `preparePostingDocument`'s and is a property rather than plumbing; only the
+    // two sentences below are this feature's to write.
+    const prepared = await preparePostingDocument(deps, formData, KIND)
 
-    // ⚠️ **Only this one field is read, and that is the security property.**
-    // `formData` may well carry a `posting` — the test suite submits one — and
-    // nothing here looks at it. A Posting body accepted from a form would be
-    // arbitrary text stored in a document written in the user's voice.
-    const parsed = draftSchema.safeParse({
-      postingId: formData.get("postingId"),
-    })
-
-    if (!parsed.success) return fail(BAD_REQUEST)
-
-    const stored = await loadStoredPosting(
-      deps.getPrisma(),
-      caller.userId,
-      parsed.data.postingId,
-      "cover-letters"
-    )
-    if (stored.status !== "found") return fail(storedPostingMessage(stored))
-
-    const { posting, lastSeenRunId } = stored
-
-    // Before the writer is constructed, so a user with nothing to write from
-    // spends nothing. Since #86 this is also where a PDF or a DOCX is parsed —
-    // still on this side of the model call, which is what keeps the bounds
-    // below applying to the text that was actually extracted.
-    let background
-    try {
-      background = await loadCandidateBackground(
-        caller.userId,
-        deps.getPrisma(),
-        deps.getResumes()
-      )
-    } catch (error) {
-      return fail(storageMessage(`cover-letters: read failed`, error))
+    if (!prepared.ok) {
+      switch (prepared.reason) {
+        case "refused":
+          return fail(prepared.message)
+        case "no-background":
+          return fail(describeMissingBackground(prepared.missing))
+        case "undraftable":
+          return fail(describeUndraftable(prepared.error, prepared.displayName))
+        default: {
+          const _exhaustive: never = prepared
+          return _exhaustive
+        }
+      }
     }
 
-    if (!background.ok)
-      return fail(describeMissingBackground(background.reason))
+    const { userId, postingId, posting, lastSeenRunId } = prepared
 
     let request: CoverLetterRequest
     try {
-      // Still before the model call, and measured on the *extracted* text: a
-      // letter written from too little is not a thin letter, it is a fabricated
-      // one, and every specific in it would be invented and then attributed to
-      // the user.
-      assertDraftable({ background: background.background })
-
       request = CoverLetterRequestSchema.parse({
         posting,
-        profile: { background: background.background },
+        profile: { background: prepared.background },
       })
     } catch (error) {
-      if (error instanceof UndraftableError) {
-        return fail(describeUndraftable(error, background.displayName))
-      }
-
       console.error("cover-letters: the request would not validate", error)
       return fail("That posting could not be turned into a letter.")
     }
@@ -297,10 +260,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     // to the constant, and the draft proceeds.
     let extras: LetterInstructions
     try {
-      const saved = await coverLetterInstructions(
-        deps.getPrisma(),
-        caller.userId
-      )
+      const saved = await coverLetterInstructions(deps.getPrisma(), userId)
 
       extras = {
         instructions: saved?.instructions ?? "",
@@ -313,7 +273,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
 
     let markdown: string
     try {
-      markdown = await draft(request, caller.userId, extras)
+      markdown = await draft(request, userId, extras)
     } catch (error) {
       console.error("cover-letters: the writer failed", error)
       return fail("The letter could not be drafted. Try again in a moment.")
@@ -324,8 +284,8 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         // ⚠️ **The session's userId, never anything from the form.** There is
         // no way to *name* another user's prefix from here, which is what makes
         // the key-segment assertion in the store a second line of defence.
-        userId: caller.userId,
-        postingId: parsed.data.postingId,
+        userId,
+        postingId,
         markdown,
         draftedAt: now(),
         // Provenance rides here rather than in the key — the key holds the
@@ -344,7 +304,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         },
       })
     } catch (error) {
-      return fail(storageMessage(`cover-letters: write failed`, error))
+      return fail(storageMessage(`${KIND}: write failed`, error))
     }
 
     return {
@@ -371,7 +331,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    const caller = await requireUser(deps.getUser, "cover-letters")
+    const caller = await requireUser(deps.getUser, KIND)
     if (!caller.ok) return fail(caller.message)
 
     const parsed = saveSchema.safeParse({
@@ -388,7 +348,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       deps.getPrisma(),
       caller.userId,
       parsed.data.postingId,
-      "cover-letters"
+      KIND
     )
     if (stored.status !== "found") return fail(storedPostingMessage(stored))
 
@@ -402,7 +362,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       )
     } catch (error) {
       if (!isUserStorageError(error) || error.code !== "object_not_found") {
-        return fail(storageMessage(`cover-letters: read failed`, error))
+        return fail(storageMessage(`${KIND}: read failed`, error))
       }
     }
 
@@ -419,7 +379,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         },
       })
     } catch (error) {
-      return fail(storageMessage(`cover-letters: write failed`, error))
+      return fail(storageMessage(`${KIND}: write failed`, error))
     }
 
     return {
@@ -462,7 +422,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    const caller = await requireUser(deps.getUser, "cover-letters")
+    const caller = await requireUser(deps.getUser, KIND)
     if (!caller.ok) return fail(caller.message)
 
     const parsed = saveSchema.safeParse({
@@ -525,7 +485,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
       // Anything else is the bucket being unreachable, which must not be
       // reported as "you have not drafted this" — that would tell a user their
       // letter is gone during an outage.
-      return fail(storageMessage(`cover-letters: read failed`, error))
+      return fail(storageMessage(`${KIND}: read failed`, error))
     }
 
     try {
@@ -536,7 +496,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         provenance: existing.provenance,
       })
     } catch (error) {
-      return fail(storageMessage(`cover-letters: write failed`, error))
+      return fail(storageMessage(`${KIND}: write failed`, error))
     }
 
     return {
@@ -549,59 +509,22 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
   /**
    * One model call, traced.
    *
-   * ⚠️ **The callback is not optional decoration.** Every other agent run in
-   * this repository reports to Langfuse — `generate-briefing` from the worker,
-   * `chat-response` from the dashboard — and one that did not would be the only
-   * agent invocation whose prompt and output nobody can inspect after the fact,
-   * which for a document written in the user's own voice is the worst place to
-   * lose the transcript. The shape is `lib/chat-handler.ts`'s: a handler per
-   * invocation (they retain run state, so sharing one would mix traces),
-   * `langfuseUserId`/`langfuseSessionId` in metadata, and the callback spread in
-   * only when Langfuse is configured — it is `undefined` without keys, and
-   * `callbacks: [undefined]` is not the same as no callbacks.
-   *
-   * `.invoke()` rather than `.stream()`: the writer has no tools, so the graph
-   * is START → model → END and there are no intermediate steps for a stream to
-   * be interesting about. The `letter` CLI makes the same call for the same
-   * reason.
+   * Tracing, the empty-answer throw and the choice of `.invoke()` over
+   * `.stream()` all belong to {@link invokeTracedAgent}, which says why. What is
+   * this feature's own is the writer the instructions were baked into, and the
+   * prompt.
    */
   async function draft(
     request: CoverLetterRequest,
     userId: string,
     extras: LetterInstructions
   ): Promise<string> {
-    const writer = createWriter(extras)
-    const sessionId = crypto.randomUUID()
-
-    const callback = createLangfuseCallback({
+    return invokeTracedAgent(createWriter(extras), {
+      name: "cover-letter",
+      route: "/jobs",
       userId,
-      sessionId,
-      tags: ["dashboard", "cover-letter"],
-      traceMetadata: {
-        feature: "cover-letter",
-        route: "/jobs",
-      },
+      prompt: toCoverLetterPrompt(request),
     })
-
-    const result = await writer.invoke(
-      { messages: [{ role: "user", content: toCoverLetterPrompt(request) }] },
-      {
-        runName: "cover-letter",
-        metadata: {
-          langfuseUserId: userId,
-          langfuseSessionId: sessionId,
-        },
-        ...(callback ? { callbacks: [callback] } : {}),
-      }
-    )
-
-    const letter = result.messages.at(-1)?.text.trim() ?? ""
-
-    if (letter.length === 0) {
-      throw new Error("The writer returned an empty letter.")
-    }
-
-    return letter
   }
 
   return { createCoverLetter, draftCoverLetter, saveCoverLetter }

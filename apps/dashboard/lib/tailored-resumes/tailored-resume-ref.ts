@@ -1,7 +1,7 @@
 import {
   postingDocumentFilename,
   type PostingDocumentNameParts,
-} from "@/lib/postings/posting-document-filename"
+} from "@/lib/posting-documents/posting-document-filename"
 
 /**
  * Naming the file a tailored-resume download produces.
@@ -11,10 +11,10 @@ import {
  * ⚠️ **There is no `POSTING_ID_PATTERN` here, and that absence is the point.**
  * A tailored resume is addressed by exactly the value a cover letter is, so the
  * shape a form field or a URL segment must have before it can become a key
- * segment is already stated once — in `lib/cover-letters/cover-letter-ref.ts`,
- * whose own comment explains at length why there is one copy of it. This module
- * imports that; restating the regex under a second name is precisely the drift
- * that comment exists to prevent.
+ * segment is stated once, for both — in
+ * `lib/posting-documents/posting-document-ref.ts`, whose own comment explains at
+ * length why there is one copy of it. Restating the regex under a second name is
+ * precisely the drift that comment exists to prevent.
  */
 
 export type TailoredResumeNameParts = PostingDocumentNameParts

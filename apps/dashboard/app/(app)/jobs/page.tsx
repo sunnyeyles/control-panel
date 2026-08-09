@@ -196,7 +196,7 @@ export default async function BriefingsPage({
               otherwise be invented and attributed to the user.
             - **Three CV formats cannot be read.** `.doc`, `.odt` and `.rtf`
               upload and store fine and have no parser — see
-              `READABLE_PROFILE_EXTENSIONS` in `lib/cover-letters/profile-text.ts`
+              `READABLE_PROFILE_EXTENSIONS` in `lib/candidate/profile-text.ts`
               — so a user whose CV is one of them is refused for a reason that
               has nothing to do with their document being wrong. PDF and DOCX
               *are* read, and this paragraph claimed otherwise for far too long.

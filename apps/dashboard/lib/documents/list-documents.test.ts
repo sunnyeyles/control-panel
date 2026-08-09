@@ -1,7 +1,10 @@
 import type { Document as DocumentRow } from "@workspace/db"
 import { describe, expect, it } from "vitest"
 
-import { fakeDocumentDb, toFakeDocument } from "./fake-document-db"
+import {
+  fakeDocumentDb,
+  toFakeDocument,
+} from "@/lib/test-support/fake-document-db"
 import { listDocuments } from "./list-documents"
 
 /**

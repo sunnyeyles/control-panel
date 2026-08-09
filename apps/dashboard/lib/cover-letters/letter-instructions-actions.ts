@@ -24,7 +24,7 @@ import {
   isReadableProfileExtension,
   ProfileTextError,
   type ReadableProfileExtension,
-} from "./profile-text"
+} from "@/lib/candidate/profile-text"
 
 /**
  * Saving the rules a user wants their cover letters written by, and filling the

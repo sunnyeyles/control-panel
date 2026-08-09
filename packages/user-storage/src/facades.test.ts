@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import { createBriefStore } from "./brief-store.ts"
-import { createCoverLetterStore } from "./cover-letter-store.ts"
+import {
+  createCoverLetterStore,
+  type CoverLetterProvenance,
+} from "./cover-letter-store.ts"
 import { InvalidObjectKeyError } from "./errors.ts"
+import type { PostingDocumentRef } from "./posting-document-store.ts"
 import { acceptedResumeExtensions, createResumeStore } from "./resume-store.ts"
 import { createTailoredResumeStore } from "./tailored-resume-store.ts"
 import type {
@@ -248,143 +252,257 @@ describe("BriefStore", () => {
   })
 })
 
-describe("CoverLetterStore", () => {
-  const DRAFTED_AT = new Date("2026-08-03T04:15:00.000Z")
-  const POSTING_ID = "0f1e2d3c4b5a6978"
+/**
+ * The two **Posting Document** kinds, driven through one table.
+ *
+ * ⚠️ **`describe.each` rather than two suites, because the two stores are one
+ * store.** Everything below — the flat Posting key, the overwrite, the metadata
+ * round trip, what a listing does and does not carry — is
+ * `createPostingDocumentStore`'s behaviour, and asserting it twice would mean
+ * two sets of assertions that could come to disagree about a single
+ * implementation. What each kind genuinely owns is in {@link KINDS}: its
+ * prefix, and the metadata key its instant lands under.
+ *
+ * The adapters exist because the two facades name their instant differently on
+ * purpose — `draftedAt` reads right for a letter and `generatedAt` for a resume
+ * — so the table speaks the core's `writtenAt` and each adapter translates. That
+ * translation is itself worth exercising: it is the only code the facades add.
+ */
+interface DocumentInput {
+  userId: string
+  postingId: string
+  markdown: string
+  writtenAt: Date
+  provenance?: CoverLetterProvenance
+}
 
-  it("keys flat on the Posting id, with no Run and no date in it", async () => {
-    const letters = createCoverLetterStore(objects)
+interface DocumentKind {
+  /** The kind's name, for the test titles. */
+  name: string
+  /** The bucket prefix. The two must not be the same. */
+  kind: string
+  /** The metadata key its instant lands under. */
+  instantKey: string
+  create(objects: UserObjectStore): {
+    put(input: DocumentInput): Promise<{ key: string }>
+    get(ref: PostingDocumentRef): Promise<{
+      markdown?: string | undefined
+      writtenAt: Date
+    }>
+    head(ref: PostingDocumentRef): Promise<{
+      provenance: CoverLetterProvenance
+    }>
+    list(userId: string): Promise<
+      {
+        postingId: string
+        provenance: CoverLetterProvenance
+        writtenAt: Date
+      }[]
+    >
+  }
+}
 
-    await letters.put({
+const KINDS: DocumentKind[] = [
+  {
+    name: "CoverLetterStore",
+    kind: "cover-letters",
+    instantKey: "drafted-at",
+    create(objects) {
+      const letters = createCoverLetterStore(objects)
+
+      return {
+        put: ({ writtenAt, ...rest }) =>
+          letters.put({ ...rest, draftedAt: writtenAt }),
+        get: async (ref) => {
+          const letter = await letters.get(ref)
+          return { markdown: letter.markdown, writtenAt: letter.draftedAt }
+        },
+        head: (ref) => letters.head(ref),
+        list: async (userId) =>
+          (await letters.list(userId)).map((letter) => ({
+            postingId: letter.postingId,
+            provenance: letter.provenance,
+            writtenAt: letter.draftedAt,
+          })),
+      }
+    },
+  },
+  {
+    name: "TailoredResumeStore",
+    kind: "tailored-resumes",
+    instantKey: "generated-at",
+    create(objects) {
+      const resumes = createTailoredResumeStore(objects)
+
+      return {
+        put: ({ writtenAt, ...rest }) =>
+          resumes.put({ ...rest, generatedAt: writtenAt }),
+        get: async (ref) => {
+          const resume = await resumes.get(ref)
+          return { markdown: resume.markdown, writtenAt: resume.generatedAt }
+        },
+        head: (ref) => resumes.head(ref),
+        list: async (userId) =>
+          (await resumes.list(userId)).map((resume) => ({
+            postingId: resume.postingId,
+            provenance: resume.provenance,
+            writtenAt: resume.generatedAt,
+          })),
+      }
+    },
+  },
+]
+
+const POSTING_ID = "0f1e2d3c4b5a6978"
+const WRITTEN_AT = new Date("2026-08-03T04:15:00.000Z")
+
+/**
+ * The memory store narrowed to what `ListObjectsV2` actually returns.
+ *
+ * Delegating method by method rather than spreading the instance: the methods
+ * live on the prototype, so a spread would silently drop them.
+ */
+function listsWithoutMetadata(objects: UserObjectStore): UserObjectStore {
+  return {
+    put: (object) => objects.put(object),
+    get: (ref) => objects.get(ref),
+    head: (ref) => objects.head(ref),
+    delete: (ref) => objects.delete(ref),
+    list: async (userId, kind) =>
+      (await objects.list(userId, kind)).map((object) => ({
+        ...object,
+        metadata: {},
+      })),
+  }
+}
+
+describe.each(KINDS)("$name", (subject) => {
+  it("keys flat on the Posting id, under its own kind", async () => {
+    const store = subject.create(objects)
+
+    await store.put({
       userId: "alice",
       postingId: POSTING_ID,
-      markdown: "Dear Hiring Team",
-      draftedAt: DRAFTED_AT,
-      provenance: { runId: "run-1" },
+      markdown: "x",
+      writtenAt: WRITTEN_AT,
     })
 
     const [put] = objects.puts
-    expect(put?.kind).toBe("cover-letters")
+    expect(put?.kind).toBe(subject.kind)
     expect(put?.segments).toEqual([POSTING_ID])
     expect(put?.extension).toBe(".md")
   })
 
-  it("overwrites one object when the same Posting is redrafted", async () => {
-    const letters = createCoverLetterStore(objects)
-
+  it("overwrites one object when the same Posting is written again", async () => {
     // The whole reason the Run is not in the key: two clicks a week apart find
     // the same advertisement, and the second must supersede the first rather
     // than orphan it.
-    const first = await letters.put({
+    const store = subject.create(objects)
+
+    const first = await store.put({
       userId: "alice",
       postingId: POSTING_ID,
-      markdown: "First draft",
-      draftedAt: DRAFTED_AT,
+      markdown: "First",
+      writtenAt: WRITTEN_AT,
       provenance: { runId: "run-1" },
     })
-
-    const second = await letters.put({
+    const second = await store.put({
       userId: "alice",
       postingId: POSTING_ID,
-      markdown: "Second draft",
-      draftedAt: new Date("2026-08-10T04:15:00.000Z"),
+      markdown: "Second",
+      writtenAt: new Date("2026-08-10T04:15:00.000Z"),
       provenance: { runId: "run-2" },
     })
 
     expect(second.key).toBe(first.key)
     expect(
-      (await letters.get({ userId: "alice", postingId: POSTING_ID })).markdown
-    ).toBe("Second draft")
+      (await store.get({ userId: "alice", postingId: POSTING_ID })).markdown
+    ).toBe("Second")
   })
 
-  it("round-trips the markdown and the drafting instant", async () => {
-    const letters = createCoverLetterStore(objects)
+  it("round-trips the markdown and the instant it was written", async () => {
+    const store = subject.create(objects)
     const markdown = "Dear Hiring Team — café 日本語 🎉\n\n[start date]"
 
-    await letters.put({
+    await store.put({
       userId: "alice",
       postingId: POSTING_ID,
       markdown,
-      draftedAt: DRAFTED_AT,
+      writtenAt: WRITTEN_AT,
     })
 
-    const read = await letters.get({ userId: "alice", postingId: POSTING_ID })
+    const read = await store.get({ userId: "alice", postingId: POSTING_ID })
 
     expect(read.markdown).toBe(markdown)
-    expect(read.draftedAt.toISOString()).toBe(DRAFTED_AT.toISOString())
+    expect(read.writtenAt.toISOString()).toBe(WRITTEN_AT.toISOString())
   })
 
   describe("list", () => {
-    it("answers which Postings have a letter in one request", async () => {
+    it("answers which Postings have one, in a single request", async () => {
       // The reason this method exists. The postings table asks it once per page
-      // render; it used to ask `head()` once per visible Posting, twenty-five
-      // at a time. The posting id is the last key segment, so the set of
-      // drafted ids falls straight out of the listing.
-      const letters = createCoverLetterStore(objects)
-      const other = "aaaaaaaaaaaaaaaa"
+      // render; it used to ask `head()` once per visible Posting, twenty-five at
+      // a time. The posting id is the last key segment, so the set of written
+      // ids falls straight out of the listing.
+      const store = subject.create(objects)
+      const other = "1122334455667788"
 
       for (const postingId of [POSTING_ID, other]) {
-        await letters.put({
+        await store.put({
           userId: "alice",
           postingId,
-          markdown: "Dear Hiring Team",
-          draftedAt: DRAFTED_AT,
+          markdown: "x",
+          writtenAt: WRITTEN_AT,
         })
       }
 
-      await letters.put({
-        userId: "bob",
-        postingId: POSTING_ID,
-        markdown: "Not alice's",
-        draftedAt: DRAFTED_AT,
-      })
+      const listed = await store.list("alice")
 
-      const listed = await letters.list("alice")
-
-      expect(listed.map((letter) => letter.postingId).sort()).toEqual(
+      expect(listed.map((entry) => entry.postingId).sort()).toEqual(
         [POSTING_ID, other].sort()
       )
     })
 
-    it("carries no provenance, because ListObjectsV2 returns no metadata", async () => {
-      // The same trap the resume suite pins below: `MemoryObjectStore` keeps
-      // metadata on a listed object and the real store hardcodes `metadata: {}`
-      // in `list()`. Narrowing the fake is what makes this about S3 rather than
-      // about the fake — and it is why `posting-detail.tsx` derives a letter's
-      // display name and filename from the Posting instead of from the letter.
-      const listsWithoutMetadata: UserObjectStore = {
-        ...objects,
-        put: (object) => objects.put(object),
-        get: (ref) => objects.get(ref),
-        head: (ref) => objects.head(ref),
-        delete: (ref) => objects.delete(ref),
-        list: async (userId, kind) =>
-          (await objects.list(userId, kind)).map((object) => ({
-            ...object,
-            metadata: {},
-          })),
-      }
+    it("does not return another user's", async () => {
+      const store = subject.create(objects)
 
-      const letters = createCoverLetterStore(listsWithoutMetadata)
+      await store.put({
+        userId: "bob",
+        postingId: POSTING_ID,
+        markdown: "x",
+        writtenAt: WRITTEN_AT,
+      })
 
-      await letters.put({
+      expect(await store.list("alice")).toEqual([])
+    })
+
+    it("carries no provenance, and dates each entry by the object's write time", async () => {
+      // ⚠️ The documented limitation, asserted so it stays documented. The
+      // memory store returns what was written, metadata included, and the real
+      // store hardcodes `metadata: {}` in `list()` — so narrowing the fake is
+      // what makes this about S3 rather than about the fake. A caller that
+      // rendered a filename or a company off `list()` would render blanks, and
+      // would do it only in production.
+      const store = subject.create(listsWithoutMetadata(objects))
+
+      await store.put({
         userId: "alice",
         postingId: POSTING_ID,
-        markdown: "Dear Hiring Team",
-        draftedAt: DRAFTED_AT,
+        markdown: "x",
+        writtenAt: WRITTEN_AT,
         provenance: { title: "Backend Engineer", company: "Acme" },
       })
 
-      const [listed] = await letters.list("alice")
+      const [listed] = await store.list("alice")
 
       expect(listed?.postingId).toBe(POSTING_ID)
       expect(listed?.provenance).toEqual({})
+      // Degrades to the object's write time rather than going missing, because
+      // the instant travels in the metadata that is gone with the rest.
+      expect(listed?.writtenAt.toISOString()).toBe("2026-07-28T09:00:00.000Z")
 
-      // And `draftedAt` degrades to the object's write time rather than going
-      // missing, because the `drafted-at` metadata is gone with the rest.
-      expect(listed?.draftedAt).toBeInstanceOf(Date)
-
-      const headed = await letters.head({
+      // And `head()` still has all of it, which is what a caller that needs the
+      // title has to use.
+      const headed = await store.head({
         userId: "alice",
         postingId: POSTING_ID,
       })
@@ -394,13 +512,13 @@ describe("CoverLetterStore", () => {
 
   describe("provenance metadata", () => {
     it("carries the Run and the Posting rather than putting them in the key", async () => {
-      const letters = createCoverLetterStore(objects)
+      const store = subject.create(objects)
 
-      await letters.put({
+      await store.put({
         userId: "alice",
         postingId: POSTING_ID,
         markdown: "x",
-        draftedAt: DRAFTED_AT,
+        writtenAt: WRITTEN_AT,
         provenance: {
           runId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
           title: "Backend Engineer",
@@ -410,7 +528,10 @@ describe("CoverLetterStore", () => {
       })
 
       expect(objects.puts[0]?.metadata).toEqual({
-        "drafted-at": DRAFTED_AT.toISOString(),
+        // ⚠️ The one metadata key the two kinds differ by, and they must keep
+        // differing: both are stamped on objects that already exist, and
+        // `UserObjectStore` has no copy-onto-itself to rename them with.
+        [subject.instantKey]: WRITTEN_AT.toISOString(),
         "run-id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
         "posting-title": "Backend Engineer",
         "posting-company": "Acme",
@@ -420,16 +541,16 @@ describe("CoverLetterStore", () => {
     })
 
     it("strips characters an HTTP header cannot carry", async () => {
-      const letters = createCoverLetterStore(objects)
+      // ⚠️ Not a formality. Title and company are text the scout transcribed out
+      // of an advertisement someone else wrote, and S3 user metadata travels in
+      // HTTP headers — a newline here is header injection.
+      const store = subject.create(objects)
 
-      // ⚠️ Not a formality. Title and company are text the scout transcribed
-      // out of an advertisement someone else wrote, and S3 user metadata
-      // travels in HTTP headers — a newline here is header injection.
-      await letters.put({
+      await store.put({
         userId: "alice",
         postingId: POSTING_ID,
         markdown: "x",
-        draftedAt: DRAFTED_AT,
+        writtenAt: WRITTEN_AT,
         provenance: {
           title: "Senior Engineer\r\nX-Injected: yes",
           company: "Café Ünicode — Pty Ltd",
@@ -444,55 +565,44 @@ describe("CoverLetterStore", () => {
     })
 
     it("drops a value with nothing representable left rather than writing a blank", async () => {
-      const letters = createCoverLetterStore(objects)
-
-      // Unlike a filename, which is raised on: a letter whose company name is
-      // entirely non-ASCII is still a letter, and an empty metadata field
+      // Unlike a filename, which is raised on: a document whose company name is
+      // entirely non-ASCII is still a document, and an empty metadata field
       // would claim the company is blank rather than unknown.
-      await letters.put({
+      const store = subject.create(objects)
+
+      await store.put({
         userId: "alice",
         postingId: POSTING_ID,
         markdown: "x",
-        draftedAt: DRAFTED_AT,
+        writtenAt: WRITTEN_AT,
         provenance: { company: "日本語" },
       })
 
       expect(objects.puts[0]?.metadata).toEqual({
-        "drafted-at": DRAFTED_AT.toISOString(),
+        [subject.instantKey]: WRITTEN_AT.toISOString(),
       })
     })
   })
 })
 
-describe("TailoredResumeStore", () => {
-  const GENERATED_AT = new Date("2026-08-06T04:15:00.000Z")
+/**
+ * What only one kind does, and the one thing that needs both.
+ *
+ * Everything here is a decision `CONTEXT.md` argues for rather than a gap in the
+ * table above: the source document is a field a letter deliberately has no use
+ * for, and the collision test is about the two kinds *not* being one.
+ */
+describe("what the two kinds do not share", () => {
   const POSTING_ID = "0f1e2d3c4b5a6978"
+  const GENERATED_AT = new Date("2026-08-06T04:15:00.000Z")
 
-  it("keys flat on the Posting id, under its own kind", async () => {
-    const resumes = createTailoredResumeStore(objects)
-
-    await resumes.put({
-      userId: "alice",
-      postingId: POSTING_ID,
-      markdown: "# Alice",
-      generatedAt: GENERATED_AT,
-    })
-
-    const [put] = objects.puts
-    expect(put?.kind).toBe("tailored-resumes")
-    expect(put?.segments).toEqual([POSTING_ID])
-    expect(put?.extension).toBe(".md")
-  })
-
-  /**
-   * The two kinds share a Posting id, so they would collide if either wrote
-   * under the other's prefix. Asserted rather than assumed: the whole reason a
-   * tailored resume is not a sixth Document Type is that it lives somewhere
-   * else.
-   */
-  it("does not collide with the cover letter for the same Posting", async () => {
-    const resumes = createTailoredResumeStore(objects)
+  it("keeps a letter and a resume for the same Posting apart", async () => {
+    // The two share a Posting id, so they would collide if either wrote under
+    // the other's prefix. Asserted rather than assumed: the whole reason a
+    // tailored resume is not a sixth Document Type is that it lives somewhere
+    // else — and it is the property the shared core could most plausibly break.
     const letters = createCoverLetterStore(objects)
+    const resumes = createTailoredResumeStore(objects)
 
     await letters.put({
       userId: "alice",
@@ -515,47 +625,11 @@ describe("TailoredResumeStore", () => {
     ).toBe("# Alice")
   })
 
-  it("overwrites one object when the same Posting is regenerated", async () => {
-    const resumes = createTailoredResumeStore(objects)
-
-    const first = await resumes.put({
-      userId: "alice",
-      postingId: POSTING_ID,
-      markdown: "First",
-      generatedAt: GENERATED_AT,
-    })
-    const second = await resumes.put({
-      userId: "alice",
-      postingId: POSTING_ID,
-      markdown: "Second",
-      generatedAt: new Date("2026-08-13T04:15:00.000Z"),
-    })
-
-    expect(second.key).toBe(first.key)
-    expect(
-      (await resumes.get({ userId: "alice", postingId: POSTING_ID })).markdown
-    ).toBe("Second")
-  })
-
-  it("round-trips the markdown and the generating instant", async () => {
-    const resumes = createTailoredResumeStore(objects)
-    const markdown =
-      "# Alice — café 日本語 🎉\n\n## Experience\n\n- Built things"
-
-    await resumes.put({
-      userId: "alice",
-      postingId: POSTING_ID,
-      markdown,
-      generatedAt: GENERATED_AT,
-    })
-
-    const read = await resumes.get({ userId: "alice", postingId: POSTING_ID })
-
-    expect(read.markdown).toBe(markdown)
-    expect(read.generatedAt.toISOString()).toBe(GENERATED_AT.toISOString())
-  })
-
-  it("carries the Posting and the source Document as metadata, not as key", async () => {
+  it("records which Document a resume was rewritten from", async () => {
+    // A letter has no counterpart: it is written *about* a CV and the reader can
+    // see whether it fits, while a resume *is* the CV and the selection rule
+    // takes the newest upload labelled Resume — so which one produced this
+    // changes silently and is worth stamping.
     const resumes = createTailoredResumeStore(objects)
 
     await resumes.put({
@@ -563,33 +637,22 @@ describe("TailoredResumeStore", () => {
       postingId: POSTING_ID,
       markdown: "x",
       generatedAt: GENERATED_AT,
-      provenance: {
-        runId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-        title: "Backend Engineer",
-        company: "Acme",
-        url: "https://www.seek.com.au/job/1",
-        sourceDocument: "alice-cv-2026.pdf",
-      },
+      provenance: { sourceDocument: "alice-cv-2026.pdf" },
     })
 
-    expect(objects.puts[0]?.metadata).toEqual({
-      "generated-at": GENERATED_AT.toISOString(),
-      "run-id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-      "posting-title": "Backend Engineer",
-      "posting-company": "Acme",
-      "posting-url": "https://www.seek.com.au/job/1",
-      "source-document": "alice-cv-2026.pdf",
-    })
-    expect(objects.puts[0]?.segments).toEqual([POSTING_ID])
+    expect(objects.puts[0]?.metadata?.["source-document"]).toBe(
+      "alice-cv-2026.pdf"
+    )
+
+    const read = await resumes.head({ userId: "alice", postingId: POSTING_ID })
+    expect(read.provenance.sourceDocument).toBe("alice-cv-2026.pdf")
   })
 
-  /**
-   * The source document is an uploaded filename, so it is the value here most
-   * likely to carry something a header cannot. Same treatment as a letter's
-   * title and company, from the same module — the point of `toMetadataRecord`
-   * is that no call site writes its own regex.
-   */
   it("strips characters an HTTP header cannot carry from the source filename", async () => {
+    // The source document is an uploaded filename, so it is the value most
+    // likely to carry something a header cannot. Same treatment as a title and
+    // company, from the same module — the point of `toMetadataRecord` is that no
+    // call site writes its own regex.
     const resumes = createTailoredResumeStore(objects)
 
     await resumes.put({
@@ -603,93 +666,6 @@ describe("TailoredResumeStore", () => {
     const metadata = objects.puts[0]?.metadata ?? {}
     expect(metadata["source-document"]).toBe("cvX-Injected: yes.pdf")
     expect(metadata["source-document"]).not.toContain("\n")
-  })
-
-  describe("list", () => {
-    /**
-     * The method `CoverLetterStore` does not have, and the reason this feature
-     * does not repeat the `HeadObject`-per-row fan-out
-     * `docs/cover-letter-existence-plan.md` describes.
-     */
-    it("returns one entry per Posting the user has generated for", async () => {
-      const resumes = createTailoredResumeStore(objects)
-
-      await resumes.put({
-        userId: "alice",
-        postingId: POSTING_ID,
-        markdown: "x",
-        generatedAt: GENERATED_AT,
-      })
-      await resumes.put({
-        userId: "alice",
-        postingId: "1122334455667788",
-        markdown: "y",
-        generatedAt: GENERATED_AT,
-      })
-
-      const listed = await resumes.list("alice")
-
-      expect(listed.map((entry) => entry.postingId).sort()).toEqual([
-        "0f1e2d3c4b5a6978",
-        "1122334455667788",
-      ])
-    })
-
-    it("does not return another user's", async () => {
-      const resumes = createTailoredResumeStore(objects)
-
-      await resumes.put({
-        userId: "bob",
-        postingId: POSTING_ID,
-        markdown: "x",
-        generatedAt: GENERATED_AT,
-      })
-
-      expect(await resumes.list("alice")).toEqual([])
-    })
-
-    /**
-     * ⚠️ The documented limitation, asserted so it stays documented. A listing
-     * carries no user metadata, so a caller that rendered a filename or a
-     * company off `list()` would render blanks — and would do it only in
-     * production, where the metadata exists and simply is not returned.
-     */
-    it("carries no provenance, and dates each entry by the object's write time", async () => {
-      const resumes = createTailoredResumeStore(objects)
-
-      await resumes.put({
-        userId: "alice",
-        postingId: POSTING_ID,
-        markdown: "x",
-        generatedAt: GENERATED_AT,
-        provenance: { title: "Backend Engineer", company: "Acme" },
-      })
-
-      // The memory store returns what was written, metadata included, so the
-      // listing is narrowed here to what ListObjectsV2 actually gives back.
-      // Delegating method by method rather than spreading the instance: the
-      // methods live on the prototype, so a spread would silently drop them.
-      const withoutMetadata: UserObjectStore = {
-        put: (object) => objects.put(object),
-        get: (ref) => objects.get(ref),
-        head: (ref) => objects.head(ref),
-        delete: (ref) => objects.delete(ref),
-        list: async (userId, kind) =>
-          (await objects.list(userId, kind)).map((object) => ({
-            ...object,
-            metadata: {},
-          })),
-      }
-
-      const listed =
-        await createTailoredResumeStore(withoutMetadata).list("alice")
-
-      expect(listed[0]?.provenance).toEqual({})
-      expect(listed[0]?.generatedAt.toISOString()).toBe(
-        "2026-07-28T09:00:00.000Z"
-      )
-      expect(listed[0]?.postingId).toBe(POSTING_ID)
-    })
   })
 })
 

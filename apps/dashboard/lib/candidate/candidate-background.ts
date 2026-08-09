@@ -13,10 +13,25 @@ import {
 } from "./profile-text"
 
 /**
- * Finding the candidate's own words to write a letter from.
+ * Finding the candidate's own words to write from.
  *
- * **Nothing here imports Next**, like everything else under this directory —
- * see `cover-letter-actions.ts` for why that matters.
+ * ## What `lib/candidate/` is
+ *
+ * The candidate as an input — which of a user's **Documents** speaks for them,
+ * and what it says. It answers that once, for everyone who needs it, and it has
+ * three callers with nothing else in common: a **Cover Letter**, a **Tailored
+ * Resume**, and proposing **Search Criteria**. It lived under `lib/cover-letters/`
+ * until the second of those arrived, and the third made the directory name a
+ * lie rather than merely an accident.
+ *
+ * ⚠️ **It knows nothing about what is written from it.** No Posting, no agent,
+ * no message a user reads. That is what lets a fourth caller appear without
+ * touching anything here.
+ *
+ * **Nothing under this directory imports Next**, which is the rule the whole of
+ * `lib/` follows — see the Server Action section of `apps/dashboard/CLAUDE.md`.
+ *
+ * ## This file
  *
  * The whole of the "which document is the CV" decision lives here rather than
  * in the action, because it is the part with branches worth naming: a user with
@@ -124,7 +139,7 @@ export async function loadCandidateBackground(
       // document they did not choose, with nothing saying so. Refusing here is
       // the same rule `assertDraftable` follows one step later.
       console.error(
-        "cover-letters: could not extract text from",
+        "candidate: could not extract text from",
         readable.file,
         error.cause ?? error
       )
