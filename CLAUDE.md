@@ -62,6 +62,15 @@ endpoint, its own users and its own JWKS, so a preview branch is a different
 auth environment — not a different view of the same one. Never hand-write the
 value; re-pull it.
 
+**The trusted-domain list is maintained by CI, not by hand** —
+`.github/workflows/preview-auth-domain.yml` adds a pull request's Vercel branch
+alias when it opens and removes it when it closes, against `main`'s auth
+instance, which is the one Vercel's Preview environment points every preview at.
+Sign-in on a preview is impossible without that entry: Neon Auth checks
+`callbackURL` against the list _before_ it checks the provider and answers
+`403 INVALID_CALLBACKURL`. It needs a `VERCEL_TOKEN` secret alongside
+`NEON_API_KEY`. See `apps/dashboard/CLAUDE.md`.
+
 **`NEON_AUTH_COOKIE_SECRET` is ours, not Neon's**, so `env pull` does not
 supply it. Generate with `openssl rand -base64 32`; the SDK requires 32+
 characters.
