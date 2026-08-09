@@ -41,6 +41,7 @@ export {
   claimJob,
   createJob,
   dueJobs,
+  findJob,
   pauseJob,
   resumeJob,
   updateJobSchedule,

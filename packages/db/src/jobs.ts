@@ -37,6 +37,28 @@ const DEFAULT_DUE_LIMIT = 50
 
 type DbClient = PrismaClient | Prisma.TransactionClient
 
+/**
+ * One job by its id, or `undefined` when there is no such row.
+ *
+ * ⚠️ **This does not filter by `user_id`, and no helper in this file does.** A
+ * `jobs.id` addresses any row in the table, which is right for the worker — its
+ * tick legitimately operates across every user's jobs, and `dueJobs` and
+ * `claimJob` would be wrong if it did not. It is exactly wrong for a `jobId`
+ * arriving from a form, so **a caller acting on behalf of a user must check
+ * ownership itself**: `requireOwnedJob` in the dashboard is that check, and its
+ * docblock says why it lives up there rather than being pushed in here.
+ *
+ * `undefined` rather than Prisma's `null`, matching {@link pauseJob} and
+ * {@link resumeJob} — a caller then has one absent value to handle rather than
+ * two.
+ */
+export async function findJob(
+  prisma: DbClient,
+  id: string
+): Promise<Job | undefined> {
+  return (await prisma.job.findUnique({ where: { id } })) ?? undefined
+}
+
 /** Create a scheduled job, computing `nextRunAt` before the insert. */
 export async function createJob(
   prisma: DbClient,
@@ -160,7 +182,7 @@ export async function updateJobSchedule(
 
   if (updated === 0) return undefined
 
-  return (await prisma.job.findUnique({ where: { id } })) ?? undefined
+  return findJob(prisma, id)
 }
 
 /** Take a job off duty — `next_run_at = NULL`. */
@@ -185,7 +207,7 @@ export async function resumeJob(
   id: string,
   now: Date = new Date()
 ): Promise<Job | undefined> {
-  const job = await prisma.job.findUnique({ where: { id } })
+  const job = await findJob(prisma, id)
   if (!job) return undefined
 
   const nextRunAt = computeNextRunAt(
