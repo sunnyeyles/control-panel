@@ -1,18 +1,9 @@
 import { allTools } from "@workspace/agent-tools"
-import {
-  createAgent,
-  type Agent,
-  type AgentTool,
-  type CreateAgentOptions,
-} from "@workspace/agents-core"
+import { createAgent, type Agent } from "@workspace/agents-core"
 
-export interface CreateAssistantOptions extends Omit<
-  CreateAgentOptions,
-  "tools"
-> {
-  /** Appended to the catalog tools the assistant already carries. */
-  extraTools?: AgentTool[]
-}
+import type { ExtraToolsAgentOptions } from "./agent-options.ts"
+
+export type CreateAssistantOptions = ExtraToolsAgentOptions
 
 /**
  * A general-purpose assistant carrying the whole tool catalog.

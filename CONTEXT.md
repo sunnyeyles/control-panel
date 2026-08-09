@@ -298,7 +298,7 @@ _Avoid_: site, source (which means the `sources` criterion), search provider
 **Search Criteria**:
 What a candidate is looking for — titles, locations, keywords, exclusions,
 preferred boards, a cap on how many postings a brief carries. Held in
-`jobs.config` and interpreted by `apps/briefing-worker/src/job-search-config.ts`.
+`jobs.config` and interpreted by `packages/job-search/src/job-search-config.ts`.
 The platform stores that column and never reads inside it, so the meaning lives
 with whatever runs the job.
 

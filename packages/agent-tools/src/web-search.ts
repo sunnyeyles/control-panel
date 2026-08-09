@@ -1,6 +1,8 @@
 import { tool } from "@langchain/core/tools"
 import * as z from "zod"
 
+import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
+
 /**
  * Web search, via Tavily's REST API.
  *
@@ -58,13 +60,7 @@ export interface WebSearchDeps {
  * Mirrors `getOpenAIApiKey()` in `@workspace/agents-core`.
  */
 function getTavilyApiKey(): string {
-  const apiKey = process.env.TAVILY_API_KEY
-  if (!apiKey) {
-    throw new Error(
-      "TAVILY_API_KEY is not set, so there is no way to search the web."
-    )
-  }
-  return apiKey
+  return requireEnv("TAVILY_API_KEY", "search the web")
 }
 
 /**
@@ -117,51 +113,32 @@ export async function tavilySearch(
   const apiKey = deps.apiKey ?? getTavilyApiKey()
 
   const requested = maxResults ?? DEFAULT_MAX_RESULTS
-  const clamped = Math.min(
-    Math.max(Math.trunc(requested), 1),
-    MAX_RESULTS_LIMIT
-  )
+  const subject = `The search for "${query}"`
 
-  let response: Response
-  try {
-    response = await doFetch(TAVILY_SEARCH_URL, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        query,
-        max_results: clamped,
-        search_depth: "basic",
-        ...(timeRange ? { time_range: timeRange } : {}),
-        ...(includeDomains?.length ? { include_domains: includeDomains } : {}),
-      }),
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return `The search for "${query}" could not be sent: ${message}. Continue with what you already have.`
-  }
+  const result = await searchApiPost({
+    fetch: doFetch,
+    url: TAVILY_SEARCH_URL,
+    token: apiKey,
+    body: {
+      query,
+      max_results: clampMaxResults(requested, MAX_RESULTS_LIMIT),
+      search_depth: "basic",
+      ...(timeRange ? { time_range: timeRange } : {}),
+      ...(includeDomains?.length ? { include_domains: includeDomains } : {}),
+    },
+    subject,
+    retryAdvice: "a different query",
+    auth: {
+      service: "Tavily",
+      credential: "API key",
+      envVar: "TAVILY_API_KEY",
+    },
+  })
+  if (!result.ok) return result.message
 
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(
-      `Tavily rejected the API key (HTTP ${response.status}). TAVILY_API_KEY is set but not accepted.`
-    )
-  }
-
-  if (!response.ok) {
-    return `The search for "${query}" failed with HTTP ${response.status}. Try again with a different query, or continue with what you already have.`
-  }
-
-  let body: TavilyResponse
-  try {
-    body = (await response.json()) as TavilyResponse
-  } catch {
-    return `The search for "${query}" returned a response that could not be read. Continue with what you already have.`
-  }
-
+  const body = result.body as TavilyResponse
   if (!Array.isArray(body.results)) {
-    return `The search for "${query}" returned no result list. Continue with what you already have.`
+    return `${subject} returned no result list. Continue with what you already have.`
   }
 
   return formatResults(query, body.results)

@@ -1,125 +1,23 @@
-import { AIMessage, HumanMessage } from "@langchain/core/messages"
-import type { BaseMessage } from "@langchain/core/messages"
-import { getCurrentTime } from "@workspace/agent-tools/time"
-import {
-  createAgent,
-  type AgentTool,
-  type ChatModelLike,
-} from "@workspace/agents-core"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { HumanMessage } from "@langchain/core/messages"
+import { describe, expect, it } from "vitest"
 
 import { criteriaSchemaDescription } from "./criteria.ts"
 import {
   createProfileExtractor,
   PROFILE_EXTRACTOR_SYSTEM_PROMPT,
   toProfilePrompt,
-  type CreateProfileExtractorOptions,
 } from "./profile-extractor.ts"
+import { expectSharedPromptGuards } from "./test-support/prompt-guards.ts"
+import { RecordingModel } from "./test-support/recording-model.ts"
 
 /**
- * The tool set is the security property, so it is asserted structurally rather
- * than read off the source.
- *
- * `ChatModelLike` in `@workspace/agents-core` is a structural interface for
- * exactly this: a fake satisfies it, so the factory can be driven — through the
- * real `createAgent`, the real graph — with no provider key and no network.
- * What `createAgent` hands to `bindTools` *is* what the model may call, so
- * recording that argument is the whole assertion.
- *
- * Written out here rather than lifted from `cover-letter-writer.test.ts`: each
- * suite in this package keeps its own, so the fake stays shaped by what the
- * suite is proving instead of becoming a helper every future test has to bend
- * around.
+ * The tool-lessness of this agent is `defineToollessAgent`'s contract, proven
+ * once in `agent-options.test.ts`. What this suite owns is that the factory
+ * wires the *extractor's* prompt as the default.
  */
-class RecordingModel implements ChatModelLike {
-  /** One entry per `bindTools` call. `createAgent` makes exactly one. */
-  readonly bound: AgentTool[][] = []
-  /** The message lists the model was invoked with, system message first. */
-  readonly seen: BaseMessage[][] = []
-
-  constructor(private readonly reply = '{"titles":["Backend Engineer"]}') {}
-
-  bindTools(tools: AgentTool[]): {
-    invoke(messages: BaseMessage[]): Promise<AIMessage>
-  } {
-    this.bound.push(tools)
-
-    return {
-      invoke: async (messages: BaseMessage[]): Promise<AIMessage> => {
-        this.seen.push(messages)
-        return new AIMessage(this.reply)
-      },
-    }
-  }
-}
-
 describe("createProfileExtractor", () => {
-  /**
-   * Proves the claim the rest of the suite rests on: nothing here reaches a
-   * provider. A factory that fell back to `createModel()` would throw on the
-   * missing key rather than silently passing.
-   */
-  const key = process.env.OPENAI_API_KEY
-
-  beforeEach(() => {
-    delete process.env.OPENAI_API_KEY
-  })
-
-  afterEach(() => {
-    if (key === undefined) delete process.env.OPENAI_API_KEY
-    else process.env.OPENAI_API_KEY = key
-  })
-
-  it("gives the extractor no tools at all", () => {
-    const model = new RecordingModel()
-
-    createProfileExtractor({ model })
-
-    expect(model.bound).toHaveLength(1)
-    expect(model.bound[0]).toEqual([])
-  })
-
-  /**
-   * The negative control. Without it, `bound[0]` being empty would also be what
-   * a `createAgent` that ignored `tools` entirely produced — the assertion above
-   * would pass for the wrong reason, and keep passing after someone armed the
-   * one agent in the package that holds an entire CV.
-   */
-  it("records the tools an agent is actually given, so the empty set means something", () => {
-    const model = new RecordingModel()
-
-    createAgent({ model, tools: [getCurrentTime] })
-
-    expect(model.bound[0]).toHaveLength(1)
-  })
-
-  /**
-   * `CreateProfileExtractorOptions` omits `tools` from the type, so this is not
-   * reachable from typed code — and the factory passes its own `tools: []` last,
-   * so it is not reachable by forcing one past the compiler either.
-   */
-  it("cannot be armed by a caller that forces tools past the type", () => {
-    const model = new RecordingModel()
-    const tools: AgentTool[] = [getCurrentTime]
-    const forced = {
-      model,
-      tools,
-    } as unknown as CreateProfileExtractorOptions
-
-    createProfileExtractor(forced)
-
-    expect(model.bound[0]).toEqual([])
-  })
-
-  it("is a factory, so importing this module needs no API key", () => {
-    expect(process.env.OPENAI_API_KEY).toBeUndefined()
-    expect(() =>
-      createProfileExtractor({ model: new RecordingModel() })
-    ).not.toThrow()
-  })
-
   it("sends the profile-extractor system prompt ahead of the CV", async () => {
-    const model = new RecordingModel()
+    const model = new RecordingModel('{"titles":["Backend Engineer"]}')
     const extractor = createProfileExtractor({ model })
 
     const result = await extractor.invoke({
@@ -130,17 +28,6 @@ describe("createProfileExtractor", () => {
 
     expect(model.seen[0]?.[0]?.text).toBe(PROFILE_EXTRACTOR_SYSTEM_PROMPT)
     expect(result.messages.at(-1)?.text).toBe('{"titles":["Backend Engineer"]}')
-  })
-
-  it("takes an overridden system prompt, as every agent here does", async () => {
-    const model = new RecordingModel()
-    const systemPrompt = "Return an empty object."
-    const extractor = createProfileExtractor({ model, systemPrompt })
-
-    await extractor.invoke({ messages: [new HumanMessage("A CV.")] })
-
-    expect(model.seen[0]?.[0]?.text).toBe(systemPrompt)
-    expect(model.bound[0]).toEqual([])
   })
 })
 
@@ -154,8 +41,6 @@ describe("createProfileExtractor", () => {
 describe("PROFILE_EXTRACTOR_SYSTEM_PROMPT", () => {
   it("asks for JSON and nothing else", () => {
     expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/JSON and nothing else/i)
-    expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/no code fence/i)
-    expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/no preamble/i)
   })
 
   it("asks for roles the candidate could hold next, bounded by evidenced seniority", () => {
@@ -187,9 +72,8 @@ describe("PROFILE_EXTRACTOR_SYSTEM_PROMPT", () => {
     expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/area code/i)
   })
 
-  it("names the CV as the only source, with nothing to look up", () => {
+  it("names the CV as the only source", () => {
     expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/only source/i)
-    expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/no tools/i)
   })
 
   /**
@@ -201,8 +85,10 @@ describe("PROFILE_EXTRACTOR_SYSTEM_PROMPT", () => {
     expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(
       /never as instruction to you/i
     )
-    expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/ignore it/i)
-    expect(PROFILE_EXTRACTOR_SYSTEM_PROMPT).toMatch(/quoted material/i)
+  })
+
+  it("carries the shared containment clauses", () => {
+    expectSharedPromptGuards(PROFILE_EXTRACTOR_SYSTEM_PROMPT)
   })
 
   it("carries the schema the parser enforces, rather than a second copy of it", () => {

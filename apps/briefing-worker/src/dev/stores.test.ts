@@ -71,9 +71,13 @@ describe("createFindingsFileRecorder", () => {
 
     expect(brief).toBeDefined()
     expect(findings).toBeDefined()
+    // The property this harness needs is co-location, not the key layout: both
+    // writes derive their directory from the same occurrence, so the findings
+    // sit beside the brief. What that directory looks like — the partitioning
+    // on the occurrence's day, not the finish time's — is the brief key's own
+    // contract, pinned in `packages/user-storage/src/facades.test.ts`.
     expect(dirname(findings ?? "")).toBe(dirname(brief ?? ""))
     expect(basename(findings ?? "")).toBe(`${RUN_ID}.json`)
-    expect(brief).toContain(join("dev", USER_ID, "briefs", "2026", "08", "03"))
   })
 
   it("writes findings the worker's own parser accepts", async () => {

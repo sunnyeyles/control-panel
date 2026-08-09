@@ -6,84 +6,19 @@ import {
   type CoverLetterProvenance,
 } from "./cover-letter-store.ts"
 import { InvalidObjectKeyError } from "./errors.ts"
+import { MemoryObjectStore } from "./memory-object-store.ts"
 import type { PostingDocumentRef } from "./posting-document-store.ts"
 import { acceptedResumeExtensions, createResumeStore } from "./resume-store.ts"
 import { createTailoredResumeStore } from "./tailored-resume-store.ts"
-import type {
-  FetchedObject,
-  NewObject,
-  ObjectRef,
-  StoredObject,
-  UserObjectStore,
-} from "./user-object-store.ts"
+import type { UserObjectStore } from "./user-object-store.ts"
 
 /**
- * An in-memory {@link UserObjectStore}.
- *
  * The facades are tested against the interface rather than against S3, which
  * is the whole point of the seam: no AWS SDK is involved below this line.
+ * The store is the shared `MemoryObjectStore` — real key building, real error
+ * types — rather than the template-string fake that used to live here and
+ * could not catch a key-layout change.
  */
-class MemoryObjectStore implements UserObjectStore {
-  readonly puts: NewObject[] = []
-  private readonly objects = new Map<string, StoredObject & { body: Buffer }>()
-
-  private keyOf(ref: ObjectRef): string {
-    return `${ref.userId}/${ref.kind}/${ref.segments.join("/")}${ref.extension}`
-  }
-
-  async put(object: NewObject): Promise<StoredObject> {
-    this.puts.push(object)
-
-    const body =
-      typeof object.body === "string"
-        ? Buffer.from(object.body, "utf8")
-        : Buffer.from(object.body)
-
-    const stored = {
-      key: this.keyOf(object),
-      environment: "test",
-      userId: object.userId,
-      kind: object.kind,
-      segments: object.segments,
-      extension: object.extension,
-      contentType: "application/octet-stream",
-      size: body.byteLength,
-      storedAt: new Date("2026-07-28T09:00:00.000Z"),
-      metadata: object.metadata ?? {},
-      body,
-    }
-
-    this.objects.set(stored.key, stored)
-    return stored
-  }
-
-  async get(ref: ObjectRef): Promise<FetchedObject> {
-    const found = this.objects.get(this.keyOf(ref))
-    if (!found) throw new Error(`not stored: ${this.keyOf(ref)}`)
-
-    return {
-      ...found,
-      body: found.body,
-      text: () => found.body.toString("utf8"),
-    }
-  }
-
-  async head(ref: ObjectRef): Promise<StoredObject> {
-    const found = this.objects.get(this.keyOf(ref))
-    if (!found) throw new Error(`not stored: ${this.keyOf(ref)}`)
-    return found
-  }
-
-  async delete(ref: ObjectRef): Promise<void> {
-    this.objects.delete(this.keyOf(ref))
-  }
-
-  async list(userId: string, kind: ObjectRef["kind"]): Promise<StoredObject[]> {
-    return [...this.objects.values()]
-      .filter((o) => o.userId === userId && o.kind === kind)
-      .sort((a, b) => a.key.localeCompare(b.key))
-  }
-}
 
 let objects: MemoryObjectStore
 

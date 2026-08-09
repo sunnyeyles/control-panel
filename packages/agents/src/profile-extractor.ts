@@ -1,9 +1,7 @@
 import {
-  createAgent,
-  type Agent,
-  type CreateAgentOptions,
-} from "@workspace/agents-core"
-
+  defineToollessAgent,
+  type ToollessAgentOptions,
+} from "./agent-options.ts"
 import { criteriaSchemaDescription } from "./criteria.ts"
 
 export const PROFILE_EXTRACTOR_SYSTEM_PROMPT = [
@@ -26,17 +24,17 @@ export const PROFILE_EXTRACTOR_SYSTEM_PROMPT = [
   criteriaSchemaDescription,
 ].join("\n")
 
-export type CreateProfileExtractorOptions = Omit<CreateAgentOptions, "tools">
+export type CreateProfileExtractorOptions = ToollessAgentOptions
 
 /**
  * The profile extractor: reads one CV, proposes search criteria, and can do
  * nothing else.
  *
- * `tools: []` is not a quality preference here, it is the containment, and this
- * is the strongest case for it in the package. The cover-letter writer holds the
- * candidate's CV alongside attacker-influenced posting text; this agent holds
- * the CV and nothing but the CV — the whole document, verbatim, including
- * whatever address, phone number and employment history it carries.
+ * Tool-lessness is not a quality preference here, it is the containment, and
+ * this is the strongest case for it in the package. The cover-letter writer
+ * holds the candidate's CV alongside attacker-influenced posting text; this
+ * agent holds the CV and nothing but the CV — the whole document, verbatim,
+ * including whatever address, phone number and employment history it carries.
  *
  * An agent that can both read a CV and issue an outbound request can be induced
  * to put one inside the other, and the uploaded file is itself the injection
@@ -48,19 +46,12 @@ export type CreateProfileExtractorOptions = Omit<CreateAgentOptions, "tools">
  * agent ever needs a fact it cannot read off the page, that lookup belongs on a
  * separate agent that never sees the CV.
  *
- * The tool set is asserted structurally in `profile-extractor.test.ts` against
- * a fake chat model, not left to this comment.
- *
- * A factory rather than an instance, like every agent here: building one
- * constructs a model, which reads `OPENAI_API_KEY` and throws without it.
+ * The mechanism — and the structural assertion that no caller can arm it — is
+ * `defineToollessAgent`, proven once in `agent-options.test.ts`.
  */
-export function createProfileExtractor(
-  options: CreateProfileExtractorOptions = {}
-): Agent {
-  const { systemPrompt = PROFILE_EXTRACTOR_SYSTEM_PROMPT, ...rest } = options
-
-  return createAgent({ ...rest, systemPrompt, tools: [] })
-}
+export const createProfileExtractor = defineToollessAgent(
+  PROFILE_EXTRACTOR_SYSTEM_PROMPT
+)
 
 /**
  * The prompt, built from the CV and nothing else.

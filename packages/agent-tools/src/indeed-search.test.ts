@@ -1,7 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 
-import { apifyIndeedSearch, type IndeedSearchDeps } from "./indeed-search.ts"
-import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
+import {
+  apifyIndeedSearch,
+  INDEED_SPEC,
+  type IndeedSearchDeps,
+} from "./indeed-search.ts"
+import type { PostingCatalog } from "./posting-catalog.ts"
+import {
+  API_TOKEN,
+  fakeFetch,
+  jsonResponse,
+  requestBody,
+  sequentialCatalog,
+  type Capture,
+} from "./test-support/search-fakes.ts"
 
 /**
  * What is true of Indeed and of no other board: the actor it runs, the request
@@ -15,33 +27,6 @@ import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
  * `seek-search.test.ts` does it: a tool's schema describes what the *model*
  * passes and has nowhere to carry a fake `fetch`.
  */
-
-const API_TOKEN = "apify-test-token"
-
-interface Capture {
-  url: string
-  init: RequestInit
-}
-
-function fakeFetch(reply: Response, captured: Capture[]) {
-  return (async (url: string | URL | Request, init?: RequestInit) => {
-    captured.push({ url: String(url), init: init ?? {} })
-    // Cloned, not returned directly: a Response body reads once, and some tests
-    // drive the same fake through several calls.
-    return reply.clone()
-  }) as unknown as typeof globalThis.fetch
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  })
-}
-
-function requestBody(capture: Capture): Record<string, unknown> {
-  return JSON.parse(String(capture.init.body)) as Record<string, unknown>
-}
 
 /**
  * Ages are written relative to the run rather than as fixed dates: the
@@ -68,25 +53,10 @@ const ONE_JOB = [
   },
 ]
 
-/**
- * The run's catalog, handing out `id1`, `id2`, … in the order postings arrive.
- *
- * Readable ids rather than the platform's hashes: how an id is derived is
- * `posting-id.test.ts`'s subject in `@workspace/agents`, and what matters here
- * is that this board's URL reaches the catalog and its description with it.
- */
 let catalog: PostingCatalog
-let ids: Map<string, string>
 
 beforeEach(() => {
-  ids = new Map()
-  catalog = createPostingCatalog({
-    idFor: (url) => {
-      const held = ids.get(url) ?? `id${ids.size + 1}`
-      ids.set(url, held)
-      return held
-    },
-  })
+  catalog = sequentialCatalog()
 })
 
 /** `apifyIndeedSearch` against the catalog this test is holding. */
@@ -96,10 +66,6 @@ function indeedSearch(
 ): Promise<string> {
   return apifyIndeedSearch(input, catalog, deps)
 }
-
-afterEach(() => {
-  delete process.env.APIFY_TOKEN
-})
 
 describe("apifyIndeedSearch", () => {
   it("sends the query to Indeed's actor and renders its fields", async () => {
@@ -169,21 +135,12 @@ describe("apifyIndeedSearch", () => {
     )
   })
 
-  it("asks for fewer than SEEK, because the inventory is thinner", async () => {
-    const captured: Capture[] = []
-    const fetch = fakeFetch(jsonResponse(ONE_JOB), captured)
-
-    await indeedSearch({ query: "a" }, { apiToken: API_TOKEN, fetch })
-    await indeedSearch(
-      { query: "b", maxResults: 500 },
-      { apiToken: API_TOKEN, fetch }
-    )
-
-    // Under SEEK's 40, because the actor charges per item and Indeed's
-    // Australian inventory is thinner — not because of context any more. Six
-    // results measured 77 KB of JSON, and none of it reaches the model now.
-    expect(requestBody(captured[0]!).maxItemsPerSearch).toBe(20)
-    expect(requestBody(captured[1]!).maxItemsPerSearch).toBe(25)
+  it("declares bounds under SEEK's, because the inventory is thinner", () => {
+    // The clamp that applies them is shared and `apify-search.test.ts` drives
+    // it; what is Indeed's alone are the numbers. Under SEEK's 40 because the
+    // actor charges per item and Indeed's Australian inventory is thinner.
+    expect(INDEED_SPEC.defaultMaxResults).toBe(20)
+    expect(INDEED_SPEC.maxResultsLimit).toBe(25)
   })
 
   it("scopes an unspecified location by country rather than inventing one", async () => {
@@ -330,13 +287,9 @@ describe("apifyIndeedSearch", () => {
     expect(output).not.toContain("Closed")
   })
 
-  it("names Indeed when there is nothing to report", async () => {
-    const output = await indeedSearch(
-      { query: "zeppelin wrangler" },
-      { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse([]), []) }
-    )
-
-    expect(output).toContain("No currently-listed Indeed postings")
-    expect(output).toContain("zeppelin wrangler")
+  it("declares the board name the empty-result sentence renders", () => {
+    // The sentence itself is `formatSearchResults`'s, owned by
+    // `apify-search.test.ts`. What is Indeed's alone is the spelling.
+    expect(INDEED_SPEC.board).toBe("Indeed")
   })
 })

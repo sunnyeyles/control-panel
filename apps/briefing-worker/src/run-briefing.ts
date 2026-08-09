@@ -19,7 +19,7 @@ import {
   parseJobSearchConfig,
   scoutLlmCallBudget,
   toSearchBrief,
-} from "./job-search-config.ts"
+} from "@workspace/job-search"
 import { toNewPostings } from "./postings.ts"
 import { resolvePostings, type PostingLookup } from "./resolve-postings.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"

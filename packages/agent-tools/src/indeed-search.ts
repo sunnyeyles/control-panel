@@ -1,8 +1,8 @@
-import { tool, type StructuredToolInterface } from "@langchain/core/tools"
-import * as z from "zod"
+import type { StructuredToolInterface } from "@langchain/core/tools"
 
 import {
   apifyBoardSearch,
+  createBoardSearchTool,
   type ApifyBoardSpec,
   type BoardSearchDeps,
   type BoardSearchInput,
@@ -182,7 +182,7 @@ function matchesWorkType(
   return job.jobType.toLowerCase() === workType.toLowerCase()
 }
 
-const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
+export const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
   board: "Indeed",
   actorId: ACTOR_ID,
   defaultMaxResults: DEFAULT_MAX_RESULTS,
@@ -285,48 +285,13 @@ export async function apifyIndeedSearch(
 export function createIndeedSearch(
   catalog: PostingCatalog
 ): StructuredToolInterface {
-  return tool(
-    async (input: IndeedSearchInput) => apifyIndeedSearch(input, catalog),
-    {
-      name: INDEED_TOOL_NAME,
-      description:
-        "Search au.indeed.com's live listings for currently-open job postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.",
-      schema: z.object({
-        query: z
-          .string()
-          .describe(
-            'Role title or keywords, e.g. "software engineer TypeScript".'
-          ),
-        location: z
-          .string()
-          .optional()
-          .describe(
-            'Where, as Indeed writes it — "Sydney NSW", "Melbourne VIC", "Remote". Omit to search all of Australia.'
-          ),
-        maxResults: z
-          .number()
-          .int()
-          .min(1)
-          .max(MAX_RESULTS_LIMIT)
-          .optional()
-          .describe(
-            `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
-          ),
-        daysOld: z
-          .number()
-          .int()
-          .min(1)
-          .optional()
-          .describe(
-            `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
-          ),
-        workType: z
-          .enum(WORK_TYPES)
-          .optional()
-          .describe(
-            "Restrict to one employment type, as Indeed labels it. Omit for all; postings that state no type are kept either way."
-          ),
-      }),
-    }
-  )
+  return createBoardSearchTool(INDEED_SPEC, catalog, {
+    name: INDEED_TOOL_NAME,
+    source: "au.indeed.com",
+    locationDescription:
+      'Where, as Indeed writes it — "Sydney NSW", "Melbourne VIC", "Remote". Omit to search all of Australia.',
+    workTypes: WORK_TYPES,
+    workTypeDescription:
+      "Restrict to one employment type, as Indeed labels it. Omit for all; postings that state no type are kept either way.",
+  })
 }

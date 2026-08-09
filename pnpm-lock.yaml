@@ -44,6 +44,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@workspace/job-search':
+        specifier: workspace:*
+        version: link:../../packages/job-search
       '@workspace/langfuse':
         specifier: workspace:*
         version: link:../../packages/langfuse
@@ -108,6 +111,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@workspace/job-search':
+        specifier: workspace:*
+        version: link:../../packages/job-search
       '@workspace/langfuse':
         specifier: workspace:*
         version: link:../../packages/langfuse
@@ -353,6 +359,34 @@ importers:
       typescript-eslint:
         specifier: ^8.60.0
         version: 8.60.0(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
+
+  packages/job-search:
+    dependencies:
+      '@workspace/agents':
+        specifier: workspace:*
+        version: link:../agents
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.41
+      '@workspace/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@workspace/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.7.0)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@20.19.41)(vite@8.1.5(@types/node@20.19.41)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
   packages/langfuse:
     dependencies:

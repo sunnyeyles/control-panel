@@ -2,17 +2,23 @@ import { JOB_SCOUT_MAX_LLM_CALLS } from "@workspace/agents"
 import * as z from "zod"
 
 /**
- * What a job's `config` column means to *this* worker.
+ * What a job's `config` column means — the one copy of that contract.
  *
  * `jobs.config` is deliberately untyped in `@workspace/db` — the platform
  * stores it and never reads inside it — so the interpretation belongs to
- * whatever runs the job, which is here. Keeping the schema out of the database
+ * whatever writes or runs the job. Keeping the schema out of the database
  * package is what lets a second kind of job arrive later with a completely
  * different config and no migration.
  *
- * This is also the seam the resume-extraction stage will eventually write to:
- * today a person fills these fields in by hand, later a profile extractor
- * derives them from an uploaded resume, and nothing downstream of here changes.
+ * A package rather than a worker module, because two apps hold this contract
+ * and apps do not depend on apps. The worker requires `titles` and
+ * `locations`, so a job created without them is not "a job with no criteria
+ * yet" — it is a job whose first run is guaranteed to fail with *"has a
+ * config this worker cannot read"*, having already claimed and burned its
+ * slot. While the schema lived in the worker, the dashboard's create form
+ * carried a knowing partial copy of it; now the form derives its fields from
+ * this schema, and a change to the required set is a compile error over
+ * there rather than a run that fails tomorrow morning.
  */
 
 const nonEmpty = z.string().trim().min(1)

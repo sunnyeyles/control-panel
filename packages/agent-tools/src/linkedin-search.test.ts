@@ -1,10 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   apifyLinkedinSearch,
+  LINKEDIN_SPEC,
   type LinkedinSearchDeps,
 } from "./linkedin-search.ts"
-import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
+import type { PostingCatalog } from "./posting-catalog.ts"
+import {
+  API_TOKEN,
+  fakeFetch,
+  jsonResponse,
+  requestBody,
+  sequentialCatalog,
+  type Capture,
+} from "./test-support/search-fakes.ts"
 
 /**
  * What is true of LinkedIn and of no other board: the actor it runs, the search
@@ -19,33 +28,6 @@ import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
  * `seek-search.test.ts` does it: a tool's schema describes what the *model*
  * passes and has nowhere to carry a fake `fetch`.
  */
-
-const API_TOKEN = "apify-test-token"
-
-interface Capture {
-  url: string
-  init: RequestInit
-}
-
-function fakeFetch(reply: Response, captured: Capture[]) {
-  return (async (url: string | URL | Request, init?: RequestInit) => {
-    captured.push({ url: String(url), init: init ?? {} })
-    // Cloned, not returned directly: a Response body reads once, and some tests
-    // drive the same fake through several calls.
-    return reply.clone()
-  }) as unknown as typeof globalThis.fetch
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  })
-}
-
-function requestBody(capture: Capture): Record<string, unknown> {
-  return JSON.parse(String(capture.init.body)) as Record<string, unknown>
-}
 
 /** The one search URL the actor was pointed at. */
 function searchUrl(capture: Capture): string {
@@ -74,32 +56,10 @@ const ONE_JOB = [
   },
 ]
 
-/** Ten, for the runs that exercise the actor's `count` floor. */
-const TEN_JOBS = Array.from({ length: 10 }, (_, index) => ({
-  title: `Job ${index}`,
-  companyName: "Acme",
-  link: `https://au.linkedin.com/jobs/view/job-${index}`,
-}))
-
-/**
- * The run's catalog, handing out `id1`, `id2`, … in the order postings arrive.
- *
- * Readable ids rather than the platform's hashes: how an id is derived is
- * `posting-id.test.ts`'s subject in `@workspace/agents`, and what matters here
- * is that this board's URL reaches the catalog untouched.
- */
 let catalog: PostingCatalog
-let ids: Map<string, string>
 
 beforeEach(() => {
-  ids = new Map()
-  catalog = createPostingCatalog({
-    idFor: (url) => {
-      const held = ids.get(url) ?? `id${ids.size + 1}`
-      ids.set(url, held)
-      return held
-    },
-  })
+  catalog = sequentialCatalog()
 })
 
 /** `apifyLinkedinSearch` against the catalog this test is holding. */
@@ -109,10 +69,6 @@ function linkedinSearch(
 ): Promise<string> {
   return apifyLinkedinSearch(input, catalog, deps)
 }
-
-afterEach(() => {
-  delete process.env.APIFY_TOKEN
-})
 
 describe("apifyLinkedinSearch", () => {
   it("points LinkedIn's actor at a composed search URL and renders its fields", async () => {
@@ -252,39 +208,14 @@ describe("apifyLinkedinSearch", () => {
     expect(new URL(url).searchParams.get("keywords")).toBe("C++ & Rust")
   })
 
-  it("asks for the actor's ten-item floor while returning what was requested", async () => {
-    const captured: Capture[] = []
-
-    const output = await linkedinSearch(
-      { query: "a", maxResults: 3 },
-      {
-        apiToken: API_TOKEN,
-        fetch: fakeFetch(jsonResponse(TEN_JOBS), captured),
-      }
-    )
-
-    // Below ten the actor refuses to run at all — `Field input.count must be
-    // >= 10` — so a small search asks for ten and drops the surplus. The floor
-    // must not reach the schema the model reads.
-    expect(requestBody(captured[0]!).count).toBe(10)
-    expect(output).toContain("3 currently-listed LinkedIn posting(s)")
-    expect(output).toContain("Job 2")
-    expect(output).not.toContain("Job 3")
-  })
-
-  it("asks for exactly what was requested once it clears the floor", async () => {
-    const captured: Capture[] = []
-    const fetch = fakeFetch(jsonResponse(TEN_JOBS), captured)
-
-    await linkedinSearch(
-      { query: "a", maxResults: 25 },
-      { apiToken: API_TOKEN, fetch }
-    )
-    await linkedinSearch({ query: "b" }, { apiToken: API_TOKEN, fetch })
-
-    // The floor is a minimum, not a rewrite: nothing above it is touched, and
-    // the default of 40 is already well clear of it.
-    expect(requestBody(captured[0]!).count).toBe(25)
-    expect(requestBody(captured[1]!).count).toBe(40)
+  it("declares the actor's ten-item floor and its own bounds", () => {
+    // The floor's mechanics — raise the run to ten, slice the surplus off,
+    // keep the floor out of the schema the model reads — are shared, and
+    // `apify-search.test.ts` owns them. What is LinkedIn's alone is that this
+    // board declares one: below ten the actor refuses to run at all (`Field
+    // input.count must be >= 10`).
+    expect(LINKEDIN_SPEC.minItemsPerRun).toBe(10)
+    expect(LINKEDIN_SPEC.defaultMaxResults).toBe(40)
+    expect(LINKEDIN_SPEC.maxResultsLimit).toBe(50)
   })
 })

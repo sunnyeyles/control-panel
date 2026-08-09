@@ -15,13 +15,9 @@ import {
   createSeekSearch,
   SEEK_TOOL_NAME,
 } from "@workspace/agent-tools/seek-search"
-import {
-  createAgent,
-  type Agent,
-  type AgentTool,
-  type CreateAgentOptions,
-} from "@workspace/agents-core"
+import { createAgent, type Agent } from "@workspace/agents-core"
 
+import type { ExtraToolsAgentOptions } from "./agent-options.ts"
 import type { ScoutFindings } from "./findings.ts"
 import { postingId } from "./posting-id.ts"
 import { createSubmitFindings } from "./submit-findings.ts"
@@ -82,13 +78,7 @@ export const JOB_SCOUT_SEARCH_TOOL_NAMES: readonly string[] = [
   LINKEDIN_TOOL_NAME,
 ]
 
-export interface CreateJobScoutOptions extends Omit<
-  CreateAgentOptions,
-  "tools"
-> {
-  /** Appended to the tools the scout already carries. */
-  extraTools?: AgentTool[]
-}
+export type CreateJobScoutOptions = ExtraToolsAgentOptions
 
 /**
  * One scout, and the two pieces of per-run state its tools write into.

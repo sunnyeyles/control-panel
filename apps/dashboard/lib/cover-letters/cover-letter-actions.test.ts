@@ -325,57 +325,20 @@ beforeEach(() => {
 
 describe("draftCoverLetter", () => {
   describe("who is asking", () => {
+    /**
+     * The gate itself — identical wording for anonymous and unapproved, the
+     * refusal landing before the Posting query — is
+     * `prepare-posting-document.test.ts`'s. What this asserts is the ordering
+     * this action owns: refused before *its* model and *its* bucket.
+     */
     it("refuses an anonymous caller before anything else happens", async () => {
       subject = harness({ user: ANONYMOUS })
 
       const result = await subject.draft(IDLE, form(VALID))
 
       expect(result).toEqual({ status: "error", message: NOT_AUTHORIZED })
-      // Not merely refused — refused before the model, the database and the
-      // bucket were touched at all.
       expect(subject.writer.prompts).toHaveLength(0)
       expect(subject.objects.puts).toHaveLength(0)
-    })
-
-    it("gives a signed-in-but-unapproved caller the same message", async () => {
-      // Identical wording on purpose: telling this caller apart from the
-      // anonymous one confirms their account exists and is merely not on the
-      // allowlist, which is more than they need to know.
-      subject = harness({ user: REFUSED })
-
-      const result = await subject.draft(IDLE, form(VALID))
-
-      expect(result).toEqual({ status: "error", message: NOT_AUTHORIZED })
-      expect(subject.writer.prompts).toHaveLength(0)
-    })
-  })
-
-  describe("whose Posting it is", () => {
-    it("refuses a Posting belonging to another user", async () => {
-      // Seeded under a different owner, so the lookup naming this caller finds
-      // nothing at all. There is no ownership comparison to assert here and
-      // that is the point of the change: `(user, posting id)` is the key, the
-      // user half is the session's, and a stranger's row cannot be addressed.
-      subject = harness({
-        db: new FakeDb().seedPosting(OTHER_USER_ID, POSTING, RUN_ID),
-      })
-
-      const result = await subject.draft(IDLE, form(VALID))
-
-      expect(result).toEqual({ status: "error", message: POSTING_NOT_FOUND })
-      expect(subject.writer.prompts).toHaveLength(0)
-      expect(subject.objects.puts).toHaveLength(0)
-    })
-
-    it("says the same thing about a Posting nobody has", async () => {
-      // One message for both, or a field taking a derived id becomes an oracle
-      // for whether a stranger was shown the same advertisement — and the ids
-      // come from a public URL, so anyone reading that job board can spell one.
-      subject = harness({ db: new FakeDb() })
-
-      const result = await subject.draft(IDLE, form(VALID))
-
-      expect(result).toEqual({ status: "error", message: POSTING_NOT_FOUND })
     })
   })
 
@@ -431,47 +394,6 @@ describe("draftCoverLetter", () => {
       expect(result.status).toBe("success")
       // And the Run is still recorded — carried off the row, not looked up.
       expect(subject.objects.puts[0]?.metadata?.["run-id"]).toBe(RUN_ID)
-    })
-
-    it("refuses a Posting id this user has no row for", async () => {
-      const absent = postingId({ url: "https://www.seek.com.au/job/999" })
-
-      const result = await subject.draft(IDLE, form({ postingId: absent }))
-
-      expect(result.status).toBe("error")
-      expect(subject.writer.prompts).toHaveLength(0)
-      expect(subject.objects.puts).toHaveLength(0)
-    })
-
-    it("refuses a row whose stored Posting will not parse", async () => {
-      // The table renders such a row degraded to its four columns rather than
-      // dropping it, so this Posting is on screen and looks ordinary. There is
-      // nothing to degrade to here — the payload *is* what the letter would be
-      // written from — so it is refused before the CV is read and before the
-      // model is reached.
-      const db = new FakeDb()
-      db.postings.set(`${USER_ID}:${POSTING_ID}`, {
-        payload: { title: "Backend Engineer" },
-        lastSeenRunId: RUN_ID,
-      })
-
-      subject = harness({ db })
-
-      const result = await subject.draft(IDLE, form(VALID))
-
-      expect(result.status).toBe("error")
-      expect(subject.writer.prompts).toHaveLength(0)
-      expect(subject.objects.puts).toHaveLength(0)
-    })
-
-    it("refuses a malformed Posting id without querying anything", async () => {
-      const result = await subject.draft(
-        IDLE,
-        form({ postingId: "../../etc/passwd" })
-      )
-
-      expect(result.status).toBe("error")
-      expect(subject.objects.puts).toHaveLength(0)
     })
   })
 
@@ -636,24 +558,6 @@ describe("draftCoverLetter", () => {
       )
       expect(subject.writer.prompts).toHaveLength(0)
       expect(subject.objects.puts).toHaveLength(0)
-    })
-
-    it("refuses without calling the model when the resume is too thin to write from", async () => {
-      const thin = new FakeResumes(CV, NOW).add({
-        resumeId: "44444444-4444-4444-8444-444444444444",
-        extension: ".txt",
-        documentType: "resume",
-        bytes: new TextEncoder().encode("Alice. Engineer."),
-      })
-
-      subject = harness({ resumes: thin })
-
-      const result = await subject.draft(IDLE, form(VALID))
-
-      expect(result.status).toBe("error")
-      // `assertDraftable` runs before the writer is constructed: a letter
-      // written from that would invent every specific in it.
-      expect(subject.writer.prompts).toHaveLength(0)
     })
 
     it("passes the document through verbatim when it is readable", async () => {

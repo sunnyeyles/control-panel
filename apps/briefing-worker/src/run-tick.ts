@@ -3,13 +3,11 @@ import {
   dueJobs,
   failRun,
   finishRun,
-  recordArtifact,
-  recordPostings,
-  recordRunFindings,
   type PrismaClient,
 } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
+import { prismaRecorders } from "./recorders.ts"
 import { runBriefing } from "./run-briefing.ts"
 
 /**
@@ -103,27 +101,15 @@ export async function runTick(
       // `slot.scheduledFor` is the occurrence, and is what the brief's S3
       // partition day is derived from — not the instant the run finishes, or a
       // 23:30 slot completing after midnight files under a day its run row
-      // disagrees with.
+      // disagrees with. The recorders take the same instant; see `recorders.ts`.
       const briefing = await runBriefing({
         job,
         slot,
         briefs,
-        recordArtifact: (runId, objectKey) =>
-          recordArtifact(prisma, runId, objectKey),
-        recordFindings: (runId, findings) =>
-          recordRunFindings(prisma, runId, findings),
-        // The cumulative record, which every Posting outlives its run through.
-        // `seenAt` is `slot.scheduledFor` for the same reason the object key
-        // partitions on it: a 23:30 slot that finishes after midnight must not
-        // claim it found something the following day. The clock says when the
-        // work happened; the slot says which occurrence it was.
-        recordPostings: (runId, postings) =>
-          recordPostings(prisma, {
-            userId: job.userId,
-            runId,
-            seenAt: slot.scheduledFor,
-            postings,
-          }),
+        ...prismaRecorders(prisma, {
+          userId: job.userId,
+          seenAt: slot.scheduledFor,
+        }),
       })
 
       // Third argument, and usually `undefined`. A run that produced a brief

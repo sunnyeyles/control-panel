@@ -215,47 +215,13 @@ describe("the gate", () => {
     expect(saved).toEqual({ status: "error", message: NOT_AUTHORIZED })
     expect(filled).toEqual({ status: "error", message: NOT_AUTHORIZED })
     // Not merely refused: refused before a single field was looked at, and
-    // before the database or the bucket was touched.
+    // before the database or the bucket was touched. The wording, the
+    // refused/anonymous identity and the thrown-`getUser` case belong to
+    // `requireUser` and are asserted in `require-user.test.ts`.
     expect(save.reads).toEqual([])
     expect(imported.reads).toEqual([])
     expect(store.saves).toHaveLength(0)
     expect(store.reads).toHaveLength(0)
-  })
-
-  it("gives a refused caller the identical state an anonymous one gets", async () => {
-    // Identical wording on purpose: telling this caller apart from the
-    // anonymous one confirms their account exists and is merely not on the
-    // allowlist, which is more than they need to know.
-    const anonymous = await actionsFor(ANONYMOUS).saveLetterInstructions(
-      IDLE,
-      saveForm()
-    )
-    const refused = await actionsFor(REFUSED).saveLetterInstructions(
-      IDLE,
-      saveForm()
-    )
-
-    expect(refused).toEqual(anonymous)
-    expect(refused).toMatchObject({ message: NOT_AUTHORIZED })
-    expect(store.saves).toHaveLength(0)
-  })
-
-  it("treats a thrown getUser as unauthorized rather than propagating it", async () => {
-    const actions = createLetterInstructionsActions({
-      getUser: async () => {
-        throw new Error("neon is asleep")
-      },
-      getPrisma: () =>
-        mergeClients(store.asPrisma(), fakeDocumentDb(USER_ID, resumes.rows)),
-      getResumes: () => resumes,
-    })
-
-    const saved = await actions.saveLetterInstructions(IDLE, saveForm())
-    const filled = await actions.importExampleLetter(IDLE, importForm())
-
-    expect(saved).toEqual({ status: "error", message: NOT_AUTHORIZED })
-    expect(filled).toEqual({ status: "error", message: NOT_AUTHORIZED })
-    expect(store.saves).toHaveLength(0)
   })
 })
 
