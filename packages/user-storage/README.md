@@ -30,15 +30,13 @@ injection and a non-ASCII one is silently mangled. An uploaded filename, a cover
 letter's provenance and a tailored resume's are all text from outside, so all go
 through `toMetadataValue`.
 
-⚠️ **Only `TailoredResumeStore` and `ResumeStore` have a `list()`, and the
-asymmetry is deliberate.** `CoverLetterStore` does not, which is why rendering
-"does one exist for this Posting" down a table costs it one `HeadObject` per row
-— see `docs/cover-letter-existence-plan.md`. The tailored resume was built with
-`list()` from the start rather than repeating that. The cost of having it is that
-a listing carries **no user metadata**: every entry comes back with empty
-provenance and a date taken from the object's own write time, so anything
-rendering a filename or a company must `get()` or `head()` the one object it is
-showing.
+⚠️ **`list()` carries no user metadata.** ListObjectsV2 does not return it, so
+every listed entry comes back with empty provenance and a date taken from the
+object's own write time — anything that needs a filename or a company must
+`get()` or `head()` the one object it is showing. `CoverLetterStore`,
+`TailoredResumeStore` and `ResumeStore` all expose `list()`; the cover-letter
+table on `/jobs` uses that listing once per render rather than a `HeadObject`
+per visible Posting.
 
 Compose once, at the composition root:
 

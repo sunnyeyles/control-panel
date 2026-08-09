@@ -127,7 +127,7 @@ Migrations need the **direct** endpoint and are not run by this function.
 ## If a second scheduled worker appears
 
 This module is not yet a reusable `scheduled-lambda-job`, and deliberately so.
-It hardcodes two secrets and their environment variable names, so a second
+It hardcodes five secrets and their environment variable names, so a second
 worker cannot use it as-is — but there is one caller today, and generalising now
 would mean designing an interface against an imagined second consumer rather
 than a real one.

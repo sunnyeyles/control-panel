@@ -34,18 +34,21 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                            |
 | EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                            |
 
-**The tool catalog is five tools and there is no fetch tool.**
-`seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` each query one job
-board's live inventory through its own Apify actor, over the shared runner in
-`apify-search.ts` — which is machinery rather than a tool, and is what makes a
-board an actor id, a request body and a field mapping instead of a fourth
-implementation. `web-search.ts` is a general Tavily search, and `time.ts`
-answers what the current time is. Nothing retrieves an arbitrary URL, and
-nothing should acquire that ability casually — a fetcher is a security surface
-(SSRF, redirect chains, response size, prompt injection from a page the model
-then acts on). The scout carries the three board tools and nothing else; the
-dashboard's assistant carries `allTools`, which is `get_current_time` and
-`web_search` — the board tools are deliberately not in it.
+**There is no fetch tool.** `seek-search.ts`, `indeed-search.ts` and
+`linkedin-search.ts` each query one job board's live inventory through its own
+Apify actor, over the shared runner in `apify-search.ts` — which is machinery
+rather than a tool, and is what makes a board an actor id, a request body and a
+field mapping instead of a fourth implementation. `get_posting_details` reads
+back one advertisement the scout already found, by id. `web-search.ts` is a
+general Tavily search, and `time.ts` answers what the current time is. The
+whiteboard agent carries a separate canvas tool set (`canvas.ts`) that mutates
+an in-memory board session rather than reaching the network. Nothing retrieves
+an arbitrary URL, and nothing should acquire that ability casually — a fetcher
+is a security surface (SSRF, redirect chains, response size, prompt injection
+from a page the model then acts on). The scout carries the three board tools
+plus `get_posting_details` and nothing else; the dashboard's assistant carries
+`allTools`, which is `get_current_time` and `web_search` — the board tools are
+deliberately not in it.
 
 ## Rules
 
@@ -201,9 +204,10 @@ flowchart TD
   redraft overwrites one object. The letter's key and the row's identity are the
   same `postingId()` value, which is what keeps a stored letter attached to the
   Posting it was written for. Listing and downloading (#85):
-  `cover-letter-rows.ts` pays one `HeadObject` per visible Posting, because a
-  listing carries no user metadata, and `/api/cover-letters/{postingId}` hands
-  the Markdown back as a file. **Letter Instructions** — a per-user row in
+  `cover-letter-rows.ts` issues one `ListObjectsV2` via `CoverLetterStore.list`
+  rather than a `HeadObject` per visible Posting, and
+  `/api/cover-letters/{postingId}` hands the Markdown back as a file. **Letter
+  Instructions** — a per-user row in
   `cover_letter_instructions`, edited from `/jobs/letters` and composed onto the
   writer's prompt by `coverLetterSystemPrompt()` — make tone and structure
   settable, with an optional example letter fenced as a style reference and
@@ -259,10 +263,11 @@ flowchart TD
 - All AWS infrastructure is Terraform under `infra/aws/`, which Turborepo does
   not cover. CloudWatch provides logs, metrics and failure alarms.
 - Langfuse receives one trace per agent run when its keys are present:
-  `generate-briefing` from the worker, and `chat-response`, `cover-letter` and
-  `search-criteria` from the dashboard. All retain full prompts, tool I/O and
-  outputs by design — which for the last two means the candidate's CV, so the
-  keys are what decides whether it leaves the machine.
+  `generate-briefing` from the worker, and `chat-response`, `cover-letter`,
+  `search-criteria`, `tailored-resume` and `whiteboard-turn` from the dashboard.
+  All retain full prompts, tool I/O and outputs by design — which for the
+  cover-letter, search-criteria and tailored-resume traces means the candidate's
+  CV, so the keys are what decides whether it leaves the machine.
 
 ## Design requirements
 

@@ -1,10 +1,11 @@
 # @workspace/db
 
 Postgres for **scheduling and provenance** — jobs, their runs, and pointers to
-what those runs produced — plus the one record a person writes into: the
-cumulative `postings` table and the status they set on each Posting. Neon behind
-Prisma Client, with domain helpers for the claim and schedule invariants that
-the model API cannot express alone.
+what those runs produced — plus the records a person writes into: the cumulative
+`postings` table and the status they set on each Posting, the `documents`
+metadata shelf, the whiteboard `boards` snapshot, and cover-letter instructions.
+Neon behind Prisma Client, with domain helpers for the claim and schedule
+invariants that the model API cannot express alone.
 
 ## The seam
 
@@ -20,6 +21,8 @@ jobs.ts        create / claim / due / schedule helpers
 runs.ts        finish / fail / startAdHoc / recordFindings
 artifacts.ts   record / latest helpers
 postings.ts    recordPostings / setPostingStatus — the cumulative tracker
+documents.ts   list / find / create / delete Document metadata rows
+boards.ts      load / save one whiteboard snapshot per user
 client.ts      createPrismaClient() — adapter + pooled URL
 prisma/        schema + Prisma Migrate history
 ```

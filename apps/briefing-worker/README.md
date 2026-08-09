@@ -13,10 +13,10 @@ A job's own cadence lives in Postgres, as `jobs.schedule_cron` and
 §Tick has the reasoning.
 
 The work a claimed job performs is a **briefing run**: a scout agent searches
-SEEK's live listings for postings matching the criteria in `jobs.config`, a
-writer agent turns those findings into markdown, the worker uploads it to
-private S3 through `@workspace/user-storage`, records the object key in
-`artifacts`, keeps the findings themselves on the run row, and adds every
+each job board's live listings for postings matching the criteria in
+`jobs.config`, a writer agent turns those findings into markdown, the worker
+uploads it to private S3 through `@workspace/user-storage`, records the object
+key in `artifacts`, keeps the findings themselves on the run row, and adds every
 posting it found to the cumulative `postings` record. Live listings rather than
 web search, deliberately: a search engine's index carries a board's browse
 pages, not its postings, and the posting URLs it does surface are often expired
@@ -91,8 +91,9 @@ worker is broken.
 
 ## Connections and secrets
 
-Three secrets, all fetched from Secrets Manager at cold start and cached at
-module scope: `OPENAI_SECRET_ID`, `DATABASE_SECRET_ID` and `APIFY_SECRET_ID`.
+Five secrets, all fetched from Secrets Manager at cold start and cached at
+module scope: `OPENAI_SECRET_ID`, `DATABASE_SECRET_ID`, `APIFY_SECRET_ID`,
+`LANGFUSE_PUBLIC_KEY_SECRET_ID` and `LANGFUSE_SECRET_KEY_SECRET_ID`.
 No value is a Lambda environment variable — that would put it in plan output, in
 state, and on the console's function configuration page.
 
@@ -183,7 +184,7 @@ export OPENAI_API_KEY=... APIFY_TOKEN=...
 pnpm --filter=@workspace/briefing-worker watch --config ./fixtures/example-search.json
 ```
 
-The model and the SEEK search are real, because they are the parts worth
+The model and the board searches are real, because they are the parts worth
 watching. Everything else is local: the brief lands under `.briefings/` at the
 key S3 would have used, the validated findings land beside it as `.json`, and
 the trace is kept under `traces/` as JSON lines.
@@ -229,10 +230,10 @@ accident.
 ## Drafting a cover letter
 
 `letter` drafts one cover letter for one **Posting**, from a Findings file and a
-document the candidate wrote, and puts it on disk. It exists to answer whether
-such a letter is worth the surface it would need — storage, a dashboard, an
-object kind, an IAM grant — **before** any of that is built. Nothing it touches
-is a step toward that surface: no S3, no database, no migration.
+document the candidate wrote, and puts it on disk. The dashboard surface it
+once existed to prove — storage, `/jobs`, an object kind, an IAM grant — is
+already built; this CLI remains as a local harness that never touches S3 or the
+database. Nothing it writes is a step toward that surface.
 
 ```bash
 export OPENAI_API_KEY=...

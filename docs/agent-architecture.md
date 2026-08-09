@@ -51,9 +51,11 @@ Three things this picture is making explicit:
   `StructuredToolInterface`. The two fit structurally, not by dependency, so the
   catalog works with any caller and the runtime ships no tools at all
   (`createAgent({ tools })` defaults to none).
-- **Neither app declares `agents-core` or `agent-tools`.** Both list only
-  `@workspace/agents` and `@workspace/langfuse`; the lower layers arrive
-  transitively. That is the layering holding.
+- **The worker declares only `@workspace/agents` and `@workspace/langfuse`.**
+  The dashboard additionally declares `@workspace/agent-tools`, because the
+  whiteboard UI imports canvas schema and board-session helpers directly rather
+  than only through an agent factory. `agents-core` still arrives transitively
+  for both.
 - **`@workspace/langfuse` has no edge to the stack in either direction.** It is a
   composition-root concern, which is why `@langfuse/*` and `@opentelemetry/*`
   stay out of the runtime entirely.
@@ -110,7 +112,7 @@ deliberately never set — reasoning-capable models reject any non-default value
 
 ## 3. Agents and their tools
 
-Six agents. What separates them is mostly which tools they carry, and **tool
+Seven agents. What separates them is mostly which tools they carry, and **tool
 scope here is a containment boundary rather than a tuning knob.**
 
 ```mermaid
@@ -122,6 +124,7 @@ flowchart LR
         RT["createResumeTailor<br/>the Resume Tailor"]
         PE["createProfileExtractor<br/>the Profile Extractor"]
         ASST["createAssistant"]
+        WB["createWhiteboardAgent<br/>the Whiteboard"]
     end
 
     subgraph catalog ["@workspace/agent-tools"]
@@ -131,6 +134,7 @@ flowchart LR
         DET["get_posting_details"]
         WEB["web_search"]
         TIME["get_current_time"]
+        CANVAS["createCanvasTools<br/>board mutations"]
     end
 
     NONE["no tools at all"]
@@ -142,6 +146,7 @@ flowchart LR
     SCOUT --> SUB["submit_findings<br/>@workspace/agents"]
     ASST --> WEB
     ASST --> TIME
+    WB --> CANVAS
     BW --> NONE
     CLW --> NONE
     RT --> NONE
@@ -161,6 +166,7 @@ flowchart LR
     A3 --> L3["linkedin.com live inventory"]
     WEB --> TAV["Tavily REST API<br/>TAVILY_API_KEY"]
     TIME --> INTL["Intl.DateTimeFormat<br/>no network, no key"]
+    CANVAS --> BOARD["BoardSession<br/>in-memory; no network"]
 ```
 
 **The three board tools are one implementation, not three.** `apify-search.ts`
@@ -193,6 +199,7 @@ than module singletons, because each is bound to one run's catalog.
 | `createResumeTailor`      | `[]`                                                           | The Letter Writer's case, unchanged: the same CV, the same advertisement copied verbatim beside it                                                                                                                                                                                                                                                                                                                              |
 | `createProfileExtractor`  | `[]`                                                           | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                                                                                                          |
 | `createAssistant`         | `allTools` + `extraTools`                                      | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                                                                                                         |
+| `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Mutates one in-memory board session for the turn; no board search, no fetch, no S3. The dashboard imports the canvas schema and session helpers from `@workspace/agent-tools` so the UI and the agent agree on the board shape                                                                                                                                                                                                  |
 
 ### Why the Letter Writer, the Resume Tailor and the Profile Extractor have no tools
 
@@ -264,7 +271,7 @@ three.
 
 ## 4. Who invokes what
 
-Five entry points. They differ in how they import, how they call, and what they
+Six entry points. They differ in how they import, how they call, and what they
 persist.
 
 ```mermaid
@@ -301,6 +308,14 @@ flowchart TD
         S4 --> S5["parseSearchCriteria<br/>back to the form, nothing persisted"]
     end
 
+    subgraph whiteboard ["Whiteboard — dashboard"]
+        direction TB
+        W1["/whiteboard"] --> W2["POST /api/whiteboard"]
+        W2 --> W3["whiteboard-handler.ts<br/>auth, board session"]
+        W3 --> W4["createWhiteboardAgent → .stream()"]
+        W4 --> W5["canvas ops applied to the board<br/>snapshot saved in boards"]
+    end
+
     subgraph brief ["Briefing — worker"]
         direction TB
         B1["EventBridge Tick, hourly"] --> B2["run-tick.ts<br/>dueJobs → claimJob"]
@@ -312,11 +327,12 @@ flowchart TD
     end
 ```
 
-**Chat** streams, because the assistant has tools and the interesting part is
-watching it work. **Every other entry point uses `.invoke()`, not `.stream()`**
-— with no tools the graph is just `START → model → END`, so there is nothing to
-watch. **The worker is the only place two agents run in sequence**, scout then
-writer, with a validation step between them.
+**Chat and the whiteboard stream**, because both agents have tools and the
+interesting part is watching them work. **Every other entry point uses
+`.invoke()`, not `.stream()`** — with no tools the graph is just
+`START → model → END`, so there is nothing to watch. **The worker is the only
+place two agents run in sequence**, scout then writer, with a validation step
+between them.
 
 **The cover letter and the tailored resume are the same path twice, and they
 share the parts where getting it wrong is expensive.** Both re-read the Posting
@@ -380,6 +396,8 @@ flowchart TD
         CB --> CB1["chat-response"]
         CB --> CB2["cover-letter"]
         CB --> CB3["search-criteria"]
+        CB --> CB4["tailored-resume"]
+        CB --> CB5["whiteboard-turn"]
     end
 
     subgraph sink ["The worker's own trace sink"]
@@ -401,14 +419,14 @@ that can afford to batch. The worker calls `shutdownLangfuse()` in a `finally`
 beside `prisma.$disconnect()` to flush what is queued.
 
 The briefing Run is wrapped so the Scout and the Brief Writer nest under a single
-`generate-briefing` root rather than arriving as two unrelated traces. The three
+`generate-briefing` root rather than arriving as two unrelated traces. The
 dashboard traces need no such root: each is one agent answering one request.
 
-**Two of those traces carry the candidate's CV**, `cover-letter` and
-`search-criteria`, and Langfuse retains full prompts by design. Whether that text
-leaves the machine is decided entirely by whether the two keys are set — which is
-the one place the no-op default is a privacy property and not merely a
-convenience.
+**Three of those traces carry the candidate's CV**, `cover-letter`,
+`search-criteria` and `tailored-resume`, and Langfuse retains full prompts by
+design. Whether that text leaves the machine is decided entirely by whether the
+two keys are set — which is the one place the no-op default is a privacy
+property and not merely a convenience.
 
 The trace sink is held to the same standard from the other direction: it is
 synchronous and returns nothing, because a sink that could be awaited is a sink
@@ -422,7 +440,7 @@ down with it.
 
 | Package                | Holds                                                                                                                                                                                                                                                                                      |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, plus the two schema contracts — `findings` (Scout → Brief Writer) and `criteria` (Profile Extractor → whoever stores them) — and `cover-letter`, `tailored-resume` and `posting-id` |
+| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `whiteboard`, plus the two schema contracts — `findings` (Scout → Brief Writer) and `criteria` (Profile Extractor → whoever stores them) — and `cover-letter`, `tailored-resume` and `posting-id` |
 | `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                |
-| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `web-search.ts`, `time.ts`, and `index.ts` with `allTools`                                                                                                                                |
+| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                                                                                                                |
 | `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                 |
