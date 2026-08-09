@@ -134,12 +134,21 @@ export function createBoardSession(context: BoardContext): BoardSession {
    * numbering self-heal: a shape the user deleted between turns frees its name,
    * and a shape they kept keeps it. Arrows share the counter because a tldraw
    * arrow is itself a shape, so the two cannot be allowed to collide.
+   *
+   * `knownIds` is why the two visible collections are not enough. Both are
+   * filtered before they get here — by the viewport cap, and by the rule that
+   * an arrow is only a connection when both its terminals are bound — so an id
+   * can be absent from this session and present on the canvas. Allocating it
+   * would reach `store.put` on the client, which overwrites the user's shape
+   * rather than refusing.
    */
+  const knownIds = new Set(context.knownIds ?? [])
   let nextId = 1
   const allocateId = (): string => {
     let candidate = `s${nextId}`
     while (
       shapes.has(candidate) ||
+      knownIds.has(candidate) ||
       connections.some((c) => c.id === candidate)
     ) {
       nextId += 1
@@ -234,12 +243,13 @@ export function createBoardSession(context: BoardContext): BoardSession {
           moves.set(s.id, { x: s.x, y: round(maxBottom - s.h) })
         break
       case "distribute-horizontal": {
-        // Equal gaps between edges, with the outermost two left where they are —
-        // distributing is about the space between things, not about moving the
-        // extents the user chose.
+        // Equal gaps between edges, inside the extent the shapes already
+        // occupy — distributing is about the space between things, not about
+        // widening the span the user chose. Clamped at zero because shapes
+        // wider than that span would otherwise walk the layout backwards.
         const span = maxRight - minX
         const used = byX.reduce((total, s) => total + s.w, 0)
-        const step = (span - used) / Math.max(1, byX.length - 1)
+        const step = Math.max(0, (span - used) / Math.max(1, byX.length - 1))
         let cursor = minX
         for (const shape of byX) {
           moves.set(shape.id, { x: round(cursor), y: shape.y })
@@ -250,7 +260,7 @@ export function createBoardSession(context: BoardContext): BoardSession {
       case "distribute-vertical": {
         const span = maxBottom - minY
         const used = byY.reduce((total, s) => total + s.h, 0)
-        const step = (span - used) / Math.max(1, byY.length - 1)
+        const step = Math.max(0, (span - used) / Math.max(1, byY.length - 1))
         let cursor = minY
         for (const shape of byY) {
           moves.set(shape.id, { x: shape.x, y: round(cursor) })
@@ -345,6 +355,19 @@ export function createBoardSession(context: BoardContext): BoardSession {
               connections.splice(i, 1)
             }
           }
+          continue
+        }
+
+        // An arrow id is not in `shapes`, but it *is* an id the model was
+        // given, so failing to resolve it would be a correction it cannot act
+        // on. To tldraw an arrow is a shape like any other, so the delete op
+        // below carries it unchanged.
+        const arrowAt = connections.findIndex(
+          (connection) => connection.id === id
+        )
+        if (arrowAt >= 0) {
+          connections.splice(arrowAt, 1)
+          removed.push(id)
         } else {
           missing.push(rawId)
         }
@@ -353,7 +376,10 @@ export function createBoardSession(context: BoardContext): BoardSession {
       if (removed.length > 0) emit({ op: "delete", ids: removed })
 
       if (removed.length === 0) {
-        return `Deleted nothing. ${listIds([...shapes.keys()])}`
+        return `Deleted nothing. ${listIds([
+          ...shapes.keys(),
+          ...connections.map((connection) => connection.id),
+        ])}`
       }
       return missing.length === 0
         ? `Deleted ${removed.join(", ")}.`

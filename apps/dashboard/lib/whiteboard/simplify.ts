@@ -247,6 +247,11 @@ export function toBoardContext(input: ToBoardContextInput): BoardContext {
       h: round(viewport.h),
     },
     recentEdits: recentEdits.filter((id) => visible.has(id)).map(toSimpleId),
+    // Unfiltered, unlike everything above it, and that is the point: the server
+    // allocates ids for new shapes by skipping the ones already taken, so it
+    // needs the ids this module drops as much as the ones it keeps. Nothing
+    // reads it but the allocator — it never reaches the model.
+    knownIds: shapes.map((shape) => toSimpleId(shape.id)),
     ...(dropped.length > 0
       ? {
           offscreen: {
