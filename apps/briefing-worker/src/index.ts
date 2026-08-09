@@ -185,13 +185,16 @@ export const handler = async (event?: unknown): Promise<void> => {
   // the note above.
   const prisma = createPrismaClient()
 
-  // Built here rather than at module scope for the same reason the agents are
-  // factories: constructing the store reads `USER_STORAGE_BUCKET_NAME` and
-  // `USER_STORAGE_ENVIRONMENT`, and a module-level instance would move that
-  // failure to import time. Region comes from the AWS_REGION the runtime sets.
-  const briefs = createBriefStore(createS3UserObjectStore())
-
   try {
+    // Built here rather than at module scope for the same reason the agents
+    // are factories: constructing the store reads `USER_STORAGE_BUCKET_NAME`
+    // and `USER_STORAGE_ENVIRONMENT`, and a module-level instance would move
+    // that failure to import time. Region comes from the AWS_REGION the
+    // runtime sets. Inside the `try`, because that read throwing must still
+    // reach the `finally` — a client left connected across a freeze is one
+    // Neon keeps accounting for.
+    const briefs = createBriefStore(createS3UserObjectStore())
+
     if (adHoc.success) {
       await runAdHocBriefing(prisma, briefs, {
         runId: adHoc.data.runId,

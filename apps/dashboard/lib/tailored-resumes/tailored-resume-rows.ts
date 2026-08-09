@@ -43,6 +43,10 @@ export async function loadTailoredResumeRows(
 
   return listed.map((resume) => ({
     postingId: resume.postingId,
+    // From the object's write time rather than the `generated-at` metadata,
+    // because a listing carries no metadata — `instantFrom` in
+    // `@workspace/user-storage` already falls back to exactly that. The two
+    // differ by however long the `put` took.
     generatedAt: formatUtcDateTime(resume.generatedAt),
   }))
 }

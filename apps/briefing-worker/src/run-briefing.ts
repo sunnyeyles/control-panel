@@ -335,10 +335,7 @@ export async function runBriefing(
         )
 
         llmCalls += scouted.llmCalls
-        const searchesRun = successfulSearches(
-          scouted.messages,
-          SEARCH_TOOL_NAMES
-        )
+        const searchesRun = successfulSearches(scouted.messages)
         searches = searchesRun.length
         searchesBySource = countBySource(searchesRun)
 

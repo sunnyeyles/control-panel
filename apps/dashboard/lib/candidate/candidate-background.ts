@@ -1,7 +1,4 @@
-import {
-  listDocuments,
-  type DocumentSummary,
-} from "@/lib/documents/list-documents"
+import { listDocuments } from "@/lib/documents/list-documents"
 import type { PrismaClient } from "@workspace/db"
 import type { ResumeStore } from "@workspace/user-storage"
 
@@ -9,7 +6,6 @@ import {
   extractProfileText,
   isReadableProfileExtension,
   ProfileTextError,
-  type ReadableProfileExtension,
 } from "./profile-text"
 
 /**
@@ -78,7 +74,7 @@ export type CandidateBackground =
   | { ok: false; reason: NoBackgroundReason }
 
 /**
- * The most recent readable document the user labelled as a resume.
+ * The most recent document the user labelled as a resume, if it is readable.
  *
  * **Most recent, and labelled.** The label is the user's own statement about
  * which document is their CV — guessing from a filename would mean a letter
@@ -102,34 +98,37 @@ export async function loadCandidateBackground(
     (document) => document.documentType === "resume"
   )
 
-  if (labelled.length === 0) return { ok: false, reason: "no-resume" }
+  // `listDocuments` sorts newest first, so `labelled[0]` is the document the
+  // user most recently called their resume — and it is the only candidate.
+  // ⚠️ **Deliberately not a `find()` for the newest *readable* one.** The same
+  // rule as the extraction failure below: the user labelled this document, so
+  // skipping past it to an older CV would write from one they did not choose,
+  // with nothing saying so. An unreadable newest resume is reported as
+  // exactly that instead.
+  const newest = labelled[0]
+  if (newest === undefined) return { ok: false, reason: "no-resume" }
 
-  // `listDocuments` sorts newest first, so the first match is the newest. The
-  // predicate is spelled as a type guard so the extension reaches
-  // `extractProfileText` as a `ReadableProfileExtension` rather than a `string`
-  // — that is what makes the exhaustive switch there load-bearing.
-  const readable = labelled.find(
-    (
-      document
-    ): document is DocumentSummary & { extension: ReadableProfileExtension } =>
-      isReadableProfileExtension(document.extension)
-  )
-
-  if (!readable) return { ok: false, reason: "unreadable-format" }
+  // Narrowed through a const so the extension reaches `extractProfileText` as
+  // a `ReadableProfileExtension` rather than a `string` — that is what makes
+  // the exhaustive switch there load-bearing.
+  const extension = newest.extension
+  if (!isReadableProfileExtension(extension)) {
+    return { ok: false, reason: "unreadable-format" }
+  }
 
   const fetched = await resumes.get({
     // The session's userId, never anything from a form. The store checks
     // ownership again underneath; this is what makes that check a second line
     // rather than the only one.
     userId,
-    resumeId: readable.resumeId,
-    extension: readable.extension,
+    resumeId: newest.resumeId,
+    extension,
   })
 
   let background: string
   try {
     background = await extractProfileText(
-      readable.extension,
+      extension,
       fetched.bytes ?? new Uint8Array()
     )
   } catch (error) {
@@ -140,7 +139,7 @@ export async function loadCandidateBackground(
       // the same rule `assertDraftable` follows one step later.
       console.error(
         "candidate: could not extract text from",
-        readable.file,
+        newest.file,
         error.cause ?? error
       )
       return { ok: false, reason: "extraction-failed" }
@@ -154,6 +153,6 @@ export async function loadCandidateBackground(
   return {
     ok: true,
     background,
-    displayName: readable.displayName,
+    displayName: newest.displayName,
   }
 }

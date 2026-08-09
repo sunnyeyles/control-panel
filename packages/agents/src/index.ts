@@ -7,6 +7,7 @@ export {
 export { createAssistant, type CreateAssistantOptions } from "./assistant.ts"
 
 export {
+  BRIEF_WRITER_SYSTEM_PROMPT,
   createBriefWriter,
   type CreateBriefWriterOptions,
 } from "./brief-writer.ts"

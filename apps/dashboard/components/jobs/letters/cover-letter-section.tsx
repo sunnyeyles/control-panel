@@ -21,34 +21,45 @@ import { coverLetterInstructions } from "@workspace/db"
  * `lib/jobs/briefing-summary.ts` for why that boundary matters.
  */
 export async function CoverLetterSection({ userId }: { userId: string }) {
-  const saved = await coverLetterInstructions(getPrisma(), userId)
-
-  // A failure listing documents should cost the import picker and nothing
-  // else. The instructions themselves are already loaded by the line above, and
-  // a page that cannot list documents must still be able to save them — the
-  // same degradation `app/(app)/documents/page.tsx` makes for the same reason.
-  let documents: ImportableDocument[] = []
-
-  try {
-    const listed = await listDocuments(userId, getPrisma())
-
-    documents = listed
-      // Only formats `extractProfileText` can actually turn into text. Offering
-      // a `.doc` here would produce a picker entry whose only outcome is a
-      // refusal.
-      .filter((document) => isReadableProfileExtension(document.extension))
-      // Already newest first out of `listDocuments`.
-      .map((document) => ({
-        file: document.file,
-        name: document.displayName,
-        type: DOCUMENT_TYPE_LABELS[document.documentType],
-      }))
-  } catch (error) {
+  // ⚠️ **Started together, awaited once.** Two unrelated indexed reads — the
+  // saved instructions row and the user's documents — and neither supplies the
+  // other, so issuing them one after the next paid two round trips in series for
+  // no dependency at all. This function is deployed away from its database (see
+  // the region note in the repo's memory of it), so a needless serial query is a
+  // needless ~200ms.
+  //
+  // ⚠️ **The `.catch()` is attached now, not at the `await`.** A rejection
+  // before anything is awaiting is an unhandled rejection, which in Node is a
+  // process-level event rather than this component's problem to survive. Same
+  // shape, and the same reason, as `app/(app)/jobs/page.tsx`.
+  //
+  // A failure listing documents costs the import picker and nothing else —
+  // `null` rather than an empty list so the two are still distinguishable here.
+  // The instructions must still reach the form, because a page that cannot list
+  // documents must still be able to save them: the same degradation
+  // `app/(app)/documents/page.tsx` makes for the same reason.
+  const savedPromise = coverLetterInstructions(getPrisma(), userId)
+  const listedPromise = listDocuments(userId, getPrisma()).catch((error) => {
     console.error(
       "cover-letters: could not list documents to import from",
       error
     )
-  }
+    return null
+  })
+
+  const [saved, listed] = await Promise.all([savedPromise, listedPromise])
+
+  const documents: ImportableDocument[] = (listed ?? [])
+    // Only formats `extractProfileText` can actually turn into text. Offering
+    // a `.doc` here would produce a picker entry whose only outcome is a
+    // refusal.
+    .filter((document) => isReadableProfileExtension(document.extension))
+    // Already newest first out of `listDocuments`.
+    .map((document) => ({
+      file: document.file,
+      name: document.displayName,
+      type: DOCUMENT_TYPE_LABELS[document.documentType],
+    }))
 
   return (
     <section className="flex flex-col gap-4">

@@ -218,7 +218,7 @@ new here.
 What made this possible is a two-line change in `run-briefing.ts`: the agents
 are driven with `.stream()` instead of `.invoke()`. `.invoke()` runs the graph
 to completion and returns the final state, discarding the queries, the results
-and the turns it took to get there — which is why `countToolResults` has to
+and the turns it took to get there — which is why `successfulSearches` has to
 re-derive a search count by filtering the finished message array. `.stream()`
 yields the same run one superstep at a time and returns the same final state.
 `@workspace/agents-core` and the agents themselves are untouched.

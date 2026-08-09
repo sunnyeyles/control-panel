@@ -1,5 +1,5 @@
 import type { ObjectKind } from "./kinds.ts"
-import { toMetadataRecord } from "./metadata.ts"
+import { parseInstant, toMetadataRecord } from "./metadata.ts"
 import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
 
 /**
@@ -295,8 +295,5 @@ function instantFrom(
   instantKey: string,
   storedAt: Date
 ): Date {
-  const raw = metadata[instantKey]
-  const parsed = raw ? new Date(raw) : undefined
-
-  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : storedAt
+  return parseInstant(metadata[instantKey]) ?? storedAt
 }

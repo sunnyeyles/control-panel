@@ -17,8 +17,6 @@ import {
  * precisely the drift that comment exists to prevent.
  */
 
-export type TailoredResumeNameParts = PostingDocumentNameParts
-
 /**
  * The filename a download is offered under.
  *
@@ -28,6 +26,8 @@ export type TailoredResumeNameParts = PostingDocumentNameParts
  * derives its name from this one by swapping the extension, so the distinction
  * carries there too.
  */
-export function tailoredResumeFilename(parts: TailoredResumeNameParts): string {
+export function tailoredResumeFilename(
+  parts: PostingDocumentNameParts
+): string {
   return postingDocumentFilename("Tailored resume", parts)
 }

@@ -2,6 +2,7 @@
 
 import { DeletePostingsDialog } from "@/components/briefings/delete-postings-dialog"
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
+import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import { usePostingSelection } from "@/components/briefings/posting-selection"
 import { Button } from "@workspace/ui/components/button"
 import { Trash2Icon } from "lucide-react"
@@ -19,7 +20,13 @@ import { Trash2Icon } from "lucide-react"
  * click and back up on the last, which puts the row someone is aiming at
  * somewhere else between the two.
  */
-export function PostingBulkBar({ letters }: { letters: CoverLetterPromise }) {
+export function PostingBulkBar({
+  letters,
+  tailoredResumes,
+}: {
+  letters: CoverLetterPromise
+  tailoredResumes: TailoredResumePromise
+}) {
   const { selected, clear } = usePostingSelection()
 
   return (
@@ -42,6 +49,7 @@ export function PostingBulkBar({ letters }: { letters: CoverLetterPromise }) {
           <DeletePostingsDialog
             postingIds={selected}
             letters={letters}
+            tailoredResumes={tailoredResumes}
             onDeleted={clear}
             trigger={
               <Button

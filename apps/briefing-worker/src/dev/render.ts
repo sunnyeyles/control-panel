@@ -90,6 +90,12 @@ export function createTerminalRenderer(options: RenderOptions = {}): TraceSink {
     process.stdout.write(`${text}\n`)
   }
 
+  // The one place `--verbose` is consulted for single-line content, so the
+  // flag's promise — "do not truncate messages or tool results" — holds for a
+  // one-line tool result and a call's arguments, not only for `block` below.
+  const clip = (text: string, limit: number) =>
+    options.verbose ? text : truncate(text, limit)
+
   /** Indented, truncated, and prefixed — the shape every block of content takes. */
   const block = (text: string, indent: string, paint: Paint = c.dim) => {
     // Nothing to show is not a blank line. A tool result that fits on one line
@@ -168,7 +174,7 @@ export function createTerminalRenderer(options: RenderOptions = {}): TraceSink {
 
         for (const call of event.toolCalls) {
           line(
-            `  ${c.yellow("⚙")} ${c.yellow(call.name)} ${c.dim(truncate(JSON.stringify(call.args) ?? "", MAX_ARGS_LENGTH))}`
+            `  ${c.yellow("⚙")} ${c.yellow(call.name)} ${c.dim(clip(JSON.stringify(call.args) ?? "", MAX_ARGS_LENGTH))}`
           )
         }
         return
@@ -176,7 +182,9 @@ export function createTerminalRenderer(options: RenderOptions = {}): TraceSink {
 
       case "tool": {
         const head = event.ok ? c.dim("←") : c.red("← error")
-        line(`  ${head} ${c.dim(firstLine(event.result))}`)
+        line(
+          `  ${head} ${c.dim(clip(firstLine(event.result), MAX_LINE_LENGTH))}`
+        )
         block(rest(event.result), "    ")
         return
       }
@@ -220,7 +228,7 @@ function short(id: string): string {
 }
 
 function firstLine(text: string): string {
-  return truncate(text.split("\n")[0] ?? "", MAX_LINE_LENGTH)
+  return text.split("\n")[0] ?? ""
 }
 
 function rest(text: string): string {

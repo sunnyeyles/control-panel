@@ -50,6 +50,25 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* The travelling highlight in `ai-elements/shimmer.tsx`, which used to be the
+     app's only reason to ship `motion` — 772 KB of animation runtime for one
+     linear loop of `background-position`.
+
+     `--shimmer-duration` is read off the element, not off `:root`, and that is
+     what `@theme inline` buys: the utility carries the `var()` literally rather
+     than resolving it here, so the component can set the duration per instance
+     in a style attribute and still fall back to 2s. */
+  --animate-shimmer: shimmer var(--shimmer-duration, 2s) linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -21,6 +21,12 @@ import TurndownService from "turndown"
  * Extracted from `file-editor-dialog.tsx` rather than left inline so it can be
  * asserted without a DOM: the dialect is plain string-to-string, and only the
  * editor around it needs React.
+ *
+ * ⚠️ **The trip is a fixed point over the constructs the writers emit, not
+ * over all of GFM.** Turndown ships no table rule, so a pipe table in a
+ * stored document would come back from an untouched save as its cell text in
+ * paragraphs. Nothing emits tables today; a writer that starts to needs a
+ * table rule added here — and a case in `markdown.test.ts` — first.
  */
 
 /** Parse stored markdown into the HTML the editor is initialized with. */
@@ -84,8 +90,11 @@ function listItemPrefix(node: Node): string {
 
   const list = parent as Element
   // `start` absent ⇒ 1, matching both HTML's default and Turndown's own
-  // `start ? Number(start) + index : index + 1`.
-  const start = Number(list.getAttribute("start")) || 1
+  // `start ? Number(start) + index : index + 1`. Presence, not truthiness:
+  // `marked` emits `start="0"` for a list numbered from zero, and `|| 1`
+  // would renumber it on an untouched save.
+  const attr = list.getAttribute("start")
+  const start = attr ? Number(attr) : 1
   const index = Array.prototype.indexOf.call(list.children, node)
 
   return `${start + Math.max(index, 0)}. `

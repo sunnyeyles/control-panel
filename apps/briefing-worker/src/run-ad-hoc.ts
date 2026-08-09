@@ -143,7 +143,15 @@ export async function runAdHocBriefing(
     // not keep its findings, or could not add what it found to the cumulative
     // record, is `succeeded` with a non-empty `failure` — the rule
     // `packages/db/src/types.ts` states.
-    await finishRun(prisma, request.runId, briefing.warnings)
+    //
+    // `false` is a lost race — the row was already terminal. The brief is
+    // stored either way, so the outcome reported is still success; the log
+    // line is the only trace the lost transition leaves.
+    if (!(await finishRun(prisma, request.runId, briefing.warnings))) {
+      console.warn(
+        `run ${request.runId}: already terminal when this run went to finish it`
+      )
+    }
     return report("succeeded")
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
