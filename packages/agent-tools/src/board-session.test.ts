@@ -171,6 +171,20 @@ describe("validation", () => {
     expect(session.flush()).toEqual([{ op: "delete", ids: ["s1"] }])
   })
 
+  it("treats a repeated id as one deletion, not a deletion and a miss", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1" }), shape({ id: "s2" })] })
+    )
+
+    // The second spelling must not come back as "No shape matched" — a
+    // correction that contradicts the deletion beside it.
+    const message = session.deleteShapes(["s1", "shape:s1"])
+
+    expect(message).toContain("Deleted s1")
+    expect(message).not.toContain("No shape matched")
+    expect(session.flush()).toEqual([{ op: "delete", ids: ["s1"] }])
+  })
+
   it("drops arrows whose endpoint was deleted", () => {
     const session = createBoardSession(
       context({
@@ -347,6 +361,23 @@ describe("layouts", () => {
     expect(
       session.arrangeShapes({ ids: ["s1", "s9"], layout: "row" })
     ).toContain("at least two shapes that exist")
+  })
+
+  it("counts a repeated id once, so one shape named twice is not two", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1" }), shape({ id: "s2" })] })
+    )
+
+    // Same shape, two spellings — the guards count shapes, not spellings.
+    expect(
+      session.arrangeShapes({ ids: ["s1", "shape:s1"], layout: "row" })
+    ).toContain("at least two shapes that exist")
+    expect(
+      session.arrangeShapes({
+        ids: ["s1", "s1", "s2"],
+        layout: "distribute-horizontal",
+      })
+    ).toContain("at least three")
   })
 })
 

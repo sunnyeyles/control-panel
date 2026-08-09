@@ -290,10 +290,16 @@ export async function apifyBoardSearch<TItem>(
   // place on it rather than several — but a posting that genuinely answers two
   // different searches has to appear in both, or the second search reports
   // nothing found and the model believes it.
+  //
+  // The cap is applied to what will be reported, not to the raw items — the
+  // same rule `keepItem` follows — so a duplicate does not eat one of the
+  // requested places.
   const seen = new Set<string>()
   const entries: CatalogEntry[] = []
 
-  for (const item of kept.slice(0, search.maxResults)) {
+  for (const item of kept) {
+    if (entries.length >= search.maxResults) break
+
     // `undefined` is a posting the catalog will not identify, which is one that
     // arrived with no URL — see `record`.
     const entry = catalog.record(spec.board, spec.toPosting(item))

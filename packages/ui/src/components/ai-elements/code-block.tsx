@@ -141,11 +141,19 @@ const tokensCache = new Map<string, TokenizedCode>()
 // Subscribers for async token updates
 const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>()
 
-const getTokensCacheKey = (code: string, language: BundledLanguage) => {
-  const start = code.slice(0, 100)
-  const end = code.length > 100 ? code.slice(-100) : ""
-  return `${language}:${code.length}:${start}:${end}`
+// djb2 over the whole string. A key of head-and-tail slices collided for
+// JSON tool payloads — same length, same braces and stable keys at both
+// ends — and served one block the other's highlighting.
+const hashCode = (code: string): number => {
+  let hash = 5381
+  for (let index = 0; index < code.length; index++) {
+    hash = ((hash << 5) + hash + code.charCodeAt(index)) | 0
+  }
+  return hash
 }
+
+const getTokensCacheKey = (code: string, language: BundledLanguage) =>
+  `${language}:${code.length}:${hashCode(code)}`
 
 const getHighlighter = (
   language: BundledLanguage

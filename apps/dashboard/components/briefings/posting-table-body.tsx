@@ -483,6 +483,7 @@ function PostingRow({
             postingIds={[posting.id]}
             postingTitle={posting.title}
             letters={letters}
+            tailoredResumes={tailoredResumes}
             trigger={
               <Button
                 type="button"

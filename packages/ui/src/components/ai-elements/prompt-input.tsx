@@ -494,8 +494,6 @@ export type PromptInputProps = Omit<
   multiple?: boolean
   // When true, accepts drops anywhere on document. Default false (opt-in).
   globalDrop?: boolean
-  // Render a hidden input with given name and keep it in sync for native form posts. Default false.
-  syncHiddenInput?: boolean
   // Minimal constraints
   maxFiles?: number
   // bytes
@@ -515,7 +513,6 @@ export const PromptInput = ({
   accept,
   multiple,
   globalDrop,
-  syncHiddenInput,
   maxFiles,
   maxFileSize,
   onError,
@@ -717,14 +714,6 @@ export const PromptInput = ({
     controller.__registerFileInput(inputRef, () => inputRef.current?.click())
   }, [usingProvider, controller])
 
-  // Note: File input cannot be programmatically set for security reasons
-  // The syncHiddenInput prop is no longer functional
-  useEffect(() => {
-    if (syncHiddenInput && inputRef.current && files.length === 0) {
-      inputRef.current.value = ""
-    }
-  }, [files, syncHiddenInput])
-
   // Attach drop handlers on nearest form and document (opt-in)
   useEffect(() => {
     const form = formRef.current
@@ -883,8 +872,11 @@ export const PromptInput = ({
             if (usingProvider) {
               controller.textInput.clear()
             }
-          } catch {
-            // Don't clear on error - user may want to retry
+          } catch (error) {
+            // Don't clear on error - user may want to retry. Logged, because
+            // a silently swallowed rejection makes a failed send look like
+            // one still in flight.
+            console.error("prompt-input: submit failed", error)
           }
         } else {
           // Sync function completed without throwing, clear inputs
@@ -893,8 +885,9 @@ export const PromptInput = ({
             controller.textInput.clear()
           }
         }
-      } catch {
+      } catch (error) {
         // Don't clear on error - user may want to retry
+        console.error("prompt-input: submit failed", error)
       }
     },
     [usingProvider, controller, files, onSubmit, clear]

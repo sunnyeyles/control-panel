@@ -66,11 +66,10 @@ export function PostingTable({
   /**
    * The user's tailored resumes, still in flight.
    *
-   * ⚠️ **A second promise rather than one merged object.** The two are read from
-   * different places by different means — twenty-five `HeadObject` calls against
-   * one `ListObjectsV2` — so they fail independently, and each section of the
-   * detail reports its own failure. It is likewise never awaited on the way
-   * down. See `use-tailored-resume.ts`.
+   * ⚠️ **A second promise rather than one merged object.** The two are read
+   * from two different prefixes by two independent requests, so they fail
+   * independently, and each section of the detail reports its own failure. It
+   * is likewise never awaited on the way down. See `use-tailored-resume.ts`.
    */
   tailoredResumes: TailoredResumePromise
   /**
@@ -101,7 +100,7 @@ export function PostingTable({
     */
     <PostingSelectionProvider ids={page.postings.map((posting) => posting.id)}>
       <div className="flex flex-col gap-4">
-        <PostingBulkBar letters={letters} />
+        <PostingBulkBar letters={letters} tailoredResumes={tailoredResumes} />
 
         <div className="rounded-lg border">
           {/*

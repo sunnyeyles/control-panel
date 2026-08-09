@@ -23,16 +23,15 @@ export interface TailoredResumeRow {
 /**
  * Every tailored resume this user has, in one call.
  *
- * ⚠️ **One `ListObjectsV2`, not one `HeadObject` per visible Posting, and the
- * difference is the whole reason this function does not look like
- * `loadCoverLetterRows`.** That one is handed the ids on the page and heads each
- * of them: twenty-five round trips per render, on every sort click, every page
+ * ⚠️ **One `ListObjectsV2`, not one `HeadObject` per visible Posting.** The
+ * letters' loader used to be handed the ids on the page and head each of
+ * them: twenty-five round trips per render, on every sort click, every page
  * click, and every tick of the five-second poll a running briefing turns on.
- * `docs/cover-letter-existence-plan.md` writes that cost down and recommends
- * exactly this as the fix; building the second feature the letters' way would
- * have doubled a number already recorded as a problem.
+ * `docs/cover-letter-existence-plan.md` wrote that cost down and recommended
+ * exactly this shape as the fix — this function was built to it, and
+ * `listCoverLetters` has since been rebuilt to it too.
  *
- * The consequences of the swap, both deliberate:
+ * The consequences of the shape, both deliberate:
  *
  * - **It takes no posting ids and is not bounded by the page.** The cost is
  *   O(tailored resumes this user has) rather than O(rows rendered). For one
@@ -50,7 +49,7 @@ export interface TailoredResumeRow {
  * empty array. Any other failure rejects, so the page can say the store could
  * not be relied on rather than claiming every Posting is un-generated.
  *
- * An array rather than a `Map`, for the reason `loadCoverLetterRows` gives: this
+ * An array rather than a `Map`, for the reason `listCoverLetters` gives: this
  * crosses the RSC boundary into client components, where a `Map` is an awkward
  * payload.
  */

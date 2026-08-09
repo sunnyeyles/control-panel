@@ -54,16 +54,20 @@ export function createBoardHandler(
       return Response.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Measured before parsing, so an oversized body is refused rather than
-    // deserialised into memory first.
-    const raw = await req.text()
-    if (raw.length > MAX_SNAPSHOT_BYTES) {
+    // Measured before parsing. The bytes are unavoidably buffered first — a
+    // `Request` offers no earlier hook short of streaming, and the platform's
+    // own request cap bounds that — so what this guard protects is the
+    // decode, the parse and the Postgres row, not the buffer. Bytes and not
+    // `string.length`: code units under-count multi-byte text by up to 3×,
+    // which would let a snapshot through at triple the named limit.
+    const buffer = await req.arrayBuffer()
+    if (buffer.byteLength > MAX_SNAPSHOT_BYTES) {
       return Response.json({ error: "Board is too large" }, { status: 413 })
     }
 
     let body: unknown
     try {
-      body = JSON.parse(raw)
+      body = JSON.parse(new TextDecoder().decode(buffer))
     } catch {
       return Response.json({ error: "Invalid JSON body" }, { status: 400 })
     }
