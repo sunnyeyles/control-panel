@@ -523,6 +523,20 @@ describe("generateTailoredResume", () => {
   })
 })
 
+/**
+ * Saving an edited tailored resume back over the stored one.
+ *
+ * ⚠️ **Only what a tailored resume owns.** Every gate a save passes — who is
+ * asking, the shape of the id, the empty and length bounds, the refusal that
+ * keeps an action accepting resume text from being able to *create* one, and
+ * that `generatedAt` and `sourceDocument` are carried across rather than
+ * restamped — belongs to `editPostingDocument` and is asserted once, in
+ * `lib/posting-documents/edit-posting-document.test.ts`, against both facades.
+ *
+ * What survives is the two things that suite cannot see: the sentences this
+ * feature words, and that saving costs no model call. The shared suite
+ * constructs no agent.
+ */
 describe("saveTailoredResume", () => {
   async function generated() {
     const actions = actionsFor(SIGNED_IN)
@@ -530,147 +544,52 @@ describe("saveTailoredResume", () => {
     return actions
   }
 
-  it("refuses an anonymous caller before the body is read at all", async () => {
-    const result = await actionsFor(ANONYMOUS).saveTailoredResume(
-      IDLE,
-      form({ postingId: POSTING_ID, markdown: "# Mine" })
-    )
+  const saveForm = (markdown: string) =>
+    form({ postingId: POSTING_ID, markdown })
 
-    expect(result).toMatchObject({ status: "error", message: NOT_AUTHORIZED })
-    expect(objects.puts).toHaveLength(0)
-  })
+  it("words each refusal as a resume rather than as a document", async () => {
+    expect(
+      await actionsFor(SIGNED_IN).saveTailoredResume(
+        IDLE,
+        saveForm("# Anything I like")
+      )
+    ).toMatchObject({ status: "error", message: RESUME_NOT_FOUND })
 
-  /**
-   * ⚠️ **The property that keeps a text-accepting action from being a way to
-   * create a document.** Generating never takes resume text from a form; saving
-   * does, and is safe only for as long as it can do nothing but overwrite
-   * something the caller already has.
-   */
-  it("refuses to create one at an address with nothing there", async () => {
-    const result = await actionsFor(SIGNED_IN).saveTailoredResume(
-      IDLE,
-      form({ postingId: POSTING_ID, markdown: "# Anything I like" })
-    )
+    const actions = await generated()
 
-    expect(result).toMatchObject({
+    expect(
+      await actions.saveTailoredResume(IDLE, saveForm("  \n\n  "))
+    ).toMatchObject({
       status: "error",
-      message: RESUME_NOT_FOUND,
+      message: expect.stringContaining("resume is empty"),
     })
-    expect(objects.puts).toHaveLength(0)
-  })
 
-  it("overwrites the stored document with the edited text", async () => {
-    const actions = await generated()
-
-    const result = await actions.saveTailoredResume(
-      IDLE,
-      form({ postingId: POSTING_ID, markdown: "# Alice\n\nEdited by hand." })
-    )
-
-    expect(result).toMatchObject({ status: "success" })
-    const stored = await createTailoredResumeStore(objects).get({
-      userId: USER_ID,
-      postingId: POSTING_ID,
-    })
-    expect(stored.markdown).toBe("# Alice\n\nEdited by hand.")
-  })
-
-  /**
-   * An edit is not a generation. The panel renders "Generated <date>" and names
-   * the source Document — restamping either would report that the model rewrote
-   * the resume just now, or would attribute it to whichever CV is newest today.
-   */
-  it("carries the generated instant and the provenance across unchanged", async () => {
-    const actions = await generated()
-
-    await actions.saveTailoredResume(
-      IDLE,
-      form({ postingId: POSTING_ID, markdown: "# Alice\n\nEdited." })
-    )
-
-    const stored = await createTailoredResumeStore(objects).head({
-      userId: USER_ID,
-      postingId: POSTING_ID,
-    })
-    expect(stored.generatedAt.toISOString()).toBe(NOW.toISOString())
-    expect(stored.provenance).toMatchObject({
-      runId: RUN_ID,
-      title: POSTING.title,
-      company: POSTING.company,
-      sourceDocument: "alice-cv.md",
-    })
-  })
-
-  it("never takes the user from the submission", async () => {
-    await generated()
-
-    const data = form({ postingId: POSTING_ID, markdown: "# Edited" })
-    data.set("userId", OTHER_USER_ID)
-
-    await actionsFor(SIGNED_IN).saveTailoredResume(IDLE, data)
-
-    expect(objects.keys()).toEqual([
-      `${ENVIRONMENT}/${USER_ID}/tailored-resumes/${POSTING_ID}.md`,
-    ])
-  })
-
-  it("refuses a document that is only whitespace", async () => {
-    const actions = await generated()
-
-    const result = await actions.saveTailoredResume(
-      IDLE,
-      form({ postingId: POSTING_ID, markdown: "  \n\n  " })
-    )
-
-    expect(result).toMatchObject({
-      status: "error",
-      message: expect.stringContaining("empty"),
-    })
-  })
-
-  it("refuses a document over the limit, naming the limit", async () => {
-    const actions = await generated()
-
-    const result = await actions.saveTailoredResume(
-      IDLE,
-      form({
-        postingId: POSTING_ID,
-        markdown: "a".repeat(MAX_RESUME_CHARS + 1),
-      })
-    )
-
-    expect(result).toMatchObject({
+    expect(
+      await actions.saveTailoredResume(
+        IDLE,
+        saveForm("a".repeat(MAX_RESUME_CHARS + 1))
+      )
+    ).toMatchObject({
       status: "error",
       message: expect.stringContaining(
         MAX_RESUME_CHARS.toLocaleString("en-AU")
       ),
     })
-  })
 
-  /** Unreachable through the editor; reachable by a direct POST. */
-  it("normalizes CRLF before storing", async () => {
-    const actions = await generated()
-
-    await actions.saveTailoredResume(
-      IDLE,
-      form({ postingId: POSTING_ID, markdown: "# Alice\r\n\r\nEdited." })
-    )
-
-    const stored = await createTailoredResumeStore(objects).get({
-      userId: USER_ID,
-      postingId: POSTING_ID,
+    expect(
+      await actions.saveTailoredResume(IDLE, saveForm("# Alice\n\nEdited."))
+    ).toEqual({
+      status: "success",
+      message: "Saved your changes to this tailored resume.",
+      resetKey: RESET_KEY,
     })
-    expect(stored.markdown).toBe("# Alice\n\nEdited.")
   })
 
   it("makes no model call", async () => {
     const actions = await generated()
     const before = tailor.built
 
-    await actions.saveTailoredResume(
-      IDLE,
-      form({ postingId: POSTING_ID, markdown: "# Edited" })
-    )
+    await actions.saveTailoredResume(IDLE, saveForm("# Edited"))
 
     expect(tailor.built).toBe(before)
   })
