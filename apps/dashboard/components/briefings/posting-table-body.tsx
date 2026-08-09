@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useCallback, useRef, useState } from "react"
+import { memo, Suspense, useCallback, useRef, useState } from "react"
 
 import { loadPostingDetailAction } from "@/app/(app)/jobs/actions"
 import {
@@ -53,6 +53,20 @@ import { ChevronRightIcon, Trash2Icon } from "lucide-react"
  * page's S3 round trips and undo the reason the page stopped awaiting them. Only
  * the leaves read them, each behind its own boundary. See `cover-letter-cell.tsx`
  * and `use-tailored-resume.ts`.
+ *
+ * ⚠️ **This component is the table's single subscriber, and {@link PostingRow}
+ * is memoized behind it.** Three unrelated things re-render it — a checkbox tick
+ * (the selection context hands out a new value object), an expand, and a
+ * detail fetch resolving — and each used to re-render all twenty-five rows plus
+ * whichever detail panel was open. Every prop below is now either referentially
+ * stable across such a render or a boolean that changes for the one or two rows
+ * it concerns, so `memo` actually bites: a tick re-renders one row, an expand
+ * two, a resolved detail one.
+ *
+ * That is why {@link usePostingSelection} is read *here* rather than in the row,
+ * and why the two handlers take a posting id rather than being closed over one.
+ * A fresh `() => warm(posting.id)` per row per render would defeat `memo` on its
+ * own, whatever else were stable.
  */
 export function PostingTableBody({
   postings,
@@ -65,6 +79,25 @@ export function PostingTableBody({
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const { details, warm } = usePostingDetails()
+  // `isSelected` answers from the visible-page intersection, which is the whole
+  // safety property of `posting-selection.tsx` — reading the raw set here to
+  // save a render would put a second membership rule in a second file.
+  const { isSelected, toggle } = usePostingSelection()
+
+  // Stable, so it is the same prop on every row across an unrelated re-render.
+  // `warm` is already stable — see `usePostingDetails` — and the functional
+  // updater is what lets this close over nothing else.
+  const toggleExpanded = useCallback(
+    (postingId: string) => {
+      // Before the state change rather than in an effect after it: the request
+      // and the expansion start in the same tick, so a row whose hover never
+      // happened (keyboard, touch) still begins loading the moment it is opened
+      // rather than a render later.
+      warm(postingId)
+      setExpandedId((current) => (current === postingId ? null : postingId))
+    },
+    [warm]
+  )
 
   return (
     <TableBody>
@@ -75,18 +108,11 @@ export function PostingTableBody({
           letters={letters}
           tailoredResumes={tailoredResumes}
           detail={details[posting.id] ?? PENDING}
-          onWarm={() => warm(posting.id)}
+          selected={isSelected(posting.id)}
+          onToggleSelect={toggle}
+          onWarm={warm}
           expanded={expandedId === posting.id}
-          onToggle={() => {
-            // Before the state change rather than in an effect after it: the
-            // request and the expansion start in the same tick, so a row whose
-            // hover never happened (keyboard, touch) still begins loading the
-            // moment it is opened rather than a render later.
-            warm(posting.id)
-            setExpandedId((current) =>
-              current === posting.id ? null : posting.id
-            )
-          }}
+          onToggle={toggleExpanded}
         />
       ))}
     </TableBody>
@@ -199,12 +225,22 @@ const PENDING: PostingDetailState = { status: "loading" }
  * sibling `<tr>`s and is the only thing that ever will, and splitting it out is
  * what previously put the detail row's `colSpan` in a different file from the
  * headers it had to agree with.
+ *
+ * ⚠️ **Memoized, and it stays worth memoizing only while every prop stays
+ * cheap to compare.** A row carries a Suspense boundary, a delete dialog and a
+ * handful of icons, and there are twenty-five of them; before this, ticking one
+ * checkbox re-rendered all of it. The parent is what keeps the props stable —
+ * see {@link PostingTableBody}. Adding a prop built inline at the call site (an
+ * object literal, an array, a closure over `posting`) silently turns this back
+ * into a plain function.
  */
-function PostingRow({
+const PostingRow = memo(function PostingRow({
   posting,
   letters,
   tailoredResumes,
   detail,
+  selected,
+  onToggleSelect,
   onWarm,
   expanded,
   onToggle,
@@ -215,19 +251,33 @@ function PostingRow({
   /** This row's fetched detail, or where that fetch has got to. */
   detail: PostingDetailState
   /**
+   * Whether this row is ticked, resolved by the parent against the visible page
+   * — see `posting-selection.tsx` for why that intersection is the answer.
+   *
+   * A boolean rather than this row reading the context itself, so a tick on
+   * some other row does not re-render this one.
+   */
+  selected: boolean
+  /** Tick or untick this row. Stable, and takes the id for that reason. */
+  onToggleSelect: (postingId: string) => void
+  /**
    * Start fetching the detail without opening anything.
    *
    * Bound to pointer-enter and focus, so the request for a row someone is about
    * to click is usually finished before they click it. Idempotent — see
    * `usePostingDetails` — so a row hovered five times is fetched once.
    */
-  onWarm: () => void
+  onWarm: (postingId: string) => void
   expanded: boolean
-  onToggle: () => void
+  onToggle: (postingId: string) => void
 }) {
   const detailId = `posting-detail-${posting.id}`
-  const { isSelected, toggle } = usePostingSelection()
-  const selected = isSelected(posting.id)
+
+  // Bound here rather than passed down already bound: these are DOM handlers,
+  // so they cannot take an id, and a closure minted inside a memoized row costs
+  // nothing — the row is what stopped re-rendering.
+  const warmThis = () => onWarm(posting.id)
+  const toggleThis = () => onToggle(posting.id)
 
   return (
     <>
@@ -275,8 +325,8 @@ function PostingRow({
           only user who watches the skeleton. Capture rather than bubble because
           focus does not bubble.
         */
-        onPointerEnter={onWarm}
-        onFocusCapture={onWarm}
+        onPointerEnter={warmThis}
+        onFocusCapture={warmThis}
         onClick={(event) => {
           // `Element` and not `HTMLElement`: a click on the chevron lands on
           // the `<svg>` inside the button, which is an `SVGElement`. `closest`
@@ -285,13 +335,13 @@ function PostingRow({
             return
           }
           if (window.getSelection()?.isCollapsed === false) return
-          onToggle()
+          toggleThis()
         }}
       >
         <TableCell className={POSTING_SELECT_WIDTH}>
           <Checkbox
             checked={selected}
-            onCheckedChange={() => toggle(posting.id)}
+            onCheckedChange={() => onToggleSelect(posting.id)}
             aria-label={`Select ${posting.title}`}
           />
         </TableCell>
@@ -318,7 +368,7 @@ function PostingRow({
             size="icon-sm"
             aria-expanded={expanded}
             aria-controls={expanded ? detailId : undefined}
-            onClick={onToggle}
+            onClick={toggleThis}
           >
             <ChevronRightIcon
               aria-hidden="true"
@@ -516,4 +566,4 @@ function PostingRow({
       ) : null}
     </>
   )
-}
+})
