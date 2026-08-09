@@ -10,7 +10,6 @@ import {
   createMarkdownSerializer,
   markdownToHtml,
 } from "@workspace/ui/lib/markdown"
-import { exportMarkdownToPdf } from "@workspace/ui/lib/pdf-export"
 import { Button } from "@workspace/ui/components/button"
 import {
   Dialog,
@@ -186,7 +185,7 @@ function FileEditorDialog({
     onOpenChange(next)
   }
 
-  function downloadPdf() {
+  async function downloadPdf() {
     if (!editor || !activeFile) return
 
     const { files: next, markdown } = serializeActiveFile()
@@ -194,6 +193,13 @@ function FileEditorDialog({
     setExporting(true)
 
     try {
+      // jsPDF is fetched on the click, not with the dialog. Callers already
+      // mount this component lazily so TipTap is not in the page chunk; a
+      // static import here would have put a PDF writer in the *editor* chunk
+      // for everyone who opens it only to save. Same shape as
+      // `apps/dashboard/components/briefings/tailored-resume-pdf-button.tsx`.
+      const { exportMarkdownToPdf } =
+        await import("@workspace/ui/lib/pdf-export")
       const pdfName = activeFile.name.replace(/\.md$/i, ".pdf")
       exportMarkdownToPdf(markdown, pdfName)
     } catch (error) {

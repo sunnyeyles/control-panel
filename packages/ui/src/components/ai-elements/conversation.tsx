@@ -81,22 +81,23 @@ export const ConversationScrollButton = ({
     scrollToBottom()
   }, [scrollToBottom])
 
-  return (
-    !isAtBottom && (
-      <Button
-        className={cn(
-          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
-          className
-        )}
-        onClick={handleScrollToBottom}
-        size="icon"
-        type="button"
-        variant="outline"
-        {...props}
-      >
-        <ArrowDownIcon className="size-4" />
-      </Button>
-    )
+  // A ternary rather than `&&`: the falsy branch of `&&` returns `false` from a
+  // component, which React renders as nothing but is not the same thing as
+  // returning nothing (`rendering-conditional-render`).
+  return isAtBottom ? null : (
+    <Button
+      className={cn(
+        "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
+        className
+      )}
+      onClick={handleScrollToBottom}
+      size="icon"
+      type="button"
+      variant="outline"
+      {...props}
+    >
+      <ArrowDownIcon className="size-4" />
+    </Button>
   )
 }
 
