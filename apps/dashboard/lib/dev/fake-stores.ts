@@ -88,9 +88,11 @@ type DevRef = ResumeRef | CoverLetterRef | TailoredResumeRef
  * `Symbol.for` is typed `symbol` rather than `unique symbol` and cannot be a
  * computed key in an interface.
  *
- * `lib/dev/fake-prisma.ts` is memoized the old way and may well have the same
- * gap; nothing has needed it across that boundary yet, so it is left alone
- * rather than changed speculatively.
+ * `lib/dev/fake-prisma.ts` had the same gap and no longer does — `lib/db.ts`
+ * moved it onto `globalThis` under `Symbol.for("@workspace/dashboard.devPrisma")`
+ * when the whiteboard turned out to write from a route handler and read from a
+ * page. The two fakes are now memoized the same way for the same reason; only
+ * the key differs, and that one is a symbol because it can be.
  */
 function devStores(): DevStores {
   const holder = globalThis as typeof globalThis & {
