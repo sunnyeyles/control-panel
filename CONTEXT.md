@@ -514,11 +514,11 @@ Two independent mechanisms produce one, and they do not feed each other:
   run with no sink emits nothing and behaves identically; the local `watch`
   harness passes one and renders it.
 - **Langfuse** receives a trace per agent invocation over OpenTelemetry —
-  `generate-briefing` from the worker, `chat-response`, `cover-letter` and
-  `search-criteria` from the dashboard — through `@workspace/langfuse`. Only the
-  first is a **Run**; the other three are things a person clicked, and no `runs`
-  row is minted for any of them, so the trace is the only place their prompt
-  survives. Missing keys make it a no-op rather than an error, so this too is a
-  thing a runtime opts into.
+  `generate-briefing` from the worker, and `chat-response`, `cover-letter`,
+  `search-criteria`, `tailored-resume` and `whiteboard-turn` from the dashboard
+  — through `@workspace/langfuse`. Only the first is a **Run**; the dashboard
+  traces are things a person clicked, and no `runs` row is minted for any of
+  them, so the trace is the only place their prompt survives. Missing keys make
+  it a no-op rather than an error, so this too is a thing a runtime opts into.
 
 _Avoid_: log, debug output, history

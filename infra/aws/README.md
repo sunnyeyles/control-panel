@@ -72,18 +72,20 @@ flowchart TB
     briefs["prod/{userId}/briefs/YYYY/MM/DD/{id}.md<br>tag kind=briefs"]
     resumes["prod/{userId}/resumes/{id}.pdf<br>tag kind=resumes"]
     letters["prod/{userId}/cover-letters/{postingId}.md<br>tag kind=cover-letters"]
+    tailored["prod/{userId}/tailored-resumes/{postingId}.md<br>tag kind=tailored-resumes"]
   end
 
   pab["Public access block<br>all four flags"]
   own["BucketOwnerEnforced<br>ACLs unrepresentable"]
   tls["Bucket policy<br>deny aws:SecureTransport = false"]
-  lc["Lifecycle — by tag, not prefix<br>briefs expire; resumes and cover letters never"]
+  lc["Lifecycle — by tag, not prefix<br>briefs expire; other kinds never"]
 
   worker --- role
   app --- role
   role -->|prod:briefs policy| briefs
   role -->|prod:resumes policy| resumes
   role -->|prod:cover-letters policy| letters
+  role -->|prod:tailored-resumes policy| tailored
   pab -.-> bucket
   own -.-> bucket
   tls -.-> bucket
@@ -93,17 +95,17 @@ flowchart TB
   class pab,own,tls,lc guard
 ```
 
-| Resource                       | Why                                                                                      |
-| ------------------------------ | ---------------------------------------------------------------------------------------- |
-| Bucket                         | one bucket, environments separated by the leading key segment                            |
-| Public access block            | all four flags, pinned at the bucket rather than trusting the account                    |
-| Ownership controls             | `BucketOwnerEnforced` — a `public-read` object is not merely blocked but unrepresentable |
-| Versioning                     | an overwrite supersedes and a delete leaves a marker; both are undoable                  |
-| Default encryption             | SSE-S3, or a customer-managed KMS key when `kms_key_arn` is set                          |
-| Bucket policy                  | denies any request where `aws:SecureTransport` is false                                  |
-| Lifecycle **per kind, by tag** | briefs expire after a year; resumes and cover letters never expire automatically         |
-| IAM per environment            | every kind in that environment — the broad grant                                         |
-| IAM per environment **× kind** | one category only — the narrow grant, and the one to prefer                              |
+| Resource                       | Why                                                                                                |
+| ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Bucket                         | one bucket, environments separated by the leading key segment                                      |
+| Public access block            | all four flags, pinned at the bucket rather than trusting the account                              |
+| Ownership controls             | `BucketOwnerEnforced` — a `public-read` object is not merely blocked but unrepresentable           |
+| Versioning                     | an overwrite supersedes and a delete leaves a marker; both are undoable                            |
+| Default encryption             | SSE-S3, or a customer-managed KMS key when `kms_key_arn` is set                                    |
+| Bucket policy                  | denies any request where `aws:SecureTransport` is false                                            |
+| Lifecycle **per kind, by tag** | briefs expire after a year; resumes, cover letters and tailored resumes never expire automatically |
+| IAM per environment            | every kind in that environment — the broad grant                                                   |
+| IAM per environment **× kind** | one category only — the narrow grant, and the one to prefer                                        |
 
 There is no website configuration, no ACL, and no presigned-URL machinery. An
 object is read back through the application using the caller's own credentials.
@@ -134,10 +136,11 @@ Splitting by environment means the identity running production cannot name a
 matters more now that one of those is a document the user uploaded.
 
 The two workloads' grants are **disjoint**, and that is asserted rather than
-described: the worker holds `prod:briefs`, the dashboard holds `prod:resumes`
-and `prod:cover-letters`, and `tests/vercel_dashboard.tftest.hcl` fails if either
-set widens into the other. The dashboard drafts letters and must not be able to
-forge or delete a briefing.
+described: the worker holds `prod:briefs`, the dashboard holds `prod:resumes`,
+`prod:cover-letters` and `prod:tailored-resumes`, and
+`tests/vercel_dashboard.tftest.hcl` fails if either set widens into the other.
+The dashboard drafts letters and tailored resumes and must not be able to forge
+or delete a briefing.
 
 ```json
 {
@@ -247,7 +250,7 @@ restated here.
 | `user_storage_policy_arns`      | per environment, every kind — the broad grant           |
 | `user_storage_kind_policy_arns` | keyed `<environment>:<kind>` — the narrow grant, prefer |
 | `alerts_topic_arn`              | the one topic every stack's alarms publish to           |
-| `worker_*`                      | function name, roles, log group, the two secret ARNs    |
+| `worker_*`                      | function name, roles, log group, the worker secret ARNs |
 | `vercel_dashboard_role_arn`     | `AWS_ROLE_ARN` on the Vercel project                    |
 
 The workload also needs `USER_STORAGE_ENVIRONMENT`, which is not an output — it
