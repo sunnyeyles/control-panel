@@ -178,8 +178,8 @@ model Posting {
   // words, so "3 days ago" is an ordinary answer and not a failure.
   //
   // Unlike the four columns above this one is *derived* rather than copied:
-  // `parsePostedAt()` in `apps/briefing-worker/src/postings.ts` is the only rule
-  // that produces it, and the backfill in `0006` restates that rule in SQL.
+  // `parsePostedAt()` in `@workspace/agents` is the only rule that produces it,
+  // and the backfill in `0006` restates that rule in SQL.
   postedAt        DateTime? @map("posted_at") @db.Timestamptz(6)
   // The validated Posting as its producer wrote it, opaque here exactly as
   // `runs.findings` and `jobs.config` are. The five columns above are the
@@ -193,12 +193,20 @@ model Posting {
   statusChangedAt DateTime? @map("status_changed_at") @db.Timestamptz(6)
   firstSeenAt     DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(6)
   lastSeenAt      DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
-  firstSeenRunId  String    @map("first_seen_run_id") @db.Uuid
-  lastSeenRunId   String    @map("last_seen_run_id") @db.Uuid
+  // NULL in either means no Run has seen this: the user added it by pasting the
+  // advertisement's link. There is no `source` column and there must not be one
+  // — see `0009` and `posting-source.ts`, which makes the same argument for the
+  // board a Posting came from.
+  //
+  // The two move independently. A Run that later finds a link-added
+  // advertisement sets `last_seen_run_id` and leaves `first_seen_run_id` NULL,
+  // because a second sighting cannot change who saw it first.
+  firstSeenRunId  String?   @map("first_seen_run_id") @db.Uuid
+  lastSeenRunId   String?   @map("last_seen_run_id") @db.Uuid
 
   user         User @relation(fields: [userId], references: [id], onDelete: Restrict)
-  firstSeenRun Run  @relation("PostingFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: Restrict)
-  lastSeenRun  Run  @relation("PostingLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: Restrict)
+  firstSeenRun Run? @relation("PostingFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: Restrict)
+  lastSeenRun  Run? @relation("PostingLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: Restrict)
 
   @@unique([userId, postingId], map: "postings_user_id_posting_id_key")
   @@index([userId, lastSeenAt(sort: Desc), postingId(sort: Desc)], map: "postings_user_last_seen_idx")

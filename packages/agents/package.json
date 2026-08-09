@@ -33,13 +33,13 @@
     "@langchain/core": "^1.2.3",
     "@workspace/agent-tools": "workspace:*",
     "@workspace/agents-core": "workspace:*",
+    "@workspace/user-storage": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
-    "@workspace/user-storage": "workspace:*",
     "eslint": "^9",
     "typescript": "^5",
     "vitest": "^4.1.10"

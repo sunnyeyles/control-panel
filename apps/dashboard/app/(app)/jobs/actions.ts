@@ -6,6 +6,7 @@ import { getBriefingInvoker } from "@/lib/briefing-runs/invoke-worker"
 import { createRunActions } from "@/lib/briefing-runs/run-actions"
 import { createCoverLetterActions } from "@/lib/cover-letters/cover-letter-actions"
 import { getPrisma } from "@/lib/db"
+import { createAddByLinkActions } from "@/lib/postings/add-by-link-actions"
 import { createPostingActions } from "@/lib/postings/posting-actions"
 import {
   getCoverLetterStore,
@@ -56,6 +57,11 @@ const postingActions = createPostingActions({
   getPrisma,
   getCoverLetters: getCoverLetterStore,
   getTailoredResumes: getTailoredResumeStore,
+})
+
+const addByLinkActions = createAddByLinkActions({
+  getUser: getCurrentUser,
+  getPrisma,
 })
 
 /** Create a manually written cover letter from the blank editor. */
@@ -167,6 +173,29 @@ export async function saveTailoredResumeAction(
   formData: FormData
 ): Promise<ActionState> {
   const result = await tailoredResumeActions.saveTailoredResume(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Add a Posting the user found themselves, from its link.
+ *
+ * `refresh()` on success is the whole of what puts the new row on the page —
+ * `/jobs` is `force-dynamic` and `staleTimes.dynamic` lets the client router
+ * reuse the segment for 30 seconds, so without it somebody would paste a link,
+ * be told it was added, and look at a table that does not contain it.
+ *
+ * It is the slowest action in this file by a wide margin: a page fetch and then
+ * a model call, in sequence, both on the request. `maxDuration` on `page.tsx`
+ * is sized for it.
+ */
+export async function addPostingByLinkAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await addByLinkActions.addPostingByLink(state, formData)
 
   if (result.status === "success") refresh()
 

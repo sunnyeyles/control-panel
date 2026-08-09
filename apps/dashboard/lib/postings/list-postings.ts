@@ -1,4 +1,4 @@
-import { PostingSchema } from "@workspace/agents/findings"
+import { StoredPostingSchema } from "@workspace/agents/stored-posting"
 import {
   listPostingPage,
   POSTING_STATUSES,
@@ -182,10 +182,15 @@ export async function listPostings(
     // `PostingView`; it comes from `load-posting-detail.ts` now. Doing the
     // parse in this one place keeps the reporting honest without parsing every
     // payload twice.
-    const parsed = PostingSchema.safeParse(row.payload)
+    const parsed = StoredPostingSchema.safeParse(row.payload)
 
     if (!parsed.success) unreadable += 1
-    if (briefingName(row.briefing) === undefined) unnamed += 1
+    // Only a row a Run *should* have named counts as unnamed. A Posting the
+    // user added by link has no Briefing behind it by construction, and
+    // reporting one as a fault would bury a real relation failure in noise.
+    if (!row.addedByLink && briefingName(row.briefing) === undefined) {
+      unnamed += 1
+    }
 
     return toView(row, parsed, now)
   })
@@ -267,7 +272,7 @@ const ORDER_FOR = {
  */
 function toView(
   row: PostingListRow,
-  parsed: ReturnType<typeof PostingSchema.safeParse>,
+  parsed: ReturnType<typeof StoredPostingSchema.safeParse>,
   now: Date
 ): PostingView {
   // Independent of the parse, deliberately: `url` is a projected column
@@ -287,7 +292,9 @@ function toView(
     firstSeenExact: formatUtcDateTime(row.firstSeenAt),
     lastSeen: formatSeenAgo(row.lastSeenAt, now),
     lastSeenExact: formatUtcDateTime(row.lastSeenAt),
-    briefing: briefingName(row.briefing) ?? UNKNOWN_BRIEFING,
+    briefing:
+      briefingName(row.briefing) ??
+      (row.addedByLink ? ADDED_BY_LINK : UNKNOWN_BRIEFING),
     // The column when the write path could read a date out of the
     // advertisement, the advertisement's own words when it could not, and
     // nothing when it said nothing. See {@link PostingView.postedAt} for why
@@ -307,6 +314,17 @@ function toView(
 
 /** What the dialog shows when the relation could not name a Briefing. */
 const UNKNOWN_BRIEFING = "Unknown briefing"
+
+/**
+ * What it shows instead when there was never a Briefing to name.
+ *
+ * ⚠️ **Distinct from {@link UNKNOWN_BRIEFING}, and the distinction is the whole
+ * reason `addedByLink` is carried out of `@workspace/db`.** Both are a `null`
+ * briefing; one is a Posting the user added themselves and the other is a fault.
+ * Rendering them the same word would tell somebody their own paste had lost its
+ * provenance.
+ */
+const ADDED_BY_LINK = "Added by link"
 
 /**
  * The Briefing's name as the row carries it, or `undefined` when it has none.

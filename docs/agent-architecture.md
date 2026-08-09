@@ -121,7 +121,7 @@ deliberately never set — reasoning-capable models reject any non-default value
 
 ## 3. Agents and their tools
 
-Seven agents. What separates them is mostly which tools they carry, and **tool
+Eight agents. What separates them is mostly which tools they carry, and **tool
 scope here is a containment boundary rather than a tuning knob.**
 
 ```mermaid
@@ -132,6 +132,7 @@ flowchart LR
         CLW["createCoverLetterWriter<br/>the Letter Writer"]
         RT["createResumeTailor<br/>the Resume Tailor"]
         PE["createProfileExtractor<br/>the Profile Extractor"]
+        PX["createPostingExtractor<br/>the Posting Extractor"]
         ASST["createAssistant"]
         WB["createWhiteboardAgent<br/>the Whiteboard"]
     end
@@ -160,6 +161,7 @@ flowchart LR
     CLW --> NONE
     RT --> NONE
     PE --> NONE
+    PX --> NONE
 
     SEEK --> RUN["apify-search.ts<br/>shared runner — APIFY_TOKEN"]
     IND --> RUN
@@ -174,6 +176,11 @@ flowchart LR
     A2 --> L2["indeed.com live inventory"]
     A3 --> L3["linkedin.com live inventory"]
     WEB --> TAV["Tavily REST API<br/>TAVILY_API_KEY"]
+    FETCH["extractPage<br/>NOT a tool — no agent carries it"] --> TAVX["Tavily /extract<br/>TAVILY_API_KEY"]
+    TAVX -.->|"the dashboard hands the page<br/>to a tool-less agent"| PX
+    BFETCH["fetchBoardPosting<br/>NOT a tool — no agent carries it"] --> A1
+    BFETCH --> A2
+    BFETCH -.->|"fields the board published —<br/>no model in the path at all"| PTBL[("postings")]
     TIME --> INTL["Intl.DateTimeFormat<br/>no network, no key"]
     CANVAS --> BOARD["BoardSession<br/>in-memory; no network"]
 ```
@@ -207,8 +214,52 @@ than module singletons, because each is bound to one run's catalog.
 | `createCoverLetterWriter` | `[]`                                                           | Prompt-injection containment — see below                                                                                                                                                                                                                                                                                                                                                                                        |
 | `createResumeTailor`      | `[]`                                                           | The Letter Writer's case, unchanged: the same CV, the same advertisement copied verbatim beside it                                                                                                                                                                                                                                                                                                                              |
 | `createProfileExtractor`  | `[]`                                                           | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                                                                                                          |
+| `createPostingExtractor`  | `[]`                                                           | Reads one page fetched from a host the user merely named — the least trusted input in the system — verbatim. It is the "separate agent" the two writers below defer to, and holds no CV, no instructions and no way to reach the page's own links                                                                                                                                                                               |
 | `createAssistant`         | `allTools` + `extraTools`                                      | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                                                                                                         |
 | `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Mutates one in-memory board session for the turn; no board search, no fetch, no S3. The dashboard imports the canvas schema and session helpers from `@workspace/agent-tools` so the UI and the agent agree on the board shape                                                                                                                                                                                                  |
+
+### The two page fetchers, and why neither is in the catalog
+
+Both exist for **adding a Posting by pasting its link**, and both are plain
+functions rather than `tool()`s, absent from `allTools` and carried by no
+agent — `page-extract.test.ts` and `board-posting.test.ts` each assert it,
+because the alternative is a general chat agent acquiring a fetcher the first
+time somebody tidies the catalog.
+
+**`fetchBoardPosting`** (`packages/agent-tools/src/board-posting.ts`) is tried
+first. Where the link belongs to a board whose actor takes a single
+advertisement's URL — SEEK and Indeed, through a `byUrl` entry on their existing
+`ApifyBoardSpec` — the board answers with `title`, `company`, `location` and the
+description as _fields it published_. **No model is in that path at all**: no
+extraction to be wrong about, no prompt to inject into, and nothing to pay for.
+The answer is still validated against `StoredPostingSchema`, because a community
+scraper's structured output is not validated output.
+
+Two properties are worth not undoing. Its run timeout is 30 seconds against the
+search path's 120 — a person is waiting inside a route whose `maxDuration` is 60.
+And **the item it accepts has to be the advertisement that was asked for**,
+matched on `postingId` rather than on string equality: both actors take a search
+or a company page as a start URL as readily as a job, and taking `[0]` on trust
+is how pasting a search page stores one arbitrary role as though somebody had
+chosen it.
+
+The routing lives one layer up, in `packages/agents/src/board-fetch.ts`, because
+`agent-tools` may not depend on `@workspace/agents` — `boardForHost` and
+`postingId` both live there, and `board-posting.ts` takes `idFor` as an injection
+for the same reason `posting-catalog.ts` does.
+
+**`extractPage`** (`packages/agent-tools/src/page-extract.ts`) is the path for
+every link no board can answer — a Greenhouse link, a company careers page, and
+LinkedIn, whose actor accepts search-results URLs only. The dashboard's action
+calls it, bounds what comes back, and hands the text to
+`createPostingExtractor`, which has no tools. So the untrusted page and the
+ability to act on it are never held by the same thing.
+
+Retrieval is delegated on both paths — to Tavily's `/extract` or to an Apify
+actor run — so this system never opens a socket to a host somebody typed into a
+form. And a board that fails is **not** followed by the general fetcher: two
+retrievals plus a model call do not fit in the route's budget, and the general
+fetcher is the path least likely to get past the board that just refused.
 
 ### Why the Letter Writer, the Resume Tailor and the Profile Extractor have no tools
 
@@ -250,8 +301,11 @@ containment is the empty tool list, and both are asserted structurally, in
 `cover-letter-writer.test.ts`, `resume-tailor.test.ts` and
 `profile-extractor.test.ts`, rather than left to a comment.
 
-When a page fetcher eventually exists it belongs on a separate agent that never
-sees the profile, handing them validated data.
+That agent now exists, and is the **Posting Extractor** above: a page fetcher on
+a separate agent that never sees the profile, handing validated data on. The
+clause in `cover-letter-writer.ts` and `resume-tailor.ts` stays exactly as
+written — it is now a description of where the fetcher went, and a rule about
+where it must not move to.
 
 ### The same idea one level down
 
@@ -404,6 +458,7 @@ flowchart TD
         R1 --> R3["write-brief"]
         CB --> CB1["chat-response"]
         CB --> CB2["cover-letter"]
+    CB --> CB6["posting-extract"]
         CB --> CB3["search-criteria"]
         CB --> CB4["tailored-resume"]
         CB --> CB5["whiteboard-turn"]
@@ -431,6 +486,13 @@ The briefing Run is wrapped so the Scout and the Brief Writer nest under a singl
 `generate-briefing` root rather than arriving as two unrelated traces. The
 dashboard traces need no such root: each is one agent answering one request.
 
+`posting-extract` is the one dashboard trace carrying no candidate data at all —
+its whole prompt is a page somebody else wrote — which makes it the safest of
+them to read when something goes wrong. It is also the one that does not appear
+for every attempt: a SEEK or Indeed link is answered by that board's actor with
+no model in the path, so there is no span to look for. An **Add posting** that
+left no trace usually means the board answered, not that something was lost.
+
 **Three of those traces carry the candidate's CV**, `cover-letter`,
 `search-criteria` and `tailored-resume`, and Langfuse retains full prompts by
 design. Whether that text leaves the machine is decided entirely by whether the
@@ -447,9 +509,9 @@ down with it.
 
 ## Where things live
 
-| Package                | Holds                                                                                                                                                                                                                                                                                                    |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `whiteboard`, plus the two schema contracts — `findings` (Scout → Brief Writer) and `criteria` (Profile Extractor → whoever stores them) — and `cover-letter`, `tailored-resume` and `posting-id` |
-| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                              |
-| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                             |
-| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                               |
+| Package                | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `posting-extractor`, `whiteboard`, plus the schema contracts — `findings` (Scout → Brief Writer), `criteria` (Profile Extractor → whoever stores them) and `stored-posting` (what a `postings.payload` may hold) — and `cover-letter`, `tailored-resume`, `posting-id`, `posted-at`, `job-boards` and `board-fetch` (host → board → actor, the one place the registry meets the tool catalog) |
+| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `page-extract.ts` and `board-posting.ts` (both fetchers, and neither a tool); `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                                                                                                                                           |
+| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                                                                                                                                                                                                                           |

@@ -15,40 +15,72 @@ employment opportunity, which is a **Posting**. To a user a job is a
 
 ## Where it lives
 
-| Stage                                        | Owner                                                                                                                                    |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Dashboard — chat, documents, briefings       | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                                                        |
-| Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                                                  |
-| A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                               |
-| One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                               |
-| What `jobs.config` means                     | `packages/job-search/src/job-search-config.ts`                                                                                          |
-| The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                              |
-| The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                        |
-| The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                        |
-| Proposing criteria from a resume             | `apps/dashboard/lib/jobs/suggest-criteria-actions.ts`, reading through `apps/dashboard/lib/cover-letters/candidate-background.ts`        |
-| The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                        |
-| Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                              |
-| Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                                            |
-| Every Posting ever found, and its status     | `packages/db/src/postings.ts`, projected from findings by `apps/briefing-worker/src/postings.ts`, read by `apps/dashboard/lib/postings/` |
-| S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts` / `cover-letter-store.ts`, never import the AWS SDK elsewhere |
-| Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                            |
-| EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                            |
+| Stage                                        | Owner                                                                                                                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard — chat, documents, briefings       | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                                                                                                            |
+| Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                                                                                                      |
+| A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                                                                                   |
+| One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                                                                                   |
+| What `jobs.config` means                     | `packages/job-search/src/job-search-config.ts`                                                                                                                                               |
+| The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                                                                                  |
+| The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                                                                            |
+| The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                                                                            |
+| Proposing criteria from a resume             | `apps/dashboard/lib/jobs/suggest-criteria-actions.ts`, reading through `apps/dashboard/lib/cover-letters/candidate-background.ts`                                                            |
+| The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                                                                            |
+| Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                                                                                  |
+| Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                                                                                                |
+| Every Posting ever found, and its status     | `packages/db/src/postings.ts`, projected from findings by `apps/briefing-worker/src/postings.ts`, read by `apps/dashboard/lib/postings/`                                                     |
+| Adding a Posting by pasting its link         | `apps/dashboard/lib/postings/add-by-link-actions.ts`, over `@workspace/agents/board-fetch` first and `@workspace/agent-tools/page-extract` + `@workspace/agents/posting-extractor` otherwise |
+| S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts` / `cover-letter-store.ts`, never import the AWS SDK elsewhere                                                     |
+| Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                                                                                |
+| EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                                                                                |
 
-**There is no fetch tool.** `seek-search.ts`, `indeed-search.ts` and
-`linkedin-search.ts` each query one job board's live inventory through its own
-Apify actor, over the shared runner in `apify-search.ts` — which is machinery
-rather than a tool, and is what makes a board an actor id, a request body and a
-field mapping instead of a fourth implementation. `get_posting_details` reads
-back one advertisement the scout already found, by id. `web-search.ts` is a
-general Tavily search, and `time.ts` answers what the current time is. The
-whiteboard agent carries a separate canvas tool set (`canvas.ts`) that mutates
-an in-memory board session rather than reaching the network. Nothing retrieves
-an arbitrary URL, and nothing should acquire that ability casually — a fetcher
-is a security surface (SSRF, redirect chains, response size, prompt injection
-from a page the model then acts on). The scout carries the three board tools
-plus `get_posting_details` and nothing else; the dashboard's assistant carries
-`allTools`, which is `get_current_time` and `web_search` — the board tools are
-deliberately not in it.
+**There are two page fetchers, and neither is a tool.**
+`seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` each query one job
+board's live inventory through its own Apify actor, over the shared runner in
+`apify-search.ts` — which is machinery rather than a tool, and is what makes a
+board an actor id, a request body and a field mapping instead of a fourth
+implementation. `get_posting_details` reads back one advertisement the scout
+already found, by id. `web-search.ts` is a general Tavily search, and `time.ts`
+answers what the current time is. The whiteboard agent carries a separate canvas
+tool set (`canvas.ts`) that mutates an in-memory board session rather than
+reaching the network.
+
+Both fetchers exist for **adding a Posting by pasting its link**, and each is a
+plain function: absent from `allTools`, carried by no agent, and asserted to be
+both.
+
+- `board-posting.ts` asks the board that issued the link for the advertisement
+  behind it, through the same actor a search uses — SEEK and Indeed only, via a
+  `byUrl` entry on their spec. **It skips the model entirely**: the board
+  publishes `title`, `company`, `location` and the description as fields, so
+  there is no reading to be done and nothing to get wrong. `board-fetch.ts` in
+  `@workspace/agents` is where `boardForHost` and `postingId` meet it, because
+  `agent-tools` may not depend on that package.
+- `page-extract.ts` retrieves the page at an arbitrary URL and is the path for
+  everything else — a Greenhouse link, a company careers page, and LinkedIn,
+  whose actor takes search-results URLs and cannot be handed a job page.
+
+**No tool retrieves a URL**, which is the property that used to be stated as
+"there is no fetch tool" — a fetcher in an agent's hands is a security surface,
+and the four hazards are answered structurally rather than promised:
+
+- **SSRF** — the retrieval is a POST to Tavily's `/extract` or to an Apify actor
+  run, and _they_ fetch the page. This system never opens a socket to a host
+  somebody typed into a form.
+- **Redirect chains** — the fetcher's problem. One JSON request, one JSON reply.
+- **Response size** — bounded at `MAX_PAGE_CHARS` before it can reach a model, as
+  `posting-details.ts` bounds a description. On the board path nothing unbounded
+  reaches a model at all.
+- **Prompt injection** — the page reaches exactly one agent, the **Posting
+  Extractor**, which has no tools, holds no CV and answers into a schema. This
+  is the "separate agent that never sees the profile" the letter writer and the
+  resume tailor each defer to in as many words. The board path has no agent in
+  it, so the hazard does not arise.
+
+The scout carries the three board tools plus `get_posting_details` and nothing
+else; the dashboard's assistant carries `allTools`, which is `get_current_time`
+and `web_search` — neither the board tools nor either fetcher are in it.
 
 ## Rules
 
@@ -72,6 +104,12 @@ deliberately not in it.
 - **The scout returns data, not side effects.** No writes, no uploads, no DB
   calls inside it. Its tools search, read what a search returned, and report;
   nothing reaches outside the run, so this is structural.
+- **A Posting may arrive without a Run.** Pasting an advertisement's link adds
+  one directly, so `postings.first_seen_run_id` and `last_seen_run_id` are
+  nullable and NULL means "no Run has ever seen this". There is no `source`
+  column. `recordLinkedPosting` is `ON CONFLICT DO NOTHING`, so a link may
+  create a Posting and may never revise one — it cannot touch a status a person
+  set, blank a Run's provenance, or overwrite a Run-written payload.
 - **The scout never handles a URL.** A search returns two lines per posting
   against an **id**; the advertisement itself is read back by id with
   `get_posting_details`, and a reported posting names that id. The worker
@@ -128,6 +166,34 @@ flowchart TD
     F -.->|optional, keys permitting| LF[Langfuse trace: generate-briefing]
 ```
 
+A Run is no longer the only way a Posting arrives. Pasting an advertisement's
+link on `/jobs` adds one directly — no Run, no Briefing, and both run columns
+NULL. Which retrieval answers depends on who issued the link:
+
+```mermaid
+flowchart TD
+    U[/jobs — paste a link/] --> ID[postingId of the pasted URL]
+    ID -->|already tracked| STOP[Say so, spend nothing]
+    ID --> B{SEEK or Indeed?}
+    B -->|yes| BF[The board's actor, by startUrls]
+    BF -->|not that advertisement| SAY2[Say so — no second retrieval]
+    BF --> V2[Validated against the schema]
+    B -->|no| EX[extractPage — Tavily fetches the page]
+    EX --> PE[Posting Extractor — no tools, no CV]
+    PE -->|not a job advertisement| SAY[Say what the page was]
+    PE --> V2
+    V2 --> PT2[(postings — no Run at either end)]
+```
+
+The URL never reaches a model, and never comes back from one: it is the user's,
+and it is attached to the validated answer afterwards. The board's own canonical
+link is used only to check that the actor answered about the advertisement that
+was asked for, and is then discarded. A board that fails is **not** followed by a
+second retrieval — the route has 60 seconds and a person waiting in them, and the
+general fetcher is the path least likely to get past the board that just refused.
+From there a link-added Posting is an ordinary Posting — the same table, the same
+status, the same two documents.
+
 What a person then does with a **Posting** happens entirely in the dashboard, off
 the row rather than off a Run — two documents, both addressed by
 `(user, Posting)`, both written from the newest **Document** labelled Resume:
@@ -135,6 +201,7 @@ the row rather than off a Run — two documents, both addressed by
 ```mermaid
 flowchart TD
     PT[(postings — payload, last_seen_run_id)] --> BR[/jobs — expanded posting/]
+    PT2[(postings — added by link, no Run)] --> BR
     DOC[(S3 — resumes: the user's uploaded CV)] --> BG[loadCandidateBackground]
     BG --> BR
     BR -->|Draft cover letter| LW[Letter Writer]
@@ -264,7 +331,8 @@ flowchart TD
   not cover. CloudWatch provides logs, metrics and failure alarms.
 - Langfuse receives one trace per agent run when its keys are present:
   `generate-briefing` from the worker, and `chat-response`, `cover-letter`,
-  `search-criteria`, `tailored-resume` and `whiteboard-turn` from the dashboard.
+  `posting-extract`, `search-criteria`, `tailored-resume` and `whiteboard-turn`
+  from the dashboard.
   All retain full prompts, tool I/O and outputs by design — which for the
   cover-letter, search-criteria and tailored-resume traces means the candidate's
   CV, so the keys are what decides whether it leaves the machine.

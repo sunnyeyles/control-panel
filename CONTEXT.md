@@ -248,6 +248,26 @@ than minting two. Runs are provenance, recorded as `first_seen_run_id` and
 `last_seen_run_id` instead of as part of the key. The row accumulates across
 every Run of every **Briefing** the user owns, which is what lets a **Posting
 Status** outlive the Run that found the advertisement.
+
+**A Posting need not come from a Run at all.** Pasting an advertisement's link
+on `/jobs` adds one directly — from the **Job Board**'s own actor where the board
+is SEEK or Indeed, and otherwise read by the **Posting Extractor** off a page the
+fetcher retrieved — and there is no Run behind it to name, so both run columns
+are nullable and **NULL means the user added it by link**. That absence is the
+whole of how the two are told apart: there is no `source` column and there must
+not be one, for the reason `posting-source.ts` gives about the **Job Board** a
+Posting came from. The two columns move independently, so a Run that later finds
+a link-added advertisement sets `last_seen_run_id` and leaves `first_seen_run_id`
+NULL — which reads, correctly, as "you found this one yourself". A link may
+create a Posting and may never revise one: `recordLinkedPosting` is
+`ON CONFLICT DO NOTHING`, so it cannot walk back a **Posting Status**, blank a
+Run's provenance, or replace a Run-written payload with a thinner one.
+
+The payload of a link-added Posting carries **no `matchReason`** — it was
+matched against no criteria, and inventing one would be a fabrication — which is
+why `StoredPostingSchema` exists beside `PostingSchema`. The first is what a
+stored row may hold, the second is what a **Scout** must produce, and only the
+first is optional in that field.
 _Avoid_: job, listing, vacancy, opening
 
 **Posting Status**:
@@ -313,6 +333,38 @@ form**. It writes nothing: a suggestion is a value the fields render, and the ro
 is still written by the user pressing Create. That is what makes "the user saw
 these before they were saved" a property of the path rather than a promise the
 interface makes — there is no write on it to review after.
+
+**Posting Extractor**:
+The agent that reads one retrieved web page and reports the **Posting** in it,
+for a link the user pasted. Has no tools, and here that is the strongest
+containment case in the repo after the **Profile Extractor**'s — it reads a page
+fetched from a host the user merely named, which is the least trusted input
+anywhere in the system, and it reads it verbatim because summarising a page
+before extracting from it would be doing the extraction twice.
+
+**It is never shown the URL and cannot return one.** The platform already holds
+the link; a page is full of others — an apply button, a related role, the
+company's own site — and one copied into the row would be stored as though it
+were the advertisement. That is the **Scout**'s rule (see `resolve-postings.ts`)
+applied to a second path, and here it is structural twice over: the prompt
+carries no URL, and the answer schema has no field for one.
+
+Its answer is a union rather than a shape, so a refusal is data: a
+search-results page, a careers index, an article or a sign-in wall come back as
+`not-a-posting` with a reason the user is shown. Returning a Posting assembled
+out of a page that contains none is the failure that branch exists to prevent.
+
+The page reaches it through `extractPage` in `@workspace/agent-tools`, which is
+**deliberately not a tool** — a plain function, absent from `allTools`, carried
+by no agent. Retrieval is delegated to Tavily, so nothing in this system opens a
+socket to a host somebody typed into a form.
+
+**It is not reached at all for a link a Job Board can answer.** SEEK's and
+Indeed's actors take a single advertisement's URL and return its fields, so
+`board-fetch.ts` builds the Posting from what the board published and no model
+runs. This agent is the path for everything else — including LinkedIn, whose
+actor accepts search-results URLs only.
+_Avoid_: scraper, page reader, link parser
 
 **Profile Extractor**:
 The agent that reads the candidate's CV and proposes **Search Criteria** out of
@@ -515,8 +567,8 @@ Two independent mechanisms produce one, and they do not feed each other:
   harness passes one and renders it.
 - **Langfuse** receives a trace per agent invocation over OpenTelemetry —
   `generate-briefing` from the worker, and `chat-response`, `cover-letter`,
-  `search-criteria`, `tailored-resume` and `whiteboard-turn` from the dashboard
-  — through `@workspace/langfuse`. Only the first is a **Run**; the dashboard
+  `posting-extract`, `search-criteria`, `tailored-resume` and `whiteboard-turn`
+  from the dashboard — through `@workspace/langfuse`. Only the first is a **Run**; the dashboard
   traces are things a person clicked, and no `runs` row is minted for any of
   them, so the trace is the only place their prompt survives. Missing keys make
   it a no-op rather than an error, so this too is a thing a runtime opts into.

@@ -30,6 +30,7 @@ import {
   postingPayload,
   recordDocument,
   recordArtifact,
+  recordLinkedPosting,
   recordPostings,
   recordRunFindings,
   resumeJob,
@@ -568,6 +569,114 @@ describeWithDatabase("against a real database", () => {
       expect(row?.lastSeenRunId).toBe(refound)
       expect(row?.firstSeenAt.toISOString()).toBe(FIRST_SIGHTING.toISOString())
       expect(row?.lastSeenAt.toISOString()).toBe(SECOND_SIGHTING.toISOString())
+    })
+
+    /**
+     * The second writer, and every case here is about what it must *not* do.
+     *
+     * `recordLinkedPosting` exists because a Posting the user pasted has no Run
+     * behind it, but the reason it is a separate function rather than a flag on
+     * `recordPostings` is its `ON CONFLICT DO NOTHING`: a link may create a
+     * Posting and may never revise one. Each assertion below is a way that
+     * could silently stop being true.
+     */
+    describe("added by link", () => {
+      it("records a posting with no run at either end", async () => {
+        const posting = aPosting()
+
+        expect(
+          await recordLinkedPosting(prisma, {
+            userId,
+            seenAt: FIRST_SIGHTING,
+            posting,
+          })
+        ).toBe(true)
+
+        const row = await readBack(posting.postingId)
+
+        // NULL in both is the whole of how a link-added Posting is
+        // distinguishable from a found one. There is no `source` column.
+        expect(row?.firstSeenRunId).toBeNull()
+        expect(row?.lastSeenRunId).toBeNull()
+        expect(row?.status).toBe("new")
+        expect(row?.firstSeenAt.toISOString()).toBe(
+          FIRST_SIGHTING.toISOString()
+        )
+      })
+
+      it("answers false for an advertisement already tracked, and changes nothing", async () => {
+        const discovered = await aRun()
+        const posting = aPosting()
+
+        await recordPostings(prisma, {
+          userId,
+          runId: discovered,
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+        await setPostingStatus(prisma, userId, posting.postingId, "applied")
+
+        expect(
+          await recordLinkedPosting(prisma, {
+            userId,
+            seenAt: SECOND_SIGHTING,
+            posting: { ...posting, title: "Something Else Entirely" },
+          })
+        ).toBe(false)
+
+        const row = await readBack(posting.postingId)
+
+        // ⚠️ The three losses `DO NOTHING` prevents, in order: a status a
+        // person set walked back to `new`, a Run's provenance blanked by a
+        // path that has none, and a Run-written payload swapped for a thinner
+        // one.
+        expect(row?.status).toBe("applied")
+        expect(row?.lastSeenRunId).toBe(discovered)
+        expect(row?.title).toBe("Senior Backend Engineer")
+      })
+
+      it("lets a later Run claim the sighting without claiming the discovery", async () => {
+        const refound = await aRun()
+        const posting = aPosting()
+
+        await recordLinkedPosting(prisma, {
+          userId,
+          seenAt: FIRST_SIGHTING,
+          posting,
+        })
+
+        await recordPostings(prisma, {
+          userId,
+          runId: refound,
+          seenAt: SECOND_SIGHTING,
+          postings: [posting],
+        })
+
+        const row = await readBack(posting.postingId)
+
+        // "You found this one yourself, and a briefing has since found it too."
+        // `first_seen_run_id` is absent from the upsert's DO UPDATE SET list,
+        // so it stays NULL rather than being backfilled with the Run that
+        // merely re-found it.
+        expect(row?.firstSeenRunId).toBeNull()
+        expect(row?.lastSeenRunId).toBe(refound)
+        expect(row?.lastSeenAt.toISOString()).toBe(
+          SECOND_SIGHTING.toISOString()
+        )
+      })
+
+      it("refuses an id that is not the shape a derived posting id takes", async () => {
+        // The CHECK applies to this path too: the value is still an object key
+        // segment, and a second writer is a second way past a constraint if it
+        // is not tested for.
+        await expect(
+          recordLinkedPosting(prisma, {
+            userId,
+            seenAt: FIRST_SIGHTING,
+            posting: aPosting({ postingId: "../../etc/passwd" }),
+          })
+        ).rejects.toThrow()
+      })
     })
 
     it("stores the posting date, and NULL when the caller supplied none", async () => {

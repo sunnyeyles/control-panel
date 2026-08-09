@@ -1,6 +1,6 @@
 /**
- * The transport half of every search tool: a JSON POST behind a bearer token,
- * shared by Tavily and by every Apify actor run.
+ * The transport half of every outbound call in this package: a JSON POST behind
+ * a bearer token, shared by Tavily and by every Apify actor run.
  *
  * The failure split lives here so it cannot drift per service. A missing or
  * rejected credential is a deployment fault no rephrasing fixes, so it throws
@@ -12,6 +12,13 @@
  *
  * What stays with each caller is what genuinely differs: building the request
  * body, and deciding whether the parsed body has the shape of a result list.
+ *
+ * **Not every caller is answering a model.** `page-extract.ts` answers a person
+ * who pasted a link, and a sentence ending "continue with what you already
+ * have" would be nonsense to them — which is why `retryAdvice` and
+ * `fallbackAdvice` exist. Both default to the model-facing wording every search
+ * tool wants, so a caller that says nothing gets exactly the sentences it got
+ * before either field existed.
  */
 
 /**
@@ -43,8 +50,18 @@ export interface SearchApiPostOptions {
    * "typescript"` — it leads every sentence a failure comes back as.
    */
   subject: string
-  /** What the HTTP-error sentence suggests varying, e.g. `different criteria`. */
-  retryAdvice: string
+  /**
+   * What the HTTP-error sentence suggests varying, e.g. `different criteria`.
+   * Omit where there is nothing useful to vary — the sentence then closes on
+   * {@link fallbackAdvice} alone rather than on an empty suggestion.
+   */
+  retryAdvice?: string
+  /**
+   * How every failure sentence closes. Defaults to the model-facing
+   * `Continue with what you already have.`; a caller answering a person passes
+   * its own.
+   */
+  fallbackAdvice?: string
   /** The names the credential-rejected throw is composed from. */
   auth: {
     /** The service, as prose spells it: `Apify`. */
@@ -54,6 +71,11 @@ export interface SearchApiPostOptions {
     /** The env var a deployer has to fix: `APIFY_TOKEN`. */
     envVar: string
   }
+}
+
+/** So a suggestion can be folded into the middle of a sentence. */
+function lowerFirst(sentence: string): string {
+  return sentence.charAt(0).toLowerCase() + sentence.slice(1)
 }
 
 export type SearchApiResult =
@@ -67,6 +89,8 @@ export async function searchApiPost(
   options: SearchApiPostOptions
 ): Promise<SearchApiResult> {
   const { subject } = options
+  const fallback =
+    options.fallbackAdvice ?? "Continue with what you already have."
 
   let response: Response
   try {
@@ -82,7 +106,7 @@ export async function searchApiPost(
     const message = error instanceof Error ? error.message : String(error)
     return {
       ok: false,
-      message: `${subject} could not be sent: ${message}. Continue with what you already have.`,
+      message: `${subject} could not be sent: ${message}. ${fallback}`,
     }
   }
 
@@ -94,9 +118,13 @@ export async function searchApiPost(
   }
 
   if (!response.ok) {
+    const advice = options.retryAdvice
+      ? `Try again with ${options.retryAdvice}, or ${lowerFirst(fallback)}`
+      : fallback
+
     return {
       ok: false,
-      message: `${subject} failed with HTTP ${response.status}. Try again with ${options.retryAdvice}, or continue with what you already have.`,
+      message: `${subject} failed with HTTP ${response.status}. ${advice}`,
     }
   }
 
@@ -106,7 +134,7 @@ export async function searchApiPost(
   } catch {
     return {
       ok: false,
-      message: `${subject} returned a response that could not be read. Continue with what you already have.`,
+      message: `${subject} returned a response that could not be read. ${fallback}`,
     }
   }
 

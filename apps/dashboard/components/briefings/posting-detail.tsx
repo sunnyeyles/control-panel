@@ -321,11 +321,19 @@ export function PostingDetail({
             </Section>
           ) : null}
 
-          <Section title="Why it matched">
-            <p className="text-sm whitespace-normal text-muted-foreground">
-              {detail.view.matchReason}
-            </p>
-          </Section>
+          {/*
+            Absent for a Posting the user added by pasting its link: it was
+            matched against no criteria, so there is nothing for this section to
+            say. Left out entirely rather than filled with a sentence somebody
+            would have had to invent — see `StoredPostingSchema`.
+          */}
+          {detail.view.matchReason ? (
+            <Section title="Why it matched">
+              <p className="text-sm whitespace-normal text-muted-foreground">
+                {detail.view.matchReason}
+              </p>
+            </Section>
+          ) : null}
         </>
       )}
 

@@ -1,6 +1,7 @@
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
+import type { StoredPosting } from "@workspace/agents/stored-posting"
 /**
  * ⚠️ **Value imports use subpaths, not the barrels.** `current-user.ts` imports
  * `DEV_USER` from here and runs on every request, so the barrels would put
@@ -119,6 +120,26 @@ const CORVUS: Posting = {
   summary:
     "Technical leadership across the payments group, splitting time between design review and hands-on work.",
   matchReason: "Senior scope, though the location is outside your list.",
+}
+
+/**
+ * A Posting nobody's Run found: the user pasted its link.
+ *
+ * ⚠️ **It carries no `matchReason`, and that is the point of it being here.**
+ * There were no criteria behind a pasted link, so the field is absent — which
+ * is legal only against `StoredPostingSchema` and not against the scout's own
+ * `PostingSchema`. Under `DEV_AUTH_BYPASS` this is the row that proves a
+ * link-added Posting parses, renders "Added by link" where the others name a
+ * Briefing, and still opens a detail panel with no Match reason block.
+ */
+const HOLLOWAY: StoredPosting = {
+  title: "Backend Engineer",
+  company: "Holloway Labs",
+  location: "Remote (Australia)",
+  url: "https://boards.greenhouse.io/holloway/jobs/dev-fixture-linked",
+  postedAt: "2026-08-04",
+  summary:
+    "Small platform team, mostly TypeScript and Postgres, four-day week.",
 }
 
 /**
@@ -256,10 +277,17 @@ export function devPostings(): PostingRow[] {
       runId: DEV_RUN_PAUSED_ID,
       postedOn: new Date("2026-07-30T00:00:00.000Z"),
     },
+    // No Run at all: the user added this one by pasting its link.
+    {
+      posting: HOLLOWAY,
+      status: "new",
+      runId: null,
+      postedOn: new Date("2026-08-04T00:00:00.000Z"),
+    },
   ] as const satisfies readonly {
-    posting: Posting
+    posting: StoredPosting
     status: PostingStatus
-    runId: string
+    runId: string | null
     postedOn: Date | null
   }[]
 
@@ -314,18 +342,20 @@ const DEV_POSTING_COUNT = 30
  * a wrong `orderBy` invisible.
  *
  * ⚠️ **`postedOn` is passed in rather than parsed out of `posting.postedAt`,
- * deliberately.** The rule for reading a date out of what the scout copied lives
- * in `parsePostedAt()` in `apps/briefing-worker/src/postings.ts`, and this app
- * does not depend on the worker. Restating it here would be a third copy of a
- * rule that already exists twice — the other being the SQL backfill in
- * `0006_posting_posted_at` — so the caller supplies the answer as data instead,
- * which is all a fixture ever needed to do.
+ * deliberately.** A fixture is data, and the rule for reading a date out of
+ * what a producer copied — `parsePostedAt()` in `@workspace/agents` — is
+ * already stated twice, the other being the SQL backfill in
+ * `0006_posting_posted_at`. Calling it here would put a rule in a fixture; the
+ * caller supplies the answer instead, which is all a fixture ever needed to do.
+ *
+ * `runId` is `null` for a Posting the user added by pasting its link, which is
+ * the state `0009` made legal.
  */
 function devPosting(
   index: number,
-  posting: Posting,
+  posting: StoredPosting,
   status: PostingStatus,
-  runId: string,
+  runId: string | null,
   postedOn: Date | null
 ): PostingRow {
   const lastSeenAt = new Date(RAN_AT.getTime() - index * 3_600_000)
@@ -349,6 +379,7 @@ function devPosting(
     statusChangedAt: status === "new" ? null : RAN_AT,
     firstSeenAt,
     lastSeenAt,
+    // NULL in both for a Posting added by link: no Run has ever seen it.
     firstSeenRunId: runId,
     lastSeenRunId: runId,
   }

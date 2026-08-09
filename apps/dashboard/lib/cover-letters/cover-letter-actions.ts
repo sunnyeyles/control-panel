@@ -304,7 +304,11 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
           // off the row rather than looked up. Provenance exactly as it was
           // when this action read a Run directly — "which Run found this" is
           // worth keeping, and it is still no part of the key.
-          runId: lastSeenRunId,
+          //
+          // Absent, rather than blank, for a Posting the user added by pasting
+          // its link: no Run ever saw it, and a stamped placeholder would read
+          // as a Run whose id had been lost.
+          ...(lastSeenRunId ? { runId: lastSeenRunId } : {}),
           title: posting.title,
           company: posting.company,
           url: posting.url,
@@ -379,7 +383,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
         markdown,
         draftedAt: now(),
         provenance: {
-          runId: stored.lastSeenRunId,
+          ...(stored.lastSeenRunId ? { runId: stored.lastSeenRunId } : {}),
           title: stored.posting.title,
           company: stored.posting.company,
           url: stored.posting.url,

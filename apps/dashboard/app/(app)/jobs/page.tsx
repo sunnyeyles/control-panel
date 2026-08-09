@@ -5,6 +5,7 @@ import {
   BriefingStripSkeleton,
   type BriefingStripEntry,
 } from "@/components/briefings/briefing-strip"
+import { AddPostingByLink } from "@/components/briefings/add-posting-by-link"
 import { CoverLetterAlert } from "@/components/briefings/cover-letter-alert"
 import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
 import { PostingTable } from "@/components/briefings/posting-table"
@@ -50,8 +51,15 @@ export const dynamic = "force-dynamic"
  *
  * The tailored resumes added one more S3 call and not one more per row — a
  * single `ListObjectsV2` — so this did not move again for them.
+ *
+ * ⚠️ **Raised to 60 for `addPostingByLinkAction`, which is not a page load.**
+ * A Server Action posts to the route it was rendered from, so this number
+ * bounds it too — and that action fetches a page through Tavily and then makes
+ * a model call, in sequence. Thirty seconds is a plausible total for the two
+ * and therefore not a safe one; a timeout there reads to the user as a link
+ * that could not be read.
  */
-export const maxDuration = 30
+export const maxDuration = 60
 
 /**
  * Every Posting this user's briefings have ever found.
@@ -216,6 +224,14 @@ export default async function BriefingsPage({
             <code className="text-foreground">.rtf</code> can be stored but not
             yet read.
           </p>
+
+          {/*
+            Outside every `<Suspense>` below, deliberately: it depends on no
+            query, so it paints as soon as the session resolves rather than
+            waiting behind the strip or the table. Its height is fixed, which is
+            what lets `loading.tsx` reserve it exactly rather than guess.
+          */}
+          <AddPostingByLink />
 
           {/*
             One reserved strip row. The height genuinely depends on how many

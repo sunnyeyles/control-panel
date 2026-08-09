@@ -165,6 +165,43 @@ export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
       description,
     }
   },
+
+  // Fetching one named advertisement rather than searching. The actor's own
+  // schema says `startUrls` "bypasses search — fetches details for these
+  // specific listings only", which is why no search field appears beside it:
+  // `searchQuery`, `location`, `daysOld` and `sortMode` all belong to the other
+  // mode, and a query sent alongside a start URL is how one link becomes a
+  // crawl.
+  //
+  // `fetchDetails` is on for the same reason it is on above, and it matters more
+  // here: without it the actor returns `descriptionMarkdown: null`, and a
+  // Posting stored from a link would carry the teaser and nothing else.
+  byUrl: {
+    buildRequestBody(url: string): Record<string, unknown> {
+      return {
+        startUrls: [{ url }],
+        country: "AU",
+        fetchDetails: true,
+        maxItems: 1,
+      }
+    },
+
+    toAdvertisement(job: SeekJob) {
+      return {
+        url: job.url,
+        title: job.title,
+        company: job.company,
+        // Kept apart from the other facts, unlike `toPosting` above: a Posting
+        // row has a `location` column, where a search result has a `·`-joined
+        // line.
+        location: job.location,
+        postedAt: job.publishDateISO,
+        teaser: job.teaser,
+        description: job.descriptionMarkdown ?? job.descriptionText,
+        highlights: job.bulletPoints,
+      }
+    },
+  },
 }
 
 /**

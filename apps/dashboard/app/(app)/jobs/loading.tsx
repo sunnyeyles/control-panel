@@ -1,3 +1,4 @@
+import { AddPostingByLinkSkeleton } from "@/components/briefings/add-posting-by-link"
 import { BriefingStripSkeleton } from "@/components/briefings/briefing-strip"
 import { PostingTableSkeleton } from "@/components/briefings/posting-table-skeleton"
 import { JobTabs } from "@/components/jobs/job-tabs"
@@ -65,10 +66,13 @@ export default function Loading() {
           </p>
 
           {/*
-            The same two placeholders `page.tsx` uses for its own boundaries, in
-            the same order — this element is replaced by that shell mid
-            navigation, so anything only one of them draws is a jump.
+            The same three placeholders `page.tsx` draws, in the same order —
+            this element is replaced by that shell mid navigation, so anything
+            only one of them draws is a jump. The first is not a Suspense
+            fallback there: `AddPostingByLink` waits for nothing, so what is
+            reserved here is simply its height.
           */}
+          <AddPostingByLinkSkeleton />
           <BriefingStripSkeleton />
           <PostingTableSkeleton />
         </section>
