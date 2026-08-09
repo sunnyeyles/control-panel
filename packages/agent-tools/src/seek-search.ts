@@ -1,8 +1,8 @@
-import { tool, type StructuredToolInterface } from "@langchain/core/tools"
-import * as z from "zod"
+import type { StructuredToolInterface } from "@langchain/core/tools"
 
 import {
   apifyBoardSearch,
+  createBoardSearchTool,
   type ApifyBoardSpec,
   type BoardSearchDeps,
   type BoardSearchInput,
@@ -69,6 +69,14 @@ const MAX_RESULTS_LIMIT = 50
  */
 const DEFAULT_DAYS_OLD = 30
 
+/** SEEK's employment-type vocabulary, exactly as its search offers it. */
+const WORK_TYPES = [
+  "Full time",
+  "Part time",
+  "Contract/Temp",
+  "Casual/Vacation",
+] as const
+
 /**
  * The slice of an actor result this tool reads. Everything is optional on
  * purpose: the actor is community-maintained, so a missing field is rendered
@@ -78,7 +86,7 @@ const DEFAULT_DAYS_OLD = 30
  * sets `fetchDetails`; without it the actor returns both as `null`, which is
  * why enabling that flag and reading the field are one change rather than two.
  */
-interface SeekJob {
+export interface SeekJob {
   title?: string
   company?: string
   location?: string
@@ -94,13 +102,14 @@ interface SeekJob {
 }
 
 export interface SeekSearchInput extends BoardSearchInput {
-  workType?: "Full time" | "Part time" | "Contract/Temp" | "Casual/Vacation"
+  workType?: (typeof WORK_TYPES)[number]
 }
 
 /** Injected in tests. Both default to the real thing. */
 export type SeekSearchDeps = BoardSearchDeps
 
-const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
+/** Everything SEEK-shaped in one place, exported for its test. */
+export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
   board: "SEEK",
   actorId: ACTOR_ID,
   defaultMaxResults: DEFAULT_MAX_RESULTS,
@@ -176,53 +185,16 @@ export async function apifySeekSearch(
  * Named for the board, unlike `web_search`: which inventory answers the
  * question is exactly what the scout needs to know, and what the worker's
  * search gate counts.
- *
- * A factory rather than a ready-made tool, because every result it renders is
- * recorded in one run's catalog and named by it.
  */
 export function createSeekSearch(
   catalog: PostingCatalog
 ): StructuredToolInterface {
-  return tool(
-    async (input: SeekSearchInput) => apifySeekSearch(input, catalog),
-    {
-      name: SEEK_TOOL_NAME,
-      description:
-        "Search seek.com.au's live listings for currently-open job postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.",
-      schema: z.object({
-        query: z
-          .string()
-          .describe(
-            'Role title or keywords, e.g. "software engineer TypeScript".'
-          ),
-        location: z
-          .string()
-          .optional()
-          .describe(
-            'Where, as SEEK writes it — "Sydney NSW", "Melbourne VIC", "All Australia". Defaults to all of Australia.'
-          ),
-        maxResults: z
-          .number()
-          .int()
-          .min(1)
-          .max(MAX_RESULTS_LIMIT)
-          .optional()
-          .describe(
-            `How many postings to return, 1-${MAX_RESULTS_LIMIT}. Defaults to ${DEFAULT_MAX_RESULTS}.`
-          ),
-        daysOld: z
-          .number()
-          .int()
-          .min(1)
-          .optional()
-          .describe(
-            `Only postings listed within this many days. Defaults to ${DEFAULT_DAYS_OLD}; tighten it when recency matters more than volume.`
-          ),
-        workType: z
-          .enum(["Full time", "Part time", "Contract/Temp", "Casual/Vacation"])
-          .optional()
-          .describe("Restrict to one employment type. Omit for all."),
-      }),
-    }
-  )
+  return createBoardSearchTool(SEEK_SPEC, catalog, {
+    name: SEEK_TOOL_NAME,
+    source: "seek.com.au",
+    locationDescription:
+      'Where, as SEEK writes it — "Sydney NSW", "Melbourne VIC", "All Australia". Defaults to all of Australia.',
+    workTypes: WORK_TYPES,
+    workTypeDescription: "Restrict to one employment type. Omit for all.",
+  })
 }

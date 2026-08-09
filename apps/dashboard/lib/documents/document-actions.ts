@@ -279,7 +279,14 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     // filters on `userId` as well as `id`, so someone else's id is simply not
     // found — the caller gets one answer for "no such document" and "not
     // yours", which is what stops this being an existence oracle.
-    const document = await findDocument(prisma, caller.userId, resumeId.data)
+    let document: Awaited<ReturnType<typeof findDocument>>
+
+    try {
+      document = await findDocument(prisma, caller.userId, resumeId.data)
+    } catch (error) {
+      console.error("documents: could not load the document to delete", error)
+      return { status: "error", message: "Something went wrong." }
+    }
 
     if (!document) {
       return { status: "error", message: DOCUMENT_GONE }
@@ -290,7 +297,16 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     // invisible and collectable. An object removed with the row still there is
     // a document the user can see and cannot open — so if the S3 call below
     // fails, the delete has still done what the user asked.
-    if (!(await deleteDocumentRow(prisma, caller.userId, resumeId.data))) {
+    let rowDeleted: boolean
+
+    try {
+      rowDeleted = await deleteDocumentRow(prisma, caller.userId, resumeId.data)
+    } catch (error) {
+      console.error("documents: could not delete the row", error)
+      return { status: "error", message: "Something went wrong." }
+    }
+
+    if (!rowDeleted) {
       return { status: "error", message: DOCUMENT_GONE }
     }
 

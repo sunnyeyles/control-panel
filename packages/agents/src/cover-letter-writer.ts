@@ -1,9 +1,7 @@
 import {
-  createAgent,
-  type Agent,
-  type CreateAgentOptions,
-} from "@workspace/agents-core"
-
+  defineToollessAgent,
+  type ToollessAgentOptions,
+} from "./agent-options.ts"
 import type { LetterInstructions } from "./cover-letter.ts"
 
 export const COVER_LETTER_WRITER_SYSTEM_PROMPT = [
@@ -113,17 +111,18 @@ export function coverLetterSystemPrompt(extras?: LetterInstructions): string {
   return lines.join("\n")
 }
 
-export type CreateCoverLetterWriterOptions = Omit<CreateAgentOptions, "tools">
+export type CreateCoverLetterWriterOptions = ToollessAgentOptions
 
 /**
  * The cover-letter writer: drafts one letter, and can do nothing else.
  *
- * `tools: []` is not a quality preference here, it is the containment, and it
- * is a stronger case than the brief writer's. This agent holds the candidate's
- * CV in its context, and the Posting beside it is attacker-influenced text —
- * anyone who can pay to place an advertisement writes it, and `highlights`
- * carries that text into the prompt *verbatim* rather than laundered through a
- * paraphrase, so an instruction hidden in a bullet point survives intact.
+ * Tool-lessness is not a quality preference here, it is the containment, and
+ * it is a stronger case than the brief writer's. This agent holds the
+ * candidate's CV in its context, and the Posting beside it is
+ * attacker-influenced text — anyone who can pay to place an advertisement
+ * writes it, and `highlights` carries that text into the prompt *verbatim*
+ * rather than laundered through a paraphrase, so an instruction hidden in a
+ * bullet point survives intact.
  *
  * An agent that can both read a CV and issue an outbound request can be induced
  * to put one inside the other. Having no tools is exactly what makes copying
@@ -132,21 +131,17 @@ export type CreateCoverLetterWriterOptions = Omit<CreateAgentOptions, "tools">
  * here. When a page fetcher eventually exists it goes on a separate agent that
  * never sees the profile, and hands this one validated data.
  *
- * The tool set is asserted structurally in `cover-letter-writer.test.ts`
- * against a fake chat model, not left to this comment.
+ * The mechanism — and the structural assertion that no caller can arm it — is
+ * `defineToollessAgent`, proven once in `agent-options.test.ts`.
  *
  * A factory rather than an instance, like every agent here: building one
  * constructs a model, which reads `OPENAI_API_KEY` and throws without it.
  *
  * The candidate's saved instructions arrive as a `systemPrompt` the caller
- * composed with {@link coverLetterSystemPrompt} — this factory takes a string
+ * composed with {@link coverLetterSystemPrompt} — the factory takes a string
  * and does not know where it came from, so extending the prompt cannot become a
  * way to change anything else about the agent.
  */
-export function createCoverLetterWriter(
-  options: CreateCoverLetterWriterOptions = {}
-): Agent {
-  const { systemPrompt = COVER_LETTER_WRITER_SYSTEM_PROMPT, ...rest } = options
-
-  return createAgent({ ...rest, systemPrompt, tools: [] })
-}
+export const createCoverLetterWriter = defineToollessAgent(
+  COVER_LETTER_WRITER_SYSTEM_PROMPT
+)

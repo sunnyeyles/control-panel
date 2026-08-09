@@ -105,8 +105,9 @@ function writes(op: CanvasOp): TLShapeId[] {
     case "create":
     case "update":
     case "move":
-    // The arrow, not its endpoints: binding two shapes does not rewrite them.
     case "connect":
+      // For "connect" this is the arrow, not its endpoints: binding two
+      // shapes does not rewrite them.
       return [toShapeId(op.id)]
     case "delete":
     case "focus":

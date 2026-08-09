@@ -36,8 +36,9 @@ export type CoverLetterLookup =
  * CoverLetterCell} below, and the letter section of the expanded detail.
  *
  * A linear scan, not a lookup map. The array holds letters for the visible page
- * only — `loadCoverLetterRows` is given exactly the ids being rendered — so it
- * is bounded by `PAGE_SIZE` and cannot grow with a user's drafting history.
+ * only — `coverLetterRowsFor` narrows the listing to exactly the ids being
+ * rendered — so it is bounded by `PAGE_SIZE` and cannot grow with a user's
+ * drafting history.
  */
 export function useCoverLetter(
   postingId: string,

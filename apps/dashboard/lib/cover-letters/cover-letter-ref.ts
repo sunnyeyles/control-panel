@@ -18,9 +18,6 @@ import {
  * length why there is one copy of it.
  */
 
-/** What is known about the Posting a letter was drafted for, for naming it. */
-export type CoverLetterNameParts = PostingDocumentNameParts
-
 /**
  * The filename a download is offered under.
  *
@@ -30,6 +27,6 @@ export type CoverLetterNameParts = PostingDocumentNameParts
  * worth having one copy of. This stays as the name the letter's own call sites
  * use.
  */
-export function coverLetterFilename(parts: CoverLetterNameParts): string {
+export function coverLetterFilename(parts: PostingDocumentNameParts): string {
   return postingDocumentFilename("Cover letter", parts)
 }

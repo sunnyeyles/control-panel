@@ -33,11 +33,6 @@ const SIGNED_IN: CurrentUser = {
   name: "Alice",
 }
 
-const REFUSED: CurrentUser = {
-  status: "refused",
-  email: "mallory@example.com",
-}
-
 const ANONYMOUS: CurrentUser = { status: "anonymous" }
 
 /** Records what it was asked to do, and can be told to fail. */
@@ -140,63 +135,18 @@ const pdf = (bytes = 1024, name = "My CV.pdf") =>
   new File([new Uint8Array(bytes)], name, { type: "application/pdf" })
 
 describe("uploadDocument — the gate", () => {
-  it("refuses an anonymous caller without touching the store", async () => {
-    const { uploadDocument } = actionsFor(ANONYMOUS)
-
-    const result = await uploadDocument(IDLE, uploadForm(pdf()))
-
-    expect(result.status).toBe("error")
-    // The property that matters more than the message: nothing was written.
-    expect(store.puts).toHaveLength(0)
-  })
-
-  it("gives a refused caller the identical message an anonymous one gets", async () => {
-    // The non-disclosure property. A different message here would confirm to
-    // someone outside AUTH_ALLOWED_EMAILS that their account exists and is
-    // merely not approved. Easy to regress by improving the copy, and invisible
-    // in review — hence a test.
-    const anonymous = await actionsFor(ANONYMOUS).uploadDocument(
-      IDLE,
-      uploadForm(pdf())
-    )
-    const refused = await actionsFor(REFUSED).uploadDocument(
-      IDLE,
-      uploadForm(pdf())
-    )
-
-    expect(refused).toEqual(anonymous)
-    expect(store.puts).toHaveLength(0)
-  })
-
-  it("treats a thrown getUser as unauthorized rather than propagating it", async () => {
-    // `getCurrentUser` touches Postgres to map the auth id onto a platform
-    // user. A database blip must not become an unauthenticated write.
-    const { uploadDocument } = createDocumentActions({
-      getUser: async () => {
-        throw new Error("connection refused")
-      },
-      getResumes: () => store,
-      getPrisma: prisma,
-      getContentLength: async () => undefined,
-    })
-
-    const result = await uploadDocument(IDLE, uploadForm(pdf()))
-
-    expect(result.status).toBe("error")
-    expect(store.puts).toHaveLength(0)
-  })
-
-  it("checks the caller before the body, so a bad file still answers 'not signed in'", async () => {
+  // The wording, the refused/anonymous identity and the thrown-`getUser` case
+  // all belong to `requireUser` and are asserted in `require-user.test.ts`.
+  // What this action owns is the ordering: refused before its store is written.
+  it("refuses an anonymous caller before the body or the store is touched", async () => {
     const { uploadDocument } = actionsFor(ANONYMOUS)
 
     const result = await uploadDocument(IDLE, uploadForm(pdf(10, "virus.exe")))
 
     // An unauthenticated caller learns nothing about what a well-formed
-    // request looks like.
-    expect(result).toEqual({
-      status: "error",
-      message: NOT_AUTHORIZED,
-    })
+    // request looks like, and nothing was written.
+    expect(result).toEqual({ status: "error", message: NOT_AUTHORIZED })
+    expect(store.puts).toHaveLength(0)
   })
 })
 
@@ -560,21 +510,6 @@ describe("deleteDocument", () => {
     expect(rows).toHaveLength(1)
   })
 
-  it("gives a refused caller the identical message an anonymous one gets", async () => {
-    seed()
-
-    const anonymous = await actionsFor(ANONYMOUS).deleteDocument(
-      IDLE,
-      deleteForm(RESUME_ID)
-    )
-    const refused = await actionsFor(REFUSED).deleteDocument(
-      IDLE,
-      deleteForm(RESUME_ID)
-    )
-
-    expect(refused).toEqual(anonymous)
-  })
-
   it("removes the row and then the object, under the session's userId", async () => {
     seed()
 
@@ -656,7 +591,11 @@ describe("deleteDocument", () => {
     expect(rows).toHaveLength(0)
   })
 
-  it("rejects a resumeId that is not a uuid", async () => {
+  it("rejects a malformed resumeId before the bucket is touched", async () => {
+    // What the pattern admits and refuses — the uuid shape, the dash edge
+    // cases, what `crypto.randomUUID` produces — is `RESUME_ID_PATTERN`'s and
+    // is pinned in `document-ref.test.ts`. This action's own property is the
+    // ordering: a value the pattern refuses reaches no store call.
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
       deleteForm("../../someone-else/resumes/theirs")
@@ -664,43 +603,5 @@ describe("deleteDocument", () => {
 
     expect(result.status).toBe("error")
     expect(store.deletes).toHaveLength(0)
-  })
-
-  it("rejects an id that is uuid-shaped only by length", async () => {
-    // 36 characters of [0-9a-f-], and rejected by `assertSegment` in the
-    // storage package for not starting alphanumeric. Caught here, where the
-    // wording fits, rather than in the store, where it does not.
-    const result = await actionsFor(SIGNED_IN).deleteDocument(
-      IDLE,
-      deleteForm("-aaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
-    )
-
-    expect(result.status).toBe("error")
-    expect(store.deletes).toHaveLength(0)
-  })
-
-  it("rejects an id of the right length that is all dashes", async () => {
-    const result = await actionsFor(SIGNED_IN).deleteDocument(
-      IDLE,
-      deleteForm("-".repeat(36))
-    )
-
-    expect(result.status).toBe("error")
-    expect(store.deletes).toHaveLength(0)
-  })
-
-  it("accepts what crypto.randomUUID actually produces", async () => {
-    // The tightened pattern has to admit every id this app has ever written,
-    // or it turns existing documents undeletable.
-    const id = crypto.randomUUID()
-    seed(id)
-
-    const result = await actionsFor(SIGNED_IN).deleteDocument(
-      IDLE,
-      deleteForm(id)
-    )
-
-    expect(result.status).toBe("success")
-    expect(store.deletes).toHaveLength(1)
   })
 })

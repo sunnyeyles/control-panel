@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser } from "@/lib/auth/current-user"
 import { downloadCoverLetter } from "@/lib/cover-letters/download-cover-letter"
-import { contentDisposition } from "@/lib/documents/content-disposition"
+import { postingDocumentResponse } from "@/lib/posting-documents/posting-document-response"
 import { getCoverLetterStore } from "@/lib/storage"
 
 /**
@@ -49,31 +49,7 @@ export async function GET(
     getCoverLetterStore()
   )
 
-  if (letter.status === "not-found") {
-    return Response.json({ error: "Not found" }, { status: 404 })
-  }
-
-  if (letter.status === "failed") {
-    return Response.json({ error: "Download failed" }, { status: 500 })
-  }
-
-  return new Response(letter.markdown, {
-    headers: {
-      // The kind is stored `inline` because these bytes were written by this
-      // application rather than uploaded — but a *download* is what this route
-      // is for, so `contentDisposition()` (which always emits `attachment`) is
-      // reused rather than restated. It also does the header escaping, which is
-      // the half worth not writing twice.
-      "Content-Type": "text/markdown; charset=utf-8",
-      "Content-Disposition": contentDisposition(letter.filename),
-      // Belt-and-braces beside a Markdown body: this is not an upload, so the
-      // stored-XSS argument that makes documents an attachment does not apply
-      // here — but a browser that sniffs a letter as HTML would still run it on
-      // this origin with the session cookie attached.
-      "X-Content-Type-Options": "nosniff",
-      // Personal data behind a CDN. `private` keeps it out of shared caches;
-      // `no-store` keeps it out of the browser's disk cache on a shared machine.
-      "Cache-Control": "private, no-store",
-    },
-  })
+  // The status→code mapping and every header live in
+  // `postingDocumentResponse`, shared with the tailored-resume route.
+  return postingDocumentResponse(letter)
 }

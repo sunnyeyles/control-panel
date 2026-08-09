@@ -1,8 +1,7 @@
 import {
-  createAgent,
-  type Agent,
-  type CreateAgentOptions,
-} from "@workspace/agents-core"
+  defineToollessAgent,
+  type ToollessAgentOptions,
+} from "./agent-options.ts"
 
 /**
  * ⚠️ **Every clause here is load-bearing, and the reason is that this prompt is
@@ -46,37 +45,27 @@ export const RESUME_TAILOR_SYSTEM_PROMPT = [
   "Keep the resume the same length as the source or shorter; tailoring removes more than it adds. Return the resume itself as markdown, using headings for sections and bullet lists for roles and skills — no code fence, no preamble, no commentary, no notes about what you changed.",
 ].join("\n")
 
-export type CreateResumeTailorOptions = Omit<CreateAgentOptions, "tools">
+export type CreateResumeTailorOptions = ToollessAgentOptions
 
 /**
  * The resume tailor: rewrites one resume for one Posting, and can do nothing
  * else.
  *
- * `tools: []` is the containment, exactly as it is for the cover-letter writer,
- * and the argument transfers without weakening: this agent holds the candidate's
- * whole CV in its context while the Posting's `highlights` reach its prompt
- * *verbatim* — text written by anyone who can pay to place an advertisement. An
- * agent that can both read a CV and issue an outbound request can be induced to
- * put one inside the other. Having no tools is what makes copying the
- * advertisement acceptable: injected text can shape the prose of a document the
- * user then reads and edits, and can reach nothing else.
+ * Tool-lessness is the containment, exactly as it is for the cover-letter
+ * writer, and the argument transfers without weakening: this agent holds the
+ * candidate's whole CV in its context while the Posting's `highlights` reach
+ * its prompt *verbatim* — text written by anyone who can pay to place an
+ * advertisement. An agent that can both read a CV and issue an outbound
+ * request can be induced to put one inside the other. Having no tools is what
+ * makes copying the advertisement acceptable: injected text can shape the
+ * prose of a document the user then reads and edits, and can reach nothing
+ * else.
  *
- * **Do not add a tool here.** When a page fetcher eventually exists it goes on a
- * separate agent that never sees the resume, and hands this one validated data.
- * The tool set is asserted structurally in `resume-tailor.test.ts` against a fake
- * chat model, not left to this comment.
- *
- * A factory rather than an instance, like every agent here: building one
- * constructs a model, which reads `OPENAI_API_KEY` and throws without it.
- *
- * `Omit<CreateAgentOptions, "tools">` is what keeps `tools` off the type, and the
- * factory passing its own `tools: []` last is what keeps a caller forcing one
- * past the compiler from arming it either.
+ * **Do not add a tool here.** When a page fetcher eventually exists it goes on
+ * a separate agent that never sees the resume, and hands this one validated
+ * data. The mechanism — and the structural assertion that no caller can arm it
+ * — is `defineToollessAgent`, proven once in `agent-options.test.ts`.
  */
-export function createResumeTailor(
-  options: CreateResumeTailorOptions = {}
-): Agent {
-  const { systemPrompt = RESUME_TAILOR_SYSTEM_PROMPT, ...rest } = options
-
-  return createAgent({ ...rest, systemPrompt, tools: [] })
-}
+export const createResumeTailor = defineToollessAgent(
+  RESUME_TAILOR_SYSTEM_PROMPT
+)

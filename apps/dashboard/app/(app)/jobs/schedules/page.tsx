@@ -1,4 +1,7 @@
+import { Suspense } from "react"
+
 import { BriefingSection } from "@/components/briefings/jobs/briefing-section"
+import { BriefingSectionSkeleton } from "@/components/briefings/jobs/briefing-section-skeleton"
 import { JobTabs } from "@/components/jobs/job-tabs"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 
@@ -38,8 +41,16 @@ export default async function BriefingSchedulesPage() {
             `user.userId` is `users.id` — the platform identity — not the Neon
             Auth id. It is what `jobs.user_id` references, so it is the only
             thing that can scope this list.
+
+            Streamed rather than awaited above, so the tab bar and the shell
+            paint as soon as the session resolves off its cookie instead of
+            waiting on the jobs query. Same arrangement as `/jobs/letters`, and
+            the same reason `/jobs` puts each of its four loads behind its own
+            boundary: an `await` at the top of a page is the whole page's wait.
           */}
-          <BriefingSection userId={user.userId} />
+          <Suspense fallback={<BriefingSectionSkeleton cards={2} />}>
+            <BriefingSection userId={user.userId} />
+          </Suspense>
         </div>
       </div>
     </main>

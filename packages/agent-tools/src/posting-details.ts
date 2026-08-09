@@ -1,7 +1,11 @@
 import { tool, type StructuredToolInterface } from "@langchain/core/tools"
 import * as z from "zod"
 
-import type { CatalogEntry, PostingCatalog } from "./posting-catalog.ts"
+import {
+  normaliseId,
+  type CatalogEntry,
+  type PostingCatalog,
+} from "./posting-catalog.ts"
 
 /**
  * The second half of a search: the advertisement itself, by id.
@@ -136,18 +140,22 @@ export function createPostingDetails(
       const entries: CatalogEntry[] = []
       const unknown: string[] = []
       const asked = new Set<string>()
+      const missed = new Set<string>()
 
       for (const id of input.ids) {
         const entry = catalog.get(id)
 
         // Deduplicated on what the catalog resolved to rather than on what was
         // asked for, so two spellings of one id — bracketed and bare — cost one
-        // description and not two.
+        // description and not two. The misses get the same treatment through
+        // `normaliseId`, or the two spellings would be named twice in the
+        // correction.
         if (entry) {
           if (asked.has(entry.id)) continue
           asked.add(entry.id)
           entries.push(entry)
-        } else if (!unknown.includes(id)) {
+        } else if (!missed.has(normaliseId(id))) {
+          missed.add(normaliseId(id))
           unknown.push(id)
         }
       }

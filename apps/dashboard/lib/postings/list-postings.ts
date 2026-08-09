@@ -8,8 +8,7 @@ import {
   type PrismaClient,
 } from "@workspace/db"
 
-import { formatCalendarDate } from "@/lib/format-calendar-date"
-import { formatUtcDateTime } from "@/lib/format-utc-datetime"
+import { formatCalendarDate, formatUtcDateTime } from "@/lib/format-dates"
 
 import { PAGE_SIZE, type PostingQuery, type PostingSort } from "./posting-query"
 import { postingSource, type PostingSource } from "./posting-source"
@@ -229,7 +228,7 @@ export async function listPostings(
  *
  * ⚠️ **Two enums, and the mapping between them is the point.**
  * `POSTING_SORTS` in `posting-query.ts` is how a *URL* spells a sort;
- * `POSTING_ORDERS` in `@workspace/db` is what the query orders by. Keeping them
+ * `PostingOrder` in `@workspace/db` is what the query orders by. Keeping them
  * separate is what stops an address bar from naming a database column — a value
  * arriving from outside has to survive this table, rather than being handed to
  * the query because it happened to parse. Two of the four differ in spelling for

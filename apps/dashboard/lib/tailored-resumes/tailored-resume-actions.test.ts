@@ -222,6 +222,12 @@ function form(entries: Record<string, string>): FormData {
 
 describe("generateTailoredResume", () => {
   describe("who is asking", () => {
+    /**
+     * The gate itself — identical wording for anonymous and unapproved, the
+     * refusal landing before the Posting query — is
+     * `prepare-posting-document.test.ts`'s. What this asserts is the ordering
+     * this action owns: refused before *its* model and *its* bucket.
+     */
     it("refuses an anonymous caller before the body is read at all", async () => {
       const result = await actionsFor(ANONYMOUS).generateTailoredResume(
         IDLE,
@@ -234,19 +240,6 @@ describe("generateTailoredResume", () => {
       })
       expect(tailor.built).toBe(0)
       expect(objects.puts).toHaveLength(0)
-    })
-
-    it("gives a refused caller the identical state an anonymous one gets", async () => {
-      const refused = await actionsFor(REFUSED).generateTailoredResume(
-        IDLE,
-        form({ postingId: POSTING_ID })
-      )
-      const anonymous = await actionsFor(ANONYMOUS).generateTailoredResume(
-        IDLE,
-        form({ postingId: POSTING_ID })
-      )
-
-      expect(refused).toEqual(anonymous)
     })
   })
 
@@ -289,49 +282,6 @@ describe("generateTailoredResume", () => {
       expect(objects.keys()).toEqual([
         `${ENVIRONMENT}/${USER_ID}/tailored-resumes/${POSTING_ID}.md`,
       ])
-    })
-
-    it("refuses a malformed Posting id before anything is queried", async () => {
-      const result = await actionsFor(SIGNED_IN).generateTailoredResume(
-        IDLE,
-        form({ postingId: "../../someone-else" })
-      )
-
-      expect(result).toMatchObject({ status: "error" })
-      expect(tailor.built).toBe(0)
-      expect(objects.puts).toHaveLength(0)
-    })
-  })
-
-  describe("someone else's Posting", () => {
-    /**
-     * The row exists, under another owner. The lookup names the caller as half
-     * its key, so it is not found rather than found-and-refused — and the
-     * message is the one a Posting nobody has gets, because Posting ids are
-     * derived from a URL anyone reading the same job board can produce.
-     */
-    it("is refused with the message a missing one gets, exactly", async () => {
-      db.seedPosting(
-        OTHER_USER_ID,
-        posting({ url: "https://x.test/2" }),
-        RUN_ID
-      )
-
-      const theirs = await actionsFor(SIGNED_IN).generateTailoredResume(
-        IDLE,
-        form({ postingId: postingId(posting({ url: "https://x.test/2" })) })
-      )
-      const missing = await actionsFor(SIGNED_IN).generateTailoredResume(
-        IDLE,
-        form({ postingId: "abcdefabcdefabcd" })
-      )
-
-      expect(theirs).toMatchObject({
-        status: "error",
-        message: POSTING_NOT_FOUND,
-      })
-      expect(theirs).toEqual(missing)
-      expect(tailor.built).toBe(0)
     })
   })
 

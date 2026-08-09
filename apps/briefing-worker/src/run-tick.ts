@@ -3,13 +3,11 @@ import {
   dueJobs,
   failRun,
   finishRun,
-  recordArtifact,
-  recordPostings,
-  recordRunFindings,
   type PrismaClient,
 } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
+import { prismaRecorders } from "./recorders.ts"
 import { runBriefing } from "./run-briefing.ts"
 
 /**
@@ -103,34 +101,31 @@ export async function runTick(
       // `slot.scheduledFor` is the occurrence, and is what the brief's S3
       // partition day is derived from — not the instant the run finishes, or a
       // 23:30 slot completing after midnight files under a day its run row
-      // disagrees with.
+      // disagrees with. The recorders take the same instant; see `recorders.ts`.
       const briefing = await runBriefing({
         job,
         slot,
         briefs,
-        recordArtifact: (runId, objectKey) =>
-          recordArtifact(prisma, runId, objectKey),
-        recordFindings: (runId, findings) =>
-          recordRunFindings(prisma, runId, findings),
-        // The cumulative record, which every Posting outlives its run through.
-        // `seenAt` is `slot.scheduledFor` for the same reason the object key
-        // partitions on it: a 23:30 slot that finishes after midnight must not
-        // claim it found something the following day. The clock says when the
-        // work happened; the slot says which occurrence it was.
-        recordPostings: (runId, postings) =>
-          recordPostings(prisma, {
-            userId: job.userId,
-            runId,
-            seenAt: slot.scheduledFor,
-            postings,
-          }),
+        ...prismaRecorders(prisma, {
+          userId: job.userId,
+          seenAt: slot.scheduledFor,
+        }),
       })
 
       // Third argument, and usually `undefined`. A run that produced a brief
       // but could not keep its findings, or could not add what it found to the
       // cumulative record, is `succeeded` with a non-empty `failure` — the rule
       // `packages/db/src/types.ts` states.
-      await finishRun(prisma, slot.runId, briefing.warnings)
+      //
+      // `false` is a lost race — the row was already terminal, so someone else
+      // decided this run's outcome. The work still happened and the brief is
+      // stored, so it counts as succeeded here; the log line is the only trace
+      // the lost transition leaves.
+      if (!(await finishRun(prisma, slot.runId, briefing.warnings))) {
+        console.warn(
+          `run ${slot.runId}: already terminal when the tick went to finish it`
+        )
+      }
       report.succeeded += 1
     } catch (error) {
       // Recorded, then carried. The row makes the failure queryable; the run

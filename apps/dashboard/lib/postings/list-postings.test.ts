@@ -1,14 +1,8 @@
 import type { PrismaClient } from "@workspace/db"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import {
-  compareNullity,
-  comparePostingValues,
-  type PostingOrderBy,
-} from "@/lib/dev/fake-prisma"
-
 import { formatSeenAgo, listPostings } from "./list-postings"
-import { PAGE_SIZE, parsePostingQuery, POSTING_SORTS } from "./posting-query"
+import { PAGE_SIZE, parsePostingQuery } from "./posting-query"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
@@ -52,21 +46,28 @@ function payload(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * A stand-in for `prisma.posting` that honours the parts of the query this
- * module depends on — the `userId` filter, the ordering, `skip` and `take`.
+ * A stand-in for `prisma.posting` that records every query it is handed and
+ * answers with its seeded rows, filtered by the `where`'s `userId`.
  *
- * Deliberately a real filter rather than a stub returning canned rows: the
- * claim under test is that a second user's Postings are unreachable, and a fake
- * that returned whatever it was seeded with would assert nothing about it. It
- * also records every query it was handed, so a test can check the filter and
- * the tie-break reached the database rather than only that this implementation
- * applied them.
+ * That one filter is real rather than canned because the claim under test is
+ * that a second user's Postings are unreachable, and a fake that returned
+ * whatever it was seeded with would assert nothing about it.
  *
- * `select` is not applied — the rows are seeded with the relation already on
- * them, which is what a database honouring the projection would answer. That
- * the projection was *asked for* is asserted against the recorded query
- * instead, since a fake answering more than it was asked cannot otherwise tell
- * a `select` that stopped naming the relation from one that still does.
+ * **Ordering, `skip` and `take` are deliberately not applied.** `listPostings`
+ * delegates the page read to `listPostingPage` in `@workspace/db`, and the
+ * ordering and paging behaviour — NULLS LAST in both directions, the
+ * `postingId` tie-break, the clamp against the real page count — is proven
+ * against a real Postgres in `packages/db/src/stores.test.ts`. This suite used
+ * to re-sort with JavaScript written to match what Postgres was believed to
+ * do, which checked the belief rather than the database. Rows come back in the
+ * order they were seeded.
+ *
+ * `select` is not applied either — the rows are seeded with the relation
+ * already on them, which is what a database honouring the projection would
+ * answer. That the projection was *asked for* is asserted against the recorded
+ * query instead, since a fake answering more than it was asked cannot
+ * otherwise tell a `select` that stopped naming the relation from one that
+ * still does.
  */
 class FakeDb {
   readonly rows: PostingRow[] = []
@@ -96,14 +97,6 @@ class FakeDb {
     return this
   }
 
-  many(count: number): this {
-    for (let index = 0; index < count; index++) {
-      this.posting({ postingId: `${index}`.padStart(16, "0") })
-    }
-
-    return this
-  }
-
   asPrisma(): PrismaClient {
     return {
       posting: {
@@ -111,52 +104,9 @@ class FakeDb {
           this.counts.push(query)
           return this.mine(query.where.userId).length
         },
-        findMany: async (query: {
-          where: { userId: string }
-          orderBy: PostingOrderBy[]
-          skip: number
-          take: number
-          select: Record<string, unknown>
-        }) => {
+        findMany: async (query: { where: { userId: string } }) => {
           this.queries.push(query)
-
-          const ordered = [...this.mine(query.where.userId)].sort(
-            (left, right) => {
-              for (const clause of query.orderBy) {
-                for (const [field, spec] of Object.entries(clause)) {
-                  const direction = typeof spec === "string" ? spec : spec.sort
-                  const nulls =
-                    typeof spec === "string" ? undefined : spec.nulls
-
-                  const a = left[field as keyof PostingRow]
-                  const b = right[field as keyof PostingRow]
-
-                  // Nullity is decided before the direction is applied, as
-                  // Postgres decides it: `nulls: "last"` means last whichever
-                  // way the values run. Flipping it with the direction is
-                  // exactly the bug the tests below would then fail to catch.
-                  // `compareNullity` is the same rule `lib/dev/fake-prisma.ts`
-                  // applies for its own fake `prisma.posting`, reused here
-                  // rather than restated so the two fakes cannot disagree.
-                  const byNullity = compareNullity(a, b, direction, nulls)
-                  if (byNullity !== undefined) {
-                    if (byNullity !== 0) return byNullity
-                    continue
-                  }
-
-                  const compared = comparePostingValues(field, a, b)
-
-                  if (compared !== 0) {
-                    return direction === "desc" ? -compared : compared
-                  }
-                }
-              }
-
-              return 0
-            }
-          )
-
-          return ordered.slice(query.skip, query.skip + query.take)
+          return this.mine(query.where.userId)
         },
       },
     } as unknown as PrismaClient
@@ -226,201 +176,10 @@ describe("listPostings", () => {
     ])
   })
 
-  it("skips and takes a whole page at a time", async () => {
-    db.many(PAGE_SIZE * 2 + 3)
-
-    const first = await listPostings(
-      db.asPrisma(),
-      USER_ID,
-      parsePostingQuery()
-    )
-    expect(first).toMatchObject({ page: 1, pageCount: 3 })
-    expect(first.postings).toHaveLength(PAGE_SIZE)
-    expect(db.queries.at(-1)).toMatchObject({ skip: 0, take: PAGE_SIZE })
-
-    const second = await listPostings(
-      db.asPrisma(),
-      USER_ID,
-      parsePostingQuery({ page: "2" })
-    )
-    expect(second.page).toBe(2)
-    expect(db.queries.at(-1)).toMatchObject({
-      skip: PAGE_SIZE,
-      take: PAGE_SIZE,
-    })
-
-    // No row on two pages and none skipped between them.
-    const ids = [...first.postings, ...second.postings].map((row) => row.id)
-    expect(new Set(ids).size).toBe(PAGE_SIZE * 2)
-  })
-
-  /**
-   * ⚠️ A page past the end renders the last page, not an empty one with
-   * working controls underneath it.
-   */
-  it("clamps a page past the end to the last one", async () => {
-    db.many(PAGE_SIZE + 1)
-
-    const page = await listPostings(
-      db.asPrisma(),
-      USER_ID,
-      parsePostingQuery({ page: "99" })
-    )
-
-    expect(page).toMatchObject({ page: 2, pageCount: 2 })
-    expect(page.postings).toHaveLength(1)
-    expect(db.queries.at(-1)).toMatchObject({ skip: PAGE_SIZE })
-  })
-
-  /**
-   * ⚠️ **The round-trip budget, asserted rather than described.** The count and
-   * the page are asked for concurrently, so an ordinary render pays one round
-   * trip where it used to pay two serial ones. The price is a speculative fetch
-   * for a page that may not exist — which is why the overshoot case below is
-   * the only one that still issues two.
-   */
-  it("asks for the count and the page in one round trip", async () => {
-    db.many(PAGE_SIZE + 1)
-
-    await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
-
-    expect(db.counts).toHaveLength(1)
-    expect(db.queries).toHaveLength(1)
-  })
-
-  it("re-fetches only when the requested page really did overshoot", async () => {
-    db.many(PAGE_SIZE + 1)
-
-    await listPostings(
-      db.asPrisma(),
-      USER_ID,
-      parsePostingQuery({ page: "99" })
-    )
-
-    // The first is the speculative fetch for page 99, thrown away; the second
-    // is the clamped page actually rendered.
-    expect(db.queries).toHaveLength(2)
-    expect(db.queries.at(0)).toMatchObject({ skip: 98 * PAGE_SIZE })
-    expect(db.queries.at(-1)).toMatchObject({ skip: PAGE_SIZE })
-  })
-
-  /**
-   * ⚠️ Offset pagination over a non-unique sort key shows one row twice and
-   * skips another. Every order carries the tie-break, in the same direction.
-   */
-  it("tie-breaks every order on the posting id", async () => {
-    db.many(1)
-
-    // Driven from the list itself rather than written out again: a sort added
-    // to `POSTING_SORTS` without a tie-break is exactly what this asserts
-    // against, and a hand-copied list here would simply not cover it.
-    for (const sort of POSTING_SORTS) {
-      await listPostings(
-        db.asPrisma(),
-        USER_ID,
-        parsePostingQuery({ sort, dir: "asc" })
-      )
-
-      expect(db.queries.at(-1)).toMatchObject({
-        orderBy: [expect.anything(), { postingId: "asc" }],
-      })
-    }
-  })
-
-  it("orders on the column the query names", async () => {
-    db.posting({ postingId: "a".repeat(16), title: "Zebra Wrangler" }).posting({
-      postingId: "b".repeat(16),
-      title: "Alpaca Herder",
-    })
-
-    const page = await listPostings(
-      db.asPrisma(),
-      USER_ID,
-      parsePostingQuery({ sort: "title" })
-    )
-
-    expect(page.postings.map((row) => row.title)).toEqual([
-      "Alpaca Herder",
-      "Zebra Wrangler",
-    ])
-  })
-
-  /**
-   * The Posted column is the only nullable thing this table orders by, and NULL
-   * there does not mean "long ago" — it means the advertisement did not state a
-   * date, or stated something the write path would not read as one.
-   *
-   * ⚠️ **Both directions are asserted, and that is the whole test.** Postgres
-   * defaults to NULLS FIRST under `DESC`, so a clause that merely said
-   * `{ postedAt: "desc" }` would put every undated row above every dated one —
-   * passing an ascending-only test and being visibly wrong on the first click.
-   */
-  describe("ordering on the posting date", () => {
-    function seedDatedAndUndated() {
-      db.posting({
-        postingId: "a".repeat(16),
-        title: "Older",
-        postedAt: new Date("2026-07-01T00:00:00.000Z"),
-      })
-        .posting({
-          postingId: "b".repeat(16),
-          title: "Newer",
-          postedAt: new Date("2026-08-01T00:00:00.000Z"),
-        })
-        .posting({ postingId: "c".repeat(16), title: "Undated" })
-    }
-
-    it("puts the newest first and the undated last", async () => {
-      seedDatedAndUndated()
-
-      const page = await listPostings(
-        db.asPrisma(),
-        USER_ID,
-        parsePostingQuery({ sort: "posted" })
-      )
-
-      expect(page.postings.map((row) => row.title)).toEqual([
-        "Newer",
-        "Older",
-        "Undated",
-      ])
-    })
-
-    it("keeps the undated last when the order is reversed", async () => {
-      seedDatedAndUndated()
-
-      const page = await listPostings(
-        db.asPrisma(),
-        USER_ID,
-        parsePostingQuery({ sort: "posted", dir: "asc" })
-      )
-
-      expect(page.postings.map((row) => row.title)).toEqual([
-        "Older",
-        "Newer",
-        "Undated",
-      ])
-    })
-
-    it("asks the database for nulls last rather than doing it afterwards", async () => {
-      db.many(1)
-
-      await listPostings(
-        db.asPrisma(),
-        USER_ID,
-        parsePostingQuery({ sort: "posted" })
-      )
-
-      // Paging is offset-based, so a rule applied to the page in memory would
-      // only order the twenty-five rows that already came back.
-      expect(db.queries.at(-1)).toMatchObject({
-        orderBy: [
-          { postedAt: { sort: "desc", nulls: "last" } },
-          { postingId: "desc" },
-        ],
-      })
-    })
-  })
+  // How a page is ordered, paged, tie-broken and clamped is `listPostingPage`'s
+  // contract, exercised against a real Postgres in
+  // `packages/db/src/stores.test.ts` — see the preamble of its "reading a page"
+  // block for why those assertions could not honestly live here.
 
   describe("the Posted cell", () => {
     it("formats the column when the write path read a date", async () => {
@@ -523,11 +282,10 @@ describe("listPostings", () => {
 
     const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
 
-    // Most recently seen first, which is the default order — so the Greenhouse
-    // row, seeded second and therefore later, leads.
+    // Seeded order — the fake does not sort; the real order is the database's.
     expect(page.postings.map((posting) => posting.source)).toEqual([
-      { label: "boards.greenhouse.io", recognised: false },
       { label: "LinkedIn", recognised: true },
+      { label: "boards.greenhouse.io", recognised: false },
     ])
   })
 
@@ -597,8 +355,8 @@ describe("listPostings", () => {
     const page = await listPostings(db.asPrisma(), USER_ID, parsePostingQuery())
 
     expect(page.postings.map((row) => row.title)).toEqual([
-      "Also here",
       "Still here",
+      "Also here",
     ])
     expect(page.postings.map((row) => row.briefing)).toEqual([
       "Unknown briefing",

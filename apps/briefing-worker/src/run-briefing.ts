@@ -19,7 +19,7 @@ import {
   parseJobSearchConfig,
   scoutLlmCallBudget,
   toSearchBrief,
-} from "./job-search-config.ts"
+} from "@workspace/job-search"
 import { toNewPostings } from "./postings.ts"
 import { resolvePostings, type PostingLookup } from "./resolve-postings.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
@@ -335,10 +335,7 @@ export async function runBriefing(
         )
 
         llmCalls += scouted.llmCalls
-        const searchesRun = successfulSearches(
-          scouted.messages,
-          SEARCH_TOOL_NAMES
-        )
+        const searchesRun = successfulSearches(scouted.messages)
         searches = searchesRun.length
         searchesBySource = countBySource(searchesRun)
 

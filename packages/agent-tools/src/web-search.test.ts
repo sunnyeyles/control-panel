@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest"
 
+import {
+  fakeFetch,
+  jsonResponse,
+  requestBody,
+  type Capture,
+} from "./test-support/search-fakes.ts"
 import { tavilySearch } from "./web-search.ts"
 
 /**
@@ -9,36 +15,6 @@ import { tavilySearch } from "./web-search.ts"
  */
 
 const API_KEY = "tvly-test-key"
-
-interface Capture {
-  url: string
-  init: RequestInit
-}
-
-/**
- * A `fetch` that records the request and replies from a script. An `Error`
- * reply is thrown rather than returned, standing in for a transport fault.
- */
-function fakeFetch(reply: Response | Error, captured: Capture[]) {
-  return (async (url: string | URL | Request, init?: RequestInit) => {
-    captured.push({ url: String(url), init: init ?? {} })
-    if (reply instanceof Error) throw reply
-    // Cloned, not returned directly: a Response body reads once, and some tests
-    // drive the same fake through several calls.
-    return reply.clone()
-  }) as unknown as typeof globalThis.fetch
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  })
-}
-
-function requestBody(capture: Capture): Record<string, unknown> {
-  return JSON.parse(String(capture.init.body)) as Record<string, unknown>
-}
 
 const ONE_RESULT = {
   results: [

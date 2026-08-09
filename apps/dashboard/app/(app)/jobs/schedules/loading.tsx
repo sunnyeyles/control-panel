@@ -1,5 +1,5 @@
+import { BriefingSectionSkeleton } from "@/components/briefings/jobs/briefing-section-skeleton"
 import { JobTabs } from "@/components/jobs/job-tabs"
-import { Skeleton } from "@workspace/ui/components/skeleton"
 
 /**
  * ⚠️ **This file exists to override an inherited skeleton, not to add one.**
@@ -23,6 +23,11 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
  *
  * Shape only, no prose: unlike the postings skeleton this one duplicates no
  * sentences, so there is nothing here to keep in step with the page.
+ *
+ * The skeleton beneath the bar is the page's own `<Suspense>` fallback, drawn
+ * from the same component — so the transition from this file to the page is,
+ * for the section itself, no transition at all. Same arrangement as
+ * `jobs/letters/loading.tsx`.
  */
 export default function Loading() {
   return (
@@ -35,19 +40,9 @@ export default function Loading() {
         <JobTabs />
 
         <div className="flex w-full max-w-2xl flex-col gap-10">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-6 w-32" />
-              <Skeleton className="h-4 w-full max-w-md" />
-            </div>
-
-            {/* Two briefing cards. Most users have one or two; an empty column
-                would read as "no briefings" a moment before the real answer. */}
-            <Skeleton className="h-36 w-full rounded-lg" />
-            <Skeleton className="h-36 w-full rounded-lg" />
-
-            <Skeleton className="h-4 w-full max-w-sm" />
-          </div>
+          {/* Two cards. Most users have one or two; an empty column would read
+              as "no briefings" a moment before the real answer. */}
+          <BriefingSectionSkeleton cards={2} />
         </div>
       </div>
     </main>

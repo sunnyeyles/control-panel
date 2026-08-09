@@ -464,13 +464,17 @@ export type PostingDetailResult =
 /**
  * What the user is told, counting only what actually went.
  *
- * The partial case is reported rather than rounded up to a success: a letter
+ * The partial case is reported rather than rounded up to a success: a document
  * that would not delete leaves its Posting on the page, and a message claiming
  * otherwise would read as a UI that had not refreshed.
+ *
+ * "documents", not "cover letters" — the same rule as `DOCUMENTS_UNAVAILABLE`:
+ * a Posting carries two, and the message cannot name which one refused without
+ * being wrong half the time.
  */
 function deleteMessage(removed: number, attempted: number): string {
   if (removed < attempted) {
-    return `Deleted ${removed} of ${attempted} postings — the rest were left alone because their cover letters could not be deleted.`
+    return `Deleted ${removed} of ${attempted} postings — the rest were left alone because the documents saved against them could not be deleted.`
   }
 
   return `Deleted ${removed} ${removed === 1 ? "posting" : "postings"}.`

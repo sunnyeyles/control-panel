@@ -35,11 +35,15 @@
  * one bad search does not sink a run that has other searches to make.
  */
 
+import { tool, type StructuredToolInterface } from "@langchain/core/tools"
+import * as z from "zod"
+
 import type {
   BoardPosting,
   CatalogEntry,
   PostingCatalog,
 } from "./posting-catalog.ts"
+import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
 
 /** Caps every actor run server-side, in seconds. */
 const RUN_TIMEOUT_SECONDS = 120
@@ -126,13 +130,7 @@ export interface BoardSearchDeps {
  * Mirrors `getTavilyApiKey()` in `web-search.ts`.
  */
 function getApifyToken(board: string): string {
-  const apiToken = process.env.APIFY_TOKEN
-  if (!apiToken) {
-    throw new Error(
-      `APIFY_TOKEN is not set, so there is no way to search ${board}.`
-    )
-  }
-  return apiToken
+  return requireEnv("APIFY_TOKEN", `search ${board}`)
 }
 
 /**
@@ -224,10 +222,7 @@ export async function apifyBoardSearch<TItem>(
   const apiToken = deps.apiToken ?? getApifyToken(spec.board)
 
   const requested = input.maxResults ?? spec.defaultMaxResults
-  const maxResults = Math.min(
-    Math.max(Math.trunc(requested), 1),
-    spec.maxResultsLimit
-  )
+  const maxResults = clampMaxResults(requested, spec.maxResultsLimit)
 
   const search: ResolvedBoardSearch = {
     query,
@@ -238,47 +233,25 @@ export async function apifyBoardSearch<TItem>(
     daysOld: input.daysOld ?? spec.defaultDaysOld,
   }
 
-  let response: Response
-  try {
-    response = await doFetch(
-      `https://api.apify.com/v2/acts/${spec.actorId}/run-sync-get-dataset-items?timeout=${RUN_TIMEOUT_SECONDS}`,
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${apiToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(spec.buildRequestBody(search)),
-      }
-    )
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return `The ${spec.board} search for "${query}" could not be sent: ${message}. Continue with what you already have.`
-  }
+  const subject = `The ${spec.board} search for "${query}"`
 
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(
-      `Apify rejected the API token (HTTP ${response.status}). APIFY_TOKEN is set but not accepted.`
-    )
-  }
-
-  if (!response.ok) {
-    return `The ${spec.board} search for "${query}" failed with HTTP ${response.status}. Try again with different criteria, or continue with what you already have.`
-  }
-
-  let body: unknown
-  try {
-    body = await response.json()
-  } catch {
-    return `The ${spec.board} search for "${query}" returned a response that could not be read. Continue with what you already have.`
-  }
+  const result = await searchApiPost({
+    fetch: doFetch,
+    url: `https://api.apify.com/v2/acts/${spec.actorId}/run-sync-get-dataset-items?timeout=${RUN_TIMEOUT_SECONDS}`,
+    token: apiToken,
+    body: spec.buildRequestBody(search),
+    subject,
+    retryAdvice: "different criteria",
+    auth: { service: "Apify", credential: "API token", envVar: "APIFY_TOKEN" },
+  })
+  if (!result.ok) return result.message
 
   // The synchronous endpoint returns the dataset items as a bare array.
-  if (!Array.isArray(body)) {
-    return `The ${spec.board} search for "${query}" returned no result list. Continue with what you already have.`
+  if (!Array.isArray(result.body)) {
+    return `${subject} returned no result list. Continue with what you already have.`
   }
 
-  const items = body as TItem[]
+  const items = result.body as TItem[]
   const kept = spec.keepItem
     ? items.filter((item) => spec.keepItem!(item, search))
     : items
@@ -288,10 +261,16 @@ export async function apifyBoardSearch<TItem>(
   // place on it rather than several — but a posting that genuinely answers two
   // different searches has to appear in both, or the second search reports
   // nothing found and the model believes it.
+  //
+  // The cap is applied to what will be reported, not to the raw items — the
+  // same rule `keepItem` follows — so a duplicate does not eat one of the
+  // requested places.
   const seen = new Set<string>()
   const entries: CatalogEntry[] = []
 
-  for (const item of kept.slice(0, search.maxResults)) {
+  for (const item of kept) {
+    if (entries.length >= search.maxResults) break
+
     // `undefined` is a posting the catalog will not identify, which is one that
     // arrived with no URL — see `record`.
     const entry = catalog.record(spec.board, spec.toPosting(item))
@@ -302,4 +281,75 @@ export async function apifyBoardSearch<TItem>(
   }
 
   return formatSearchResults(spec.board, query, entries)
+}
+
+/**
+ * What a board contributes to the schema and description the model reads —
+ * everything else is derived from its {@link ApifyBoardSpec}.
+ */
+export interface BoardSearchToolOptions {
+  /** The tool's name, e.g. `seek_search`. */
+  name: string
+  /** How the description names the inventory: `seek.com.au`, `LinkedIn`. */
+  source: string
+  /** How the board writes places, with examples in its own spelling. */
+  locationDescription: string
+  /** The board's employment-type vocabulary, exactly as its schema offers it. */
+  workTypes: readonly [string, ...string[]]
+  workTypeDescription: string
+}
+
+/**
+ * Build one board's search tool from its spec.
+ *
+ * The schema is identical on every board apart from the two fields whose
+ * vocabulary belongs to the board — where it writes places, and what it calls
+ * employment types — and the bounds the spec already declares. Keeping the
+ * template here is what stops three copies of the same schema drifting apart
+ * a describe() at a time.
+ *
+ * A factory rather than a ready-made tool, because every result it renders is
+ * recorded in one run's catalog and named by it.
+ */
+export function createBoardSearchTool<TItem>(
+  spec: ApifyBoardSpec<TItem>,
+  catalog: PostingCatalog,
+  options: BoardSearchToolOptions
+): StructuredToolInterface {
+  return tool(
+    async (input: BoardSearchInput) => apifyBoardSearch(spec, input, catalog),
+    {
+      name: options.name,
+      description: `Search ${options.source}'s live listings for currently-open job postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.`,
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            'Role title or keywords, e.g. "software engineer TypeScript".'
+          ),
+        location: z.string().optional().describe(options.locationDescription),
+        maxResults: z
+          .number()
+          .int()
+          .min(1)
+          .max(spec.maxResultsLimit)
+          .optional()
+          .describe(
+            `How many postings to return, 1-${spec.maxResultsLimit}. Defaults to ${spec.defaultMaxResults}.`
+          ),
+        daysOld: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            `Only postings listed within this many days. Defaults to ${spec.defaultDaysOld}; tighten it when recency matters more than volume.`
+          ),
+        workType: z
+          .enum(options.workTypes)
+          .optional()
+          .describe(options.workTypeDescription),
+      }),
+    }
+  )
 }

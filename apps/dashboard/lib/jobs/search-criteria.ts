@@ -1,36 +1,31 @@
+import {
+  JobSearchConfigSchema,
+  type JobSearchConfig,
+} from "@workspace/job-search"
 import { z } from "zod"
 
 /**
  * The minimum `jobs.config` a briefing needs in order to run at all.
  *
- * ⚠️ **This duplicates part of a schema that lives somewhere else, knowingly.**
- * The authority is `JobSearchConfigSchema` in
- * `apps/briefing-worker/src/job-search-config.ts`, and the platform's rule is
- * that `jobs.config` is opaque to `@workspace/db` — "the platform stores that
- * column and never reads inside it, so the meaning lives with whatever runs the
- * job". The dashboard cannot import that schema: it lives in an app, and apps do
- * not depend on apps.
+ * The authority is `JobSearchConfigSchema` in `@workspace/job-search`, and
+ * the field schemas below are *taken from it* rather than restated — the
+ * worker requires `titles` and `locations` with at least one entry each, so a
+ * job created without them is not "a job with no criteria yet", it is a job
+ * whose first run is guaranteed to fail with *"has a config this worker
+ * cannot read"*, having already claimed and burned its slot. What this module
+ * adds is the form's own concerns: the comma-split, the null-tolerant
+ * optional field, and a paste bound.
  *
- * Duplicating it anyway, rather than writing `{}`, because the worker's schema
- * requires `titles` and `locations` with at least one entry each — so a job
- * created without them is not "a job with no criteria yet", it is a job whose
- * first run is guaranteed to fail with *"has a config this worker cannot read"*,
- * having already claimed and burned its slot.
+ * **`keywords` is the one optional field the form collects, deliberately.**
+ * It is the field a CV yields most clearly — a resume states technologies
+ * plainly and states a desired location almost never — so the "suggest
+ * criteria from my resume" flow has a list of technologies in hand and
+ * nowhere to put it unless this schema accepts one. `exclude`, `sources` and
+ * `maxPostings` stay out: nothing in the app collects them.
  *
- * **`keywords` is the one field here the worker does *not* require, and it is
- * worth the extra duplication for two reasons.** It is the field a CV yields
- * most clearly — a resume states technologies plainly and states a desired
- * location almost never — so the "suggest criteria from my resume" flow has a
- * list of technologies in hand and nowhere to put it unless this schema accepts
- * one. And without a field here, that list would stop at the form: the scout is
- * told what to look for from `jobs.config` alone, so a keyword the dashboard
- * drops is a keyword the scout never sees. Duplicating one optional field is
- * cheaper than an extracted technology list that reaches nothing.
- *
- * `exclude`, `sources` and `maxPostings` stay out: nothing in the app collects
- * them, so leaving them out costs nothing and keeps the overlap as small as it
- * can be. The real fix is to lift that module into a shared package; until then,
- * changing the worker's required fields means changing this file too.
+ * The check at the foot of this file is what the old duplication could never
+ * give: if the worker's required set grows, this module stops compiling
+ * instead of the next run failing tomorrow morning.
  */
 
 /** Generous, and only there so one paste cannot write an unbounded row. */
@@ -52,7 +47,8 @@ function splitCriteria(value: string): string[] {
 }
 
 /**
- * A comma-separated field as the array the worker expects.
+ * A comma-separated field as the array the worker expects — piped into the
+ * *worker's own* field schema, so its bounds cannot drift from the authority.
  *
  * Comma-separated rather than a repeated input because these are short phrases
  * a person types in one go — "senior backend engineer, staff engineer" — and a
@@ -61,19 +57,19 @@ function splitCriteria(value: string): string[] {
 const criteriaList = z
   .string()
   .transform(splitCriteria)
-  .pipe(z.array(z.string().min(1)).min(1).max(MAX_CRITERIA_ITEMS))
+  .pipe(JobSearchConfigSchema.shape.titles.max(MAX_CRITERIA_ITEMS))
 
 /**
  * The same field where having nothing to say is a legitimate answer.
  *
- * `.min(1)` is the whole difference in the array, but the input side has to be
- * wider too. This is parsed straight out of a `FormData`, and a form field that
- * was never posted comes back as `null`, not as `undefined` and not as `""` —
- * so a schema that only accepted `string` would turn "the user left keywords
- * empty" into "the whole create failed", which is precisely the outcome an
- * optional field exists to avoid. `undefined` is accepted for the same reason
- * one step further out: a caller that simply omits the key means the same
- * thing.
+ * The `.min(1)` the required list carries is the whole difference in the
+ * array, but the input side has to be wider too. This is parsed straight out
+ * of a `FormData`, and a form field that was never posted comes back as
+ * `null`, not as `undefined` and not as `""` — so a schema that only accepted
+ * `string` would turn "the user left keywords empty" into "the whole create
+ * failed", which is precisely the outcome an optional field exists to avoid.
+ * `undefined` is accepted for the same reason one step further out: a caller
+ * that simply omits the key means the same thing.
  *
  * All three, plus a whitespace- or comma-only string, parse to `[]`. That makes
  * `[]` the single representation of "none", which is what lets the caller test
@@ -83,10 +79,22 @@ const optionalCriteriaList = z
   .string()
   .nullish()
   .transform((value) => splitCriteria(value ?? ""))
-  .pipe(z.array(z.string().min(1)).max(MAX_CRITERIA_ITEMS))
+  .pipe(JobSearchConfigSchema.shape.keywords.unwrap().max(MAX_CRITERIA_ITEMS))
 
 export const searchCriteriaSchema = z.object({
   titles: criteriaList,
   locations: criteriaList,
   keywords: optionalCriteriaList,
 })
+
+/**
+ * ⚠️ **The drift alarm.** What this form produces must be a config the worker
+ * can read; if `JobSearchConfigSchema` ever grows a new *required* field, the
+ * assignment below stops compiling, and whoever widened the worker's contract
+ * is pointed at the form that has to start collecting the field.
+ */
+type FormCriteria = z.infer<typeof searchCriteriaSchema>
+const _formOutputSatisfiesWorkerConfig = (
+  criteria: FormCriteria
+): JobSearchConfig => criteria
+void _formOutputSatisfiesWorkerConfig

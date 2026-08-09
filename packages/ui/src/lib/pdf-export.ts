@@ -32,6 +32,26 @@ const ENTITIES: Record<string, string> = {
   "#39": "'",
 }
 
+/**
+ * Undo the escaping marked applies to text tokens — exactly once.
+ *
+ * One pass rather than five chained replaces: `&amp;lt;` is an author who wrote
+ * a literal `&lt;`, and unescaping `&amp;` first would hand `&lt;` to the next
+ * replace, which would turn it into `<`.
+ *
+ * ⚠️ **Called at the leaves only.** It used to run in `flattenInline` over that
+ * call's whole result — including the runs a recursive call had already
+ * unescaped — so the same `&amp;lt;` inside `**bold**` went through twice and
+ * came out as `<`, which is the very thing the single pass exists to prevent.
+ * Every `runs.push` below either unescapes its own text or pushes runs that
+ * already have been; nothing unescapes a run it did not create.
+ */
+const unescapeEntities = (text: string): string =>
+  text.replace(
+    /&(amp|lt|gt|quot|#39);/g,
+    (match, entity: string) => ENTITIES[entity] ?? match
+  )
+
 /** Flatten marked inline tokens into style runs. */
 function flattenInline(
   tokens: Token[] | undefined,
@@ -50,7 +70,7 @@ function flattenInline(
         break
       case "codespan":
         runs.push({
-          text: (t as Tokens.Codespan).text,
+          text: unescapeEntities((t as Tokens.Codespan).text),
           bold,
           italic,
           code: true,
@@ -64,7 +84,12 @@ function flattenInline(
         if (tt.tokens && tt.tokens.length > 0) {
           runs.push(...flattenInline(tt.tokens, bold, italic))
         } else {
-          runs.push({ text: tt.text, bold, italic, code: false })
+          runs.push({
+            text: unescapeEntities(tt.text),
+            bold,
+            italic,
+            code: false,
+          })
         }
         break
       }
@@ -73,7 +98,7 @@ function flattenInline(
         break
       case "escape":
         runs.push({
-          text: (t as Tokens.Escape).text,
+          text: unescapeEntities((t as Tokens.Escape).text),
           bold,
           italic,
           code: false,
@@ -81,22 +106,16 @@ function flattenInline(
         break
       default:
         if ("text" in t && typeof t.text === "string") {
-          runs.push({ text: t.text, bold, italic, code: false })
+          runs.push({
+            text: unescapeEntities(t.text),
+            bold,
+            italic,
+            code: false,
+          })
         }
     }
   }
-  // Unescape the entities marked leaves in text tokens.
-  //
-  // One pass rather than five chained replaces: `&amp;lt;` is an author who
-  // wrote a literal `&lt;`, and unescaping `&amp;` first would hand `&lt;` to
-  // the next replace, which would turn it into `<`.
-  return runs.map((r) => ({
-    ...r,
-    text: r.text.replace(
-      /&(amp|lt|gt|quot|#39);/g,
-      (match, entity: string) => ENTITIES[entity] ?? match
-    ),
-  }))
+  return runs
 }
 
 class PdfWriter {

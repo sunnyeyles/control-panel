@@ -1,4 +1,7 @@
+import { Suspense } from "react"
+
 import { DocumentList } from "@/components/documents/document-list"
+import { DocumentListSkeleton } from "@/components/documents/document-list-skeleton"
 import { DocumentUploader } from "@/components/documents/document-uploader"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import { getPrisma } from "@/lib/db"
@@ -19,22 +22,16 @@ export const dynamic = "force-dynamic"
  */
 export const maxDuration = 30
 
+/**
+ * ⚠️ **This component awaits the session and nothing else, and keeping it that
+ * way is the point.** The listing is inside a `<Suspense>` below, in a child
+ * that awaits it — so the uploader, which needs no data at all, is on screen as
+ * soon as the session resolves off its cookie rather than after Postgres
+ * answers. Moving the query back up here would put the whole page behind it
+ * again. Same arrangement as `/jobs` and `/jobs/letters`.
+ */
 export default async function DocumentsPage() {
   const user = await requirePageUser()
-
-  // A database outage should degrade this page to "your documents could not be
-  // loaded", not replace it with an error boundary — the user can still read
-  // what the page is for, and the upload form's own error handling takes over
-  // from there.
-  let documents: DocumentSummary[] = []
-  let listFailed = false
-
-  try {
-    documents = await listDocuments(user.userId, getPrisma())
-  } catch (error) {
-    console.error("documents: could not list", error)
-    listFailed = true
-  }
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -63,17 +60,40 @@ export default async function DocumentsPage() {
             </p>
           </div>
 
-          {listFailed ? (
-            <Alert variant="destructive">
-              <AlertDescription>
-                Your documents could not be loaded. Try again in a moment.
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <DocumentList documents={documents} />
-          )}
+          <Suspense fallback={<DocumentListSkeleton rows={3} />}>
+            <DocumentsSection userId={user.userId} />
+          </Suspense>
         </section>
       </div>
     </main>
   )
+}
+
+/**
+ * The listing, and the only thing on this page that waits on a query.
+ *
+ * A database outage degrades this to "your documents could not be loaded"
+ * rather than replacing the page with an error boundary — the user can still
+ * read what the page is for, still upload, and the upload form's own error
+ * handling takes over from there. The `try`/`catch` lives here rather than in
+ * the page so that degradation stays inside the boundary it belongs to.
+ */
+async function DocumentsSection({ userId }: { userId: string }) {
+  let documents: DocumentSummary[] = []
+
+  try {
+    documents = await listDocuments(userId, getPrisma())
+  } catch (error) {
+    console.error("documents: could not list", error)
+
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>
+          Your documents could not be loaded. Try again in a moment.
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  return <DocumentList documents={documents} />
 }

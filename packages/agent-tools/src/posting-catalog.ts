@@ -92,7 +92,7 @@ export interface CreatePostingCatalogOptions {
  * formatting habit, not a claim about a posting. Everything substantive — an id
  * no search returned — still fails to resolve.
  */
-function normaliseId(id: string): string {
+export function normaliseId(id: string): string {
   return id.trim().replace(/^\[+/, "").replace(/\]+$/, "").trim().toLowerCase()
 }
 

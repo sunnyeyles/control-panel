@@ -1,5 +1,7 @@
 import { latestRunPerJob, type PrismaClient } from "@workspace/db"
 
+import { formatRunTime } from "@/lib/format-dates"
+
 import { isStale } from "./staleness"
 
 /**
@@ -112,17 +114,4 @@ function reasonOf(failure: unknown): { reason?: string } {
   return typeof message === "string" && message.trim() !== ""
     ? { reason: message }
     : {}
-}
-
-/**
- * Formatted here, on the server, for the reason `lib/jobs/briefing-summary.ts`
- * gives: a `Date` crossing into a client component renders differently on the
- * two sides of hydration, and the fix is to send a string.
- */
-function formatRunTime(at: Date): string {
-  return new Intl.DateTimeFormat("en-AU", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Australia/Sydney",
-  }).format(at)
 }

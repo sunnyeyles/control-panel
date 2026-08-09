@@ -1,3 +1,9 @@
+export {
+  defineToollessAgent,
+  type ExtraToolsAgentOptions,
+  type ToollessAgentOptions,
+} from "./agent-options.ts"
+
 export { createAssistant, type CreateAssistantOptions } from "./assistant.ts"
 
 export {

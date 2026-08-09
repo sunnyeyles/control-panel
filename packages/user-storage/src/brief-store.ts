@@ -1,4 +1,5 @@
 import { dateSegments, toGeneratedOn } from "./keys.ts"
+import { parseInstant } from "./metadata.ts"
 import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
 
 /** Briefs are Markdown and nothing else. */
@@ -166,10 +167,8 @@ function instantFrom(
   metadata: Record<string, string>,
   partitionOn: string
 ): Date {
-  const raw = metadata[GENERATED_AT]
-  const parsed = raw ? new Date(raw) : undefined
-
-  return parsed && !Number.isNaN(parsed.getTime())
-    ? parsed
-    : new Date(`${partitionOn}T00:00:00.000Z`)
+  return (
+    parseInstant(metadata[GENERATED_AT]) ??
+    new Date(`${partitionOn}T00:00:00.000Z`)
+  )
 }

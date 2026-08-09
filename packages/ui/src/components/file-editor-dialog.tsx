@@ -10,7 +10,6 @@ import {
   createMarkdownSerializer,
   markdownToHtml,
 } from "@workspace/ui/lib/markdown"
-import { exportMarkdownToPdf } from "@workspace/ui/lib/pdf-export"
 import { Button } from "@workspace/ui/components/button"
 import {
   Dialog,
@@ -85,7 +84,6 @@ function FileEditorDialog({
 }: FileEditorDialogProps) {
   const [internalFiles, setInternalFiles] = useState(files)
   const [activeId, setActiveId] = useState(() => files[0]?.id ?? "")
-  const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const currentFiles = onFilesChange ? files : internalFiles
@@ -186,20 +184,27 @@ function FileEditorDialog({
     onOpenChange(next)
   }
 
-  function downloadPdf() {
+  async function downloadPdf() {
     if (!editor || !activeFile) return
 
     const { files: next, markdown } = serializeActiveFile()
     updateFiles(next)
-    setExporting(true)
 
+    // No spinner state around this: `exportMarkdownToPdf` is synchronous, so
+    // a `setExporting(true)`/`false` pair flushes in one batch and no render
+    // ever observes it — the loading branch it fed was unreachable code.
     try {
+      // jsPDF is fetched on the click, not with the dialog. Callers already
+      // mount this component lazily so TipTap is not in the page chunk; a
+      // static import here would have put a PDF writer in the *editor* chunk
+      // for everyone who opens it only to save. Same shape as
+      // `apps/dashboard/components/briefings/tailored-resume-pdf-button.tsx`.
+      const { exportMarkdownToPdf } =
+        await import("@workspace/ui/lib/pdf-export")
       const pdfName = activeFile.name.replace(/\.md$/i, ".pdf")
       exportMarkdownToPdf(markdown, pdfName)
     } catch (error) {
       console.error("PDF export failed:", error)
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -322,7 +327,7 @@ function FileEditorDialog({
                   <Button
                     variant="outline"
                     onClick={handleSave}
-                    disabled={saving || exporting || !editor || !activeFile}
+                    disabled={saving || !editor || !activeFile}
                   >
                     {saving ? (
                       <Loader2Icon className="size-4 animate-spin" />
@@ -335,14 +340,10 @@ function FileEditorDialog({
 
                 <Button
                   onClick={downloadPdf}
-                  disabled={exporting || saving || !editor || !activeFile}
+                  disabled={saving || !editor || !activeFile}
                 >
-                  {exporting ? (
-                    <Loader2Icon className="size-4 animate-spin" />
-                  ) : (
-                    <DownloadIcon className="size-4" />
-                  )}
-                  {exporting ? "Preparing PDF…" : "Download PDF"}
+                  <DownloadIcon className="size-4" />
+                  Download PDF
                 </Button>
               </div>
             </footer>

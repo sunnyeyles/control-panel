@@ -1,38 +1,17 @@
 "use client"
 
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@workspace/ui/components/command"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@workspace/ui/components/dropdown-menu"
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@workspace/ui/components/hover-card"
-import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
 } from "@workspace/ui/components/input-group"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@workspace/ui/components/select"
 import { Spinner } from "@workspace/ui/components/spinner"
 import {
   Tooltip,
@@ -494,8 +473,6 @@ export type PromptInputProps = Omit<
   multiple?: boolean
   // When true, accepts drops anywhere on document. Default false (opt-in).
   globalDrop?: boolean
-  // Render a hidden input with given name and keep it in sync for native form posts. Default false.
-  syncHiddenInput?: boolean
   // Minimal constraints
   maxFiles?: number
   // bytes
@@ -515,7 +492,6 @@ export const PromptInput = ({
   accept,
   multiple,
   globalDrop,
-  syncHiddenInput,
   maxFiles,
   maxFileSize,
   onError,
@@ -717,14 +693,6 @@ export const PromptInput = ({
     controller.__registerFileInput(inputRef, () => inputRef.current?.click())
   }, [usingProvider, controller])
 
-  // Note: File input cannot be programmatically set for security reasons
-  // The syncHiddenInput prop is no longer functional
-  useEffect(() => {
-    if (syncHiddenInput && inputRef.current && files.length === 0) {
-      inputRef.current.value = ""
-    }
-  }, [files, syncHiddenInput])
-
   // Attach drop handlers on nearest form and document (opt-in)
   useEffect(() => {
     const form = formRef.current
@@ -883,8 +851,11 @@ export const PromptInput = ({
             if (usingProvider) {
               controller.textInput.clear()
             }
-          } catch {
-            // Don't clear on error - user may want to retry
+          } catch (error) {
+            // Don't clear on error - user may want to retry. Logged, because
+            // a silently swallowed rejection makes a failed send look like
+            // one still in flight.
+            console.error("prompt-input: submit failed", error)
           }
         } else {
           // Sync function completed without throwing, clear inputs
@@ -893,8 +864,9 @@ export const PromptInput = ({
             controller.textInput.clear()
           }
         }
-      } catch {
+      } catch (error) {
         // Don't clear on error - user may want to retry
+        console.error("prompt-input: submit failed", error)
       }
     },
     [usingProvider, controller, files, onSubmit, clear]
@@ -1257,198 +1229,18 @@ export const PromptInputSubmit = ({
   )
 }
 
-export type PromptInputSelectProps = ComponentProps<typeof Select>
+/* Four families of composer parts used to continue from here, and they now sit
+   in siblings — `prompt-input-select.tsx`, `prompt-input-hover-card.tsx`,
+   `prompt-input-command.tsx` and `prompt-input-tabs.tsx`.
 
-export const PromptInputSelect = (props: PromptInputSelectProps) => (
-  <Select {...props} />
-)
+   Not tidiness. Nothing in this app renders any of them, and while they lived
+   in this module their imports — cmdk, Radix HoverCard, Radix Select — were in
+   the chat page's first-load chunk, because `PromptInput` itself is. The
+   package's export map is one file per subpath, so each is importable at
+   `@workspace/ui/components/ai-elements/prompt-input-<family>` and nothing had
+   to be registered anywhere.
 
-export type PromptInputSelectTriggerProps = ComponentProps<typeof SelectTrigger>
-
-export const PromptInputSelectTrigger = ({
-  className,
-  ...props
-}: PromptInputSelectTriggerProps) => (
-  <SelectTrigger
-    className={cn(
-      "border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors",
-      "hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
-      className
-    )}
-    {...props}
-  />
-)
-
-export type PromptInputSelectContentProps = ComponentProps<typeof SelectContent>
-
-export const PromptInputSelectContent = ({
-  className,
-  ...props
-}: PromptInputSelectContentProps) => (
-  <SelectContent className={cn(className)} {...props} />
-)
-
-export type PromptInputSelectItemProps = ComponentProps<typeof SelectItem>
-
-export const PromptInputSelectItem = ({
-  className,
-  ...props
-}: PromptInputSelectItemProps) => (
-  <SelectItem className={cn(className)} {...props} />
-)
-
-export type PromptInputSelectValueProps = ComponentProps<typeof SelectValue>
-
-export const PromptInputSelectValue = ({
-  className,
-  ...props
-}: PromptInputSelectValueProps) => (
-  <SelectValue className={cn(className)} {...props} />
-)
-
-export type PromptInputHoverCardProps = ComponentProps<typeof HoverCard>
-
-export const PromptInputHoverCard = ({
-  openDelay = 0,
-  closeDelay = 0,
-  ...props
-}: PromptInputHoverCardProps) => (
-  <HoverCard closeDelay={closeDelay} openDelay={openDelay} {...props} />
-)
-
-export type PromptInputHoverCardTriggerProps = ComponentProps<
-  typeof HoverCardTrigger
->
-
-export const PromptInputHoverCardTrigger = (
-  props: PromptInputHoverCardTriggerProps
-) => <HoverCardTrigger {...props} />
-
-export type PromptInputHoverCardContentProps = ComponentProps<
-  typeof HoverCardContent
->
-
-export const PromptInputHoverCardContent = ({
-  align = "start",
-  ...props
-}: PromptInputHoverCardContentProps) => (
-  <HoverCardContent align={align} {...props} />
-)
-
-export type PromptInputTabsListProps = HTMLAttributes<HTMLDivElement>
-
-export const PromptInputTabsList = ({
-  className,
-  ...props
-}: PromptInputTabsListProps) => <div className={cn(className)} {...props} />
-
-export type PromptInputTabProps = HTMLAttributes<HTMLDivElement>
-
-export const PromptInputTab = ({
-  className,
-  ...props
-}: PromptInputTabProps) => <div className={cn(className)} {...props} />
-
-export type PromptInputTabLabelProps = HTMLAttributes<HTMLHeadingElement>
-
-export const PromptInputTabLabel = ({
-  className,
-  ...props
-}: PromptInputTabLabelProps) => (
-  // Content provided via children in props
-  // oxlint-disable-next-line eslint-plugin-jsx-a11y(heading-has-content)
-  <h3
-    className={cn(
-      "mb-2 px-3 text-xs font-medium text-muted-foreground",
-      className
-    )}
-    {...props}
-  />
-)
-
-export type PromptInputTabBodyProps = HTMLAttributes<HTMLDivElement>
-
-export const PromptInputTabBody = ({
-  className,
-  ...props
-}: PromptInputTabBodyProps) => (
-  <div className={cn("space-y-1", className)} {...props} />
-)
-
-export type PromptInputTabItemProps = HTMLAttributes<HTMLDivElement>
-
-export const PromptInputTabItem = ({
-  className,
-  ...props
-}: PromptInputTabItemProps) => (
-  <div
-    className={cn(
-      "flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent",
-      className
-    )}
-    {...props}
-  />
-)
-
-export type PromptInputCommandProps = ComponentProps<typeof Command>
-
-export const PromptInputCommand = ({
-  className,
-  ...props
-}: PromptInputCommandProps) => <Command className={cn(className)} {...props} />
-
-export type PromptInputCommandInputProps = ComponentProps<typeof CommandInput>
-
-export const PromptInputCommandInput = ({
-  className,
-  ...props
-}: PromptInputCommandInputProps) => (
-  <CommandInput className={cn(className)} {...props} />
-)
-
-export type PromptInputCommandListProps = ComponentProps<typeof CommandList>
-
-export const PromptInputCommandList = ({
-  className,
-  ...props
-}: PromptInputCommandListProps) => (
-  <CommandList className={cn(className)} {...props} />
-)
-
-export type PromptInputCommandEmptyProps = ComponentProps<typeof CommandEmpty>
-
-export const PromptInputCommandEmpty = ({
-  className,
-  ...props
-}: PromptInputCommandEmptyProps) => (
-  <CommandEmpty className={cn(className)} {...props} />
-)
-
-export type PromptInputCommandGroupProps = ComponentProps<typeof CommandGroup>
-
-export const PromptInputCommandGroup = ({
-  className,
-  ...props
-}: PromptInputCommandGroupProps) => (
-  <CommandGroup className={cn(className)} {...props} />
-)
-
-export type PromptInputCommandItemProps = ComponentProps<typeof CommandItem>
-
-export const PromptInputCommandItem = ({
-  className,
-  ...props
-}: PromptInputCommandItemProps) => (
-  <CommandItem className={cn(className)} {...props} />
-)
-
-export type PromptInputCommandSeparatorProps = ComponentProps<
-  typeof CommandSeparator
->
-
-export const PromptInputCommandSeparator = ({
-  className,
-  ...props
-}: PromptInputCommandSeparatorProps) => (
-  <CommandSeparator className={cn(className)} {...props} />
-)
+   The action-menu family above stays put on purpose: `PromptInputActionAddAttachments`
+   and `PromptInputActionAddScreenshot` are `DropdownMenuItem`s wired to this
+   module's attachment context and its `captureScreenshot` helper, so moving
+   them would mean exporting internals to buy back one Radix primitive. */

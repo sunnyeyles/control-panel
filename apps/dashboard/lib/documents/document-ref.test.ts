@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  EXTENSION_PATTERN,
   formatDocumentFile,
   parseDocumentFile,
   RESUME_ID_PATTERN,
@@ -72,13 +71,11 @@ describe("formatDocumentFile", () => {
   })
 })
 
-describe("the exported halves", () => {
-  it("match exactly what the composite accepts", () => {
-    // The Zod schemas in `document-actions.ts` use these two directly, so a
+describe("the exported id half", () => {
+  it("matches exactly what the composite accepts", () => {
+    // The Zod schema in `document-actions.ts` uses this directly, so a
     // delete and a download have to agree on which ids exist.
     expect(RESUME_ID_PATTERN.test(ID)).toBe(true)
     expect(RESUME_ID_PATTERN.test(`${ID}x`)).toBe(false)
-    expect(EXTENSION_PATTERN.test(".pdf")).toBe(true)
-    expect(EXTENSION_PATTERN.test("pdf")).toBe(false)
   })
 })

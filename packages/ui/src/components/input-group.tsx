@@ -46,6 +46,7 @@ const inputGroupAddonVariants = cva(
 function InputGroupAddon({
   className,
   align = "inline-start",
+  onClick,
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof inputGroupAddonVariants>) {
   return (
@@ -55,10 +56,18 @@ function InputGroupAddon({
       data-align={align}
       className={cn(inputGroupAddonVariants({ align }), className)}
       onClick={(e) => {
+        // Composed with, not replaced by, a caller's own handler — spread
+        // after `onClick` this focus behaviour used to vanish the moment a
+        // caller passed one.
+        onClick?.(e)
         if ((e.target as HTMLElement).closest("button")) {
           return
         }
-        e.currentTarget.parentElement?.querySelector("input")?.focus()
+        // `textarea` too: the chat composer's field is one, and an addon
+        // click that focuses nothing reads as a dead control.
+        e.currentTarget.parentElement
+          ?.querySelector<HTMLElement>("input, textarea")
+          ?.focus()
       }}
       {...props}
     />

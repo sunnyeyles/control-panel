@@ -83,3 +83,18 @@ export function toMetadataRecord(
 
   return cleaned
 }
+
+/**
+ * A metadata value as the instant it records, or `undefined` if it is absent
+ * or unparseable.
+ *
+ * The parse-or-nothing half of reading an instant back, shared so the rule is
+ * stated once; what to fall back to is the caller's decision, because the
+ * right answer differs — the brief store degrades to its partition day, the
+ * posting-document store to the object's own write time.
+ */
+export function parseInstant(raw: string | undefined): Date | undefined {
+  const parsed = raw ? new Date(raw) : undefined
+
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : undefined
+}

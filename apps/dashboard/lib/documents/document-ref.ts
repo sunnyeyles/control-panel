@@ -55,7 +55,6 @@ const RESUME_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 const EXTENSION = EXTENSION_SOURCE
 
 export const RESUME_ID_PATTERN = new RegExp(`^${RESUME_ID}$`)
-export const EXTENSION_PATTERN = new RegExp(`^${EXTENSION}$`)
 
 const FILE_PATTERN = new RegExp(`^(${RESUME_ID})(${EXTENSION})$`)
 

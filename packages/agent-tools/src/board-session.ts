@@ -338,9 +338,15 @@ export function createBoardSession(context: BoardContext): BoardSession {
     deleteShapes(ids) {
       const removed: string[] = []
       const missing: string[] = []
+      // Deduped on the normalised id: the same shape named twice — or once
+      // bare and once bracketed — must not come back as one deletion *and*
+      // one "No shape matched", a self-contradicting correction.
+      const seen = new Set<string>()
 
       for (const rawId of ids) {
         const id = normaliseId(rawId)
+        if (seen.has(id)) continue
+        seen.add(id)
         if (shapes.delete(id)) {
           removed.push(id)
           // An arrow whose endpoint is gone is not a connection any more, and
@@ -410,8 +416,16 @@ export function createBoardSession(context: BoardContext): BoardSession {
     arrangeShapes(input) {
       const subjects: BoardShape[] = []
       const missing: string[] = []
+      // Deduped on the normalised id, because the guards below count
+      // *shapes*: `ids: ["s1", "s1"]` is one shape, not the two that
+      // arranging needs, and a repeated id must not inflate the count a
+      // distribute layout divides space by.
+      const seen = new Set<string>()
       for (const rawId of input.ids) {
-        const shape = shapes.get(normaliseId(rawId))
+        const id = normaliseId(rawId)
+        if (seen.has(id)) continue
+        seen.add(id)
+        const shape = shapes.get(id)
         if (shape) subjects.push(shape)
         else missing.push(rawId)
       }
