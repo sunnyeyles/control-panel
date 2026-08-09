@@ -24,7 +24,9 @@ export function SignOutButton({
 
   async function signOut() {
     setPending(true)
-    await signOutAndRedirect(router)
+    // A refused sign-out does not navigate, so give the button back rather
+    // than leaving it on "Signing out…" forever.
+    if (!(await signOutAndRedirect(router))) setPending(false)
   }
 
   return (

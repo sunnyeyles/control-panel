@@ -93,12 +93,7 @@ export function createCanvasTools(
     }
 
   const readBoard = tool(
-    ({
-      scope,
-    }: {
-      scope?: "all" | "viewport" | "selection"
-      detail?: "summary" | "full"
-    }) => {
+    ({ scope }: { scope?: "all" | "viewport" | "selection" }) => {
       const shapes = session.shapes()
       const { context } = session
 
@@ -153,12 +148,6 @@ export function createCanvasTools(
           .optional()
           .describe(
             'Which shapes to return: "all" for the whole board including anything off screen, "viewport" for what the user can see, "selection" for what they have selected. Defaults to "all".'
-          ),
-        detail: z
-          .enum(["summary", "full"])
-          .optional()
-          .describe(
-            "Reserved for future use; the rendering is the same either way."
           ),
       }),
     }

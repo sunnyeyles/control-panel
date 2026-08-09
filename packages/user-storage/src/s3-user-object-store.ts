@@ -163,8 +163,13 @@ export function createS3UserObjectStore(
       const bytes = await output.Body.transformToByteArray()
 
       return {
-        ...describe(key, output.Metadata, output.ContentType, bytes.byteLength),
-        storedAt: output.LastModified ?? new Date(0),
+        ...describe(
+          key,
+          output.Metadata,
+          output.ContentType,
+          bytes.byteLength,
+          output.LastModified
+        ),
         body: bytes,
         text: () => Buffer.from(bytes).toString("utf8"),
       }
@@ -179,15 +184,13 @@ export function createS3UserObjectStore(
 
       assertOwnedBy(key, ref.userId, output.Metadata)
 
-      return {
-        ...describe(
-          key,
-          output.Metadata,
-          output.ContentType,
-          output.ContentLength ?? 0
-        ),
-        storedAt: output.LastModified ?? new Date(0),
-      }
+      return describe(
+        key,
+        output.Metadata,
+        output.ContentType,
+        output.ContentLength ?? 0,
+        output.LastModified
+      )
     },
 
     async delete(ref: ObjectRef): Promise<void> {
@@ -324,7 +327,8 @@ function describe(
   key: string,
   metadata: Record<string, string> | undefined,
   contentType: string | undefined,
-  size: number
+  size: number,
+  lastModified: Date | undefined
 ): StoredObject {
   const parts = parseObjectKey(key)
 
@@ -334,7 +338,7 @@ function describe(
     contentType:
       contentType ?? contentTypeFor(parts.kind, parts.extension) ?? "",
     size,
-    storedAt: new Date(0),
+    storedAt: lastModified ?? new Date(0),
     metadata: custom(metadata),
   }
 }

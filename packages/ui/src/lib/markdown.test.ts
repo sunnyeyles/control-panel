@@ -42,6 +42,9 @@ describe("the markdown round trip", () => {
     ["a bullet list", "- Node and Postgres\n- Terraform on AWS"],
     ["an ordered list", "1. Node and Postgres\n2. Terraform on AWS"],
     ["an ordered list that does not start at one", "3. Third\n4. Fourth"],
+    // `marked` emits `start="0"` here, which a truthiness check on the
+    // attribute would silently renumber from one.
+    ["an ordered list that starts at zero", "0. Zero\n1. One"],
     ["a nested list", "- Backend\n  - Node\n  - Postgres\n- Infrastructure"],
     ["an ATX heading", "## Why this role"],
     ["a thematic break", "Sincerely,\n\n---\n\nAlice"],

@@ -117,10 +117,9 @@ export function PostingDetail({
    * Every tailored resume this user has, still in flight.
    *
    * A **second** promise rather than one merged object, because the two loads
-   * fail independently: the letters are twenty-five `HeadObject` calls and this
-   * is one `ListObjectsV2`, so one can be unreadable while the other is fine,
-   * and each section says so for itself. Merging them would make either failure
-   * blank both.
+   * fail independently: they list two different prefixes, so one can be
+   * unreadable while the other is fine, and each section says so for itself.
+   * Merging them would make either failure blank both.
    *
    * Note it is not scoped to this page — see `TailoredResumePromise`.
    */

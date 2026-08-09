@@ -65,6 +65,20 @@ describe("createBoardHandler", () => {
     expect(save).not.toHaveBeenCalled()
   })
 
+  it("measures the limit in bytes, not characters", async () => {
+    // "€" is one UTF-16 code unit but three UTF-8 bytes, so a limit compared
+    // against `string.length` would let this body through at ~3× the cap.
+    const save = vi.fn(async () => {})
+    const handle = createBoardHandler({ getUser: signedIn, save })
+
+    const oversized = "€".repeat(Math.floor(MAX_SNAPSHOT_BYTES / 3) + 1)
+
+    const response = await handle(request(oversized))
+
+    expect(response.status).toBe(413)
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it("rejects a body that is not JSON", async () => {
     const handle = createBoardHandler({
       getUser: signedIn,

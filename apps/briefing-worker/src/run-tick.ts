@@ -130,7 +130,16 @@ export async function runTick(
       // but could not keep its findings, or could not add what it found to the
       // cumulative record, is `succeeded` with a non-empty `failure` — the rule
       // `packages/db/src/types.ts` states.
-      await finishRun(prisma, slot.runId, briefing.warnings)
+      //
+      // `false` is a lost race — the row was already terminal, so someone else
+      // decided this run's outcome. The work still happened and the brief is
+      // stored, so it counts as succeeded here; the log line is the only trace
+      // the lost transition leaves.
+      if (!(await finishRun(prisma, slot.runId, briefing.warnings))) {
+        console.warn(
+          `run ${slot.runId}: already terminal when the tick went to finish it`
+        )
+      }
       report.succeeded += 1
     } catch (error) {
       // Recorded, then carried. The row makes the failure queryable; the run

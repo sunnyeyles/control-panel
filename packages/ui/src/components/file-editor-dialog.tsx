@@ -85,7 +85,6 @@ function FileEditorDialog({
 }: FileEditorDialogProps) {
   const [internalFiles, setInternalFiles] = useState(files)
   const [activeId, setActiveId] = useState(() => files[0]?.id ?? "")
-  const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const currentFiles = onFilesChange ? files : internalFiles
@@ -191,15 +190,15 @@ function FileEditorDialog({
 
     const { files: next, markdown } = serializeActiveFile()
     updateFiles(next)
-    setExporting(true)
 
+    // No spinner state around this: `exportMarkdownToPdf` is synchronous, so
+    // a `setExporting(true)`/`false` pair flushes in one batch and no render
+    // ever observes it — the loading branch it fed was unreachable code.
     try {
       const pdfName = activeFile.name.replace(/\.md$/i, ".pdf")
       exportMarkdownToPdf(markdown, pdfName)
     } catch (error) {
       console.error("PDF export failed:", error)
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -322,7 +321,7 @@ function FileEditorDialog({
                   <Button
                     variant="outline"
                     onClick={handleSave}
-                    disabled={saving || exporting || !editor || !activeFile}
+                    disabled={saving || !editor || !activeFile}
                   >
                     {saving ? (
                       <Loader2Icon className="size-4 animate-spin" />
@@ -335,14 +334,10 @@ function FileEditorDialog({
 
                 <Button
                   onClick={downloadPdf}
-                  disabled={exporting || saving || !editor || !activeFile}
+                  disabled={saving || !editor || !activeFile}
                 >
-                  {exporting ? (
-                    <Loader2Icon className="size-4 animate-spin" />
-                  ) : (
-                    <DownloadIcon className="size-4" />
-                  )}
-                  {exporting ? "Preparing PDF…" : "Download PDF"}
+                  <DownloadIcon className="size-4" />
+                  Download PDF
                 </Button>
               </div>
             </footer>
