@@ -1,23 +1,17 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
-import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
 import { requireUser } from "@/lib/actions/require-user"
 import { storageMessage } from "@/lib/actions/storage-message"
+import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import type { CurrentUser } from "@/lib/auth/current-user"
-import {
-  loadCandidateBackground,
-  type NoBackgroundReason,
-} from "@/lib/candidate/candidate-background"
+import type { NoBackgroundReason } from "@/lib/candidate/candidate-background"
 import { POSTING_ID_PATTERN } from "@/lib/posting-documents/posting-document-ref"
 import {
-  loadStoredPosting,
-  storedPostingMessage,
-} from "@/lib/postings/load-stored-posting"
+  BAD_REQUEST,
+  preparePostingDocument,
+} from "@/lib/posting-documents/prepare-posting-document"
 import type { Agent } from "@workspace/agents"
-import {
-  assertDraftable,
-  UndraftableError,
-} from "@workspace/agents/cover-letter"
+import type { UndraftableError } from "@workspace/agents/cover-letter"
 import { createResumeTailor } from "@workspace/agents/resume-tailor"
 import {
   TailoredResumeRequestSchema,
@@ -92,22 +86,19 @@ import { z } from "zod"
  */
 export { POSTING_NOT_FOUND }
 
-/** Reachable only by posting a form directly; the buttons always send it. */
-const BAD_REQUEST = "That posting could not be identified."
+/** The object kind. Reaches a log line and the storage prefix, never a user. */
+const KIND = "tailored-resumes"
 
 /**
- * ⚠️ **This is {@link saveSchema} without its `markdown`, and that is the two
- * actions agreeing rather than a duplication to collapse.** A tailored resume is
- * addressed by `(user, Posting)` however it came to exist, so each action asks
- * for exactly one identifier. Sharing one schema would tie what a generation
- * accepts to what an edit accepts, which is the pair most worth leaving free to
- * diverge: one of them takes resume text from the caller, and the other must
- * never.
+ * ⚠️ **Generating has no schema of its own, and that is the two actions agreeing
+ * rather than a duplication to collapse.** A tailored resume is addressed by
+ * `(user, Posting)` however it came to exist, so generating asks for exactly one
+ * identifier — which is `preparePostingDocument`'s own parse, shared with the
+ * letters because it is the same field refused for the same reason. Saving keeps
+ * its own schema below: tying what a generation accepts to what an edit accepts
+ * is the pair most worth leaving free to diverge, since one of them takes resume
+ * text from the caller and the other must never.
  */
-const generateSchema = z.object({
-  postingId: z.string().regex(POSTING_ID_PATTERN),
-})
-
 const saveSchema = z.object({
   postingId: z.string().regex(POSTING_ID_PATTERN),
   markdown: z.string(),
@@ -195,77 +186,44 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    // Before the body is touched at all. For a Server Action this is not a
-    // second layer: `proxy.ts` cannot evaluate a POST session — the auth SDK's
-    // fast path is guarded by `method === "GET"` — so it degrades to checking
-    // that some session-cookie substring is present. This is the only real
-    // check on the path.
-    const caller = await requireUser(deps.getUser, "tailored-resumes")
-    if (!caller.ok) return fail(caller.message)
+    // Who is asking, which Posting, whether there is a CV, and whether it is
+    // enough of one — all of it before the tailor is constructed, so a user with
+    // nothing to rewrite spends nothing. The order is `preparePostingDocument`'s
+    // and is a property rather than plumbing; only the two sentences below are
+    // this feature's to write.
+    const prepared = await preparePostingDocument(deps, formData, KIND)
 
-    // ⚠️ **Only this one field is read, and that is the security property.**
-    // `formData` may well carry a `posting` — the test suite submits one — and
-    // nothing here looks at it.
-    const parsed = generateSchema.safeParse({
-      postingId: formData.get("postingId"),
-    })
-
-    if (!parsed.success) return fail(BAD_REQUEST)
-
-    const stored = await loadStoredPosting(
-      deps.getPrisma(),
-      caller.userId,
-      parsed.data.postingId,
-      "tailored-resumes"
-    )
-    if (stored.status !== "found") return fail(storedPostingMessage(stored))
-
-    const { posting, lastSeenRunId } = stored
-
-    // Before the tailor is constructed, so a user with nothing to rewrite spends
-    // nothing. This is also where a PDF or a DOCX is parsed — still on this side
-    // of the model call, which is what keeps the bounds below applying to the
-    // text that was actually extracted.
-    let background
-    try {
-      background = await loadCandidateBackground(
-        caller.userId,
-        deps.getPrisma(),
-        deps.getResumes()
-      )
-    } catch (error) {
-      return fail(storageMessage(`tailored-resumes: read failed`, error))
+    if (!prepared.ok) {
+      switch (prepared.reason) {
+        case "refused":
+          return fail(prepared.message)
+        case "no-background":
+          return fail(describeMissingBackground(prepared.missing))
+        case "undraftable":
+          return fail(describeUndraftable(prepared.error, prepared.displayName))
+        default: {
+          const _exhaustive: never = prepared
+          return _exhaustive
+        }
+      }
     }
 
-    if (!background.ok)
-      return fail(describeMissingBackground(background.reason))
+    const { userId, postingId, posting, lastSeenRunId, displayName } = prepared
 
     let request: TailoredResumeRequest
     try {
-      // Still before the model call, and measured on the *extracted* text.
-      // `assertDraftable` is the letters' guard, reused rather than restated —
-      // it takes a structural `{ background }` for exactly this, and the
-      // question it answers is the same one: is there enough of this person's
-      // own document to work from? A resume rewritten from too little is not a
-      // thin resume, it is a fabricated one.
-      assertDraftable({ background: background.background })
-
       request = TailoredResumeRequestSchema.parse({
         posting,
-        profile: { background: background.background },
+        profile: { background: prepared.background },
       })
     } catch (error) {
-      if (error instanceof UndraftableError) {
-        return fail(describeUndraftable(error, background.displayName))
-      }
-
       console.error("tailored-resumes: the request would not validate", error)
       return fail("That posting could not be turned into a resume.")
     }
 
     let markdown: string
     try {
-      markdown = await tailor(request, caller.userId)
+      markdown = await tailor(request, userId)
     } catch (error) {
       console.error("tailored-resumes: the tailor failed", error)
       return fail("The resume could not be generated. Try again in a moment.")
@@ -276,8 +234,8 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
         // ⚠️ **The session's userId, never anything from the form.** There is
         // no way to *name* another user's prefix from here, which is what makes
         // the key-segment assertion in the store a second line of defence.
-        userId: caller.userId,
-        postingId: parsed.data.postingId,
+        userId,
+        postingId,
         markdown,
         generatedAt: now(),
         // Provenance rides here rather than in the key — the key holds the
@@ -293,16 +251,16 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
           // picks the newest one labelled Resume, so the answer changes the
           // moment another is uploaded — recording it is the only way to know
           // afterwards which CV a given output came out of.
-          sourceDocument: background.displayName,
+          sourceDocument: displayName,
         },
       })
     } catch (error) {
-      return fail(storageMessage(`tailored-resumes: write failed`, error))
+      return fail(storageMessage(`${KIND}: write failed`, error))
     }
 
     return {
       status: "success",
-      message: `Tailored your resume for ${posting.title} at ${posting.company}, from ${background.displayName}. Read it against your own CV before you send it.`,
+      message: `Tailored your resume for ${posting.title} at ${posting.company}, from ${displayName}. Read it against your own CV before you send it.`,
       // A fresh value per success rather than the posting id: re-generating the
       // same Posting is a second success and must read as one.
       resetKey: newResetKey(),
@@ -336,7 +294,7 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    const caller = await requireUser(deps.getUser, "tailored-resumes")
+    const caller = await requireUser(deps.getUser, KIND)
     if (!caller.ok) return fail(caller.message)
 
     const parsed = saveSchema.safeParse({
@@ -381,7 +339,7 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
       // Anything else is the bucket being unreachable, which must not be
       // reported as "you have not generated this" — that would tell a user
       // their document is gone during an outage.
-      return fail(storageMessage(`tailored-resumes: read failed`, error))
+      return fail(storageMessage(`${KIND}: read failed`, error))
     }
 
     try {
@@ -392,7 +350,7 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
         provenance: existing.provenance,
       })
     } catch (error) {
-      return fail(storageMessage(`tailored-resumes: write failed`, error))
+      return fail(storageMessage(`${KIND}: write failed`, error))
     }
 
     return {
