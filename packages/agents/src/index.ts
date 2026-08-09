@@ -66,7 +66,6 @@ export {
 export {
   createWhiteboardAgent,
   WHITEBOARD_MAX_LLM_CALLS,
-  WHITEBOARD_MODEL,
   WHITEBOARD_SYSTEM_PROMPT,
   type CreateWhiteboardAgentOptions,
   type WhiteboardSession,

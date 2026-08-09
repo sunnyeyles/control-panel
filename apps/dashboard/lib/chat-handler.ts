@@ -19,7 +19,7 @@ import { z } from "zod"
  * `"values"` events for final state. Change this pair and the UI stream
  * silently degrades — nothing typechecks the coupling.
  */
-export const CHAT_STREAM_MODE: ["values", "messages"] = ["values", "messages"]
+const CHAT_STREAM_MODE: ["values", "messages"] = ["values", "messages"]
 
 const STREAM_ERROR_TEXT = "Something went wrong while running the agent."
 

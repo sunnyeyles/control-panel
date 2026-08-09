@@ -6,15 +6,13 @@
  */
 export {
   createAgent,
-  DEFAULT_MAX_LLM_CALLS,
   DEFAULT_SYSTEM_PROMPT,
-  recursionLimitFor,
   type Agent,
   type ChatModelLike,
   type CreateAgentOptions,
 } from "./agent.ts"
 
-export { createModel, DEFAULT_MODEL, type ModelOptions } from "./model.ts"
+export { createModel, type ModelOptions } from "./model.ts"
 
 export {
   createToolRegistry,

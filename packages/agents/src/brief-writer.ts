@@ -4,7 +4,7 @@ import {
   type CreateAgentOptions,
 } from "@workspace/agents-core"
 
-export const BRIEF_WRITER_SYSTEM_PROMPT = [
+const BRIEF_WRITER_SYSTEM_PROMPT = [
   "You turn a set of job findings into a short markdown brief for the candidate who asked for it.",
   "",
   "Structure: open with a one-paragraph summary of what the search turned up. Then one section per posting, strongest match first, with the role title and company as the heading. Under each, say what the role is, why it fits, and link the posting. Close with any notes the search itself produced.",

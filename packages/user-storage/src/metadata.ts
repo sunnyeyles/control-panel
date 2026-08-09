@@ -29,7 +29,7 @@
  * for a document body: metadata is provenance for a human reading it later, and
  * a clipped company name is still the company.
  */
-export const MAX_METADATA_VALUE_CHARS = 255
+const MAX_METADATA_VALUE_CHARS = 255
 
 /**
  * Printable US-ASCII, and nothing else.

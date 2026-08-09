@@ -17,7 +17,7 @@ import * as z from "zod"
 
 const nonEmpty = z.string().trim().min(1)
 
-export const JobSearchConfigSchema = z.object({
+const JobSearchConfigSchema = z.object({
   titles: z
     .array(nonEmpty)
     .min(1)
@@ -52,7 +52,7 @@ export const JobSearchConfigSchema = z.object({
 export type JobSearchConfig = z.infer<typeof JobSearchConfigSchema>
 
 /** How many postings to ask for when the job does not say. */
-export const DEFAULT_MAX_POSTINGS = 8
+const DEFAULT_MAX_POSTINGS = 8
 
 /**
  * The hard ceiling on a scout's model calls, whatever the config asks for.

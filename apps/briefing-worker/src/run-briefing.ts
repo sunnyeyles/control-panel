@@ -97,7 +97,7 @@ export interface SuccessReport extends RunReportFields {
 }
 
 /** Anything else. `error` carries the diagnostic detail. */
-export interface FailureReport extends RunReportFields {
+interface FailureReport extends RunReportFields {
   outcome: "failure"
   error: string
 }
@@ -108,7 +108,7 @@ export interface FailureReport extends RunReportFields {
  * write a row, and it carries the diagnostics — search counts, model calls —
  * that nothing will ever query but a human will want when a brief looks thin.
  */
-export type RunReport = SuccessReport | FailureReport
+type RunReport = SuccessReport | FailureReport
 
 /**
  * Whether the tick asked for this run, or a person did.
@@ -117,7 +117,7 @@ export type RunReport = SuccessReport | FailureReport
  * someone pressing the button in the dashboard. The pipeline itself is
  * identical either way — this changes reporting and nothing else.
  */
-export type RunTrigger = "schedule" | "manual"
+type RunTrigger = "schedule" | "manual"
 
 /**
  * What a run needs to know about the occurrence it is filling.
@@ -129,7 +129,7 @@ export type RunTrigger = "schedule" | "manual"
  * the compiler helps tell. Same reasoning as {@link AgentLike}: ask for what
  * you drive.
  */
-export interface RunOccurrence {
+interface RunOccurrence {
   runId: string
   /**
    * The instant this brief is filed under — a claimed slot for a scheduled run,

@@ -45,11 +45,7 @@ export {
   type StoredCoverLetter,
 } from "./cover-letter-store.ts"
 
-export {
-  MAX_METADATA_VALUE_CHARS,
-  toMetadataRecord,
-  toMetadataValue,
-} from "./metadata.ts"
+export { toMetadataRecord, toMetadataValue } from "./metadata.ts"
 
 export {
   acceptedResumeExtensions,
@@ -97,6 +93,5 @@ export {
   contentTypeFor,
   extensionsFor,
   isObjectKind,
-  OBJECT_KINDS,
   type ObjectKind,
 } from "./kinds.ts"
