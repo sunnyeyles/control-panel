@@ -1,15 +1,16 @@
 /**
  * `Promise.allSettled`, but with a ceiling on how many calls are in flight.
  *
- * Its own module because documents and visible cover-letter rows both need
- * bounded metadata reads. S3 listings carry no user metadata, while the
- * postings table needs one `head()` per visible letter. See
- * `lib/documents/list-documents.ts` and
- * `lib/cover-letters/cover-letter-rows.ts`.
+ * Its own module because bulk posting delete fans out one pair of object-store
+ * deletes per selected Posting (`lib/postings/posting-actions.ts`), and that
+ * bound has to live somewhere neither the action nor a future second caller
+ * can quietly diverge from. Document listing used to need the same helper for
+ * bounded `HeadObject` calls; that path is one Postgres query now, so this
+ * module has a single production caller until another fan-out appears.
  *
- * Imports nothing, so a test can reach it — and, more to the point, so neither
- * caller has to carry its own copy. Two copies of a bounded fan-out is how one
- * of them quietly gets a different bound.
+ * Imports nothing, so a test can reach it — and, more to the point, so a
+ * second caller does not have to carry its own copy. Two copies of a bounded
+ * fan-out is how one of them quietly gets a different bound.
  */
 
 /**

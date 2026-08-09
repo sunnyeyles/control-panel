@@ -9,12 +9,12 @@ export const dynamic = "force-dynamic"
  * The app's global settings, which for now is how it looks.
  *
  * **No `maxDuration`, and its absence is deliberate.** This page used to raise
- * it to 30 for one reason — the Cover letters section listed documents, and
- * `listDocuments()` pays one `HeadObject` per document. That section is now
- * `/jobs/letters`, because it configures how a letter is drafted from a Posting
- * and belongs beside them; the ceiling went with it. What is left renders from
- * the session alone, so raising it here again would be cargo-culted from a page
- * whose problem this one no longer has.
+ * it to 30 for one reason — the Cover letters section lived here and needed a
+ * ceiling for document work. That section is now `/jobs/letters`, because it
+ * configures how a letter is drafted from a Posting and belongs beside them;
+ * the ceiling went with it. What is left renders from the session alone, so
+ * raising it here again would be cargo-culted from a page whose problem this
+ * one no longer has.
  *
  * ⚠️ **`requirePageUser()` is this page's own authorization check and is not
  * inherited** — `app/(app)/layout.tsx`'s `getCurrentUser()` renders the sidebar

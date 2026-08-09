@@ -8,11 +8,11 @@ export const dynamic = "force-dynamic"
 /**
  * The schedules page: what a briefing searches for, and how often.
  *
- * **No `maxDuration`, unlike `/settings` and `/documents`.** Both raise it
- * because `listDocuments()` pays one `HeadObject` per document and that fan-out
- * is what threatens the default. This page reads `jobs` through Prisma — one
- * indexed query, no object store — so raising the ceiling here would be
- * cargo-culted from a page whose problem it does not share.
+ * **No `maxDuration`, unlike `/documents` and `/jobs/letters`.** Those raise
+ * it for object-store work on their Server Actions (upload; example-letter
+ * import). This page reads `jobs` through Prisma — one indexed query, no
+ * object store — so raising the ceiling here would be cargo-culted from a
+ * page whose problem it does not share.
  */
 export default async function BriefingSchedulesPage() {
   const user = await requirePageUser()
