@@ -4,18 +4,24 @@ import type { PostingPayload, PostingStatus } from "./types.ts"
 type DbClient = PrismaClient | Prisma.TransactionClient
 
 /**
- * The three statuses, as a value.
+ * The four statuses, as a value, in the order the interface offers them —
+ * which is the order a person moves through them.
  *
  * Lives here rather than in `types.ts`, which is type-only and erases: a
  * runtime array there would make that module emit, and every consumer that
  * imports a type from it would start pulling in a value.
  *
- * `satisfies` rather than a hand-kept copy, so adding a status to
- * {@link PostingStatus} without adding it here fails to compile.
+ * `satisfies` catches a value here that is *not* a {@link PostingStatus}, and
+ * that is the only direction it catches: a short array still satisfies
+ * `readonly PostingStatus[]`, so adding a member to the union and forgetting
+ * this list compiles cleanly. **The exhaustiveness gate is
+ * `POSTING_STATUS_LABELS`** in `apps/dashboard/lib/postings/`, which is
+ * `satisfies Record<PostingStatus, string>` and does fail on a missing member.
  */
 export const POSTING_STATUSES = [
   "new",
   "applied",
+  "not-interested",
   "rejected",
 ] as const satisfies readonly PostingStatus[]
 

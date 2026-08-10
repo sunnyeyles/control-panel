@@ -16,13 +16,15 @@ import {
 } from "@workspace/ui/components/select"
 
 /**
- * The three statuses with their labels, in the order they are offered.
+ * The four statuses with their labels, in the order they are offered — which
+ * is the label map's own insertion order, and the order a person moves through
+ * them.
  *
  * Derived from the label map rather than imported from `@workspace/db`, and the
  * difference is what ends up in the browser: `POSTING_STATUSES` is a *runtime*
  * export of a package that carries the Prisma client and `pg`, so importing it
  * into a client component would put a database driver in the bundle to spell
- * three strings. The `import type` above is erased entirely — see
+ * four strings. The `import type` above is erased entirely — see
  * `lib/postings/posting-status-labels.ts`, which exists for exactly this.
  *
  * The cast is the one thing `Object.entries` cannot give: it widens keys to
@@ -35,7 +37,7 @@ const STATUS_OPTIONS = Object.entries(POSTING_STATUS_LABELS) as [
   string,
 ][]
 
-/** Whether a value the select emitted is one of the three. */
+/** Whether a value the select emitted is one of the four. */
 function isPostingStatus(value: string): value is PostingStatus {
   return STATUS_OPTIONS.some(([status]) => status === value)
 }
@@ -71,10 +73,11 @@ export function PostingStatusSelect({
   postingId: string
   status: PostingStatus
   /**
-   * Only for the accessible label. The trigger's own text is "New" or "Applied"
-   * and the heading above it is "Status", so nothing in the control names the
-   * advertisement it belongs to — and the detail panel it sits in is one of
-   * twenty-five that can be opened, each with an identically labelled select.
+   * Only for the accessible label. The trigger's own text is "New", "Applied",
+   * "Not interested" or "Rejected" and the heading above it is "Status", so
+   * nothing in the control names the advertisement it belongs to — and the
+   * detail panel it sits in is one of twenty-five that can be opened, each with
+   * an identically labelled select.
    */
   title: string
 }) {

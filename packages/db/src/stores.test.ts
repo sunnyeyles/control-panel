@@ -491,7 +491,7 @@ describeWithDatabase("against a real database", () => {
       return prisma.posting.findFirst({ where: { userId, postingId } })
     }
 
-    it("accepts each of the three statuses and refuses a fourth", async () => {
+    it("accepts each of the four statuses and refuses a fifth", async () => {
       const runId = await aRun()
       const posting = aPosting()
       await recordPostings(prisma, {
@@ -507,12 +507,14 @@ describeWithDatabase("against a real database", () => {
         ).toBe(true)
       }
 
-      // The compiler forbids a fourth, so the cast is what makes this a test of
-      // the CHECK rather than of the type.
-      const fourth = "archived" as string as PostingStatus
+      // The compiler forbids a fifth, so the cast is what makes this a test of
+      // the CHECK rather than of the type. `not_interested` rather than some
+      // unrelated word: the underscore spelling is the plausible near-miss for
+      // `not-interested`, and the CHECK is the only thing that catches one.
+      const fifth = "not_interested" as string as PostingStatus
 
       await expect(
-        setPostingStatus(prisma, userId, posting.postingId, fourth)
+        setPostingStatus(prisma, userId, posting.postingId, fifth)
       ).rejects.toThrow()
 
       expect((await readBack(posting.postingId))?.status).toBe("rejected")
