@@ -183,6 +183,13 @@ export function PostingDetail({
         wide control to repeat twenty-five times down a page, and Radix sets
         `aria-expanded` on its trigger while open, which tripped the row
         highlight meant for the disclosure chevron.
+
+        ⚠️ **The row shows the value now, and this is still where it is
+        changed.** The Status column renders a read-only badge — see
+        `posting-status-badge.tsx` — so this section is no longer the only way to
+        find out where an application stands, only the only way to move it. That
+        is also why the heading stays: below `md` the column is not rendered and
+        this is the whole of it.
       */}
       <Section title="Status">
         <PostingStatusSelect

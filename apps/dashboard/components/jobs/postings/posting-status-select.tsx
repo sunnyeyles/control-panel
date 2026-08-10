@@ -50,6 +50,12 @@ function isPostingStatus(value: string): value is PostingStatus {
  * meant for the disclosure chevron. The two notes below survive that move for
  * their own reasons, not because the column still exists.
  *
+ * ⚠️ **There is a Status column again, and it is not this.** It renders a
+ * read-only `Badge` — `posting-status-badge.tsx` — because what the column had
+ * to fix was that a status could not be *seen* without expanding a row, and
+ * neither reason above is about seeing it. Putting this control back in the row
+ * re-creates both.
+ *
  * **There is no `<form>` here, and unlike `JobEnabledSwitch` there could not
  * be.** A Radix `Select` does not bubble a hidden input at all — the switch at
  * least renders a hidden checkbox when given a `name`, which is why that

@@ -39,11 +39,11 @@ import { cn } from "@workspace/ui/lib/utils"
  *   unachievable in principle — column widths are measured from content, and a
  *   skeleton has none.
  * - `POSTING_ROW_HEIGHT` on every row, and {@link PAGE_SIZE} of them.
- * - **The same columns, which below `lg` is fewer than six.** Location, Posted
- *   and Source stop being rendered on a narrow viewport — see
- *   `PostingColumn.visibility` — and a skeleton that kept them would be a
- *   different table from the one replacing it, on exactly the viewport where
- *   the difference is widest.
+ * - **The same columns, which below `lg` is fewer than eight.** Source stops
+ *   being rendered below `lg`, and Company, Location, Posted and Status below
+ *   `md` — see `PostingColumn.visibility` — and a skeleton that kept them would
+ *   be a different table from the one replacing it, on exactly the viewport
+ *   where the difference is widest.
  * - The bulk bar's empty 36px above, and the pager's line below.
  *
  * ⚠️ **The real headings, not grey bars where headings go.** They come from
@@ -143,10 +143,13 @@ export function PostingTableSkeleton({
  * finds classes by scanning the source for literal strings, so a width built at
  * runtime is a width with no CSS behind it.
  *
- * Six fields and not seven — the cover-letter column holds a `size-4` icon
+ * Seven fields and not eight — the cover-letter column holds a `size-4` icon
  * rather than text, so it has nothing to vary. Match does vary, but narrowly: it
  * is a two- or three-digit number, so its bars are fixed widths rather than
- * fractions of a column.
+ * fractions of a column. Status varies over exactly three known labels, so its
+ * bars are the widths those words actually take — "New" against
+ * "Applied"/"Rejected" — rather than fractions of a column that would sometimes
+ * be wider than any badge the rows can produce.
  */
 const BAR_WIDTHS: readonly {
   title: string
@@ -155,6 +158,7 @@ const BAR_WIDTHS: readonly {
   match: string
   posted: string
   source: string
+  status: string
 }[] = [
   {
     title: "w-4/5",
@@ -163,6 +167,7 @@ const BAR_WIDTHS: readonly {
     match: "w-6",
     posted: "w-4/5",
     source: "w-14",
+    status: "w-16",
   },
   {
     title: "w-2/3",
@@ -171,6 +176,7 @@ const BAR_WIDTHS: readonly {
     match: "w-5",
     posted: "w-3/4",
     source: "w-12",
+    status: "w-11",
   },
   {
     title: "w-11/12",
@@ -179,6 +185,7 @@ const BAR_WIDTHS: readonly {
     match: "w-6",
     posted: "w-4/5",
     source: "w-16",
+    status: "w-11",
   },
   {
     title: "w-3/4",
@@ -187,6 +194,7 @@ const BAR_WIDTHS: readonly {
     match: "w-5",
     posted: "w-2/3",
     source: "w-12",
+    status: "w-16",
   },
 ]
 
@@ -232,7 +240,7 @@ function PlaceholderRow({ index }: { index: number }) {
       </TableCell>
 
       {/*
-        ⚠️ **The same three cells `PostingRow` hides, at the same two widths.**
+        ⚠️ **The same cells `PostingRow` hides, at the same two widths.**
         Not an optimisation — the skeleton's whole job is to occupy the geometry
         the rows will, so a placeholder still drawing a Source column that the
         arriving rows do not is the sideways jump this file exists to prevent.
@@ -258,6 +266,11 @@ function PlaceholderRow({ index }: { index: number }) {
       {/* A `Badge`, which is neither the height nor the shape of a line. */}
       <TableCell className={POSTING_HIDE_BELOW_LG}>
         <Skeleton className={cn("h-5 rounded-4xl", widths.source)} />
+      </TableCell>
+
+      {/* Also a `Badge` — see `posting-status-badge.tsx`. */}
+      <TableCell className={POSTING_HIDE_BELOW_MD}>
+        <Skeleton className={cn("h-5 rounded-4xl", widths.status)} />
       </TableCell>
 
       {/* The letter cell, whose content is a `size-4` icon either way. */}
