@@ -4,7 +4,7 @@ import { mkdir, readFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { createPrismaClient } from "@workspace/db"
+import { createPrismaClient, titleExclusions } from "@workspace/db"
 import type { ClaimedSlot, DueJob, JobConfig } from "@workspace/db"
 import { createBriefStore } from "@workspace/user-storage"
 
@@ -136,6 +136,26 @@ function requireEnv(...names: string[]): void {
 }
 
 /**
+ * A job to run, and the filter its owner has set.
+ *
+ * The two travel together because `runBriefing` takes both and the tick loads
+ * both — see `run-tick.ts`. Splitting them would mean a second database
+ * connection on the one path that has a real user behind it.
+ */
+interface LocalRun {
+  job: DueJob
+  /**
+   * ⚠️ **Empty on the `--config` path, and that is a real difference from
+   * production rather than an oversight.** A config file names no user, so
+   * there is no `posting_filters` row to read — a run from a file therefore
+   * reports every posting the scout found. `--job` reads the owner's real
+   * filter, which is the path to use when what is being watched is the filter
+   * itself.
+   */
+  titleExclusions: string[]
+}
+
+/**
  * The job to run, from a file or from a row.
  *
  * Either way what comes back is a `DueJob`, so `runBriefing` cannot tell which
@@ -143,7 +163,7 @@ function requireEnv(...names: string[]): void {
  * does, or it is watching something other than the thing that runs in
  * production.
  */
-async function resolveJob(options: Options): Promise<DueJob> {
+async function resolveJob(options: Options): Promise<LocalRun> {
   const scheduledFor = readSlot(options.at)
 
   if (options.config) {
@@ -162,16 +182,19 @@ async function resolveJob(options: Options): Promise<DueJob> {
     }
 
     return {
-      id: randomUUID(),
-      userId: LOCAL_USER_ID,
-      name: `local: ${options.config}`,
-      config,
-      scheduleCron: "0 9 * * *",
-      scheduleTimezone: "UTC",
-      nextRunAt: scheduledFor,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as DueJob
+      job: {
+        id: randomUUID(),
+        userId: LOCAL_USER_ID,
+        name: `local: ${options.config}`,
+        config,
+        scheduleCron: "0 9 * * *",
+        scheduleTimezone: "UTC",
+        nextRunAt: scheduledFor,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as DueJob,
+      titleExclusions: [],
+    }
   }
 
   requireEnv("DATABASE_URL")
@@ -183,9 +206,15 @@ async function resolveJob(options: Options): Promise<DueJob> {
     })
     if (!job) throw new Error(`No job with id ${options.job}.`)
 
-    // Read-only, and the job's own `next_run_at` is deliberately ignored: the
-    // harness runs the slot you asked for, not the one the tick would claim.
-    return { ...job, nextRunAt: scheduledFor }
+    return {
+      // Read-only, and the job's own `next_run_at` is deliberately ignored: the
+      // harness runs the slot you asked for, not the one the tick would claim.
+      job: { ...job, nextRunAt: scheduledFor },
+      // Read here rather than left out, so this path stays the one that behaves
+      // like the tick — a harness that quietly skipped the filter would show a
+      // brief production would never produce.
+      titleExclusions: await titleExclusions(prisma, job.userId),
+    }
   } finally {
     await prisma.$disconnect()
   }
@@ -242,7 +271,7 @@ async function main(): Promise<void> {
 
   requireEnv("OPENAI_API_KEY", "APIFY_TOKEN")
 
-  const job = await resolveJob(options)
+  const { job, titleExclusions: excluded } = await resolveJob(options)
   const slot: ClaimedSlot = {
     runId: randomUUID(),
     scheduledFor: job.nextRunAt,
@@ -269,6 +298,7 @@ async function main(): Promise<void> {
       recordArtifact: dryRunRecordArtifact,
       recordFindings,
       recordPostings: dryRunRecordPostings,
+      titleExclusions: excluded,
       trace: createSink(options, traceFile),
     })
   } catch {

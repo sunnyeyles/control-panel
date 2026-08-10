@@ -27,6 +27,7 @@ import {
   pauseJob,
   POSTING_STATUSES,
   ownedPostingIds,
+  postingFilters,
   postingPayload,
   recordDocument,
   recordArtifact,
@@ -37,8 +38,10 @@ import {
   runningRunForJob,
   saveBoard,
   saveCoverLetterInstructions,
+  savePostingFilters,
   setPostingStatus,
   startAdHocRun,
+  titleExclusions,
   updateJobSchedule,
   type DocumentType,
   type DueJob,
@@ -1190,7 +1193,13 @@ describeWithDatabase("against a real database", () => {
       it("answers page one for a user with nothing", async () => {
         const empty = await page(await freshUser())
 
-        expect(empty).toEqual({ rows: [], total: 0, page: 1, pageCount: 1 })
+        expect(empty).toEqual({
+          rows: [],
+          total: 0,
+          hidden: 0,
+          page: 1,
+          pageCount: 1,
+        })
       })
 
       it("shows no row twice across a boundary when the sort column ties", async () => {
@@ -1223,6 +1232,192 @@ describeWithDatabase("against a real database", () => {
           new Set(tied.map((posting) => posting.postingId))
         )
       })
+
+      /**
+       * The title filter, against the generated column rather than against a
+       * belief about it.
+       *
+       * ⚠️ **This is the half of the rule that only Postgres can answer.**
+       * `normalizeTitle()` in `@workspace/job-search` is unit-tested next door,
+       * but `title_normalized` is `GENERATED ALWAYS … STORED` in `0010` and
+       * restates that rule in SQL — so whether the two agree is a property of
+       * this database and of nothing a fake could be made to disagree with.
+       * Every case below is one where a naive substring filter gets a
+       * different answer.
+       */
+      describe("filtering by a word in the title", () => {
+        const TITLED = [
+          "Senior Backend Engineer",
+          "Backend Engineer",
+          "Seniority Partners Analyst",
+          "HTML Developer",
+          "Staff/Senior Platform Engineer",
+        ] as const
+
+        let filteredId: string
+
+        beforeAll(async () => {
+          filteredId = await freshUser()
+
+          await recordPostings(prisma, {
+            userId: filteredId,
+            runId: await aRun(),
+            seenAt: FIRST_SIGHTING,
+            postings: TITLED.map((title) => aPosting({ title })),
+          })
+        })
+
+        it("removes a whole-word match wherever the punctuation falls", async () => {
+          const result = await page(filteredId, {
+            order: "title",
+            direction: "asc",
+            excludeTitlePatterns: [" senior "],
+          })
+
+          // "Staff/Senior Platform Engineer" goes because the slash flattens to
+          // a space — the case a `LIKE '% senior %'` on the raw title misses.
+          expect(titles(result).sort()).toEqual([
+            "Backend Engineer",
+            "HTML Developer",
+            "Seniority Partners Analyst",
+          ])
+        })
+
+        it("keeps a row where the word is only a substring", async () => {
+          // The whole reason the column is padded. A substring filter would
+          // take "Seniority Partners Analyst" out with the senior roles, and
+          // `ml` would empty the table of every HTML role — silently, because
+          // the row simply would not be there to notice.
+          const bySubstring = await page(filteredId, {
+            excludeTitlePatterns: [" ml "],
+          })
+
+          expect(titles(bySubstring)).toContain("HTML Developer")
+          expect(bySubstring.total).toBe(TITLED.length)
+          expect(bySubstring.hidden).toBe(0)
+        })
+
+        it("counts the filtered set, and reports what it left out", async () => {
+          const result = await page(filteredId, {
+            pageSize: 2,
+            excludeTitlePatterns: [" senior "],
+          })
+
+          // ⚠️ `total` and `pageCount` describe the rows actually shown — a
+          // total that counted hidden rows would paginate past the end — while
+          // `hidden` is the separate fact the table has to say out loud.
+          expect(result.total).toBe(3)
+          expect(result.pageCount).toBe(2)
+          expect(result.hidden).toBe(2)
+        })
+
+        it("takes several patterns as any-of", async () => {
+          const result = await page(filteredId, {
+            excludeTitlePatterns: [" senior ", " html developer "],
+          })
+
+          expect(titles(result).sort()).toEqual([
+            "Backend Engineer",
+            "Seniority Partners Analyst",
+          ])
+        })
+
+        it("filters nothing, and counts nothing hidden, without patterns", async () => {
+          for (const patterns of [undefined, []]) {
+            const result = await page(filteredId, {
+              ...(patterns ? { excludeTitlePatterns: patterns } : {}),
+            })
+
+            expect(result.total).toBe(TITLED.length)
+            expect(result.hidden).toBe(0)
+          }
+        })
+
+        it("still scopes to the user asking", async () => {
+          // The exclusion is added beside `where: { userId }`, never in place
+          // of it — a filter must not become the ownership check.
+          const stranger = await page(await freshUser(), {
+            excludeTitlePatterns: [" senior "],
+          })
+
+          expect(stranger.rows).toEqual([])
+          expect(stranger.total).toBe(0)
+        })
+      })
+    })
+  })
+
+  describe("posting filters", () => {
+    it("reads an empty list for a user who has never saved one", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      // A missing row and an empty list are different things — the first is
+      // still `undefined` — but both filter nothing, which is what lets every
+      // enforcer read `titleExclusions` and never branch.
+      expect(await postingFilters(prisma, fresh.id)).toBeUndefined()
+      expect(await titleExclusions(prisma, fresh.id)).toEqual([])
+    })
+
+    it("creates the row on the first save and reads it back", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      const saved = await savePostingFilters(prisma, fresh.id, {
+        titleExclusions: ["senior", "tech lead"],
+      })
+
+      expect(saved.userId).toBe(fresh.id)
+      expect(await titleExclusions(prisma, fresh.id)).toEqual([
+        "senior",
+        "tech lead",
+      ])
+    })
+
+    it("replaces the list on a second save rather than adding to it", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await savePostingFilters(prisma, fresh.id, {
+        titleExclusions: ["senior", "principal"],
+      })
+      await savePostingFilters(prisma, fresh.id, { titleExclusions: [] })
+
+      // A save is the whole setting, not a patch of it, so clearing the field
+      // is an ordinary save and not its own operation.
+      expect(await titleExclusions(prisma, fresh.id)).toEqual([])
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".posting_filters where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.count).toBe("1")
+    })
+
+    it("refuses a list longer than the bound", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      // The backstop for every path that does not go through the form, which
+      // is where `MAX_TITLE_EXCLUSIONS` produces the message a user reads.
+      await expect(
+        savePostingFilters(prisma, fresh.id, {
+          titleExclusions: Array.from({ length: 51 }, (_, at) => `term${at}`),
+        })
+      ).rejects.toThrow()
+    })
+
+    it("goes when the user does", async () => {
+      // Cascades, unlike almost everything else here: a preference with no
+      // independent existence must not make a user undeletable.
+      const fresh = await prisma.user.create({ data: {} })
+      await savePostingFilters(prisma, fresh.id, {
+        titleExclusions: ["senior"],
+      })
+
+      await prisma.user.delete({ where: { id: fresh.id } })
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".posting_filters where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.count).toBe("0")
     })
   })
 
