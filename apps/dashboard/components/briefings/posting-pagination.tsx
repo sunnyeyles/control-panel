@@ -29,7 +29,7 @@ export function PostingPagination({
   page: PostingPage
   query: PostingQuery
 }) {
-  const { page, pageCount, pageSize, total, postings } = view
+  const { page, pageCount, pageSize, total, hidden, postings } = view
 
   const first = (page - 1) * pageSize + 1
   const last = first + postings.length - 1
@@ -42,6 +42,27 @@ export function PostingPagination({
       <p className="text-sm text-muted-foreground" aria-live="polite">
         Showing {first}–{last} of {total} postings
         {pageCount > 1 ? ` — page ${page} of ${pageCount}` : ""}
+        {/*
+          ⚠️ **Not decoration.** A filter that quietly shrinks the table is
+          indistinguishable from briefings that stopped finding anything — the
+          rows are not there to be noticed — so this line is the only thing
+          standing between a working filter and a bug report about a broken
+          briefing. It is in the same `aria-live` region as the count it
+          qualifies, because "40 postings" alone is the misleading half.
+
+          The link is part of the point: whoever reads this is one click from
+          the thing that caused it.
+        */}
+        {hidden > 0 ? (
+          <>
+            {" — "}
+            <Link href="/jobs/schedules" className="underline">
+              {hidden === 1
+                ? "1 hidden by your title filters"
+                : `${hidden} hidden by your title filters`}
+            </Link>
+          </>
+        ) : null}
       </p>
 
       {pageCount > 1 ? (

@@ -2,6 +2,7 @@ import {
   claimAdHocRun,
   failRun,
   finishRun,
+  titleExclusions,
   type PrismaClient,
 } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
@@ -133,6 +134,11 @@ export async function runAdHocBriefing(
       slot: { runId: request.runId, scheduledFor: claimed.startedAt },
       trigger: "manual",
       briefs,
+      // The same filter a scheduled run gets. A run someone started by hand is
+      // the same pipeline — the trigger changes reporting and nothing else —
+      // so a briefing that honoured the user's exclusions overnight and
+      // ignored them on the button would be the surprising thing.
+      titleExclusions: await titleExclusions(prisma, job.userId),
       ...prismaRecorders(prisma, {
         userId: job.userId,
         seenAt: claimed.startedAt,

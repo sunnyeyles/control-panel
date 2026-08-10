@@ -305,6 +305,21 @@ export interface PostingPageQuery {
    * many rows a *table* shows, and nothing here renders one.
    */
   pageSize: number
+  /**
+   * Title patterns whose rows are left out of the page and the counts.
+   *
+   * ⚠️ **Patterns, not words**, and the distinction is what keeps this package
+   * free of a dependency on `@workspace/job-search`. A pattern is what
+   * `titleMatchPattern()` produces — `" senior "`, space-padded and normalised —
+   * and matching it is a substring test against `postings.title_normalized`,
+   * which `0010` generates by the same rule. This package filters; it does not
+   * decide what a user's word means, exactly as it stores a `payload` it will
+   * not parse.
+   *
+   * Absent or empty filters nothing, which is what makes "no filter set" and
+   * "an empty filter" the same query.
+   */
+  excludeTitlePatterns?: readonly string[]
 }
 
 /** One `postings` row as a page of the table needs it. */
@@ -358,8 +373,29 @@ export interface PostingListRow {
 
 export interface PostingListPage {
   rows: PostingListRow[]
-  /** Every Posting this user has, not the length of {@link rows}. */
+  /**
+   * Every Posting this user has *that the filter admits*, not the length of
+   * {@link rows}.
+   *
+   * ⚠️ **The filter is in this count, deliberately.** It is what
+   * {@link PostingListPage.pageCount} is derived from and what a table renders
+   * as "N postings", so a total that counted rows the page will not show would
+   * paginate past the end and label the table with a number nothing on it adds
+   * up to. What was left out is {@link hidden}, which is a separate fact.
+   */
   total: number
+  /**
+   * How many of this user's Postings the filter removed.
+   *
+   * `0` whenever no patterns were supplied — there is nothing to report and no
+   * second count is issued.
+   *
+   * ⚠️ **This exists so that hiding is never silent.** A filter that quietly
+   * shrinks a table is indistinguishable from a briefing that stopped finding
+   * anything, and the person best placed to notice is the one who set it. The
+   * caller is expected to say the number out loud.
+   */
+  hidden: number
   /** The page actually read, which is not always the one asked for. */
   page: number
   pageCount: number
@@ -418,14 +454,20 @@ export async function listPostingPage(
   userId: string,
   query: PostingPageQuery
 ): Promise<PostingListPage> {
-  const [total, requested] = await Promise.all([
-    prisma.posting.count({ where: { userId } }),
+  const filtered = query.excludeTitlePatterns?.length ? true : false
+
+  const [total, unfiltered, requested] = await Promise.all([
+    prisma.posting.count({ where: postingPageWhere(userId, query) }),
+    // Only when there is a filter to account for. Without one the answer is
+    // `total` and a second count would be the same query twice.
+    filtered ? prisma.posting.count({ where: { userId } }) : Promise.resolve(0),
     findPostingPage(prisma, userId, query, query.page),
   ])
 
+  const hidden = filtered ? unfiltered - total : 0
   const pageCount = Math.max(1, Math.ceil(total / query.pageSize))
 
-  if (total === 0) return { rows: [], total, page: 1, pageCount }
+  if (total === 0) return { rows: [], total, hidden, page: 1, pageCount }
 
   const page = Math.min(query.page, pageCount)
 
@@ -437,7 +479,40 @@ export async function listPostingPage(
       ? requested
       : await findPostingPage(prisma, userId, query, page)
 
-  return { rows: rows.map(toListRow), total, page, pageCount }
+  return { rows: rows.map(toListRow), total, hidden, page, pageCount }
+}
+
+/**
+ * Which of this user's rows the page is about.
+ *
+ * ⚠️ **One builder, used by the count and by the fetch**, because a filter
+ * applied to only one of them is a table whose pager walks off the end of
+ * itself. That is the same reason `findPostingPage` exists as one function
+ * rather than two copies of a projection.
+ *
+ * ⚠️ **`userId` is the ownership check and not a filter in front of one.** A
+ * Posting is not addressable without naming a user — `(user_id, posting_id)` is
+ * the natural key — so it is here unconditionally and the exclusions are added
+ * beside it, never in place of it.
+ *
+ * The exclusion is a `NOT (OR …)`: a row is admitted when it matches *no*
+ * pattern. Each arm is a substring test against `title_normalized`, the
+ * `GENERATED ALWAYS … STORED` column `0010` adds — see the migration for why
+ * whole-word matching reduces to a substring at all.
+ */
+function postingPageWhere(userId: string, query: PostingPageQuery) {
+  const patterns = query.excludeTitlePatterns ?? []
+
+  if (patterns.length === 0) return { userId }
+
+  return {
+    userId,
+    NOT: {
+      OR: patterns.map((pattern) => ({
+        titleNormalized: { contains: pattern },
+      })),
+    },
+  }
 }
 
 /**
@@ -456,7 +531,7 @@ function findPostingPage(
   page: number
 ) {
   return prisma.posting.findMany({
-    where: { userId },
+    where: postingPageWhere(userId, query),
     orderBy: orderByFor(query),
     skip: (page - 1) * query.pageSize,
     take: query.pageSize,

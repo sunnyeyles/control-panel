@@ -323,8 +323,10 @@ The platform stores that column and never reads inside it, so the meaning lives
 with whatever runs the job.
 
 Titles and locations are required, and with **keywords** — optional to the
-worker, collected anyway — they are what the new-briefing form takes; exclusions,
-preferred boards and the cap reach a row only by hand. Naming no keywords leaves
+worker, collected anyway — they are what the new-briefing form takes; `exclude`,
+preferred boards and the cap reach a row only by hand. `exclude` is a hint the
+scout may weigh and is **not** the **Title Filter** below, which is enforced and
+belongs to the user rather than to the job. Naming no keywords leaves
 the field _absent_ from `config` rather than present and empty, so "never said"
 stays distinguishable from "said none".
 
@@ -333,6 +335,38 @@ form**. It writes nothing: a suggestion is a value the fields render, and the ro
 is still written by the user pressing Create. That is what makes "the user saw
 these before they were saved" a property of the path rather than a promise the
 interface makes — there is no write on it to review after.
+
+Every criterion here is inclusive — each one widens a search. The subtractive one
+is the **Title Filter**, and it is not part of this: it belongs to the **User**
+rather than to a **Job**.
+
+**Title Filter**:
+Words that rule a **Posting** out by its title. One list per **User**, in
+`posting_filters.title_exclusions`, edited on `/jobs/schedules` and applying to
+every **Briefing** that user has.
+
+**Enforced, not requested, and that is the whole difference from `exclude`.**
+`jobs.config -> 'exclude'` is a **Search Criterion**: it is rendered into the
+scout's brief and the model may weigh it. This is applied twice as a rule the
+model has no part in — the worker drops a matching posting after the hand-off and
+before the **Brief Writer** sees it, so nothing new arrives; and the Postings
+table leaves out a matching row it already holds, so nothing old lingers. The
+scout is told about it as well, which buys fewer wasted searches and no
+correctness at all.
+
+Matching is **whole-word and case-insensitive, against the title only**:
+`senior` rules out "Senior Backend Engineer" and never "Seniority Partners". The
+rule is `normalizeTitle()` in `@workspace/job-search` and, restated in SQL, the
+`postings.title_normalized` generated column — both sides lowercase the text,
+flatten punctuation to single spaces and pad the result, which is what turns
+whole-word matching into a substring test a paginated query can answer.
+
+**Hiding is never silent**, which is the property the feature would otherwise
+break: the Postings table says how many rows the filter removed, the **Run
+Report** carries `excludedPostings`, and pasting a link for a posting the filter
+would hide is refused rather than added invisibly. Nothing is deleted — clearing
+the list brings every row back with the **Posting Status** it had.
+_Avoid_: blocklist, blacklist, mute
 
 **Posting Extractor**:
 The agent that reads one retrieved web page and reports the **Posting** in it,

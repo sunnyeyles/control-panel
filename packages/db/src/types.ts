@@ -5,6 +5,7 @@ import type {
   Document as PrismaDocument,
   Job as PrismaJob,
   Posting as PrismaPosting,
+  PostingFilters as PrismaPostingFilters,
   Run as PrismaRun,
   User as PrismaUser,
 } from "./generated/prisma/client.ts"
@@ -92,4 +93,5 @@ export type Artifact = PrismaArtifact
 export type Posting = PrismaPosting
 export type Document = PrismaDocument
 export type CoverLetterInstructions = PrismaCoverLetterInstructions
+export type PostingFilters = PrismaPostingFilters
 export type Board = PrismaBoard

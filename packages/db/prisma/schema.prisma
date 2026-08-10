@@ -23,11 +23,32 @@ model User {
 
   jobs                    Job[]
   coverLetterInstructions CoverLetterInstructions?
+  postingFilters          PostingFilters?
   postings                Posting[]
   documents               Document[]
   board                   Board?
 
   @@map("users")
+}
+
+model PostingFilters {
+  userId String @id @map("user_id") @db.Uuid
+  // Words that rule a Posting out by its title, lowercased and normalised by
+  // `parseTitleExclusions` in `@workspace/job-search` before they get here.
+  // A real `text[]` rather than JSON — unlike `jobs.config`, this package does
+  // read these: `listPostingPage` filters on them, so they are data with a
+  // shape rather than a blob it merely stores. `cardinality` is bounded by a
+  // CHECK in the migration SQL.
+  titleExclusions String[] @map("title_exclusions")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Cascades, like `CoverLetterInstructions` and `Board` and for the reason
+  // both give: a preference with no independent existence is not a record that
+  // something happened, so `Restrict` would make a user undeletable for the
+  // sake of a settings row.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("posting_filters")
 }
 
 model Document {
@@ -170,6 +191,21 @@ model Posting {
   // SQL pins it to sixteen lowercase hex characters.
   postingId       String    @map("posting_id")
   title           String
+  // ⚠️ **`GENERATED ALWAYS AS … STORED` in `0010`, and Prisma cannot say so.**
+  // It is `title` lowercased, with every run of non-alphanumerics flattened to
+  // one space and a space at each end — `" senior staff engineer remote "` —
+  // which is what turns a whole-word title filter into an ordinary `LIKE
+  // '%…%'` the database can answer while paginating. `normalizeTitle()` in
+  // `@workspace/job-search` is the other half of the rule and the two must
+  // agree.
+  //
+  // **Never write it, and do not "tidy" it into a plain column**, the same
+  // instruction this file's header gives about the partial indexes and CHECKs.
+  // Optional here only so Prisma never demands it on a create; both posting
+  // inserts are raw SQL with explicit column lists, so nothing offers it a
+  // value. A `prisma migrate dev` would try to re-derive it — migrations here
+  // are hand-authored and forward-only, and that is why.
+  titleNormalized String?   @map("title_normalized")
   company         String
   location        String
   url             String

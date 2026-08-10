@@ -11,6 +11,7 @@ import type {
   Document,
   Job,
   Posting,
+  PostingFilters,
   PrismaClient,
   Run,
 } from "@workspace/db"
@@ -109,6 +110,21 @@ export function createDevPrisma(): PrismaClient {
         db.upsertCoverLetterInstructions(query),
     },
     /**
+     * The account-wide title filter. Read on every `/jobs` render — it decides
+     * which rows that page shows — and written from `/jobs/schedules`.
+     *
+     * `findUnique` ignores the `select` `titleExclusions()` sends, which is
+     * safe in the one direction that matters: the answer is a superset of the
+     * question and no caller can tell. `projectPosting` had to stop doing that
+     * because its `select` names a *relation*; this one names a column.
+     */
+    postingFilters: {
+      findUnique: async (query: ByUserId) =>
+        db.findPostingFilters(query.where.userId),
+      upsert: async (query: UpsertPostingFilters) =>
+        db.upsertPostingFilters(query),
+    },
+    /**
      * The whiteboard, which starts empty under the flag and stays wherever the
      * session leaves it. No fixture: a canned diagram is not what anyone is
      * checking on this page, and an empty canvas is the state the feature has
@@ -190,6 +206,21 @@ interface FindManyJobs {
 export interface PostingWhere {
   userId: string
   postingId?: { in: string[] }
+  /**
+   * The account's title filter, as `listPostingPage` spells it: admit a row that
+   * matches *none* of these patterns.
+   *
+   * Typed exactly as the real query builds it rather than loosely, so a change
+   * to that shape is a compile error here instead of a clause this fake ignores
+   * — which under the flag would show every posting the filter is supposed to
+   * hide.
+   */
+  NOT?: { OR: TitleExclusion[] }
+}
+
+/** One arm of the exclusion: a substring test against the generated column. */
+interface TitleExclusion {
+  titleNormalized: { contains: string }
 }
 
 /**
@@ -276,6 +307,17 @@ interface UpsertCoverLetterInstructions extends ByUserId {
   update: CoverLetterInstructionsValues
 }
 
+/**
+ * Both halves carry the whole list, because a save is the whole setting — see
+ * `savePostingFilters`. Neither is `Partial`: an omitted `titleExclusions` would
+ * be a write of `undefined` into a column typed `string[]`, and the real thing
+ * has no default to fall back on the way the cover-letter columns do.
+ */
+interface UpsertPostingFilters extends ByUserId {
+  create: { userId: string; titleExclusions: string[] }
+  update: { titleExclusions: string[] }
+}
+
 interface UpsertBoard extends ByUserId {
   create: { userId: string; snapshot: unknown }
   update: { snapshot: unknown }
@@ -304,6 +346,12 @@ class DevDb {
     devCoverLetterInstructions()
   private readonly postings: Posting[] = devPostings()
   private readonly documents: Document[] = devDocuments()
+  /**
+   * No fixture, and that is the useful starting point: an unfiltered table is
+   * what every other dev assertion about `/jobs` assumes, and a canned
+   * blocklist would silently hide fixture rows somebody is counting.
+   */
+  private readonly postingFilters: PostingFilters[] = []
   /** No fixture — the dev whiteboard starts empty. See the accessor above. */
   private board: Board | undefined
   private nextId = 1
@@ -718,6 +766,38 @@ class DevDb {
     return row
   }
 
+  /**
+   * `null` for a user who has never saved one, exactly as
+   * {@link DevDb.findCoverLetterInstructions} answers: `titleExclusions()` in
+   * `@workspace/db` turns that into `[]`, and the distinction between "never
+   * set" and "set to nothing" stays available to anything that wants it.
+   */
+  findPostingFilters(userId: string): PostingFilters | null {
+    return this.postingFilters.find((row) => row.userId === userId) ?? null
+  }
+
+  /**
+   * A save is the whole list, not a patch of it — so unlike the cover-letter
+   * upsert there is nothing to merge with what was there: an empty list is a
+   * legitimate value and must not be filled in from the previous one.
+   */
+  upsertPostingFilters(query: UpsertPostingFilters): PostingFilters {
+    const { userId } = query.where
+    const existing = this.findPostingFilters(userId)
+    const written = existing ? query.update : query.create
+
+    const row: PostingFilters = {
+      userId,
+      titleExclusions: [...written.titleExclusions],
+      updatedAt: new Date(),
+    }
+
+    if (existing) return Object.assign(existing, row)
+
+    this.postingFilters.push(row)
+    return row
+  }
+
   findBoard(userId: string): Board | null {
     return this.board?.userId === userId ? this.board : null
   }
@@ -826,10 +906,19 @@ class DevDb {
   }
 }
 
-/** The two columns every Postings filter in this app is written against. */
+/**
+ * The columns every Postings filter in this app is written against.
+ *
+ * `titleNormalized` is optional because the delete path builds its own rows from
+ * the two identifying columns and has no title in hand — and because a `where`
+ * with no exclusion in it never reads the field. A row that *is* filtered on and
+ * carries no value is a fixture that has drifted, and
+ * {@link matchesPostingWhere} says so by name rather than silently admitting it.
+ */
 interface PostingKey {
   userId: string
   postingId: string
+  titleNormalized?: string | null
 }
 
 /**
@@ -853,6 +942,10 @@ export function matchesPostingWhere(
 ): boolean {
   if (row.userId !== where.userId) return false
 
+  if (where.NOT !== undefined && matchesAnyTitlePattern(row, where.NOT.OR)) {
+    return false
+  }
+
   const byId = where.postingId
   if (byId === undefined) return true
 
@@ -864,6 +957,40 @@ export function matchesPostingWhere(
   }
 
   return byId.in.includes(row.postingId)
+}
+
+/**
+ * Whether a row's normalised title carries any of the excluded patterns.
+ *
+ * ⚠️ **A plain substring test, and that is the *real* rule rather than a
+ * simplification of it.** Both sides are space-padded and punctuation-flattened
+ * — `titleMatchPattern()` on one side, the `title_normalized` generated column
+ * on the other — which is exactly what turns whole-word matching into
+ * `contains`. Reimplementing word boundaries here would make this fake stricter
+ * than Postgres and hide the case the padding exists to handle.
+ *
+ * Throws on a row with no `titleNormalized` rather than admitting it: under the
+ * flag that means a fixture missing the field, and quietly keeping the row would
+ * make the filter look broken in the one environment it is built in.
+ */
+function matchesAnyTitlePattern(
+  row: PostingKey,
+  patterns: TitleExclusion[]
+): boolean {
+  if (patterns.length === 0) return false
+
+  const normalized = row.titleNormalized
+
+  if (typeof normalized !== "string") {
+    throw new DevPrismaError(
+      "prisma.posting where.NOT",
+      "This row has no `titleNormalized`. It is a generated column in `0010`, so lib/dev/fixtures.ts has to derive it with normalizeTitle() from @workspace/job-search — the same rule the SQL states."
+    )
+  }
+
+  return patterns.some((pattern) =>
+    normalized.includes(pattern.titleNormalized.contains)
+  )
 }
 
 /**

@@ -2,11 +2,13 @@ import { StoredPostingSchema } from "@workspace/agents/stored-posting"
 import {
   listPostingPage,
   POSTING_STATUSES,
+  titleExclusions,
   type PostingListRow,
   type PostingOrder,
   type PostingStatus,
   type PrismaClient,
 } from "@workspace/db"
+import { titleMatchPattern } from "@workspace/job-search"
 
 import { formatCalendarDate, formatUtcDateTime } from "@/lib/format-dates"
 
@@ -122,8 +124,21 @@ export interface PostingView {
 
 export interface PostingPage {
   postings: PostingView[]
-  /** Every Posting this user has, not the length of {@link postings}. */
+  /**
+   * Every Posting this user has *that their filters admit*, not the length of
+   * {@link postings}.
+   */
   total: number
+  /**
+   * How many of this user's Postings their title filters removed.
+   *
+   * ⚠️ **The page is expected to say this out loud.** A filter that quietly
+   * shrinks a table is indistinguishable from briefings that stopped finding
+   * anything, and the row is not there to be noticed — so the count is the only
+   * thing standing between a working filter and a bug report. `0` when nothing
+   * is filtered, which is the usual case.
+   */
+  hidden: number
   /** The page actually rendered, which is not always the one asked for. */
   page: number
   pageCount: number
@@ -157,7 +172,20 @@ export async function listPostings(
   userId: string,
   query: PostingQuery
 ): Promise<PostingPage> {
-  const { rows, total, page, pageCount } = await listPostingPage(
+  // ⚠️ **Serial, and it has to be**: the patterns are an argument to the page
+  // query, so there is nothing to overlap it with. One indexed primary-key
+  // lookup, and the alternative — caching it across requests — would mean a
+  // save that does not take effect until something expires.
+  //
+  // ⚠️ **Words become patterns here, and only here.** `@workspace/db` is handed
+  // `" senior "` rather than `"senior"` because it filters and does not
+  // interpret: what a user's word *means* is `@workspace/job-search`'s, and the
+  // package that owns the SQL must not have a second opinion about it.
+  const excludeTitlePatterns = (await titleExclusions(prisma, userId)).map(
+    titleMatchPattern
+  )
+
+  const { rows, total, hidden, page, pageCount } = await listPostingPage(
     prisma,
     userId,
     {
@@ -165,6 +193,7 @@ export async function listPostings(
       direction: query.direction,
       page: query.page,
       pageSize: PAGE_SIZE,
+      excludeTitlePatterns,
     }
   )
 
@@ -225,7 +254,7 @@ export async function listPostings(
     )
   }
 
-  return { postings, total, page, pageCount, pageSize: PAGE_SIZE }
+  return { postings, total, hidden, page, pageCount, pageSize: PAGE_SIZE }
 }
 
 /**

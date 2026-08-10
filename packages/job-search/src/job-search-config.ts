@@ -140,10 +140,22 @@ export function parseJobSearchConfig(
  * A list rather than a paragraph: each criterion stays separately addressable,
  * which is what lets the scout run one search per title and per location rather
  * than collapsing everything into a single query.
+ *
+ * `titleExclusions` is the account-wide blocklist and comes from
+ * `posting_filters` rather than from the config, which is why it is a parameter
+ * and not a field: it belongs to the user and applies to every one of their
+ * briefings, while everything else here belongs to this job.
+ *
+ * ⚠️ **Telling the scout is not what enforces it.** The worker drops a posting
+ * whose title matches, deterministically, after the scout has reported — see
+ * `title-exclusions.ts`. This line exists so the scout does not spend searches
+ * and read-backs on roles that are going to be thrown away, which is a cost
+ * argument and not a correctness one.
  */
 export function toSearchBrief(
   config: JobSearchConfig,
-  occurrence: Date
+  occurrence: Date,
+  titleExclusions: readonly string[] = []
 ): string {
   const lines = [
     `Today is ${occurrence.toISOString().slice(0, 10)}. Find open job postings matching this candidate's criteria.`,
@@ -160,6 +172,16 @@ export function toSearchBrief(
 
   if (config.exclude?.length) {
     lines.push(`Rule out anything matching: ${config.exclude.join("; ")}`)
+  }
+
+  if (titleExclusions.length) {
+    // Stated as a hard rule rather than a preference, and separately from
+    // `exclude` above, because it *is* one: a posting whose title carries one
+    // of these words is dropped before the brief is written whatever the scout
+    // decides. Wording it as guidance would invite the model to weigh it.
+    lines.push(
+      `Never report a posting whose title contains any of these words: ${titleExclusions.join("; ")}. They are filtered out afterwards regardless, so reporting one wastes the slot.`
+    )
   }
 
   if (config.sources?.length) {

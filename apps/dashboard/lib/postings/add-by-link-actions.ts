@@ -23,8 +23,10 @@ import type { StoredPosting } from "@workspace/agents/stored-posting"
 import {
   postingPayload,
   recordLinkedPosting,
+  titleExclusions,
   type PrismaClient,
 } from "@workspace/db"
+import { isExcludedTitle } from "@workspace/job-search"
 import { z } from "zod"
 
 /**
@@ -293,6 +295,37 @@ export function createAddByLinkActions(
 
       // The URL is attached here and comes from the form, never from the model.
       posting = { ...extraction.posting, url }
+    }
+
+    /*
+      ⚠️ **Refused rather than added, and the alternative is worse.** The
+      Postings table hides a row whose title carries one of these words, so
+      adding one would write a row that is invisible the instant it exists —
+      the user would paste a link, be told it was added, and find nothing. The
+      word is named because the filter is account-wide and was probably set
+      weeks ago about a different search entirely.
+
+      Deliberately *after* the fetch: what is checked is the title the
+      advertisement actually carries, which nothing knows until the page or the
+      board has answered. Checking the URL for the word instead would be a
+      different rule, and a wrong one.
+    */
+    let blocked: string | undefined
+    try {
+      blocked = (await titleExclusions(deps.getPrisma(), caller.userId)).find(
+        (term) => isExcludedTitle(posting.title, [term])
+      )
+    } catch (error) {
+      // A settings read that failed must not cost somebody their paste. The
+      // filter is about tidying a list, and the honest degradation is to add
+      // the advertisement they explicitly asked for.
+      console.error("postings: could not read the title filters", error)
+    }
+
+    if (blocked !== undefined) {
+      return fail(
+        `“${blocked}” is one of your excluded title words, so “${posting.title}” would be hidden as soon as it was added. Change your filters in Schedules first.`
+      )
     }
 
     // The advertisement's own words survive in the payload; the column takes

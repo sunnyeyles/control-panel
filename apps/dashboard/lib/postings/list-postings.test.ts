@@ -1,5 +1,8 @@
 import type { PrismaClient } from "@workspace/db"
+import { normalizeTitle } from "@workspace/job-search"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+
+import { matchesPostingWhere, type PostingWhere } from "@/lib/dev/fake-prisma"
 
 import { formatSeenAgo, listPostings } from "./list-postings"
 import { PAGE_SIZE, parsePostingQuery } from "./posting-query"
@@ -12,6 +15,13 @@ interface PostingRow {
   userId: string
   postingId: string
   title: string
+  /**
+   * `title` as `0010`'s generated column derives it, which is what the title
+   * filter is matched against. Seeded rather than stated, for the reason the
+   * dev fixtures give: Postgres computes it and no row can carry a value that
+   * disagrees with its own title.
+   */
+  titleNormalized: string
   company: string
   location: string
   url: string
@@ -73,13 +83,14 @@ class FakeDb {
   readonly rows: PostingRow[] = []
   readonly counts: unknown[] = []
   readonly queries: unknown[] = []
+  /** The account's title filter, as `posting_filters` holds it. */
+  private exclusions: string[] | undefined
 
   posting(row: Partial<PostingRow> & { postingId: string }): this {
     const at = new Date(
       Date.parse("2026-08-01T00:00:00.000Z") + this.rows.length * 3_600_000
     )
-
-    this.rows.push({
+    const seeded = {
       userId: USER_ID,
       title: `Role ${this.rows.length + 1}`,
       company: "Acme",
@@ -92,28 +103,54 @@ class FakeDb {
       lastSeenAt: at,
       lastSeenRun: { job: { name: DEFAULT_BRIEFING } },
       ...row,
+    }
+
+    this.rows.push({
+      // Derived from whatever title won, so a row seeded with an overridden
+      // title cannot end up normalised from the default one.
+      titleNormalized: normalizeTitle(seeded.title),
+      ...seeded,
     })
 
+    return this
+  }
+
+  /** Give this user a saved filter. No call means they have never saved one. */
+  filtering(...terms: string[]): this {
+    this.exclusions = terms
     return this
   }
 
   asPrisma(): PrismaClient {
     return {
       posting: {
-        count: async (query: { where: { userId: string } }) => {
+        count: async (query: { where: PostingWhere }) => {
           this.counts.push(query)
-          return this.mine(query.where.userId).length
+          return this.matching(query.where).length
         },
-        findMany: async (query: { where: { userId: string } }) => {
+        findMany: async (query: { where: PostingWhere }) => {
           this.queries.push(query)
-          return this.mine(query.where.userId)
+          return this.matching(query.where)
         },
+      },
+      postingFilters: {
+        findUnique: async (query: { where: { userId: string } }) =>
+          this.exclusions === undefined || query.where.userId !== USER_ID
+            ? null
+            : { userId: USER_ID, titleExclusions: this.exclusions },
       },
     } as unknown as PrismaClient
   }
 
-  private mine(userId: string): PostingRow[] {
-    return this.rows.filter((row) => row.userId === userId)
+  /**
+   * ⚠️ **`matchesPostingWhere` rather than a `userId` comparison written here.**
+   * The `where` now carries the exclusion as well as the owner, and a second
+   * spelling of "which rows does this name" is one more than the number that
+   * can be wrong without anyone noticing — the same argument `fake-prisma.ts`
+   * makes for exporting the predicate in the first place.
+   */
+  private matching(where: PostingWhere): PostingRow[] {
+    return this.rows.filter((row) => matchesPostingWhere(row, where))
   }
 }
 
@@ -381,12 +418,99 @@ describe("listPostings", () => {
     expect(page).toEqual({
       postings: [],
       total: 0,
+      hidden: 0,
       page: 1,
       pageCount: 1,
       pageSize: PAGE_SIZE,
     })
     expect(db.counts).toHaveLength(1)
     expect(db.queries).toHaveLength(1)
+  })
+
+  /**
+   * The account-wide title filter, as this module applies it.
+   *
+   * What is asserted here is the *translation*: that a saved word becomes a
+   * normalised pattern before it reaches `@workspace/db`, and that the count
+   * the page renders describes the rows it will actually show. Whether the SQL
+   * then matches the right rows is proven against a real Postgres in
+   * `packages/db/src/stores.test.ts` — a fake could only agree with whoever
+   * wrote it.
+   */
+  describe("the title filter", () => {
+    function seeded() {
+      return db
+        .posting({
+          postingId: "a".repeat(16),
+          title: "Senior Backend Engineer",
+        })
+        .posting({ postingId: "b".repeat(16), title: "Backend Engineer" })
+        .posting({ postingId: "c".repeat(16), title: "HTML Developer" })
+    }
+
+    it("hides a matching row and says how many it hid", async () => {
+      const page = await listPostings(
+        seeded().filtering("senior").asPrisma(),
+        USER_ID,
+        parsePostingQuery()
+      )
+
+      expect(page.postings.map((row) => row.title)).toEqual([
+        "Backend Engineer",
+        "HTML Developer",
+      ])
+      // ⚠️ `total` is the filtered count, because it is what `pageCount` comes
+      // from and what the table labels itself with; `hidden` is the separate
+      // fact the page has to say out loud, or a filter and a dead briefing look
+      // identical.
+      expect(page.total).toBe(2)
+      expect(page.hidden).toBe(1)
+    })
+
+    it("sends the database a pattern, not the word the user typed", async () => {
+      await listPostings(
+        seeded().filtering("Senior").asPrisma(),
+        USER_ID,
+        parsePostingQuery()
+      )
+
+      // Space-padded and lowercased here, because whole-word matching is what
+      // the padding *is* — `@workspace/db` filters and does not interpret.
+      expect(db.queries[0]).toMatchObject({
+        where: {
+          userId: USER_ID,
+          NOT: { OR: [{ titleNormalized: { contains: " senior " } }] },
+        },
+      })
+    })
+
+    it("asks for the same rows in the count as in the page", async () => {
+      await listPostings(
+        seeded().filtering("senior").asPrisma(),
+        USER_ID,
+        parsePostingQuery()
+      )
+
+      // A filter applied to one and not the other is a pager that walks off the
+      // end of its own table.
+      expect(db.counts[0]).toMatchObject({
+        where: { NOT: { OR: [{ titleNormalized: { contains: " senior " } }] } },
+      })
+    })
+
+    it("filters nothing, and hides nothing, for a user who has saved none", async () => {
+      const page = await listPostings(
+        seeded().asPrisma(),
+        USER_ID,
+        parsePostingQuery()
+      )
+
+      expect(page.total).toBe(3)
+      expect(page.hidden).toBe(0)
+      // No `NOT` at all rather than an empty one, so an unfiltered account
+      // issues exactly the query it always did.
+      expect(db.queries[0]).not.toHaveProperty("where.NOT")
+    })
   })
 })
 

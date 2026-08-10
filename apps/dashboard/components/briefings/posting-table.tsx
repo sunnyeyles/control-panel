@@ -84,7 +84,12 @@ export function PostingTable({
     return (
       <Empty>
         <EmptyDescription>
-          {POSTINGS_EMPTY_MESSAGES[postingsEmptyState(counts)]}
+          {/*
+            `page.hidden` is passed because "empty" has a fourth cause now: the
+            user's own filters took every row. Telling them their briefings
+            found nothing would send them to widen a search that is working.
+          */}
+          {POSTINGS_EMPTY_MESSAGES[postingsEmptyState(counts, page.hidden)]}
         </EmptyDescription>
       </Empty>
     )
