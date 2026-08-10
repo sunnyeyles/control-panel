@@ -1,6 +1,6 @@
 "use client"
 
-import { usePostingSelection } from "@/components/briefings/posting-selection"
+import { usePostingSelection } from "@/components/jobs/postings/posting-selection"
 import { POSTING_SELECT_WIDTH } from "@/lib/postings/posting-columns"
 import { Checkbox } from "@workspace/ui/components/checkbox"
 import { TableHead } from "@workspace/ui/components/table"

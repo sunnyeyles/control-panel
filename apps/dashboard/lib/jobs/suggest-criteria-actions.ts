@@ -14,8 +14,8 @@ import {
 } from "@workspace/agents/cover-letter"
 import { parseSearchCriteria } from "@workspace/agents/criteria"
 import {
-  createProfileExtractor,
-  toProfilePrompt,
+  createProfileExtractor as defaultProfileExtractor,
+  toSearchCriteriaPrompt,
 } from "@workspace/agents/profile-extractor"
 import { type ResumeStore } from "@workspace/user-storage"
 
@@ -102,7 +102,7 @@ export interface SuggestCriteriaActionsDeps {
    * A test passes one that records the prompt it was given and answers with a
    * canned reply.
    */
-  createExtractor?: () => Agent
+  createProfileExtractor?: () => Agent
   /** Overridden in tests, so an assertion can name the reset key. */
   newResetKey?: () => string
 }
@@ -133,8 +133,8 @@ export interface SuggestCriteriaActions {
 export function createSuggestCriteriaActions(
   deps: SuggestCriteriaActionsDeps
 ): SuggestCriteriaActions {
-  const createExtractor =
-    deps.createExtractor ?? (() => createProfileExtractor())
+  const createProfileExtractor =
+    deps.createProfileExtractor ?? (() => defaultProfileExtractor())
   const newResetKey = deps.newResetKey ?? (() => crypto.randomUUID())
 
   async function suggestCriteria(): Promise<CriteriaSuggestionState> {
@@ -284,11 +284,11 @@ export function createSuggestCriteriaActions(
     // unparseable output only in the log: a model that answered with nothing has
     // told us nothing about the CV, so proposing empty criteria would be
     // proposing a search for everything. Both leave by the same catch below.
-    const text = await invokeTracedAgent(createExtractor(), {
+    const text = await invokeTracedAgent(createProfileExtractor(), {
       name: "search-criteria",
       route: "/jobs/schedules",
       userId,
-      prompt: toProfilePrompt(background),
+      prompt: toSearchCriteriaPrompt(background),
     })
 
     return parseSearchCriteria(text)

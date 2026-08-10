@@ -204,7 +204,7 @@ export function createLetterInstructionsActions(
 
     const document = documents.find(
       (candidate) =>
-        candidate.resumeId === ref.resumeId &&
+        candidate.documentId === ref.documentId &&
         candidate.extension === ref.extension
     )
 
@@ -229,7 +229,7 @@ export function createLetterInstructionsActions(
         // The session's userId again. A tampered field can name a different
         // object; it can never name a different owner's prefix.
         userId: caller.userId,
-        resumeId: ref.resumeId,
+        resumeId: ref.documentId,
         extension,
       })
 

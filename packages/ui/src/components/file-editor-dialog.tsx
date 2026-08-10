@@ -198,7 +198,7 @@ function FileEditorDialog({
       // mount this component lazily so TipTap is not in the page chunk; a
       // static import here would have put a PDF writer in the *editor* chunk
       // for everyone who opens it only to save. Same shape as
-      // `apps/dashboard/components/briefings/tailored-resume-pdf-button.tsx`.
+      // `apps/dashboard/components/jobs/postings/tailored-resume-pdf-button.tsx`.
       const { exportMarkdownToPdf } =
         await import("@workspace/ui/lib/pdf-export")
       const pdfName = activeFile.name.replace(/\.md$/i, ".pdf")

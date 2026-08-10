@@ -304,7 +304,7 @@ to leak is read by the agent with no way to leak it, and what comes back is a
 JSON object the user reviews in a form before anything is saved.
 
 Both prompts also tell the model to treat the outside text as quoted material,
-and `toProfilePrompt()` fences the CV in the same idiom — but a fence is a label,
+and `toSearchCriteriaPrompt()` fences the CV in the same idiom — but a fence is a label,
 not a boundary, and nothing stops a document from writing one of its own. The
 containment is the empty tool list, and both are asserted structurally, in
 `cover-letter-writer.test.ts`, `resume-tailor.test.ts` and

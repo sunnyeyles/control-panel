@@ -11,7 +11,7 @@ import {
   createJobAction,
   suggestCriteriaAction,
 } from "@/app/(app)/jobs/schedules/actions"
-import { IntervalField } from "@/components/briefings/jobs/interval-field"
+import { IntervalField } from "@/components/jobs/schedules/interval-field"
 import { IDLE } from "@/lib/actions/action-state"
 import {
   SUGGESTION_IDLE,

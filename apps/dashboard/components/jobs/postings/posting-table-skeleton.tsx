@@ -1,4 +1,4 @@
-import { PostingColumnHeading } from "@/components/briefings/posting-column-heading"
+import { PostingColumnHeading } from "@/components/jobs/postings/posting-column-heading"
 import {
   POSTING_ACTIONS_WIDTH,
   POSTING_COLUMNS,

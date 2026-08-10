@@ -1,8 +1,8 @@
 import { Suspense } from "react"
 
-import { BriefingSection } from "@/components/briefings/jobs/briefing-section"
-import { BriefingSectionSkeleton } from "@/components/briefings/jobs/briefing-section-skeleton"
-import { PostingFilterSection } from "@/components/briefings/jobs/posting-filter-section"
+import { BriefingSection } from "@/components/jobs/schedules/briefing-section"
+import { BriefingSectionSkeleton } from "@/components/jobs/schedules/briefing-section-skeleton"
+import { PostingFilterSection } from "@/components/jobs/schedules/posting-filter-section"
 import { JobTabs } from "@/components/jobs/job-tabs"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 

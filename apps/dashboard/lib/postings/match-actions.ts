@@ -11,7 +11,7 @@ import {
   assertDraftable,
   UndraftableError,
 } from "@workspace/agents/cover-letter"
-import { createMatchAssessor } from "@workspace/agents/match-assessor"
+import { createMatchAssessor as defaultMatchAssessor } from "@workspace/agents/match-assessor"
 import { parsePostingMatch, toMatchPrompt } from "@workspace/agents/match"
 import {
   countUnmatchedPostings,
@@ -54,7 +54,7 @@ import { loadStoredPosting } from "./load-stored-posting"
  *    call carrying the whole CV per Posting; a briefing that returned forty
  *    advertisements is forty of them. {@link MATCH_BATCH} is what keeps a single
  *    request inside `maxDuration`, and the loop in
- *    `components/briefings/score-pending-matches.tsx` is what eventually
+ *    `components/jobs/postings/score-pending-matches.tsx` is what eventually
  *    finishes the backlog.
  */
 
@@ -125,7 +125,7 @@ export interface MatchActionsDeps {
    * calls are concurrent; sharing one instance across a batch would be sharing
    * whatever run state it holds.
    */
-  createAssessor?: () => Agent
+  createMatchAssessor?: () => Agent
   /** Overridden in tests, so an assertion can name the instant recorded. */
   now?: () => Date
 }
@@ -143,7 +143,8 @@ export interface MatchActions {
 }
 
 export function createMatchActions(deps: MatchActionsDeps): MatchActions {
-  const createAssessor = deps.createAssessor ?? (() => createMatchAssessor())
+  const createMatchAssessor =
+    deps.createMatchAssessor ?? (() => defaultMatchAssessor())
   const now = deps.now ?? (() => new Date())
 
   async function scorePendingMatches(): Promise<ScorePendingMatchesResult> {
@@ -288,14 +289,14 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
    */
   async function scoreOne(
     prisma: PrismaClient,
-    job: {
+    assessment: {
       postingId: string
       resumeText: string
       userId: string
       resumeId: string
     }
   ): Promise<boolean> {
-    const { postingId, userId } = job
+    const { postingId, userId } = assessment
 
     const stored = await loadStoredPosting(
       prisma,
@@ -306,7 +307,7 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
     if (stored.status !== "found") return false
 
     // Only now is a model constructed. Everything above refuses for free.
-    const text = await invokeTracedAgent(createAssessor(), {
+    const text = await invokeTracedAgent(createMatchAssessor(), {
       name: "posting-match",
       route: "/jobs",
       userId,
@@ -314,7 +315,7 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
         posting: stored.posting,
         // No `name`: the assessor has no use for one, and the field exists for
         // documents written in the candidate's voice.
-        profile: { background: job.resumeText },
+        profile: { background: assessment.resumeText },
       }),
     })
 
@@ -326,7 +327,7 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
       score: match.score,
       reason: match.reason,
       gaps: match.gaps,
-      resumeId: job.resumeId,
+      resumeId: assessment.resumeId,
       matchedAt: now(),
     })
   }

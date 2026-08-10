@@ -6,14 +6,14 @@ import { loadPostingDetailAction } from "@/app/(app)/jobs/actions"
 import {
   CoverLetterCell,
   type CoverLetterPromise,
-} from "@/components/briefings/cover-letter-cell"
-import { DeletePostingsDialog } from "@/components/briefings/delete-postings-dialog"
+} from "@/components/jobs/postings/cover-letter-cell"
+import { DeletePostingsDialog } from "@/components/jobs/postings/delete-postings-dialog"
 import {
   PostingDetail,
   type PostingDetailState,
-} from "@/components/briefings/posting-detail"
-import { usePostingSelection } from "@/components/briefings/posting-selection"
-import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
+} from "@/components/jobs/postings/posting-detail"
+import { usePostingSelection } from "@/components/jobs/postings/posting-selection"
+import type { TailoredResumePromise } from "@/components/jobs/postings/use-tailored-resume"
 import type { PostingView } from "@/lib/postings/list-postings"
 import {
   POSTING_ACTIONS_WIDTH,

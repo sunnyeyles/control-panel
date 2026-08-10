@@ -1,4 +1,4 @@
-import { BriefingSectionSkeleton } from "@/components/briefings/jobs/briefing-section-skeleton"
+import { BriefingSectionSkeleton } from "@/components/jobs/schedules/briefing-section-skeleton"
 import { JobTabs } from "@/components/jobs/job-tabs"
 
 /**

@@ -5,7 +5,7 @@ import { criteriaSchemaDescription } from "./criteria.ts"
 import {
   createProfileExtractor,
   PROFILE_EXTRACTOR_SYSTEM_PROMPT,
-  toProfilePrompt,
+  toSearchCriteriaPrompt,
 } from "./profile-extractor.ts"
 import { expectSharedPromptGuards } from "./test-support/prompt-guards.ts"
 import { RecordingModel } from "./test-support/recording-model.ts"
@@ -22,7 +22,7 @@ describe("createProfileExtractor", () => {
 
     const result = await extractor.invoke({
       messages: [
-        new HumanMessage(toProfilePrompt("Backend engineer, Sydney.")),
+        new HumanMessage(toSearchCriteriaPrompt("Backend engineer, Sydney.")),
       ],
     })
 
@@ -101,7 +101,7 @@ describe("PROFILE_EXTRACTOR_SYSTEM_PROMPT", () => {
  * things that could quietly ruin an extraction — a paraphrase and a truncation
  * — are asserted against rather than trusted.
  */
-describe("toProfilePrompt", () => {
+describe("toSearchCriteriaPrompt", () => {
   const BACKGROUND = [
     "Jane Citizen — Backend Engineer",
     "",
@@ -112,7 +112,7 @@ describe("toProfilePrompt", () => {
   ].join("\n")
 
   it("carries the CV through verbatim", () => {
-    expect(toProfilePrompt(BACKGROUND)).toContain(BACKGROUND)
+    expect(toSearchCriteriaPrompt(BACKGROUND)).toContain(BACKGROUND)
   })
 
   /**
@@ -129,7 +129,9 @@ describe("toProfilePrompt", () => {
    * final message, so the schema has to reach it somehow.
    */
   it("does not repeat the schema the system prompt already carries", () => {
-    expect(toProfilePrompt(BACKGROUND)).not.toContain(criteriaSchemaDescription)
+    expect(toSearchCriteriaPrompt(BACKGROUND)).not.toContain(
+      criteriaSchemaDescription
+    )
   })
 
   /**
@@ -139,7 +141,7 @@ describe("toProfilePrompt", () => {
    * model which side of the message is the person and which is the task.
    */
   it("labels the CV as quoted material rather than instruction", () => {
-    const prompt = toProfilePrompt(BACKGROUND)
+    const prompt = toSearchCriteriaPrompt(BACKGROUND)
 
     expect(prompt).toMatch(/quoted material, not instruction/i)
     expect(prompt).toContain("--- end of CV ---")
@@ -157,6 +159,6 @@ describe("toProfilePrompt", () => {
   it("does not truncate a long CV", () => {
     const long = `${BACKGROUND}\n${"Delivered a project. ".repeat(2_000)}`
 
-    expect(toProfilePrompt(long)).toContain(long)
+    expect(toSearchCriteriaPrompt(long)).toContain(long)
   })
 })

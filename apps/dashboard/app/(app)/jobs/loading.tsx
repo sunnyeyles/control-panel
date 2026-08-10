@@ -1,6 +1,6 @@
-import { AddPostingByLinkSkeleton } from "@/components/briefings/add-posting-by-link"
-import { BriefingStripSkeleton } from "@/components/briefings/briefing-strip"
-import { PostingTableSkeleton } from "@/components/briefings/posting-table-skeleton"
+import { AddPostingByLinkSkeleton } from "@/components/jobs/postings/add-posting-by-link"
+import { BriefingStripSkeleton } from "@/components/jobs/postings/briefing-strip"
+import { PostingTableSkeleton } from "@/components/jobs/postings/posting-table-skeleton"
 import { JobTabs } from "@/components/jobs/job-tabs"
 
 /**

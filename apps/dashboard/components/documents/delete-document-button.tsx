@@ -28,10 +28,10 @@ import { Trash2Icon } from "lucide-react"
  * something irreversible.
  */
 export function DeleteDocumentButton({
-  resumeId,
+  documentId,
   displayName,
 }: {
-  resumeId: string
+  documentId: string
   displayName: string
 }) {
   const [state, formAction, pending] = useActionState(
@@ -73,7 +73,7 @@ export function DeleteDocumentButton({
             off the row now — the object key is built from what the database
             holds rather than from what the browser sent back.
           */}
-          <input type="hidden" name="resumeId" value={resumeId} />
+          <input type="hidden" name="documentId" value={documentId} />
 
           <ActionError state={state} className="mb-4" />
 

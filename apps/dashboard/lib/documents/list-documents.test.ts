@@ -54,7 +54,7 @@ describe("listDocuments", () => {
     )
 
     expect(document).toEqual({
-      resumeId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      documentId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
       extension: ".pdf",
       displayName: "My CV.pdf",
       documentType: "certification",
@@ -93,7 +93,7 @@ describe("listDocuments", () => {
     // The index's order, not a sort here. `loadCandidateBackground` takes the
     // first match out of this list to decide which CV is *the* CV, so the
     // order is load-bearing rather than cosmetic.
-    expect(documents.map((d) => d.resumeId)).toEqual([
+    expect(documents.map((d) => d.documentId)).toEqual([
       "newest",
       "middle",
       "older",

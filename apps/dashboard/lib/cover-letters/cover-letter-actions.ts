@@ -25,7 +25,7 @@ import {
 } from "@workspace/agents/cover-letter"
 import {
   coverLetterSystemPrompt,
-  createCoverLetterWriter,
+  createCoverLetterWriter as defaultCoverLetterWriter,
 } from "@workspace/agents/cover-letter-writer"
 import { coverLetterInstructions, type PrismaClient } from "@workspace/db"
 import {
@@ -196,7 +196,7 @@ export interface CoverLetterActionsDeps {
    * asserts on is *which* prompt was composed, which is the only part that can
    * be got wrong from this side.
    */
-  createWriter?: (extras: LetterInstructions) => Agent
+  createCoverLetterWriter?: (extras: LetterInstructions) => Agent
   /** Overridden in tests, so an assertion can name the drafting instant. */
   now?: () => Date
   /** Overridden in tests, so an assertion can name the reset key. */
@@ -204,10 +204,10 @@ export interface CoverLetterActionsDeps {
 }
 
 export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
-  const createWriter =
-    deps.createWriter ??
+  const createCoverLetterWriter =
+    deps.createCoverLetterWriter ??
     ((extras: LetterInstructions) =>
-      createCoverLetterWriter({
+      defaultCoverLetterWriter({
         systemPrompt: coverLetterSystemPrompt(extras),
       }))
   const now = deps.now ?? (() => new Date())
@@ -471,7 +471,7 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     userId: string,
     extras: LetterInstructions
   ): Promise<string> {
-    return invokeTracedAgent(createWriter(extras), {
+    return invokeTracedAgent(createCoverLetterWriter(extras), {
       name: "cover-letter",
       route: "/jobs",
       userId,

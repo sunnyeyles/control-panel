@@ -15,7 +15,7 @@ import {
 } from "@workspace/user-storage"
 import { z } from "zod"
 
-import { RESUME_ID_PATTERN } from "./document-ref"
+import { DOCUMENT_ID_PATTERN } from "./document-ref"
 import {
   checkUpload,
   describeRejection,
@@ -66,7 +66,7 @@ export interface DocumentActionsDeps {
    */
   getContentLength: () => Promise<number | undefined>
   /** Overridden in tests so an assertion can name the key. */
-  newResumeId?: () => string
+  newDocumentId?: () => string
 }
 
 /**
@@ -96,7 +96,7 @@ const uploadSchema = z.object({
  * The extension used to be a second field beside it and is not any more: the
  * row carries it, so there is one less thing arriving from the browser.
  */
-const resumeIdSchema = z.string().regex(RESUME_ID_PATTERN)
+const documentIdSchema = z.string().regex(DOCUMENT_ID_PATTERN)
 
 /**
  * The label the `<select>` posted, or `other`.
@@ -113,7 +113,7 @@ const resumeIdSchema = z.string().regex(RESUME_ID_PATTERN)
 const docTypeSchema = z.enum(DOCUMENT_TYPES).catch("other")
 
 export function createDocumentActions(deps: DocumentActionsDeps) {
-  const newResumeId = deps.newResumeId ?? (() => crypto.randomUUID())
+  const newDocumentId = deps.newDocumentId ?? (() => crypto.randomUUID())
 
   const requireCaller = () => requireUser(deps.getUser, "documents")
 
@@ -177,7 +177,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     // else, so it is narrowed here before it can reach the CHECK on the column.
     const documentType = docTypeSchema.parse(parsed.data.documentType)
 
-    const resumeId = newResumeId()
+    const documentId = newDocumentId()
 
     try {
       await deps.getResumes().put({
@@ -191,7 +191,12 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         // rather than by the database, because it is the object's key segment
         // and the object is written first. The uploaded filename is never a key
         // segment.
-        resumeId,
+        //
+        // `resumeId` is `ResumeStore`'s field name, not our word for it: that
+        // storage kind is the shelf every upload goes on, not CVs. Ours is
+        // `documentId`, and these three call sites are the only places the
+        // misnomer is allowed — see `NAMING.md` § Known exceptions.
+        resumeId: documentId,
         extension: check.extension,
         bytes,
         originalFilename: file.name,
@@ -213,7 +218,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     // which is what the cleanup below tries to do immediately.
     try {
       await recordDocument(deps.getPrisma(), {
-        id: resumeId,
+        id: documentId,
         userId: caller.userId,
         extension: check.extension,
         // The filename as the user typed it. Postgres holds it, so unlike the
@@ -223,7 +228,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         byteSize: bytes.byteLength,
       })
     } catch (error) {
-      console.error("documents: upload recorded no row", resumeId, error)
+      console.error("documents: upload recorded no row", documentId, error)
 
       // Best effort, and deliberately not reported: the user's upload has
       // already failed, and a second message about a cleanup they did not ask
@@ -233,13 +238,13 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         .getResumes()
         .delete({
           userId: caller.userId,
-          resumeId,
+          resumeId: documentId,
           extension: check.extension,
         })
         .catch((cleanup: unknown) => {
           console.error(
             "documents: orphaned object left behind",
-            resumeId,
+            documentId,
             cleanup
           )
         })
@@ -252,7 +257,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     return {
       status: "success",
       message: `Uploaded ${file.name}.`,
-      resetKey: resumeId,
+      resetKey: documentId,
     }
   }
 
@@ -267,9 +272,9 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     const caller = await requireCaller()
     if (!caller.ok) return { status: "error", message: caller.message }
 
-    const resumeId = resumeIdSchema.safeParse(formData.get("resumeId"))
+    const documentId = documentIdSchema.safeParse(formData.get("documentId"))
 
-    if (!resumeId.success) {
+    if (!documentId.success) {
       return { status: "error", message: "That document could not be found." }
     }
 
@@ -282,7 +287,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     let document: Awaited<ReturnType<typeof findDocument>>
 
     try {
-      document = await findDocument(prisma, caller.userId, resumeId.data)
+      document = await findDocument(prisma, caller.userId, documentId.data)
     } catch (error) {
       console.error("documents: could not load the document to delete", error)
       return { status: "error", message: "Something went wrong." }
@@ -300,7 +305,11 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     let rowDeleted: boolean
 
     try {
-      rowDeleted = await deleteDocumentRow(prisma, caller.userId, resumeId.data)
+      rowDeleted = await deleteDocumentRow(
+        prisma,
+        caller.userId,
+        documentId.data
+      )
     } catch (error) {
       console.error("documents: could not delete the row", error)
       return { status: "error", message: "Something went wrong." }
@@ -316,6 +325,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         // different *object*, but never a different owner's prefix — the key is
         // built from an id the form never supplies.
         userId: caller.userId,
+        // `ResumeStore`'s field name, not ours.
         resumeId: document.id,
         // From the row, not from the form. One less untrusted field, and one
         // less way for the key to name something the row does not.
@@ -339,7 +349,7 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     return {
       status: "success",
       message: "Document deleted.",
-      resetKey: resumeId.data,
+      resetKey: documentId.data,
     }
   }
 

@@ -8,14 +8,14 @@ import { formatDocumentFile } from "./document-ref"
 
 /** One row of the documents table. Everything is already display-ready. */
 export interface DocumentSummary {
-  resumeId: string
+  documentId: string
   extension: string
   /** What the user called the file. */
   displayName: string
   documentType: DocumentType
   size: number
   uploadedAt: Date
-  /** `{resumeId}{extension}` — the download route's path segment. */
+  /** `{documentId}{extension}` — the download route's path segment. */
   file: string
 }
 
@@ -47,12 +47,12 @@ export async function listDocuments(
   const rows = await listDocumentsForUser(prisma, userId)
 
   return rows.map((row) => ({
-    resumeId: row.id,
+    documentId: row.id,
     extension: row.extension,
     displayName: row.filename,
     documentType: row.docType as DocumentType,
     size: row.byteSize,
     uploadedAt: row.uploadedAt,
-    file: formatDocumentFile({ resumeId: row.id, extension: row.extension }),
+    file: formatDocumentFile({ documentId: row.id, extension: row.extension }),
   }))
 }

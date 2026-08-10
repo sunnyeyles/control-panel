@@ -5,7 +5,7 @@ import { ActionAlert } from "@/components/forms/action-alert"
 import { SubmitButton } from "@workspace/ui/components/submit-button"
 
 import { updateJobScheduleAction } from "@/app/(app)/jobs/schedules/actions"
-import { IntervalField } from "@/components/briefings/jobs/interval-field"
+import { IntervalField } from "@/components/jobs/schedules/interval-field"
 import { IDLE } from "@/lib/actions/action-state"
 import type { BriefingSummary } from "@/lib/jobs/briefing-summary"
 
