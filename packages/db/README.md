@@ -168,14 +168,16 @@ Postgres:
   record a brief was written from can be read back without cloud credentials.
   It has no lifecycle rule and will accumulate — known, and accepted because a
   forward-only migration is easier to add than to withdraw.
-- **`on delete restrict` everywhere provenance is involved**, and
-  `cover_letter_instructions` is the single exception.
-- **`cover_letter_instructions` cascades from `users`, and only it does.** The
-  rule elsewhere is restrict, because deleting a user who owns jobs — or a job
-  with runs — should fail loudly rather than silently erase provenance. This row
-  records no such thing: it is a preference with no independent existence, and
-  restricting on it would make a user undeletable for the sake of a settings
-  row. Any new table gets `restrict` unless it can make the same argument.
+- **`on delete restrict` everywhere provenance is involved.** The exceptions are
+  the settings rows — `cover_letter_instructions`, `posting_filters` and
+  `boards`.
+- **`cover_letter_instructions` cascades from `users`, and so do the other two
+  settings rows.** The rule elsewhere is restrict, because deleting a user who
+  owns jobs — or a job with runs — should fail loudly rather than silently erase
+  provenance. These rows record no such thing: they are preferences with no
+  independent existence, and restricting on one would make a user undeletable
+  for the sake of a settings row. Any new table gets `restrict` unless it can
+  make the same argument.
   Its two text columns default to `''` rather than being nullable, so "nothing
   set" has one representation. They stay two columns rather than one because
   the prompt built from them fences each differently — rules are followed, an
@@ -234,6 +236,27 @@ Postgres:
   `recordPostings` also dedupes its own batch, because Postgres raises `21000`
   when one statement affects a row twice and two links to the same
   advertisement in one findings list is the ordinary case.
+- **`postings.title_normalized` is `GENERATED ALWAYS … STORED`, and nothing may
+  write it.** It is `title` lowercased, with runs of non-alphanumerics flattened
+  to single spaces and a space at each end — `' senior staff engineer remote '`.
+  The padding is what turns the whole-word title filter into an ordinary
+  `LIKE '%…%'`, which is the only reason a paginated query can answer it at all;
+  without it the exclusion would need a regex `where` Prisma cannot express, or
+  a rewrite of `listPostingPage` into raw SQL. Generated rather than maintained
+  by the write path so it cannot drift from the title however a row is written,
+  and both posting inserts are raw SQL with explicit column lists, so neither
+  had to learn about it. **The rule is stated twice** — here in SQL and as
+  `normalizeTitle()` in `@workspace/job-search` — exactly as `0006`'s date regex
+  restates `parsePostedAt()`, and the two must agree. A `prisma migrate dev`
+  would try to re-derive the column as a plain one; migrations here are
+  hand-authored and forward-only, and that is why.
+- **`posting_filters` is per user and read by this package, unlike
+  `jobs.config`.** The platform stores a config and never looks inside it, but
+  `listPostingPage` _filters_ on these terms — so they are a real `text[]` with a
+  cardinality CHECK rather than an opaque blob. What it is handed is a
+  **pattern** (`' senior '`) and not the word a user typed: deciding what a word
+  means belongs to `@workspace/job-search`, and this package filtering on a rule
+  it also interpreted would be two owners for one rule.
 - **`postings.posting_id` has a CHECK, and it is not a duplicated validation.**
   `apps/dashboard/lib/cover-letters/cover-letter-ref.ts` keeps the one copy of
   the rule for _untrusted input_. This one says the database must not hold a

@@ -11,7 +11,7 @@ import type { Agent } from "@workspace/agents"
 import type { PostingFetch } from "@workspace/agents/board-fetch"
 import type { PageExtractResult } from "@workspace/agent-tools/page-extract"
 import type { PrismaClient } from "@workspace/db"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import {
   ALREADY_TRACKED,
@@ -108,9 +108,24 @@ interface StoredRow {
 class FakePostings {
   readonly rows: StoredRow[] = []
   readonly inserts: StoredRow[] = []
+  /** The account's title filter, and whether reading it works at all. */
+  private exclusions: string[] = []
+  private filtersUnreadable = false
 
   seed(row: StoredRow): this {
     this.rows.push(row)
+    return this
+  }
+
+  /** Give this user a saved filter. */
+  filtering(...terms: string[]): this {
+    this.exclusions = terms
+    return this
+  }
+
+  /** Make the settings read fail, which must not cost somebody their paste. */
+  breakFilters(): this {
+    this.filtersUnreadable = true
     return this
   }
 
@@ -119,6 +134,17 @@ class FakePostings {
     const inserts = this.inserts
 
     return {
+      postingFilters: {
+        findUnique: async () => {
+          if (this.filtersUnreadable) {
+            throw new Error("the filters table is gone")
+          }
+
+          return this.exclusions.length === 0
+            ? null
+            : { userId: USER_ID, titleExclusions: this.exclusions }
+        },
+      },
       posting: {
         findUnique: async ({
           where,
@@ -592,5 +618,97 @@ describe("addPostingByLink, when a board can answer the link", () => {
     expect(it_.boardFetches()).toBe(1)
     expect(it_.fetches()).toBe(1)
     expect(it_.extractorBuilds()).toBe(1)
+  })
+})
+
+/**
+ * The account-wide title filter, met on the way in.
+ *
+ * The Postings table hides a row whose title carries one of these words, so
+ * adding one would write a row that is invisible the instant it exists — the
+ * user pastes a link, is told it was added, and finds nothing. Every assertion
+ * here is about that trade being made deliberately.
+ */
+describe("addPostingByLink, against the user's title filters", () => {
+  const SEEK_URL = "https://www.seek.com.au/job/93431609?type=standard"
+
+  const SENIOR: PostingFetch = {
+    status: "fetched",
+    board: "SEEK",
+    posting: {
+      title: "Senior Backend Engineer",
+      company: "Holloway Labs",
+      location: "Sydney NSW",
+      url: SEEK_URL,
+      summary: "Own the data platform.",
+    },
+  }
+
+  it("refuses a posting its own title would hide, and names the word", async () => {
+    const it_ = harness({
+      board: SENIOR,
+      postings: new FakePostings().filtering("senior"),
+    })
+
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    expect(state.status).toBe("error")
+    expect(messageOf(state)).toContain("senior")
+    expect(messageOf(state)).toContain("Senior Backend Engineer")
+    // Nothing written: a row nobody can see is worse than a refusal that says
+    // why, and the word was probably set weeks ago about a different search.
+    expect(it_.postings.inserts).toHaveLength(0)
+  })
+
+  it("checks the title the advertisement carries, not the link", async () => {
+    // The URL says nothing about seniority; the board's answer does. Checking
+    // before the fetch would be a different rule, and a wrong one.
+    const it_ = harness({
+      board: SENIOR,
+      postings: new FakePostings().filtering("senior"),
+    })
+
+    await it_.add(IDLE, form(SEEK_URL))
+
+    expect(it_.boardFetches()).toBe(1)
+  })
+
+  it("adds a posting no filter matches", async () => {
+    const it_ = harness({
+      board: SENIOR,
+      postings: new FakePostings().filtering("principal", "graduate"),
+    })
+
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    expect(state.status).toBe("success")
+    expect(it_.postings.inserts).toHaveLength(1)
+  })
+
+  it("matches whole words, so a substring does not cost a paste", async () => {
+    const it_ = harness({
+      board: SENIOR,
+      // Inside "engineer", and not a word of the title.
+      postings: new FakePostings().filtering("gin"),
+    })
+
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    expect(state.status).toBe("success")
+  })
+
+  it("still adds the posting when the filters cannot be read", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const it_ = harness({
+      board: SENIOR,
+      postings: new FakePostings().breakFilters(),
+    })
+
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    // The filter is about tidying a list. Losing a settings read must not cost
+    // somebody the advertisement they explicitly asked for.
+    expect(state.status).toBe("success")
+    expect(error).toHaveBeenCalled()
   })
 })

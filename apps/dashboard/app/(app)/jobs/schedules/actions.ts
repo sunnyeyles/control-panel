@@ -6,6 +6,7 @@ import { getPrisma } from "@/lib/db"
 import type { CriteriaSuggestionState } from "@/lib/jobs/criteria-suggestion"
 import { createJobActions } from "@/lib/jobs/job-actions"
 import { createSuggestCriteriaActions } from "@/lib/jobs/suggest-criteria-actions"
+import { createTitleFilterActions } from "@/lib/postings/title-filter-actions"
 import { getResumeStore } from "@/lib/storage"
 import { refresh } from "next/cache"
 
@@ -65,6 +66,38 @@ export async function createJobAction(
   formData: FormData
 ): Promise<ActionState> {
   const result = await actions.createJob(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * The account-wide title filter.
+ *
+ * Here rather than in `jobs/page.tsx`'s own actions because the form is on this
+ * page — the exported action set of a segment is a security surface, and it is
+ * auditable when it is the things *this* page can do.
+ */
+const titleFilters = createTitleFilterActions({
+  getUser: getCurrentUser,
+  getPrisma,
+})
+
+/**
+ * ⚠️ **`refresh()` matters more here than for the actions above.** The form
+ * renders the saved terms as a `defaultValue`, so without it `staleTimes.dynamic`
+ * serves the pre-save list back on the next visit — which looks exactly like a
+ * save that silently did not happen. It also clears the client router cache
+ * outright, which is what makes `/jobs` re-query: the filter decides which rows
+ * that page shows, and a stale segment there would show the postings the user
+ * has just hidden.
+ */
+export async function saveTitleFiltersAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await titleFilters.saveTitleFilters(state, formData)
 
   if (result.status === "success") refresh()
 

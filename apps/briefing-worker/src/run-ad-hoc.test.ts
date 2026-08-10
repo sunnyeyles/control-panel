@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   recordArtifact: vi.fn(),
   recordRunFindings: vi.fn(),
   runBriefing: vi.fn(),
+  titleExclusions: vi.fn(async () => [] as string[]),
 }))
 
 vi.mock("@workspace/db", async (importOriginal) => {
@@ -70,6 +71,7 @@ beforeEach(() => {
   mocks.finishRun.mockResolvedValue(true)
   mocks.claimAdHocRun.mockResolvedValue(CLAIM)
   mocks.runBriefing.mockResolvedValue({ warnings: undefined })
+  mocks.titleExclusions.mockResolvedValue([])
   vi.spyOn(console, "log").mockImplementation(() => {})
 })
 
@@ -150,6 +152,23 @@ describe("running it", () => {
         slot: { runId: RUN_ID, scheduledFor: REQUESTED_AT },
         trigger: "manual",
       })
+    )
+  })
+
+  it("applies the owner's title filter, exactly as a scheduled run does", async () => {
+    // A run someone started by hand is the same pipeline — the trigger changes
+    // reporting and nothing else — so a briefing that honoured the exclusions
+    // overnight and ignored them on the button would be the surprise.
+    mocks.titleExclusions.mockResolvedValue(["senior"])
+
+    await run(prismaWith(JOB))
+
+    expect(mocks.titleExclusions).toHaveBeenCalledWith(
+      expect.anything(),
+      JOB.userId
+    )
+    expect(mocks.runBriefing).toHaveBeenCalledWith(
+      expect.objectContaining({ titleExclusions: ["senior"] })
     )
   })
 

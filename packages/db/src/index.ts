@@ -35,6 +35,12 @@ export {
   saveCoverLetterInstructions,
 } from "./cover-letter-instructions.ts"
 
+export {
+  postingFilters,
+  savePostingFilters,
+  titleExclusions,
+} from "./posting-filters.ts"
+
 export { loadBoard, saveBoard } from "./boards.ts"
 
 export {
@@ -108,6 +114,7 @@ export type {
   Job,
   JobConfig,
   Posting,
+  PostingFilters,
   PostingStatus,
   Run,
   RunFailure,

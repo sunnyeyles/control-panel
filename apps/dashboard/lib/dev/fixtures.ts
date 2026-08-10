@@ -17,6 +17,7 @@ import type {
   PostingStatus,
   Run,
 } from "@workspace/db/types"
+import { normalizeTitle } from "@workspace/job-search"
 import { contentTypeFor } from "@workspace/user-storage/kinds"
 import type {
   NewCoverLetter,
@@ -368,6 +369,13 @@ function devPosting(
     userId: DEV_USER_ID,
     postingId: postingId(posting),
     title: posting.title,
+    // ⚠️ **Derived, unlike `postedOn` above.** `title_normalized` is a
+    // `GENERATED ALWAYS … STORED` column: Postgres computes it from `title` and
+    // nobody can write a value that disagrees, so a fixture stating one by hand
+    // would be stating something the database cannot produce. `normalizeTitle()`
+    // is the TypeScript half of that same rule, which is why calling it here is
+    // reproducing the column rather than putting a rule in a fixture.
+    titleNormalized: normalizeTitle(posting.title),
     company: posting.company,
     location: posting.location,
     url: posting.url,

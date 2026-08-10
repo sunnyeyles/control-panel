@@ -4,9 +4,9 @@ A scheduled worker turns a candidate's search criteria into a private, per-user
 job-search brief.
 
 Each run: read the criteria → query each job board's live listings for matching
-postings → validate the findings → compose markdown → upload to private S3 →
-record the object key and the findings in Neon → add every posting found to the
-cumulative `postings` record.
+postings → validate the findings → drop anything the user's title filter rules
+out → compose markdown → upload to private S3 → record the object key and the
+findings in Neon → add every posting kept to the cumulative `postings` record.
 
 Vocabulary is in `CONTEXT.md`, and it is worth reading first — in particular
 **Job** means "a row in `jobs`, a thing that runs on a cadence" and never an
@@ -22,6 +22,7 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                                                                                                                          |
 | One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                                                                                                                          |
 | What `jobs.config` means                     | `packages/job-search/src/job-search-config.ts`                                                                                                                                                                                      |
+| Words that rule a Posting out by its title   | `packages/job-search/src/title-exclusions.ts`, stored by `packages/db/src/posting-filters.ts`, enforced in `apps/briefing-worker/src/run-briefing.ts` and `packages/db/src/postings.ts`                                             |
 | The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                                                                                                                         |
 | The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                                                                                                                   |
 | The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                                                                                                                   |
@@ -91,6 +92,16 @@ and `web_search` — neither the board tools nor any fetcher are in it.
 
 - **S3 stays private.** Neon stores object keys only — never URLs, never blob
   content. The `artifacts.object_key` CHECK enforces it.
+- **The title filter is enforced, and it is never silent.** A user's excluded
+  title words are applied twice as a rule no model takes part in — the worker
+  drops a matching posting between the hand-off and the writer, and the Postings
+  table leaves out a matching row it already holds. Both ends read one rule
+  (`normalizeTitle()` in `@workspace/job-search`, restated in SQL as the
+  `postings.title_normalized` generated column). Because a filtered row is not
+  there to be noticed, every place that removes one says how many: the table
+  prints the count, the run report carries `excludedPostings`, and pasting a link
+  the filter would hide is refused rather than added invisibly. Nothing is
+  deleted — clearing the list brings every row back with its status intact.
 - **Runs are idempotent.** `briefId` is the run id and the key partitions on the
   occurrence, so re-executing a run overwrites one object rather than making a
   second. Claiming is at-most-once; every duplicate occurrence is a paid run.

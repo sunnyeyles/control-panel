@@ -37,6 +37,7 @@ type TraceStep =
   | "config"
   | "scout"
   | "handoff"
+  | "filter"
   | "writer"
   | "upload"
   | "record"
