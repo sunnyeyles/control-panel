@@ -133,7 +133,7 @@ export async function loadCandidateBackground(
     // ownership again underneath; this is what makes that check a second line
     // rather than the only one.
     userId,
-    resumeId: newest.resumeId,
+    resumeId: newest.documentId,
     extension,
   })
 
@@ -166,6 +166,6 @@ export async function loadCandidateBackground(
     ok: true,
     background,
     displayName: newest.displayName,
-    documentId: newest.resumeId,
+    documentId: newest.documentId,
   }
 }

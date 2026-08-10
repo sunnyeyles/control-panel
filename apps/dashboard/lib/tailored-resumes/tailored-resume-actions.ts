@@ -8,7 +8,7 @@ import { editPostingDocument } from "@/lib/posting-documents/edit-posting-docume
 import { preparePostingDocument } from "@/lib/posting-documents/prepare-posting-document"
 import type { Agent } from "@workspace/agents"
 import type { UndraftableError } from "@workspace/agents/cover-letter"
-import { createResumeTailor } from "@workspace/agents/resume-tailor"
+import { createResumeTailor as defaultResumeTailor } from "@workspace/agents/resume-tailor"
 import {
   TailoredResumeRequestSchema,
   toTailoredResumePrompt,
@@ -149,13 +149,13 @@ export interface TailoredResumeActionsDeps {
    * constructed — hence a factory called inside the action, never at module
    * scope. A test passes one built over a fake chat model.
    *
-   * ⚠️ **It takes no arguments, unlike the letters' `createWriter`.** That one
+   * ⚠️ **It takes no arguments, unlike the letters' `createCoverLetterWriter`.** That one
    * receives the candidate's saved Letter Instructions because the system prompt
    * is composed from them. There is no such setting for resumes, so this agent's
    * prompt is fixed — and keeping the seam argument-less is what says so at the
    * type level rather than in a comment somebody has to find.
    */
-  createTailor?: () => Agent
+  createResumeTailor?: () => Agent
   /** Overridden in tests, so an assertion can name the generating instant. */
   now?: () => Date
   /** Overridden in tests, so an assertion can name the reset key. */
@@ -163,7 +163,8 @@ export interface TailoredResumeActionsDeps {
 }
 
 export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
-  const createTailor = deps.createTailor ?? (() => createResumeTailor())
+  const createResumeTailor =
+    deps.createResumeTailor ?? (() => defaultResumeTailor())
   const now = deps.now ?? (() => new Date())
   const newResetKey = deps.newResetKey ?? (() => crypto.randomUUID())
 
@@ -322,7 +323,7 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
     request: TailoredResumeRequest,
     userId: string
   ): Promise<string> {
-    return invokeTracedAgent(createTailor(), {
+    return invokeTracedAgent(createResumeTailor(), {
       name: "tailored-resume",
       route: "/jobs",
       userId,

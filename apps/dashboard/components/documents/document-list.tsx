@@ -49,7 +49,7 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
 
         <TableBody>
           {documents.map((document) => (
-            <TableRow key={document.resumeId}>
+            <TableRow key={document.documentId}>
               <TableCell className="font-medium">
                 {/*
                   A plain anchor with `download`, not `next/link`. Prefetching a
@@ -96,7 +96,7 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
 
               <TableCell>
                 <DeleteDocumentButton
-                  resumeId={document.resumeId}
+                  documentId={document.documentId}
                   displayName={document.displayName}
                 />
               </TableCell>

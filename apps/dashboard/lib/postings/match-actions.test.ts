@@ -248,7 +248,7 @@ function harness(
     getUser: async () => options.user ?? SIGNED_IN,
     getResumes: () => resumes,
     getPrisma: () => postings.asPrisma(fakeDocumentDb(USER_ID, resumes.rows)),
-    createAssessor: () => {
+    createMatchAssessor: () => {
       builds += 1
       return assessor.asAgent()
     },

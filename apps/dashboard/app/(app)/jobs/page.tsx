@@ -4,15 +4,15 @@ import {
   BriefingStrip,
   BriefingStripSkeleton,
   type BriefingStripEntry,
-} from "@/components/briefings/briefing-strip"
-import { AddPostingByLink } from "@/components/briefings/add-posting-by-link"
-import { CoverLetterAlert } from "@/components/briefings/cover-letter-alert"
-import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
-import { PostingTable } from "@/components/briefings/posting-table"
-import { PostingTableSkeleton } from "@/components/briefings/posting-table-skeleton"
-import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
-import { ScorePendingMatches } from "@/components/briefings/score-pending-matches"
-import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
+} from "@/components/jobs/postings/briefing-strip"
+import { AddPostingByLink } from "@/components/jobs/postings/add-posting-by-link"
+import { CoverLetterAlert } from "@/components/jobs/postings/cover-letter-alert"
+import type { CoverLetterPromise } from "@/components/jobs/postings/cover-letter-cell"
+import { PostingTable } from "@/components/jobs/postings/posting-table"
+import { PostingTableSkeleton } from "@/components/jobs/postings/posting-table-skeleton"
+import { RefreshWhileRunning } from "@/components/jobs/postings/refresh-while-running"
+import { ScorePendingMatches } from "@/components/jobs/postings/score-pending-matches"
+import type { TailoredResumePromise } from "@/components/jobs/postings/use-tailored-resume"
 import { JobTabs } from "@/components/jobs/job-tabs"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import {

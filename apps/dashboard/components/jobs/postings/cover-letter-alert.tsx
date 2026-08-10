@@ -1,4 +1,4 @@
-import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
+import type { CoverLetterPromise } from "@/components/jobs/postings/cover-letter-cell"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 
 /**

@@ -24,7 +24,7 @@ import { MAX_DOCUMENT_BYTES } from "./upload-validation"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
-const RESUME_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+const DOCUMENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 
 const SIGNED_IN: CurrentUser = {
   status: "ok",
@@ -113,14 +113,14 @@ function prisma(): PrismaClient {
 
 function actionsFor(
   user: CurrentUser,
-  overrides: { contentLength?: number; newResumeId?: () => string } = {}
+  overrides: { contentLength?: number; newDocumentId?: () => string } = {}
 ) {
   return createDocumentActions({
     getUser: async () => user,
     getResumes: () => store,
     getPrisma: prisma,
     getContentLength: async () => overrides.contentLength,
-    newResumeId: overrides.newResumeId ?? (() => RESUME_ID),
+    newDocumentId: overrides.newDocumentId ?? (() => DOCUMENT_ID),
   })
 }
 
@@ -209,7 +209,7 @@ describe("uploadDocument — what reaches the store", () => {
       uploadForm(pdf(1024, "../../etc/passwd.pdf"))
     )
 
-    expect(store.puts[0]?.resumeId).toBe(RESUME_ID)
+    expect(store.puts[0]?.resumeId).toBe(DOCUMENT_ID)
     expect(store.puts[0]?.originalFilename).toBe("../../etc/passwd.pdf")
   })
 
@@ -232,14 +232,14 @@ describe("uploadDocument — what reaches the store", () => {
     // id: that is what makes `{id}{extension}` address the bytes.
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
-      id: RESUME_ID,
+      id: DOCUMENT_ID,
       userId: USER_ID,
       extension: ".pdf",
       filename: "My CV.pdf",
       docType: "resume",
       byteSize: 2048,
     })
-    expect(store.puts[0]?.resumeId).toBe(RESUME_ID)
+    expect(store.puts[0]?.resumeId).toBe(DOCUMENT_ID)
   })
 
   it("keeps a filename Postgres can hold and a header cannot", async () => {
@@ -299,7 +299,7 @@ describe("uploadDocument — what reaches the store", () => {
     expect(result.status).toBe("error")
     expect(store.puts).toHaveLength(1)
     expect(store.deletes).toEqual([
-      { userId: USER_ID, resumeId: RESUME_ID, extension: ".pdf" },
+      { userId: USER_ID, resumeId: DOCUMENT_ID, extension: ".pdf" },
     ])
   })
 
@@ -406,7 +406,7 @@ describe("uploadDocument — the reset key", () => {
     expect(success).toEqual({
       status: "success",
       message: "Uploaded My CV.pdf.",
-      resetKey: RESUME_ID,
+      resetKey: DOCUMENT_ID,
     })
 
     store.putError = new StorageUnavailableError("nope")
@@ -416,7 +416,7 @@ describe("uploadDocument — the reset key", () => {
     expect(failure).toEqual({
       status: "error",
       message: "Document storage is unavailable. Try again in a moment.",
-      resetKey: RESUME_ID,
+      resetKey: DOCUMENT_ID,
     })
   })
 
@@ -436,7 +436,7 @@ describe("uploadDocument — the reset key", () => {
     expect(failure).toEqual({
       status: "error",
       message: NOT_AUTHORIZED,
-      resetKey: RESUME_ID,
+      resetKey: DOCUMENT_ID,
     })
   })
 
@@ -451,7 +451,7 @@ describe("uploadDocument — the reset key", () => {
     const third = await uploadDocument(second, uploadForm(pdf()))
 
     // One reset per success means zero resets across three failures.
-    expect(third.status === "error" && third.resetKey).toBe(RESUME_ID)
+    expect(third.status === "error" && third.resetKey).toBe(DOCUMENT_ID)
   })
 
   it("has no reset key to carry before the first success", async () => {
@@ -471,7 +471,7 @@ describe("uploadDocument — the reset key", () => {
   it("advances on the next success, which is what resets the form", async () => {
     const ids = ["id-one", "id-two"]
     const actions = actionsFor(SIGNED_IN, {
-      newResumeId: () => ids.shift() ?? "exhausted",
+      newDocumentId: () => ids.shift() ?? "exhausted",
     })
 
     const first = await actions.uploadDocument(IDLE, uploadForm(pdf()))
@@ -483,9 +483,9 @@ describe("uploadDocument — the reset key", () => {
 })
 
 describe("deleteDocument", () => {
-  function deleteForm(resumeId: string): FormData {
+  function deleteForm(documentId: string): FormData {
     const form = new FormData()
-    form.set("resumeId", resumeId)
+    form.set("documentId", documentId)
     return form
   }
 
@@ -493,7 +493,7 @@ describe("deleteDocument", () => {
    * A stored document, as both halves. The extension is only on the row: the
    * form no longer carries one, which is the point of several tests below.
    */
-  function seed(id = RESUME_ID, extension = ".pdf"): void {
+  function seed(id = DOCUMENT_ID, extension = ".pdf"): void {
     rows.push(toFakeDocument(USER_ID, { id, extension }))
   }
 
@@ -502,7 +502,7 @@ describe("deleteDocument", () => {
 
     const result = await actionsFor(ANONYMOUS).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID)
+      deleteForm(DOCUMENT_ID)
     )
 
     expect(result.status).toBe("error")
@@ -515,14 +515,14 @@ describe("deleteDocument", () => {
 
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID)
+      deleteForm(DOCUMENT_ID)
     )
 
     expect(result.status).toBe("success")
     expect(rows).toHaveLength(0)
     expect(store.deletes[0]).toEqual({
       userId: USER_ID,
-      resumeId: RESUME_ID,
+      resumeId: DOCUMENT_ID,
       extension: ".pdf",
     })
   })
@@ -531,9 +531,9 @@ describe("deleteDocument", () => {
     // The form used to post one beside the id. It does not any more, so there
     // is one less untrusted field and no way for the key to name something the
     // row does not.
-    seed(RESUME_ID, ".docx")
+    seed(DOCUMENT_ID, ".docx")
 
-    await actionsFor(SIGNED_IN).deleteDocument(IDLE, deleteForm(RESUME_ID))
+    await actionsFor(SIGNED_IN).deleteDocument(IDLE, deleteForm(DOCUMENT_ID))
 
     expect(store.deletes[0]?.extension).toBe(".docx")
   })
@@ -541,7 +541,7 @@ describe("deleteDocument", () => {
   it("refuses an id with no row, without touching the bucket", async () => {
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID)
+      deleteForm(DOCUMENT_ID)
     )
 
     expect(result).toEqual({
@@ -557,16 +557,16 @@ describe("deleteDocument", () => {
     // oracle for whether another user's document id is real.
     const notFound = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID)
+      deleteForm(DOCUMENT_ID)
     )
 
     rows.push(
-      toFakeDocument(OTHER_USER_ID, { id: RESUME_ID, extension: ".pdf" })
+      toFakeDocument(OTHER_USER_ID, { id: DOCUMENT_ID, extension: ".pdf" })
     )
 
     const someoneElses = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID)
+      deleteForm(DOCUMENT_ID)
     )
 
     expect(someoneElses).toEqual(notFound)
@@ -584,16 +584,16 @@ describe("deleteDocument", () => {
 
     const result = await actionsFor(SIGNED_IN).deleteDocument(
       IDLE,
-      deleteForm(RESUME_ID)
+      deleteForm(DOCUMENT_ID)
     )
 
     expect(result.status).toBe("success")
     expect(rows).toHaveLength(0)
   })
 
-  it("rejects a malformed resumeId before the bucket is touched", async () => {
+  it("rejects a malformed documentId before the bucket is touched", async () => {
     // What the pattern admits and refuses — the uuid shape, the dash edge
-    // cases, what `crypto.randomUUID` produces — is `RESUME_ID_PATTERN`'s and
+    // cases, what `crypto.randomUUID` produces — is `DOCUMENT_ID_PATTERN`'s and
     // is pinned in `document-ref.test.ts`. This action's own property is the
     // ordering: a value the pattern refuses reaches no store call.
     const result = await actionsFor(SIGNED_IN).deleteDocument(

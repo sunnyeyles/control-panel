@@ -1,7 +1,7 @@
 import {
   devContentType,
   devCoverLetters,
-  devResumes,
+  devUploads,
   devTailoredResumes,
 } from "@/lib/dev/fixtures"
 import {
@@ -39,7 +39,7 @@ import {
  *
  * ⚠️ **The resume fake and `createDevPrisma()` are two halves of one fixture.**
  * `/documents` reads the rows and downloads the bytes, so an id present in
- * `devResumes()` and absent from `devDocuments()` — or the reverse — reproduces
+ * `devUploads()` and absent from `devDocuments()` — or the reverse — reproduces
  * a real production state and not a useful default. See the note on
  * `DEV_DOCUMENT_IDS` in `fixtures.ts`.
  */
@@ -156,7 +156,7 @@ function createDevResumeStore(): ResumeStore {
     return withoutBytes(record)
   }
 
-  for (const resume of devResumes()) void put(resume)
+  for (const resume of devUploads()) void put(resume)
 
   return {
     put,

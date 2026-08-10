@@ -568,7 +568,7 @@ export function devCoverLetterInstructions(): CoverLetterInstructions[] {
 /**
  * ⚠️ **A Document is two fixtures, and they have to agree.**
  *
- * {@link devResumes} is the bytes in the fake bucket; {@link devDocuments} is
+ * {@link devUploads} is the bytes in the fake bucket; {@link devDocuments} is
  * the row in the fake database, and the row is what the application reads. The
  * `id` of a row is the `resumeId` of its object — that is the real key
  * relationship, not a convention of the fixtures — so a row without a matching
@@ -587,7 +587,7 @@ const DEV_DOCUMENT_IDS = {
  * read back as text, so the Markdown CV is what makes drafting work end to end;
  * the PDF is here because its refusal has a UI.
  */
-export function devResumes(): NewResume[] {
+export function devUploads(): NewResume[] {
   return [
     {
       userId: DEV_USER_ID,

@@ -159,7 +159,7 @@ export const createPostingExtractor = defineToollessAgent(
  *
  * The page is fenced and labelled as quoted material, the same idiom
  * `posting-details.ts` uses for an advertisement's description and
- * `toProfilePrompt` uses for a CV. The fence is a label and not a boundary —
+ * `toSearchCriteriaPrompt` uses for a CV. The fence is a label and not a boundary —
  * nothing stops a page writing a fence of its own — and what actually contains
  * an injected instruction is the empty tool set on the agent reading this.
  *

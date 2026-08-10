@@ -38,7 +38,8 @@ import { EXTENSION_SOURCE } from "@workspace/user-storage/keys"
  * would turn a document undeletable if its id were ever minted by something
  * other than `crypto.randomUUID()`.
  */
-const RESUME_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+const DOCUMENT_ID =
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 /**
  * The extension half, including its dot, lowercase — see `extensionOf`.
@@ -54,13 +55,13 @@ const RESUME_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
  */
 const EXTENSION = EXTENSION_SOURCE
 
-export const RESUME_ID_PATTERN = new RegExp(`^${RESUME_ID}$`)
+export const DOCUMENT_ID_PATTERN = new RegExp(`^${DOCUMENT_ID}$`)
 
-const FILE_PATTERN = new RegExp(`^(${RESUME_ID})(${EXTENSION})$`)
+const FILE_PATTERN = new RegExp(`^(${DOCUMENT_ID})(${EXTENSION})$`)
 
 /** The two halves of a stored object's address. */
 export interface DocumentRef {
-  resumeId: string
+  documentId: string
   extension: string
 }
 
@@ -72,7 +73,7 @@ export interface DocumentRef {
  * change to one silently stops matching the other.
  */
 export function formatDocumentFile(ref: DocumentRef): string {
-  return `${ref.resumeId}${ref.extension}`
+  return `${ref.documentId}${ref.extension}`
 }
 
 /** The inverse, or `undefined` for anything this app did not write. */
@@ -83,8 +84,8 @@ export function parseDocumentFile(file: string): DocumentRef | undefined {
 
   // A match guarantees both groups; `noUncheckedIndexedAccess` types them as
   // optional anyway, so this narrows rather than defends.
-  const [, resumeId, extension] = match
-  if (!resumeId || !extension) return undefined
+  const [, documentId, extension] = match
+  if (!documentId || !extension) return undefined
 
-  return { resumeId, extension }
+  return { documentId, extension }
 }

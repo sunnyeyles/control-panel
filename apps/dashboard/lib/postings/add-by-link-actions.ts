@@ -15,7 +15,7 @@ import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import { parsePostedAt } from "@workspace/agents/posted-at"
 import { postingId } from "@workspace/agents/posting-id"
 import {
-  createPostingExtractor,
+  createPostingExtractor as defaultPostingExtractor,
   parsePostingExtraction,
   toPostingExtractionPrompt,
 } from "@workspace/agents/posting-extractor"
@@ -160,9 +160,9 @@ export interface AddByLinkActionsDeps {
   /**
    * The extractor. Defaults to the real agent, which reads `OPENAI_API_KEY`
    * when constructed — hence a factory **called inside the action**, never at
-   * module scope, exactly as `SuggestCriteriaActionsDeps.createExtractor` is.
+   * module scope, exactly as `SuggestCriteriaActionsDeps.createProfileExtractor` is.
    */
-  createExtractor?: () => Agent
+  createPostingExtractor?: () => Agent
   /** Overridden in tests, so an assertion can name the instant. */
   now?: () => Date
 }
@@ -186,8 +186,8 @@ export function createAddByLinkActions(
       if (fromTavily.status !== "failed") return fromTavily
       return extractPageViaApify(url)
     })
-  const createExtractor =
-    deps.createExtractor ?? (() => createPostingExtractor())
+  const createPostingExtractor =
+    deps.createPostingExtractor ?? (() => defaultPostingExtractor())
   const now = deps.now ?? (() => new Date())
 
   async function addPostingByLink(
@@ -271,7 +271,7 @@ export function createAddByLinkActions(
       let extraction
       try {
         extraction = parsePostingExtraction(
-          await invokeTracedAgent(createExtractor(), {
+          await invokeTracedAgent(createPostingExtractor(), {
             name: "posting-extract",
             route: "/jobs",
             userId: caller.userId,

@@ -193,6 +193,8 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 ## Conventions
 
+**`NAMING.md` says how an identifier is formed, and four of its rules are tested.** `CONTEXT.md` owns what the words mean; `NAMING.md` owns where they go — the agent-seam rule (a `*Deps` field takes the exact factory name `@workspace/agents` exports), the fixed surface of an agent module, the type-suffix vocabulary, and the rule that `components/` mirrors the route tree. `apps/dashboard/lib/naming.test.ts` and `packages/agents/src/naming.test.ts` fail on a violation, because ESLint cannot: see the `only-warn` note below. Read it before adding a feature — the rules exist so a new one does not have to re-derive a name and get a different answer.
+
 **Prettier owns formatting** (`.prettierrc`). Match this style when editing — some checked-in files predate it and are not formatted.
 
 **`.npmrc` pins `symlink=true`, and that line is load-bearing.** pnpm can be configured globally with `symlink=false` (this machine is), which downloads packages into `node_modules/.pnpm` but creates no `node_modules` links — so every `workspace:*` dependency becomes unresolvable by both Node and `tsc`, and `pnpm install` still exits 0. The repo-level setting overrides that. If a workspace import suddenly reports `Cannot find module '@workspace/…'`, check this before anything else. It is deliberately the only line in the file: the linker mode itself is left to whatever the machine prefers.

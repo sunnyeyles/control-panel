@@ -20,7 +20,7 @@ import {
  * not return. They are not lost: `displayName` is the Posting's title and
  * `filename` is `coverLetterFilename()` over its title and company, and the
  * table already holds both for every row it renders — so they are computed at
- * the point of use in `components/briefings/posting-detail.tsx` rather than
+ * the point of use in `components/jobs/postings/posting-detail.tsx` rather than
  * fetched.
  */
 export interface CoverLetterRow {

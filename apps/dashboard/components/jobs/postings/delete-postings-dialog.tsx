@@ -5,8 +5,8 @@ import { Suspense, use, useActionState, useState, type ReactNode } from "react"
 import { deletePostingsAction } from "@/app/(app)/jobs/actions"
 import { ActionError } from "@/components/forms/action-error"
 
-import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
-import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
+import type { CoverLetterPromise } from "@/components/jobs/postings/cover-letter-cell"
+import type { TailoredResumePromise } from "@/components/jobs/postings/use-tailored-resume"
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import {
   AlertDialog,

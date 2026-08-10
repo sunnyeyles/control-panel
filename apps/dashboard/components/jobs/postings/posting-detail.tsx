@@ -5,20 +5,20 @@ import { Suspense } from "react"
 import {
   useCoverLetter,
   type CoverLetterPromise,
-} from "@/components/briefings/cover-letter-cell"
-import { CoverLetterDownloadLink } from "@/components/briefings/cover-letter-download-link"
-import { CreateCoverLetterButton } from "@/components/briefings/create-cover-letter-button"
-import { DraftCoverLetterButton } from "@/components/briefings/draft-cover-letter-button"
-import { EditCoverLetterButton } from "@/components/briefings/edit-cover-letter-button"
-import { EditTailoredResumeButton } from "@/components/briefings/edit-tailored-resume-button"
-import { GenerateTailoredResumeButton } from "@/components/briefings/generate-tailored-resume-button"
-import { PostingStatusSelect } from "@/components/briefings/posting-status-select"
-import { TailoredResumeDownloadLink } from "@/components/briefings/tailored-resume-download-link"
-import { TailoredResumePdfButton } from "@/components/briefings/tailored-resume-pdf-button"
+} from "@/components/jobs/postings/cover-letter-cell"
+import { CoverLetterDownloadLink } from "@/components/jobs/postings/cover-letter-download-link"
+import { CreateCoverLetterButton } from "@/components/jobs/postings/create-cover-letter-button"
+import { DraftCoverLetterButton } from "@/components/jobs/postings/draft-cover-letter-button"
+import { EditCoverLetterButton } from "@/components/jobs/postings/edit-cover-letter-button"
+import { EditTailoredResumeButton } from "@/components/jobs/postings/edit-tailored-resume-button"
+import { GenerateTailoredResumeButton } from "@/components/jobs/postings/generate-tailored-resume-button"
+import { PostingStatusSelect } from "@/components/jobs/postings/posting-status-select"
+import { TailoredResumeDownloadLink } from "@/components/jobs/postings/tailored-resume-download-link"
+import { TailoredResumePdfButton } from "@/components/jobs/postings/tailored-resume-pdf-button"
 import {
   useTailoredResume,
   type TailoredResumePromise,
-} from "@/components/briefings/use-tailored-resume"
+} from "@/components/jobs/postings/use-tailored-resume"
 import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
 import type { PostingView } from "@/lib/postings/list-postings"
 import type { PostingDetailView } from "@/lib/postings/load-posting-detail"
