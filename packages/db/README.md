@@ -20,7 +20,7 @@ cover-letter-instructions.ts
 jobs.ts        create / claim / due / schedule helpers
 runs.ts        finish / fail / startAdHoc / recordFindings
 artifacts.ts   record / latest helpers
-postings.ts    recordPostings / setPostingStatus — the cumulative tracker
+postings.ts    recordPostings / setPostingStatus / recordPostingMatch — the cumulative tracker
 documents.ts   list / find / create / delete Document metadata rows
 boards.ts      load / save one whiteboard snapshot per user
 client.ts      createPrismaClient() — adapter + pooled URL
@@ -209,6 +209,24 @@ Postgres:
   DELETE + INSERT — reverts every Posting marked `applied` the next time a Run
   re-finds it, on a schedule, with no error. The `first_seen_*` pair answers
   "when did this first appear", which a second sighting cannot change.
+- **The five `match_*` columns are absent from that list for the same reason,
+  and are the second set a Run must not write.** A match is a model call against
+  the user's resume, which the worker cannot even read — its IAM role grants the
+  `briefs` shelf alone — so there is no value for `EXCLUDED` to carry but NULL.
+  Adding any of them would blank a score every time a Briefing re-found the
+  advertisement it belongs to, which for a live search is nightly, and
+  `postings_match_complete_check` would not catch it because all five would go
+  together. `recordPostingMatch` is the only writer, and it updates rather than
+  inserts: a statement that could insert would let a caller mint a Posting out
+  of a score, with no title, no URL and no sighting.
+- **`match_resume_id` is a plain UUID and deliberately not a foreign key.**
+  `RESTRICT` would make a Document undeletable the moment anything scored
+  against it, and `SET NULL` would violate the all-five-or-none CHECK. What it
+  is for is one comparison — a value other than the user's current resume means
+  the score is for a document they have replaced — and `unmatchedAgainst()`
+  spells that predicate out as an `OR` rather than relying on a `not` filter's
+  null handling, because a bare inequality would silently exclude every row
+  nobody has scored yet.
 - **The upsert's trailing `WHERE EXCLUDED.last_seen_at >= postings.last_seen_at`
   is what makes the write order-independent**, so a backfill walking Runs
   oldest-first can race live traffic without dragging `last_seen_at` backwards

@@ -191,6 +191,26 @@ model Posting {
   status          String    @default("new")
   // NULL means nobody has ever moved it off `new`.
   statusChangedAt DateTime? @map("status_changed_at") @db.Timestamptz(6)
+  // How well this advertisement matches the candidate's own resume, 0–100, with
+  // the reason and the stated requirements it does not evidence. Distinct from
+  // `payload -> matchReason`, which is one sentence about the *criteria* a scout
+  // was handed; criteria are a lossy projection of a person, and this is the
+  // judgement against the document itself.
+  //
+  // All five are NULL together or set together — a CHECK in `0010` says so —
+  // because a score nobody can date or attribute to a document is not a score.
+  //
+  // ⚠️ Written only by the dashboard, never by a Run. They join `status` in the
+  // list `recordPostings` leaves out of its `DO UPDATE SET`, and for the same
+  // reason: a Run re-finding a scored advertisement must not blank the score.
+  matchScore      Int?      @map("match_score") @db.SmallInt
+  matchReason     String?   @map("match_reason")
+  matchGaps       Json?     @map("match_gaps")
+  // The `documents.id` the score was computed against, and deliberately not an
+  // FK — see `0010`. A value other than the user's current resume is the whole
+  // of "this needs scoring again".
+  matchResumeId   String?   @map("match_resume_id") @db.Uuid
+  matchedAt       DateTime? @map("matched_at") @db.Timestamptz(6)
   firstSeenAt     DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(6)
   lastSeenAt      DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
   // NULL in either means no Run has seen this: the user added it by pasting the
@@ -210,5 +230,6 @@ model Posting {
 
   @@unique([userId, postingId], map: "postings_user_id_posting_id_key")
   @@index([userId, lastSeenAt(sort: Desc), postingId(sort: Desc)], map: "postings_user_last_seen_idx")
+  @@index([userId, matchScore(sort: Desc), postingId(sort: Desc)], map: "postings_user_match_idx")
   @@map("postings")
 }

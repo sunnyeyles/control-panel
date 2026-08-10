@@ -38,6 +38,25 @@ export {
 
 export { parseSearchCriteria } from "./criteria.ts"
 
+export { findExperienceStatement } from "./experience.ts"
+
+export {
+  MatchRequestSchema,
+  MAX_MATCH_SCORE,
+  MIN_MATCH_SCORE,
+  parsePostingMatch,
+  PostingMatchSchema,
+  toMatchPrompt,
+  type MatchRequest,
+  type PostingMatch,
+} from "./match.ts"
+
+export {
+  createMatchAssessor,
+  MATCH_ASSESSOR_SYSTEM_PROMPT,
+  type CreateMatchAssessorOptions,
+} from "./match-assessor.ts"
+
 export {
   FindingsSchema,
   parseFindings,

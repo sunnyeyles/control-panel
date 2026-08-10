@@ -268,7 +268,65 @@ matched against no criteria, and inventing one would be a fabrication — which 
 why `StoredPostingSchema` exists beside `PostingSchema`. The first is what a
 stored row may hold, the second is what a **Scout** must produce, and only the
 first is optional in that field.
+
+**A Posting also carries the experience its advertisement asked for, in the
+advertisement's own words.** `experience` is free text — "5+ years", "at least 3
+years in a similar role" — and never a number, exactly as `postedAt` is free
+text and never a date: whoever produced the Posting copied a phrase or left the
+field out, and is instructed never to read one off the seniority in the title.
+Most advertisements state none, so absent is the ordinary answer. The one
+producer with no model behind it is the **Job Board** path, where
+`findExperienceStatement()` reads the phrase off what the board published — and
+that rule is applied there and nowhere else, because a pattern running on top of
+a model that was shown the advertisement would be a second rule producing the
+same field.
 _Avoid_: job, listing, vacancy, opening
+
+**Match**:
+How well one **Posting** fits the person reading it, as a score from 0 to 100
+with the reason behind it and the requirements it does not answer. Held in five
+columns on `postings` — `match_score`, `match_reason`, `match_gaps`,
+`match_resume_id`, `matched_at` — all NULL together or all set together, which a
+CHECK enforces.
+
+**Distinct from a Posting's `matchReason`, and neither replaces the other.**
+`matchReason` is one sentence a **Scout** wrote about the **Search Criteria** it
+was handed; criteria are a lossy projection of a person, so "why this fits your
+search" is not an answer to "should I apply". A Match is the judgement against
+the **Document** the user labelled Resume, which is. A Posting added by link has
+a Match and no `matchReason` at all.
+
+**Only the dashboard writes one**, and the reason is a boundary rather than a
+preference: the briefing worker's IAM role grants the `briefs` shelf and nothing
+else, so the one process that finds an advertisement structurally cannot read
+the CV it would be scored against. The consequence is stated plainly in the UI —
+a **Briefing** that runs overnight leaves its Postings unscored until somebody
+opens `/jobs`, where a bounded loop works through the backlog.
+
+The five columns join **Posting Status** in the list `recordPostings` leaves out
+of its `DO UPDATE SET`, and for the same reason: a Run re-finding a scored
+advertisement must not blank the score.
+
+`match_resume_id` names the `documents.id` the score was computed against, and
+is the whole of how a score goes stale — a value other than the user's current
+resume means the Match describes a document they have replaced, and the row is
+scored again.
+_Avoid_: fit, rating, relevance, rank
+
+**Match Assessor**:
+The agent that produces a **Match**. Tool-less, like the **Letter Writer** and
+the **Resume Tailor**, and for the identical reason: it holds the candidate's CV
+and an advertisement side by side, the advertisement is written by whoever paid
+to place it, and copied bullet points reach the prompt verbatim. An agent that
+can both read a CV and issue an outbound request can be induced to put one
+inside the other. Having no tools is what makes quoting the advertisement
+acceptable — injected text can move a number the user then reads beside the
+advertisement that moved it, and can reach nothing else.
+
+It credits only what the resume names and penalises only what the advertisement
+states, so a thin advertisement is an easy match rather than a bad one, and a
+gap is always a requirement that was actually asked for.
+_Avoid_: scorer, matcher, ranker
 
 **Posting Status**:
 Where the user has got to with one **Posting**: `new`, `applied` or `rejected`,

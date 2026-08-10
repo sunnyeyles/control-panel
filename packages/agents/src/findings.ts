@@ -50,6 +50,12 @@ const PostingFieldsSchema = z.object({
     .describe(
       "When the role was posted, if the page states it. Omit rather than estimate."
     ),
+  experience: z
+    .string()
+    .optional()
+    .describe(
+      'What the advertisement says about years of experience, in its own words — "5+ years", "at least 3 years in a similar role". Copy the phrase as written. Omit the field when the advertisement states none; never work one out from the seniority in the title, from the technologies listed, or from how the role is pitched.'
+    ),
   highlights: z
     .array(z.string())
     .optional()

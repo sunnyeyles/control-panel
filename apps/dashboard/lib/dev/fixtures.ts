@@ -382,6 +382,64 @@ function devPosting(
     // NULL in both for a Posting added by link: no Run has ever seen it.
     firstSeenRunId: runId,
     lastSeenRunId: runId,
+    ...devMatch(index),
+  }
+}
+
+/**
+ * The match columns for one fixture row — a score for two rows in every three,
+ * and nothing at all for the third.
+ *
+ * ⚠️ **Both states are needed and neither is the default.** A page where every
+ * row is scored never renders the em-dash the Match column shows for an
+ * unscored advertisement, and never starts the scoring loop in
+ * `score-pending-matches.tsx`; a page where none is never renders a number, a
+ * reason or a gaps list. Two in three is what puts several of each on both
+ * pages of the fixture set.
+ *
+ * ⚠️ **`matchResumeId` is the Markdown CV, which is the *newest* document
+ * labelled Resume — so these rows read as scored against the current one.**
+ * Naming the PDF instead would make every row stale, and every page view under
+ * the flag would spend a real model call re-scoring thirty advertisements.
+ *
+ * All five together or none, which is what `postings_match_complete_check`
+ * enforces in Postgres and what this returns as one object rather than five
+ * fields for.
+ */
+function devMatch(
+  index: number
+): Pick<
+  PostingRow,
+  "matchScore" | "matchReason" | "matchGaps" | "matchResumeId" | "matchedAt"
+> {
+  if (index % 3 === 0) {
+    return {
+      matchScore: null,
+      matchReason: null,
+      matchGaps: null,
+      matchResumeId: null,
+      matchedAt: null,
+    }
+  }
+
+  // Spread across the bands the assessor's prompt names, so the column is not
+  // thirty numbers in the seventies — and so sorting by it visibly reorders the
+  // page rather than nearly preserving it.
+  const score = 31 + ((index * 17) % 69)
+
+  return {
+    matchScore: score,
+    matchReason:
+      score >= 70
+        ? "Your CV evidences the stack this role names and the seniority it asks for, with the domain the closest thing to a stretch."
+        : "Adjacent rather than direct: the tools overlap, but the CV does not show the scale or the specialism this advertisement leads with.",
+    // An empty list on some rows, because that is a real answer — the CV
+    // evidenced everything stated — and the panel renders it by showing no
+    // heading at all.
+    matchGaps:
+      score >= 70 ? [] : ["Kubernetes in production", "Team leadership"],
+    matchResumeId: DEV_DOCUMENT_IDS.markdownCv,
+    matchedAt: new Date(RAN_AT.getTime() - index * 60_000),
   }
 }
 

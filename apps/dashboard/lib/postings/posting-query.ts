@@ -50,8 +50,8 @@ export const MAX_PAGE = 10_000
  * what a user sees in their address bar is not a database column they can probe
  * by editing it.
  *
- * ⚠️ **Three of these are headings and one is not.** `title`, `company` and
- * `posted` are the sortable headings — see `POSTING_COLUMNS` in
+ * ⚠️ **Four of these are headings and one is not.** `title`, `company`,
+ * `posted` and `match` are the sortable headings — see `POSTING_COLUMNS` in
  * `posting-columns.ts`, which names per column why the other two do not sort.
  * `lastSeen` has no heading and is here because it is {@link DEFAULT_SORT}: the
  * order of the page nobody has sorted still has to be spellable.
@@ -62,7 +62,13 @@ export const MAX_PAGE = 10_000
  * naming one is not an error: `SortSchema` catches it back to the default, the
  * same as `?sort=salary` always did.
  */
-export const POSTING_SORTS = ["lastSeen", "title", "company", "posted"] as const
+export const POSTING_SORTS = [
+  "lastSeen",
+  "title",
+  "company",
+  "posted",
+  "match",
+] as const
 
 export type PostingSort = (typeof POSTING_SORTS)[number]
 
@@ -80,6 +86,8 @@ const DEFAULT_DIRECTIONS = {
   title: "asc",
   company: "asc",
   posted: "desc",
+  // The best matches, which is the only reason anybody clicks this heading.
+  match: "desc",
 } as const satisfies Record<PostingSort, SortDirection>
 
 /**
