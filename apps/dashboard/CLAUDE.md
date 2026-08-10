@@ -2,6 +2,8 @@
 
 Guidance moved out of the root `CLAUDE.md` so it loads only when working in this app.
 
+Naming rules are in the repo root's `NAMING.md`, and `lib/naming.test.ts` enforces the ones that can be. The two that bite most often here: an agent seam in a `*Deps` interface takes the exact factory name `@workspace/agents` exports (R2), and `components/` mirrors the route tree while `lib/` names domain concepts (R8).
+
 ## The auth gate
 
 **The gate is two layers, and neither is sufficient alone.** `apps/dashboard/proxy.ts` — `proxy.ts`, not `middleware.ts`; Next 16 renamed the convention — matches everything except static assets, so a route added later is closed by default. The authoritative check is separate: pages call `getCurrentUser()` themselves, and `lib/chat-handler.ts` returns its own 401 before it parses a body. That duplication is deliberate. The proxy is a routing concern, and the chat route spends the OpenAI budget, so it must not be reachable because a matcher pattern was wrong.
