@@ -79,12 +79,15 @@ export {
 } from "./documents.ts"
 
 export {
+  countUnmatchedPostings,
   deletePostings,
   listPostingPage,
+  listUnmatchedPostingIds,
   ownedPostingIds,
   postingPayload,
   POSTING_STATUSES,
   recordLinkedPosting,
+  recordPostingMatch,
   recordPostings,
   setPostingStatus,
   type LinkedPosting,
@@ -92,6 +95,8 @@ export {
   type PostingDirection,
   type PostingListPage,
   type PostingListRow,
+  type PostingMatchRow,
+  type PostingMatchWrite,
   type PostingOrder,
   type PostingPageQuery,
   type SeenPostings,

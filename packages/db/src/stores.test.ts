@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   claimAdHocRun,
   claimJob,
+  countUnmatchedPostings,
   coverLetterInstructions,
   createJob,
   createPrismaClient,
@@ -23,6 +24,7 @@ import {
   latestRunPerJob,
   listDocumentsForUser,
   listPostingPage,
+  listUnmatchedPostingIds,
   loadBoard,
   pauseJob,
   POSTING_STATUSES,
@@ -32,6 +34,7 @@ import {
   recordDocument,
   recordArtifact,
   recordLinkedPosting,
+  recordPostingMatch,
   recordPostings,
   recordRunFindings,
   resumeJob,
@@ -764,6 +767,211 @@ describeWithDatabase("against a real database", () => {
       expect(row?.lastSeenRunId).toBe(refound)
     })
 
+    describe("the match against a resume", () => {
+      const RESUME_ID = "3f8d1b2a-0000-4000-8000-0000000000c1"
+      const OTHER_RESUME_ID = "3f8d1b2a-0000-4000-8000-0000000000c2"
+      const MATCHED_AT = new Date("2026-08-03T09:00:00.000Z")
+
+      async function aScoredPosting(resumeId = RESUME_ID) {
+        const posting = aPosting()
+
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        expect(
+          await recordPostingMatch(prisma, {
+            userId,
+            postingId: posting.postingId,
+            score: 82,
+            reason: "The CV evidences the stack this role names.",
+            gaps: ["Kubernetes in production"],
+            resumeId,
+            matchedAt: MATCHED_AT,
+          })
+        ).toBe(true)
+
+        return posting
+      }
+
+      it("records all five columns and reads them back together", async () => {
+        const posting = await aScoredPosting()
+
+        expect(
+          await postingPayload(prisma, userId, posting.postingId)
+        ).toMatchObject({
+          match: {
+            score: 82,
+            reason: "The CV evidences the stack this role names.",
+            gaps: ["Kubernetes in production"],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          },
+        })
+      })
+
+      /**
+       * ⚠️ **The reason the five are columns rather than payload keys, and the
+       * exact analogue of the `status` test above.** A Briefing on a daily
+       * cadence re-finds the advertisements it already found, so a `DO UPDATE
+       * SET` list that named any of these would blank every score on a
+       * schedule, with no error and no trace. `turbo test` alone cannot catch
+       * that — this file skips itself without `DATABASE_URL_UNPOOLED`.
+       */
+      it("survives a later run re-reporting the same advertisement", async () => {
+        const posting = await aScoredPosting()
+        const refound = await aRun()
+
+        await recordPostings(prisma, {
+          userId,
+          runId: refound,
+          seenAt: SECOND_SIGHTING,
+          postings: [posting],
+        })
+
+        const row = await readBack(posting.postingId)
+        expect(row?.matchScore).toBe(82)
+        expect(row?.matchResumeId).toBe(RESUME_ID)
+        expect(row?.matchedAt?.toISOString()).toBe(MATCHED_AT.toISOString())
+        // …and the sighting was still recorded, so this is not a no-op upsert.
+        expect(row?.lastSeenRunId).toBe(refound)
+      })
+
+      it("refuses a score outside 0 to 100", async () => {
+        const posting = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        await expect(
+          recordPostingMatch(prisma, {
+            userId,
+            postingId: posting.postingId,
+            score: 101,
+            reason: "Out of range.",
+            gaps: [],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          })
+        ).rejects.toThrow()
+      })
+
+      /**
+       * A score nobody can date or attribute to a document is not a score. The
+       * CHECK is what makes "all five or none" a property of the table rather
+       * than of whichever caller wrote the row last.
+       */
+      it("refuses a half-written match", async () => {
+        const posting = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        await expect(
+          prisma.posting.updateMany({
+            where: { userId, postingId: posting.postingId },
+            data: { matchScore: 70 },
+          })
+        ).rejects.toThrow()
+      })
+
+      it("never inserts a Posting that is not already there", async () => {
+        expect(
+          await recordPostingMatch(prisma, {
+            userId,
+            postingId: derivedId(),
+            score: 50,
+            reason: "Nothing to attach this to.",
+            gaps: [],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          })
+        ).toBe(false)
+      })
+
+      /**
+       * ⚠️ **Both arms of the staleness predicate, in one test.** A Posting
+       * nobody has scored has `match_resume_id` NULL and a plain `<>` would
+       * exclude it — which would make the unscored rows invisible to the one
+       * query whose job is to find them. A Posting scored against a CV the user
+       * has replaced carries some other id and wants scoring again.
+       */
+      it("lists the never-scored and the scored-against-something-else", async () => {
+        const unscored = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [unscored],
+        })
+
+        const stale = await aScoredPosting(OTHER_RESUME_ID)
+        const current = await aScoredPosting(RESUME_ID)
+
+        const pending = await listUnmatchedPostingIds(
+          prisma,
+          userId,
+          RESUME_ID,
+          100
+        )
+
+        expect(pending).toContain(unscored.postingId)
+        expect(pending).toContain(stale.postingId)
+        expect(pending).not.toContain(current.postingId)
+        expect(await countUnmatchedPostings(prisma, userId, RESUME_ID)).toBe(
+          pending.length
+        )
+      })
+
+      it("bounds the batch it hands back", async () => {
+        for (let index = 0; index < 3; index += 1) {
+          await recordPostings(prisma, {
+            userId,
+            runId: await aRun(),
+            seenAt: FIRST_SIGHTING,
+            postings: [aPosting()],
+          })
+        }
+
+        expect(
+          await listUnmatchedPostingIds(prisma, userId, RESUME_ID, 2)
+        ).toHaveLength(2)
+        // A caller that asked for nothing is asking no question, and must not
+        // be answered with the whole table.
+        expect(
+          await listUnmatchedPostingIds(prisma, userId, RESUME_ID, 0)
+        ).toEqual([])
+      })
+
+      it("cannot be written through another user's id", async () => {
+        const posting = await aScoredPosting()
+        const stranger = await ensureUserForAuth(prisma, `auth_${randomUUID()}`)
+
+        expect(
+          await recordPostingMatch(prisma, {
+            userId: stranger.id,
+            postingId: posting.postingId,
+            score: 5,
+            reason: "Somebody else's row.",
+            gaps: [],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          })
+        ).toBe(false)
+
+        expect((await readBack(posting.postingId))?.matchScore).toBe(82)
+      })
+    })
+
     it("does not drag the last-seen values backwards for an older sighting", async () => {
       const recent = await aRun()
       const backdated = await aRun()
@@ -873,7 +1081,9 @@ describeWithDatabase("against a real database", () => {
         })
 
         expect(await postingPayload(prisma, userId, posting.postingId)).toEqual(
-          { payload: posting.payload, lastSeenRunId: runId }
+          // `match: null` because a Run cannot write one — the worker holds no
+          // grant on the resumes it would be scored against. See `0011`.
+          { payload: posting.payload, lastSeenRunId: runId, match: null }
         )
       })
 
@@ -922,7 +1132,11 @@ describeWithDatabase("against a real database", () => {
         })
 
         expect(await postingPayload(prisma, userId, posting.postingId)).toEqual(
-          { payload: { matchReason: "rewritten" }, lastSeenRunId: refound }
+          {
+            payload: { matchReason: "rewritten" },
+            lastSeenRunId: refound,
+            match: null,
+          }
         )
       })
     })

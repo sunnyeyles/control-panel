@@ -143,13 +143,16 @@ export function PostingTableSkeleton({
  * finds classes by scanning the source for literal strings, so a width built at
  * runtime is a width with no CSS behind it.
  *
- * Five fields and not six — the cover-letter column holds a `size-4` icon rather
- * than text, so it has nothing to vary.
+ * Six fields and not seven — the cover-letter column holds a `size-4` icon
+ * rather than text, so it has nothing to vary. Match does vary, but narrowly: it
+ * is a two- or three-digit number, so its bars are fixed widths rather than
+ * fractions of a column.
  */
 const BAR_WIDTHS: readonly {
   title: string
   company: string
   location: string
+  match: string
   posted: string
   source: string
 }[] = [
@@ -157,6 +160,7 @@ const BAR_WIDTHS: readonly {
     title: "w-4/5",
     company: "w-3/5",
     location: "w-2/3",
+    match: "w-6",
     posted: "w-4/5",
     source: "w-14",
   },
@@ -164,6 +168,7 @@ const BAR_WIDTHS: readonly {
     title: "w-2/3",
     company: "w-4/5",
     location: "w-1/2",
+    match: "w-5",
     posted: "w-3/4",
     source: "w-12",
   },
@@ -171,6 +176,7 @@ const BAR_WIDTHS: readonly {
     title: "w-11/12",
     company: "w-1/2",
     location: "w-3/4",
+    match: "w-6",
     posted: "w-4/5",
     source: "w-16",
   },
@@ -178,6 +184,7 @@ const BAR_WIDTHS: readonly {
     title: "w-3/4",
     company: "w-2/3",
     location: "w-3/5",
+    match: "w-5",
     posted: "w-2/3",
     source: "w-12",
   },
@@ -232,6 +239,16 @@ function PlaceholderRow({ index }: { index: number }) {
       */}
       <TableCell className={POSTING_HIDE_BELOW_MD}>
         <Skeleton className={cn("h-4", widths.location)} />
+      </TableCell>
+
+      {/*
+        No visibility class: Match is one of the three columns rendered at every
+        width — see `POSTING_COLUMNS` — so a skeleton that hid it would be a
+        different table from the one replacing it on exactly the viewport where
+        the difference is widest.
+      */}
+      <TableCell>
+        <Skeleton className={cn("h-4", widths.match)} />
       </TableCell>
 
       <TableCell className={POSTING_HIDE_BELOW_MD}>

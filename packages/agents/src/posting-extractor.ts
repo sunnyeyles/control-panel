@@ -99,7 +99,7 @@ export const POSTING_EXTRACTOR_SYSTEM_PROMPT = [
   "",
   "The page reaches you as markdown, and it carries the whole document — navigation, related roles, footers, cookie notices. Find the advertisement inside it and ignore everything around it. A related-roles sidebar is not part of the role being advertised, and neither is a list of the company's other openings.",
   "",
-  "Copy, never infer. Every field must be something the page actually says. Where it does not say who is hiring, the company is Unknown; where it does not say where the role is based, say what the page says and nothing more. A salary, a start date, a seniority or a location you worked out rather than read is an invented fact about somebody's job, and it will be stored and searched against as though a person had checked it.",
+  "Copy, never infer. Every field must be something the page actually says. Where it does not say who is hiring, the company is Unknown; where it does not say where the role is based, say what the page says and nothing more. A salary, a start date, a seniority, a number of years of experience or a location you worked out rather than read is an invented fact about somebody's job, and it will be stored and searched against as though a person had checked it.",
   "",
   "The page is the only source. You have no tools, so there is nothing to look up and nothing to check — not the company, not the salary, not what the role usually pays. Anything the page does not say is something you do not know.",
   "",

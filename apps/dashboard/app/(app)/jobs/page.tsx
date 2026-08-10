@@ -11,6 +11,7 @@ import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cel
 import { PostingTable } from "@/components/briefings/posting-table"
 import { PostingTableSkeleton } from "@/components/briefings/posting-table-skeleton"
 import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
+import { ScorePendingMatches } from "@/components/briefings/score-pending-matches"
 import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
 import { JobTabs } from "@/components/jobs/job-tabs"
 import { requirePageUser } from "@/lib/auth/require-page-user"
@@ -428,6 +429,20 @@ async function PostingsSection({
       <Suspense fallback={null}>
         <CoverLetterAlert letters={lettersPromise} />
       </Suspense>
+
+      {/*
+        ⚠️ **Mounted only when there are rows, and it decides the rest for
+        itself.** Whether anything actually needs scoring depends on which
+        document is currently labelled Resume, and answering that here would put
+        a second document query on the render path of every page view — so the
+        component asks the action, which already has to resolve the CV before it
+        can score anything. A user whose Postings are all scored pays one cheap
+        query and renders nothing.
+
+        It is not inside a `<Suspense>` and has no server work of its own: it is
+        a client component that starts a Server Action on mount.
+      */}
+      {postings.total > 0 ? <ScorePendingMatches /> : null}
 
       <PostingTable
         page={postings}

@@ -46,6 +46,15 @@ export interface PromptPosting {
   summary: string
   matchReason?: string | undefined
   postedAt?: string | undefined
+  /**
+   * What the advertisement said about years of experience, in its own words.
+   *
+   * Free text and never a number, for the reason `posted-at.ts` gives about
+   * dates: whoever produced it copied a phrase rather than working one out, so
+   * "5+ years" and "at least 3 years in a similar role" are what arrives, and
+   * absent means the advertisement stated none.
+   */
+  experience?: string | undefined
   highlights?: string[] | undefined
 }
 
@@ -83,6 +92,9 @@ export function toPostingRequestPrompt(
   ]
 
   if (posting.postedAt) lines.push(`Posted: ${posting.postedAt}`)
+  if (posting.experience) {
+    lines.push(`Experience the advertisement asks for: ${posting.experience}`)
+  }
 
   lines.push("", "What the search recorded about the role:", posting.summary)
 

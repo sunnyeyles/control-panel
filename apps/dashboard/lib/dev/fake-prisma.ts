@@ -207,6 +207,18 @@ export interface PostingWhere {
   userId: string
   postingId?: { in: string[] }
   /**
+   * The "not scored against this document" predicate, and the only `OR` this
+   * fake understands.
+   *
+   * ⚠️ **Two arms, and dropping either would break the loop it serves in
+   * opposite directions.** `unmatchedAgainst()` in `@workspace/db` spells it
+   * out rather than relying on a `not` filter's null handling; matching only
+   * the `not` arm here would hide every Posting nobody has scored — the ones
+   * the loop exists to find — and matching only the `null` arm would never
+   * re-score after the user uploads a new CV.
+   */
+  OR?: readonly PostingMatchClause[]
+  /**
    * The account's title filter, as `listPostingPage` spells it: admit a row that
    * matches *none* of these patterns.
    *
@@ -222,6 +234,9 @@ export interface PostingWhere {
 interface TitleExclusion {
   titleNormalized: { contains: string }
 }
+
+type PostingMatchClause =
+  { matchResumeId: null } | { matchResumeId: { not: string } }
 
 /**
  * The whole of the row scoping the table applies, and the whole of what the
@@ -909,6 +924,11 @@ class DevDb {
 /**
  * The columns every Postings filter in this app is written against.
  *
+ * `matchResumeId` is optional so that the narrower doubles which share this
+ * predicate — `posting-actions.test.ts` builds one — do not have to carry a
+ * column their `where` never mentions. Absent is read as NULL, which is what an
+ * unscored Posting holds.
+ *
  * `titleNormalized` is optional because the delete path builds its own rows from
  * the two identifying columns and has no title in hand — and because a `where`
  * with no exclusion in it never reads the field. A row that *is* filtered on and
@@ -918,6 +938,7 @@ class DevDb {
 interface PostingKey {
   userId: string
   postingId: string
+  matchResumeId?: string | null
   titleNormalized?: string | null
 }
 
@@ -942,6 +963,8 @@ export function matchesPostingWhere(
 ): boolean {
   if (row.userId !== where.userId) return false
 
+  if (where.OR !== undefined && !matchesUnscored(row, where.OR)) return false
+
   if (where.NOT !== undefined && matchesAnyTitlePattern(row, where.NOT.OR)) {
     return false
   }
@@ -957,6 +980,40 @@ export function matchesPostingWhere(
   }
 
   return byId.in.includes(row.postingId)
+}
+
+/**
+ * The `OR` arm of a "not scored against this document" filter.
+ *
+ * ⚠️ **Throws on any other clause rather than ignoring it**, the whole file's
+ * principle: an `OR` quietly treated as "everything matches" would hand the
+ * scoring loop every Posting the dev user has and spend a model call on each,
+ * every page view.
+ */
+function matchesUnscored(
+  row: PostingKey,
+  clauses: readonly PostingMatchClause[]
+): boolean {
+  return clauses.some((clause) => {
+    // Absent is NULL, which is what an unscored Posting holds.
+    const scoredAgainst = row.matchResumeId ?? null
+
+    if (clause.matchResumeId === null) return scoredAgainst === null
+
+    if (
+      typeof clause.matchResumeId === "object" &&
+      typeof clause.matchResumeId.not === "string"
+    ) {
+      return (
+        scoredAgainst !== null && scoredAgainst !== clause.matchResumeId.not
+      )
+    }
+
+    throw new DevPrismaError(
+      "prisma.posting where.OR",
+      "The only `OR` understood here is the unscored-against-a-document pair from unmatchedAgainst() in @workspace/db. Teach matchesUnscored() in this file the new shape — ignoring it would match every posting the dev user has."
+    )
+  })
 }
 
 /**

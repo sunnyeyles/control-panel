@@ -26,6 +26,8 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                                                                                                                         |
 | The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                                                                                                                   |
 | The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                                                                                                                   |
+| The posting↔resume match contract            | `packages/agents/src/match.ts`, produced by `match-assessor.ts`                                                                                                                                                                     |
+| Scoring Postings against the resume          | `apps/dashboard/lib/postings/match-actions.ts`, driven by `apps/dashboard/components/briefings/score-pending-matches.tsx`                                                                                                           |
 | Proposing criteria from a resume             | `apps/dashboard/lib/jobs/suggest-criteria-actions.ts`, reading through `apps/dashboard/lib/cover-letters/candidate-background.ts`                                                                                                   |
 | The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                                                                                                                   |
 | Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                                                                                                                         |
@@ -236,6 +238,34 @@ from the CV: the **Letter Writer** writes _about_ it and leaves a
 `[bracketed placeholder]` wherever a fact was not supplied, while the **Resume
 Tailor** rewrites _it_ and may leave nothing out of nothing — every line it emits
 must have a counterpart in the source.
+
+Opening `/jobs` at all starts a third use of the same CV, before anybody clicks
+anything: every **Posting** not yet scored against the current resume is given a
+**Match**, in bounded rounds, until a round writes nothing.
+
+```mermaid
+flowchart TD
+    BR2[/jobs — mounted/] --> A[scorePendingMatches]
+    BG2[loadCandidateBackground] --> A
+    A -->|no readable CV| SAY[Say so, build no model]
+    A --> Q[listUnmatchedPostingIds — match_resume_id is not the current one]
+    Q --> MA[Match Assessor — no tools, one call per posting]
+    MA --> W[recordPostingMatch — five columns, one statement]
+    W --> PT3[(postings — match_score, sortable)]
+    W -->|a round that scored nothing| STOP[Stop, whatever the count says]
+```
+
+**This runs in the dashboard because it cannot run in the worker.** The Lambda's
+role grants the `briefs` shelf and nothing else, and
+`infra/aws/tests/vercel_dashboard.tftest.hcl` asserts the two roles' grants stay
+disjoint — so the process that finds an advertisement structurally cannot read
+the CV it would be scored against. The cost is stated rather than hidden: a
+briefing that runs overnight leaves its Postings unscored until somebody opens
+the page.
+
+The loop stops on **a round that scored nothing**, not on a backlog of zero. A
+Posting that fails scoring stays unscored and is therefore picked again by the
+very next round, so a count that never reaches zero would spin forever.
 
 ## Not built yet
 

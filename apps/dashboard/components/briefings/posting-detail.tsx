@@ -193,6 +193,79 @@ export function PostingDetail({
       </Section>
 
       {/*
+        ⚠️ **The score comes from the row, the words behind it come from the
+        fetch, and that split is why this section is outside the three-state
+        branch below.** `posting.matchScore` is a column on the page the table
+        already holds, so the number is on screen the instant a row opens; the
+        reason and the gaps are prose and arrive with the rest of the detail —
+        see `lib/postings/load-posting-detail.ts`.
+
+        Rendered only once something has scored this advertisement. A Posting
+        nobody has scored yet has nothing to say here, and a heading over "not
+        yet" would be a section that is empty for every row on a first visit.
+      */}
+      {posting.matchScore === undefined ? null : (
+        <Section title="Match against your resume">
+          <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+            <span className="text-base font-medium tabular-nums">
+              {posting.matchScore}
+              <span className="text-muted-foreground"> / 100</span>
+            </span>
+            {detail.status === "ready" && detail.view.match ? (
+              <span className="text-xs text-muted-foreground">
+                Scored {detail.view.match.matchedAt}
+              </span>
+            ) : null}
+          </p>
+
+          {/*
+            ⚠️ **Said every time a score is shown, not once on the page.** The
+            number reads as a measurement and is a model's judgement of one
+            document against another; the sentence is what keeps somebody from
+            discarding an advertisement on the strength of it.
+          */}
+          <p className="text-xs text-muted-foreground">
+            Read from the newest document you have labelled <em>Resume</em>,
+            against what this advertisement states. A judgement, not a
+            measurement — and it knows nothing about you that your CV does not
+            say.
+          </p>
+
+          {detail.status === "loading" ? (
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-4 w-full max-w-lg" />
+              <Skeleton className="h-4 w-full max-w-sm" />
+            </div>
+          ) : detail.status === "ready" && detail.view.match ? (
+            <>
+              <p className="text-sm whitespace-normal text-muted-foreground">
+                {detail.view.match.reason}
+              </p>
+
+              {/*
+                An empty list is a real answer — the CV evidenced everything the
+                advertisement stated — so the heading only appears when there is
+                something under it rather than over the word "none".
+              */}
+              {detail.view.match.gaps.length > 0 ? (
+                <>
+                  <p className="text-xs font-medium">
+                    What the advertisement asks for that your resume does not
+                    show
+                  </p>
+                  <ul className="list-disc pl-5 text-sm whitespace-normal text-muted-foreground">
+                    {detail.view.match.gaps.map((gap, index) => (
+                      <li key={`${posting.id}-gap-${index}`}>{gap}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </>
+          ) : null}
+        </Section>
+      )}
+
+      {/*
         ⚠️ **The columns this viewport is not rendering, and nothing else.**
         These three are cells of the compact row above `lg` — see
         `PostingColumn.visibility` — so each pair here carries the breakpoint at
@@ -304,6 +377,23 @@ export function PostingDetail({
           <Section title="Summary">
             <p className="text-sm whitespace-normal">{detail.view.summary}</p>
           </Section>
+
+          {/*
+            ⚠️ **The advertisement's own words, and absent is the ordinary
+            case.** Whoever produced this Posting was instructed to copy the
+            phrase or leave the field out — never to read a number of years off
+            the seniority in the title — so most advertisements have none, and a
+            row showing nothing here is a row whose advertisement said nothing.
+            See `findings.ts`, and `experience.ts` for the one path with no model
+            behind it.
+          */}
+          {detail.view.experience ? (
+            <Section title="Experience asked for">
+              <p className="text-sm whitespace-normal text-muted-foreground">
+                {detail.view.experience}
+              </p>
+            </Section>
+          ) : null}
 
           {detail.view.highlights.length > 0 ? (
             <Section title="From the advertisement">

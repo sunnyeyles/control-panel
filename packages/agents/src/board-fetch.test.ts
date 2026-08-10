@@ -83,6 +83,41 @@ describe("fetchPostingByUrl", () => {
   })
 
   /**
+   * ⚠️ **The one field on this path that is derived rather than published, and
+   * the only place in the system that derivation is allowed to run.** Every
+   * other producer of a Posting has a model that was shown the advertisement and
+   * is instructed to copy the phrase; this path deliberately has none, so
+   * `findExperienceStatement` reads it off what the board did publish. Running
+   * that pattern anywhere else would be a second rule producing the same field,
+   * and the two would disagree about the same advertisement depending on which
+   * path found it.
+   */
+  it("reads the stated experience off what the board published", async () => {
+    const result = await fetchPostingByUrl(
+      SEEK_URL,
+      fakeFetch(
+        [{ ...SEEK_ITEM, bulletPoints: ["5+ years of experience with Go"] }],
+        []
+      )
+    )
+
+    expect(result.status === "fetched" && result.posting.experience).toBe(
+      "5+ years of experience"
+    )
+  })
+
+  it("leaves the field out when the board published no requirement", async () => {
+    // Absent is the ordinary answer, and the field is optional so that saying
+    // nothing is expressible. A number invented from the title would be a fact
+    // about somebody's job that nobody stated.
+    const result = await fetchPostingByUrl(SEEK_URL, fakeFetch([SEEK_ITEM], []))
+
+    expect(result.status === "fetched" && result.posting).not.toHaveProperty(
+      "experience"
+    )
+  })
+
+  /**
    * ⚠️ **The stored URL is the one that was pasted, not the one the board
    * reported.** They are the same advertisement — the identity check upstream
    * proved it — and keeping the caller's is what makes a link and a Run's later

@@ -6,6 +6,7 @@ import { INDEED_SPEC } from "@workspace/agent-tools/indeed-search"
 import { SEEK_SPEC } from "@workspace/agent-tools/seek-search"
 import * as z from "zod"
 
+import { findExperienceStatement } from "./experience.ts"
 import { boardForHost } from "./job-boards.ts"
 import { postingId } from "./posting-id.ts"
 import { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
@@ -122,7 +123,21 @@ export async function fetchPostingByUrl(
   // `matchReason` is absent, and absent rather than empty. Nobody stated
   // criteria for a link somebody pasted, so there is no judgement to record —
   // see `stored-posting.ts`, which is why that field is optional at all.
-  const parsed = StoredPostingSchema.safeParse({ ...result.posting, url })
+  //
+  // ⚠️ `experience` is derived *here and only here*. Every other producer of a
+  // Posting has a model that was shown the advertisement and is instructed to
+  // copy the phrase; this path deliberately has none, so a pattern over what
+  // the board published is the only reading available. See `experience.ts` for
+  // why running it anywhere else would be a second, disagreeing rule.
+  const experience = findExperienceStatement(
+    [result.posting.summary, ...(result.posting.highlights ?? [])].join("\n")
+  )
+
+  const parsed = StoredPostingSchema.safeParse({
+    ...result.posting,
+    url,
+    ...(experience === undefined ? {} : { experience }),
+  })
 
   if (!parsed.success) {
     // An actor is a community scraper, and structured output is not validated

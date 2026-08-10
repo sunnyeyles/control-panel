@@ -78,6 +78,22 @@ export interface PostingView {
    */
   source?: PostingSource
   /**
+   * How well this advertisement matches the user's resume, 0–100.
+   *
+   * Absent when nobody has scored it yet, which is every Posting until the
+   * scoring loop on this page reaches it — see
+   * `components/briefings/score-pending-matches.tsx`. Absent is a state the
+   * column renders rather than a fault: an unscored Posting is not a
+   * badly-matched one, and the order puts it last either way.
+   *
+   * ⚠️ **The number and nothing else.** The reason behind it and the gaps it
+   * names arrive with `load-posting-detail.ts` when a row is opened, for the
+   * reason the docblock above gives about `summary`: they are prose, and
+   * carrying them for twenty-five rows to serve the one that gets expanded is
+   * what that split exists to stop.
+   */
+  matchScore?: number
+  /**
    * How long ago this advertisement was first found, as "3 weeks ago".
    *
    * Relative rather than absolute because the question the detail panel is
@@ -276,6 +292,7 @@ const ORDER_FOR = {
   title: "title",
   company: "company",
   posted: "postedAt",
+  match: "match",
 } as const satisfies Record<PostingSort, PostingOrder>
 
 /**
@@ -317,6 +334,11 @@ function toView(
     url: row.url,
     status: toStatus(row.status),
     ...(source ? { source } : {}),
+    // Nullish rather than `=== null`, for the reason `toMatchRow` in
+    // `@workspace/db` gives: a client that answered less than it was asked
+    // would otherwise put `matchScore: undefined` on the view, which the cell
+    // renders as a blank rather than as the absent score it is.
+    ...(row.matchScore == null ? {} : { matchScore: row.matchScore }),
     firstSeen: formatSeenAgo(row.firstSeenAt, now),
     firstSeenExact: formatUtcDateTime(row.firstSeenAt),
     lastSeen: formatSeenAgo(row.lastSeenAt, now),

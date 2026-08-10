@@ -64,25 +64,27 @@ export interface PostingColumn {
    * table inside `max-w-6xl`.
    *
    * ⚠️ **Below `md` a second set of percentages applies, and they have to add
-   * up on their own.** Only Title and the letter column are still rendered
-   * there, and their `lg` shares — 27% and 10% — describe a table with four
-   * more columns in it. Left at those, 37% of the width was claimed and the
-   * other 63% was slack the browser spread across every column including the
-   * three control cells; measured on a 390px viewport that produced a 97px
-   * Title, a letter column too narrow for its own heading, and half the table
-   * spent on a checkbox, a chevron and a bin.
+   * up on their own.** Only Title, Match and the letter column are still
+   * rendered there, and their `lg` shares — 24%, 11% and 8% — describe a table
+   * with four more columns in it. Left at those, 43% of the width would be
+   * claimed and the other 57% would be slack the browser spreads across every
+   * column including the three control cells; measured on a 390px viewport an
+   * earlier version of exactly that produced a 97px Title, a letter column too
+   * narrow for its own heading, and half the table spent on a checkbox, a
+   * chevron and a bin.
    *
-   * So the mobile pair is sized against the space that actually exists. On a
-   * 356px table: 32 + 32 + 40 for the control cells leaves 252px, which is 52%
-   * for Title (≈185px, two clamped lines of about 24 characters) and 18% for
-   * the letter column (≈64px, against the ≈59px "Letter" plus `px-2` needs).
-   * **Check both sums when changing either.** A column whose share leaves slack
-   * does not simply render narrow — it makes every other column wrong too.
+   * So the mobile set is sized against the space that actually exists. On a
+   * 356px table: 32 + 32 + 40 for the control cells leaves 252px, which is 40%
+   * for Title (≈142px), 12% for Match (≈43px, enough for a two- or three-digit
+   * number) and 18% for the letter column (≈64px, against the ≈59px "Letter"
+   * plus `px-2` needs). **Check both sums when changing either.** A column whose
+   * share leaves slack does not simply render narrow — it makes every other
+   * column wrong too.
    *
    * The floor on each is its own heading: `TableHead` is `whitespace-nowrap`, so
    * a column narrower than the words in it spills rather than wrapping. "Cover
-   * letter" is the longest and is why that column is 10% and not the 7% its
-   * contents — a single `size-4` icon — would otherwise justify.
+   * letter" is the longest and is why that column carries a `shortLabel` rather
+   * than a wider share; "Match" is short enough to need neither.
    */
   width: string
   /**
@@ -108,7 +110,7 @@ export interface PostingColumn {
    * When this column is rendered, as a Tailwind class on its `<th>` and on the
    * matching `<td>`. Absent means always.
    *
-   * ⚠️ **Nine cells do not fit on a phone.** At 375px each of them is about
+   * ⚠️ **Ten cells do not fit on a phone.** At 375px each of them is under
    * 40px, and `TableHead` is `whitespace-nowrap`, so every heading spills its
    * own column. The `overflow-x-auto` the shared `Table` puts around itself
    * does not save this table: it is `w-full` and `table-fixed`, so it shrinks
@@ -125,14 +127,14 @@ export interface PostingColumn {
    * - **The percentages no longer total 90%, and that is fine.** A
    *   `display: none` cell contributes no column at all, and the slack is
    *   distributed across the columns that remain in proportion to their
-   *   declared widths — so below `md` the 27/17/10 ratio scales up to fill the
-   *   row and Title stays the widest thing on screen. A per-breakpoint width
-   *   would be three more numbers to keep in step with the skeleton for no
-   *   visible gain.
-   * - **{@link POSTING_COLSPAN} stays 9.** CSS cannot vary an attribute, and
+   *   declared widths — so below `md` the 40/12/18 ratio fills the row and
+   *   Title stays the widest thing on screen. A per-breakpoint width would be
+   *   three more numbers to keep in step with the skeleton for no visible
+   *   gain.
+   * - **{@link POSTING_COLSPAN} stays 10.** CSS cannot vary an attribute, and
    *   under `table-fixed` the column count is fixed by the first row — so a
    *   `colSpan` wider than the visible columns is clamped to the row rather
-   *   than inventing a phantom tenth one. Computing a smaller number from a
+   *   than inventing a phantom eleventh one. Computing a smaller number from a
    *   media query would put the breakpoint into JavaScript, and the header is a
    *   server component.
    */
@@ -162,10 +164,11 @@ export const POSTING_HIDE_BELOW_LG = "hidden lg:table-cell"
 
 /**
  * ⚠️ **Which columns hide is a judgement about what a row is *for*.** Title is
- * how somebody recognises an advertisement they have already seen, and the
- * letter column is the only per-row state worth scanning a page for — so those
- * two stay at every width. Location, Posted and Source answer questions about
- * one posting, which is what expanding it is for.
+ * how somebody recognises an advertisement they have already seen; Match is the
+ * reason to scan the page at all; and the letter column is the only per-row
+ * state worth scanning for. Those three stay at every width. Location, Posted
+ * and Source answer questions about one posting, which is what expanding it is
+ * for.
  *
  * ⚠️ **Company hides but does not go to the detail panel — it moves into the
  * title cell.** A column and a stacked line are not the same trade. The other
@@ -183,38 +186,44 @@ export const POSTING_HIDE_BELOW_LG = "hidden lg:table-cell"
  * begin with stays narrow, and no amount of hiding fixes it.
  */
 export const POSTING_COLUMNS: readonly PostingColumn[] = [
-  { key: "title", label: "Title", width: "w-[52%] md:w-[27%]", sort: "title" },
+  { key: "title", label: "Title", width: "w-[40%] md:w-[24%]", sort: "title" },
   {
     key: "company",
     label: "Company",
-    width: "w-[17%]",
+    width: "w-[15%]",
     sort: "company",
     visibility: POSTING_HIDE_BELOW_MD,
   },
   {
     key: "location",
     label: "Location",
-    width: "w-[15%]",
+    width: "w-[13%]",
     visibility: POSTING_HIDE_BELOW_MD,
+  },
+  {
+    key: "match",
+    label: "Match",
+    width: "w-[12%] md:w-[11%]",
+    sort: "match",
   },
   {
     key: "postedAt",
     label: "Posted",
-    width: "w-[11%]",
+    width: "w-[10%]",
     sort: "posted",
     visibility: POSTING_HIDE_BELOW_MD,
   },
   {
     key: "source",
     label: "Source",
-    width: "w-[10%]",
+    width: "w-[9%]",
     visibility: POSTING_HIDE_BELOW_LG,
   },
   {
     key: "letter",
     label: "Cover letter",
     shortLabel: "Letter",
-    width: "w-[18%] md:w-[10%]",
+    width: "w-[18%] md:w-[8%]",
   },
 ]
 

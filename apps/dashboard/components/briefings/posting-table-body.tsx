@@ -459,6 +459,37 @@ const PostingRow = memo(function PostingRow({
         </TableCell>
 
         {/*
+          ⚠️ **Rendered at every width, unlike the three around it.** It is the
+          one cell that answers "is this worth my time", which is the question a
+          page of twenty-five advertisements is scanned for — so it keeps its
+          column on a phone, where Location, Posted and Source give theirs up.
+
+          An em-dash means nobody has scored it yet, which is every Posting until
+          the loop in `score-pending-matches.tsx` reaches it. Deliberately not a
+          zero and not a spinner: an unscored advertisement is not a badly-matched
+          one, and the order puts it last either way — see the `match` branch of
+          `orderByFor` in `@workspace/db`.
+
+          `tabular-nums` so a column of two- and three-digit scores lines up
+          rather than jittering by digit width.
+        */}
+        <TableCell className="truncate tabular-nums">
+          {posting.matchScore === undefined ? (
+            <span className="text-muted-foreground">
+              <span aria-hidden="true">—</span>
+              <span className="sr-only">Not scored yet</span>
+            </span>
+          ) : (
+            <>
+              <span aria-hidden="true">{posting.matchScore}</span>
+              <span className="sr-only">
+                Matches your resume {posting.matchScore} out of 100
+              </span>
+            </>
+          )}
+        </TableCell>
+
+        {/*
           The parsed `postings.posted_at` formatted, or the advertisement's own
           words when the write path could not read a date out of them — one
           string either way, resolved in `lib/postings/list-postings.ts`. The
