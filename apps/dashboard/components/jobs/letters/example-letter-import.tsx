@@ -23,7 +23,7 @@ import {
  * cross at all.
  */
 export interface ImportableDocument {
-  /** `{resumeId}{extension}` — what the action reads back to find the object. */
+  /** `{documentId}{extension}` — what the action reads back to find the object. */
   file: string
   /** What the user called it, or the id when the metadata could not be read. */
   name: string

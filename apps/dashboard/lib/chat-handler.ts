@@ -2,7 +2,7 @@ import { toBaseMessages, toUIMessageStream } from "@ai-sdk/langchain"
 import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/current-user"
 import type { Agent } from "@workspace/agents"
-import { createAssistant } from "@workspace/agents/assistant"
+import { createAssistant as defaultAssistant } from "@workspace/agents/assistant"
 import { createLangfuseCallback } from "@workspace/langfuse"
 import {
   createUIMessageStreamResponse,
@@ -29,10 +29,14 @@ const requestBodySchema = z.object({
 })
 
 export interface ChatHandlerDeps {
-  /** Agent factory — the seam a test fake plugs into. Defaults to createAssistant. */
-  createAgent?: () => Agent
   /**
-   * Who is asking. Same seam idea as `createAgent`, and it exists so this
+   * Agent factory — the seam a test fake plugs into. Defaults to the real
+   * `createAssistant`, imported as `defaultAssistant` because the seam takes the
+   * factory's own name (`NAMING.md` R2) and would otherwise shadow it.
+   */
+  createAssistant?: () => Agent
+  /**
+   * Who is asking. Same seam idea as `createAssistant`, and it exists so this
    * handler can be exercised in all three states without a live session.
    */
   getUser?: () => Promise<CurrentUser>
@@ -62,7 +66,7 @@ function maskErrorChunks(
 export function createChatHandler(
   deps: ChatHandlerDeps = {}
 ): (req: Request) => Promise<Response> {
-  const createAgent = deps.createAgent ?? (() => createAssistant())
+  const createAssistant = deps.createAssistant ?? (() => defaultAssistant())
   const getUser = deps.getUser ?? getCurrentUser
 
   return async function POST(req: Request): Promise<Response> {
@@ -105,7 +109,7 @@ export function createChatHandler(
 
     let stream
     try {
-      const agent = createAgent()
+      const agent = createAssistant()
       const sessionId = parsed.data.sessionId ?? crypto.randomUUID()
       const callback = createLangfuseCallback({
         userId: caller.userId,

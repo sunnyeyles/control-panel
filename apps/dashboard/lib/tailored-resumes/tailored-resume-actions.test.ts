@@ -208,7 +208,7 @@ function actionsFor(user: CurrentUser) {
       mergeClients(db.asPrisma(), fakeDocumentDb(USER_ID, resumes.rows)),
     getResumes: () => resumes,
     getTailoredResumes: () => createTailoredResumeStore(objects),
-    createTailor: tailor.factory(),
+    createResumeTailor: tailor.factory(),
     now: () => NOW,
     newResetKey: () => RESET_KEY,
   })

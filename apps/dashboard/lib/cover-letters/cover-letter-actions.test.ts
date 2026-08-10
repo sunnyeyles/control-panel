@@ -287,7 +287,7 @@ function harness(
     // `createCoverLetterWriter({ systemPrompt: coverLetterSystemPrompt(extras) })`,
     // and the composition is mirrored here so the assertions below are about
     // the prompt the model would have been built with.
-    createWriter: (extras: LetterInstructions) => {
+    createCoverLetterWriter: (extras: LetterInstructions) => {
       writer.systemPrompts.push(coverLetterSystemPrompt(extras))
       return writer.asAgent()
     },

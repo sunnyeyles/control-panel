@@ -144,7 +144,7 @@ function harness(
     getUser: async () => options.user ?? SIGNED_IN,
     getResumes: () => resumes,
     getPrisma: () => fakeDocumentDb(USER_ID, resumes.rows),
-    createExtractor: () => {
+    createProfileExtractor: () => {
       builds += 1
       return extractor.asAgent()
     },

@@ -247,7 +247,7 @@ function harness(
         }
       )
     },
-    createExtractor: () => {
+    createPostingExtractor: () => {
       builds += 1
       return extractor.asAgent()
     },

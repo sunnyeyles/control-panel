@@ -80,7 +80,7 @@ export const createProfileExtractor = defineToollessAgent(
  * empty tool set on the agent reading this.
  *
  * ⚠️ **The schema is deliberately not repeated here.** It is already in
- * {@link PROFILE_EXTRACTOR_SYSTEM_PROMPT}, and `toProfilePrompt` says nothing
+ * {@link PROFILE_EXTRACTOR_SYSTEM_PROMPT}, and `toSearchCriteriaPrompt` says nothing
  * about the shape. Restating it would put the same JSON Schema in the context
  * twice on every call, and would create a second place for it to be stale.
  *
@@ -90,7 +90,7 @@ export const createProfileExtractor = defineToollessAgent(
  * in a final message, so the schema has to reach it somehow, and once is the
  * answer.
  */
-export function toProfilePrompt(background: string): string {
+export function toSearchCriteriaPrompt(background: string): string {
   return [
     "Propose the job searches to run for the candidate whose CV is below.",
     "",

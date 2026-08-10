@@ -7,6 +7,7 @@ export {
 export { createAssistant, type CreateAssistantOptions } from "./assistant.ts"
 
 export {
+  BRIEF_WRITER_SYSTEM_PROMPT,
   createBriefWriter,
   type CreateBriefWriterOptions,
 } from "./brief-writer.ts"
@@ -86,7 +87,8 @@ export { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
 
 export {
   createProfileExtractor,
-  toProfilePrompt,
+  PROFILE_EXTRACTOR_SYSTEM_PROMPT,
+  toSearchCriteriaPrompt,
   type CreateProfileExtractorOptions,
 } from "./profile-extractor.ts"
 
@@ -106,6 +108,7 @@ export {
   createJobScout,
   JOB_SCOUT_MAX_LLM_CALLS,
   JOB_SCOUT_SEARCH_TOOL_NAMES,
+  JOB_SCOUT_SYSTEM_PROMPT,
   type CreateJobScoutOptions,
   type JobScoutSession,
 } from "./job-scout.ts"

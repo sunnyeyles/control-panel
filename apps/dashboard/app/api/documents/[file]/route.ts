@@ -49,7 +49,7 @@ export async function GET(
 
   if (!ref) return notFound()
 
-  const { resumeId, extension } = ref
+  const { documentId, extension } = ref
 
   // The row before the bytes, for two reasons. It is the ownership check —
   // `findDocument` filters on `userId` as well as `id`, so another user's
@@ -59,7 +59,7 @@ export async function GET(
   // object was stripped to printable ASCII on the way in.
   let document
   try {
-    document = await findDocument(getPrisma(), caller.userId, resumeId)
+    document = await findDocument(getPrisma(), caller.userId, documentId)
   } catch (error) {
     console.error("documents: download could not read the row", error)
     return Response.json({ error: "Download failed" }, { status: 500 })
@@ -75,7 +75,8 @@ export async function GET(
       // names another user's object at all, so `assertOwnedBy` inside the store
       // is a second line of defence rather than the only one.
       userId: caller.userId,
-      resumeId,
+      // `ResumeStore`'s field name, not ours — see `NAMING.md` § Known exceptions.
+      resumeId: documentId,
       extension,
     })
   } catch (error) {
