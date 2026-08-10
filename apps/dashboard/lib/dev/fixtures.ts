@@ -241,8 +241,9 @@ export function devRuns(): Run[] {
  * - **A third of the rows have no posting date**, which is what makes the
  *   Posted column's NULLS-LAST order checkable: they must sit at the bottom
  *   under *both* directions, not float to the top when it is reversed.
- * - **One row per status**, on the three hand-written Postings, so the status
- *   column is not thirty copies of `new`.
+ * - **One row per status**, on the four hand-written Postings, so the status
+ *   column is not thirty copies of `new`. Exactly one each, which is why
+ *   changing one of these four means finding the status it gave up.
  * - **Both Briefings are represented, on both pages.** The Run a row names is
  *   what the detail dialog resolves into a Briefing name, so rows alternate
  *   between the two — see the loop below.
@@ -278,10 +279,12 @@ export function devPostings(): PostingRow[] {
       runId: DEV_RUN_PAUSED_ID,
       postedOn: new Date("2026-07-30T00:00:00.000Z"),
     },
-    // No Run at all: the user added this one by pasting its link.
+    // No Run at all: the user added this one by pasting its link. Its status
+    // is the fourth of four and carries no further meaning — a link-added
+    // Posting is an ordinary one, and `new` is already on NORTHWIND.
     {
       posting: HOLLOWAY,
-      status: "new",
+      status: "not-interested",
       runId: null,
       postedOn: new Date("2026-08-04T00:00:00.000Z"),
     },
