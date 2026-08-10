@@ -325,6 +325,65 @@ export async function postingPayload(
  * offers; adding one is a decision about the index, not a convenience —
  * `match` came with `postings_user_match_idx` in `0011`.
  */
+/**
+ * One Posting reduced to the fields that say *which advertisement it is*.
+ *
+ * Deliberately not {@link PostingListRow}: that one carries a status, a match
+ * and the Briefing that found it, because a table renders them. This carries
+ * what a comparison reads and nothing else, so a caller cannot accidentally
+ * make a decision from a column it did not mean to consult.
+ */
+export interface PostingIdentityRow {
+  postingId: string
+  title: string
+  company: string
+  location: string
+  url: string
+  firstSeenAt: Date
+}
+
+/**
+ * Every advertisement a user holds, as identities.
+ *
+ * ⚠️ **This reads the whole set rather than filtering in SQL, and the reason is
+ * that the comparison is not expressible here.** Whether two advertisements are
+ * the same role is decided by normalised text — legal suffixes stripped from a
+ * company, punctuation folded, bracketed asides dropped — and that rule lives in
+ * `apps/dashboard/lib/postings/duplicate-posting.ts` because it is the same kind
+ * of rule as `postingId()`'s URL normalisation. A `WHERE company = …` here would
+ * be a *second* rule, disagreeing with the first on "Acme" versus "Acme Pty
+ * Ltd", which is the exact case the caller exists to catch.
+ *
+ * Six small columns, bounded by {@link limit}, on a path that has already spent
+ * a page fetch and a model call — so the read is noise against what surrounds
+ * it. That is the trade, and it is only defensible at the scale this table has:
+ * one person's advertisements, not every user's. If it ever stops being, the
+ * fix is a generated column and an index rather than a cheaper query here,
+ * because the rule still has to be applied somewhere.
+ *
+ * No `orderBy`: the caller sorts what it keeps, and asking Postgres to order a
+ * set that is about to be filtered in memory would only pay for an order the
+ * comparison discards.
+ */
+export async function postingIdentities(
+  prisma: DbClient,
+  userId: string,
+  limit: number
+): Promise<PostingIdentityRow[]> {
+  return prisma.posting.findMany({
+    where: { userId },
+    select: {
+      postingId: true,
+      title: true,
+      company: true,
+      location: true,
+      url: true,
+      firstSeenAt: true,
+    },
+    take: limit,
+  })
+}
+
 export type PostingOrder =
   "lastSeenAt" | "title" | "company" | "postedAt" | "match"
 

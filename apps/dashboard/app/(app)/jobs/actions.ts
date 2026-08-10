@@ -7,6 +7,7 @@ import { createRunActions } from "@/lib/briefing-runs/run-actions"
 import { createCoverLetterActions } from "@/lib/cover-letters/cover-letter-actions"
 import { getPrisma } from "@/lib/db"
 import { createAddByLinkActions } from "@/lib/postings/add-by-link-actions"
+import type { AddByLinkState } from "@/lib/postings/add-by-link-state"
 import { createMatchActions } from "@/lib/postings/match-actions"
 import { createPostingActions } from "@/lib/postings/posting-actions"
 import {
@@ -197,11 +198,16 @@ export async function saveTailoredResumeAction(
  * It is the slowest action in this file by a wide margin: a page fetch and then
  * a model call, in sequence, both on the request. `maxDuration` on `page.tsx`
  * is sized for it.
+ *
+ * ⚠️ **`duplicate` is not a success and must not refresh.** It means the row was
+ * *not* written and the person is being asked whether to write it — refreshing
+ * there would re-render the table to show a change that has not happened, and
+ * the answer they are about to give could still be no.
  */
 export async function addPostingByLinkAction(
-  state: ActionState,
+  state: AddByLinkState,
   formData: FormData
-): Promise<ActionState> {
+): Promise<AddByLinkState> {
   const result = await addByLinkActions.addPostingByLink(state, formData)
 
   if (result.status === "success") refresh()
