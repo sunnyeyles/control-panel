@@ -177,7 +177,10 @@ flowchart LR
     A3 --> L3["linkedin.com live inventory"]
     WEB --> TAV["Tavily REST API<br/>TAVILY_API_KEY"]
     FETCH["extractPage<br/>NOT a tool — no agent carries it"] --> TAVX["Tavily /extract<br/>TAVILY_API_KEY"]
+    TAVX -.->|"failed"| FETCH2["extractPageViaApify<br/>NOT a tool — no agent carries it"]
+    FETCH2 --> A4["apify~website-content-crawler"]
     TAVX -.->|"the dashboard hands the page<br/>to a tool-less agent"| PX
+    FETCH2 -.->|"same hand-off when Tavily cannot read"| PX
     BFETCH["fetchBoardPosting<br/>NOT a tool — no agent carries it"] --> A1
     BFETCH --> A2
     BFETCH -.->|"fields the board published —<br/>no model in the path at all"| PTBL[("postings")]
@@ -218,13 +221,13 @@ than module singletons, because each is bound to one run's catalog.
 | `createAssistant`         | `allTools` + `extraTools`                                      | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                                                                                                         |
 | `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Mutates one in-memory board session for the turn; no board search, no fetch, no S3. The dashboard imports the canvas schema and session helpers from `@workspace/agent-tools` so the UI and the agent agree on the board shape                                                                                                                                                                                                  |
 
-### The two page fetchers, and why neither is in the catalog
+### The page fetchers, and why none is in the catalog
 
-Both exist for **adding a Posting by pasting its link**, and both are plain
-functions rather than `tool()`s, absent from `allTools` and carried by no
-agent — `page-extract.test.ts` and `board-posting.test.ts` each assert it,
-because the alternative is a general chat agent acquiring a fetcher the first
-time somebody tidies the catalog.
+They exist for **adding a Posting by pasting its link**, and each is a plain
+function rather than a `tool()`, absent from `allTools` and carried by no
+agent — `page-extract.test.ts` and `board-posting.test.ts` each assert it for
+their module, because the alternative is a general chat agent acquiring a
+fetcher the first time somebody tidies the catalog.
 
 **`fetchBoardPosting`** (`packages/agent-tools/src/board-posting.ts`) is tried
 first. Where the link belongs to a board whose actor takes a single
@@ -248,18 +251,24 @@ The routing lives one layer up, in `packages/agents/src/board-fetch.ts`, because
 `postingId` both live there, and `board-posting.ts` takes `idFor` as an injection
 for the same reason `posting-catalog.ts` does.
 
-**`extractPage`** (`packages/agent-tools/src/page-extract.ts`) is the path for
-every link no board can answer — a Greenhouse link, a company careers page, and
-LinkedIn, whose actor accepts search-results URLs only. The dashboard's action
-calls it, bounds what comes back, and hands the text to
+**`extractPage`** (`packages/agent-tools/src/page-extract.ts`) is the first try
+for every link no board can answer — a Greenhouse link, a company careers page,
+and LinkedIn, whose actor accepts search-results URLs only. The dashboard's
+action calls it, bounds what comes back, and hands the text to
 `createPostingExtractor`, which has no tools. So the untrusted page and the
 ability to act on it are never held by the same thing.
 
-Retrieval is delegated on both paths — to Tavily's `/extract` or to an Apify
+**`extractPageViaApify`** (`packages/agent-tools/src/page-extract-apify.ts`) is
+the same general path's second try: Apify's `website-content-crawler`, once,
+when Tavily returns `failed`. Same result shape, same bound, still not a tool.
+Its timeout is 20 seconds — shorter than the board-by-URL path — because Tavily
+may already have spent 15s and the extractor still has to fit in 60.
+
+Retrieval is delegated on every path — to Tavily's `/extract` or to an Apify
 actor run — so this system never opens a socket to a host somebody typed into a
-form. And a board that fails is **not** followed by the general fetcher: two
-retrievals plus a model call do not fit in the route's budget, and the general
-fetcher is the path least likely to get past the board that just refused.
+form. And a board that fails is **not** followed by the general fetchers: the
+board path has already spent its clock, and a general crawler is the path least
+likely to get past the board that just refused.
 
 ### Why the Letter Writer, the Resume Tailor and the Profile Extractor have no tools
 
@@ -513,5 +522,5 @@ down with it.
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `posting-extractor`, `whiteboard`, plus the schema contracts — `findings` (Scout → Brief Writer), `criteria` (Profile Extractor → whoever stores them) and `stored-posting` (what a `postings.payload` may hold) — and `cover-letter`, `tailored-resume`, `posting-id`, `posted-at`, `job-boards` and `board-fetch` (host → board → actor, the one place the registry meets the tool catalog) |
 | `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `page-extract.ts` and `board-posting.ts` (both fetchers, and neither a tool); `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                                                                                                                                           |
+| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `page-extract.ts`, `page-extract-apify.ts` and `board-posting.ts` (the fetchers, and none a tool); `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                                                                                                                      |
 | `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                                                                                                                                                                                                                           |

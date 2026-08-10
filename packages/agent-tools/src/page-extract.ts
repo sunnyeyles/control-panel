@@ -104,8 +104,11 @@ function getTavilyApiKey(): string {
  * may put its advertisement anywhere — so the marker matters more, not less: an
  * agent that reads a cut as the end of the document would report a posting it
  * only half saw.
+ *
+ * Exported so the Apify fallback in `page-extract-apify.ts` applies the same
+ * bound and the same marker — two fetchers, one result shape.
  */
-function bound(content: string): string {
+export function bound(content: string): string {
   const trimmed = content.trim()
 
   return trimmed.length > MAX_PAGE_CHARS
