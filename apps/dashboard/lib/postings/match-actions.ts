@@ -54,7 +54,7 @@ import { loadStoredPosting } from "./load-stored-posting"
  *    call carrying the whole CV per Posting; a briefing that returned forty
  *    advertisements is forty of them. {@link MATCH_BATCH} is what keeps a single
  *    request inside `maxDuration`, and the loop in
- *    `components/briefings/score-pending-matches.tsx` is what eventually
+ *    `components/jobs/postings/score-pending-matches.tsx` is what eventually
  *    finishes the backlog.
  */
 

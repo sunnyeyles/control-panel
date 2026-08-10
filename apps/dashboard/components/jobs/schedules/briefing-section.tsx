@@ -1,6 +1,6 @@
-import { CreateBriefingForm } from "@/components/briefings/jobs/create-briefing-form"
-import { JobEnabledSwitch } from "@/components/briefings/jobs/job-enabled-switch"
-import { JobScheduleForm } from "@/components/briefings/jobs/job-schedule-form"
+import { CreateBriefingForm } from "@/components/jobs/schedules/create-briefing-form"
+import { JobEnabledSwitch } from "@/components/jobs/schedules/job-enabled-switch"
+import { JobScheduleForm } from "@/components/jobs/schedules/job-schedule-form"
 import { getPrisma } from "@/lib/db"
 import {
   toBriefingSummary,

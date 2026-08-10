@@ -162,8 +162,8 @@ app/(app)/documents/       → components/documents/
 ```
 
 The rule exists because the alternative was three conventions at once: `/jobs`
-read from `components/briefings/`, `/jobs/schedules` from
-`components/briefings/jobs/`, and `/jobs/letters` from `components/jobs/letters/`
+read from `components/jobs/postings/`, `/jobs/schedules` from
+`components/jobs/schedules/`, and `/jobs/letters` from `components/jobs/letters/`
 — so `jobs` was two directories meaning two different things, and `briefings`
 held the Postings table.
 

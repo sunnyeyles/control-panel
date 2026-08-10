@@ -1,9 +1,9 @@
 "use client"
 
-import { DeletePostingsDialog } from "@/components/briefings/delete-postings-dialog"
-import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
-import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
-import { usePostingSelection } from "@/components/briefings/posting-selection"
+import { DeletePostingsDialog } from "@/components/jobs/postings/delete-postings-dialog"
+import type { CoverLetterPromise } from "@/components/jobs/postings/cover-letter-cell"
+import type { TailoredResumePromise } from "@/components/jobs/postings/use-tailored-resume"
+import { usePostingSelection } from "@/components/jobs/postings/posting-selection"
 import { Button } from "@workspace/ui/components/button"
 import { Trash2Icon } from "lucide-react"
 

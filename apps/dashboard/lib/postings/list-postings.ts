@@ -82,7 +82,7 @@ export interface PostingView {
    *
    * Absent when nobody has scored it yet, which is every Posting until the
    * scoring loop on this page reaches it — see
-   * `components/briefings/score-pending-matches.tsx`. Absent is a state the
+   * `components/jobs/postings/score-pending-matches.tsx`. Absent is a state the
    * column renders rather than a fault: an unscored Posting is not a
    * badly-matched one, and the order puts it last either way.
    *

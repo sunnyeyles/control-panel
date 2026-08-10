@@ -27,7 +27,7 @@ employment opportunity, which is a **Posting**. To a user a job is a
 | The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                                                                                                                   |
 | The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                                                                                                                   |
 | The posting↔resume match contract            | `packages/agents/src/match.ts`, produced by `match-assessor.ts`                                                                                                                                                                     |
-| Scoring Postings against the resume          | `apps/dashboard/lib/postings/match-actions.ts`, driven by `apps/dashboard/components/briefings/score-pending-matches.tsx`                                                                                                           |
+| Scoring Postings against the resume          | `apps/dashboard/lib/postings/match-actions.ts`, driven by `apps/dashboard/components/jobs/postings/score-pending-matches.tsx`                                                                                                       |
 | Proposing criteria from a resume             | `apps/dashboard/lib/jobs/suggest-criteria-actions.ts`, reading through `apps/dashboard/lib/cover-letters/candidate-background.ts`                                                                                                   |
 | The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                                                                                                                   |
 | Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                                                                                                                         |
@@ -349,7 +349,7 @@ flowchart TD
   each row carrying the **Posting Status** its owner set and opening its full
   detail in a dialog. It no longer reads one Run's `runs.findings`, so a Posting
   the next Run does not re-find stays on the page rather than vanishing
-  overnight. Above the table, `components/briefings/briefing-strip.tsx` renders
+  overnight. Above the table, `components/jobs/postings/briefing-strip.tsx` renders
   one line per briefing from `run-activity.ts` — its most recent Run whatever
   became of it, running, failed, or too long in `running` to still be believed —
   and carries that briefing's **Run now** button, which is what makes the line

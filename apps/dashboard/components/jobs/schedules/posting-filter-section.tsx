@@ -1,4 +1,4 @@
-import { TitleFilterForm } from "@/components/briefings/jobs/title-filter-form"
+import { TitleFilterForm } from "@/components/jobs/schedules/title-filter-form"
 import { getPrisma } from "@/lib/db"
 import { titleExclusions } from "@workspace/db"
 import { formatTitleExclusions } from "@workspace/job-search"

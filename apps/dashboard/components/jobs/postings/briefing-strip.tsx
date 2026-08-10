@@ -1,5 +1,5 @@
-import { RunActivityStatus } from "@/components/briefings/run-activity-status"
-import { RunNowButton } from "@/components/briefings/run-now-button"
+import { RunActivityStatus } from "@/components/jobs/postings/run-activity-status"
+import { RunNowButton } from "@/components/jobs/postings/run-now-button"
 import type { RunActivity } from "@/lib/briefing-runs/run-activity"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 
@@ -8,7 +8,7 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
  *
  * ⚠️ **This exists because the table has nowhere else to put these two
  * controls.** `RunNowButton` and `RunActivityStatus` used to hang off the
- * per-briefing card in `components/briefings/briefing-list.tsx`; a cumulative
+ * per-briefing card in `components/jobs/postings/briefing-list.tsx`; a cumulative
  * table has no per-briefing row at all, so deleting that component without this
  * strip would have removed the ability to run a briefing on demand and to see
  * that one is running — a feature regression with nothing failing to compile to
