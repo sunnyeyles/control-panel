@@ -1,6 +1,7 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
+import { extractPageViaApify } from "@workspace/agent-tools/page-extract-apify"
 import {
   extractPage,
   type PageExtractResult,
@@ -43,18 +44,18 @@ import { z } from "zod"
  * posting — SEEK and Indeed — the board answers with `title`, `company`,
  * `location` and the description as *fields it published*, and no model is
  * involved at all: no extraction to get wrong, no prompt to inject into, nothing
- * to pay for. Everything else goes through the general fetcher and the Posting
+ * to pay for. Everything else goes through the general fetchers and the Posting
  * Extractor. LinkedIn is deliberately in the second group; its actor takes
  * search-results URLs and cannot be given a job page.
  *
  * ⚠️ **A supported board that fails does not fall through to the general
- * fetcher**, and the reason is the clock rather than tidiness. This action runs
- * on a request somebody is waiting on, inside a `maxDuration` of 60 seconds; two
- * retrievals plus a model call do not fit, and the second retrieval is the one
- * least likely to work — `seek-search.ts` records that the scout reached these
- * boards through actors precisely because general retrieval did not. So each
- * link takes exactly one path, and a board's failure is reported in the board's
- * own words.
+ * fetchers.** The board path has already spent up to 30 seconds, and a general
+ * crawler is the path least likely to get past the board that just refused —
+ * `seek-search.ts` records that the scout reached these boards through actors
+ * precisely because general retrieval did not. So a board's failure is reported
+ * in the board's own words. The general path *does* try a second fetcher: Tavily
+ * first, then Apify's Website Content Crawler once, timeouts chosen to leave
+ * room for the extractor inside the route's `maxDuration` of 60.
  *
  * **This is the page fetcher `OVERVIEW.md` warns about, and the shape of it is
  * the answer to that warning rather than a way around it.** Three properties,
@@ -63,8 +64,9 @@ import { z } from "zod"
  * 1. **Nothing in this process opens a socket to the host the user named.** The
  *    retrieval is a POST to Tavily or to Apify, and they fetch the page — so
  *    there is no SSRF surface, no redirect chain to bound, and no streaming
- *    response to cut off. See `@workspace/agent-tools/page-extract` and
- *    `@workspace/agent-tools/board-posting`, neither of which is a tool.
+ *    response to cut off. See `@workspace/agent-tools/page-extract`,
+ *    `@workspace/agent-tools/page-extract-apify` and
+ *    `@workspace/agent-tools/board-posting`, none of which is a tool.
  * 2. **The page reaches exactly one agent, and that agent has no tools.**
  *    `cover-letter-writer.ts` and `resume-tailor.ts` both say a page fetcher,
  *    when it exists, "goes on a separate agent that never sees the profile, and
@@ -144,11 +146,13 @@ export interface AddByLinkActionsDeps {
    */
   fetchFromBoard?: (url: string) => Promise<PostingFetch>
   /**
-   * How the page is retrieved when no board claims the link. Defaults to the
-   * real fetcher, which reads `TAVILY_API_KEY` **inside the call**.
+   * How the page is retrieved when no board claims the link. Defaults to
+   * Tavily then, on `status: "failed"` only, Apify's Website Content Crawler —
+   * reading `TAVILY_API_KEY` and, if needed, `APIFY_TOKEN` **inside the call**.
    *
    * A test passes one that answers from a fixture, which is also how "a
-   * duplicate costs no fetch" is asserted rather than asserted about.
+   * duplicate costs no fetch" is asserted rather than asserted about. The
+   * injection replaces the whole composition.
    */
   fetchPage?: (url: string) => Promise<PageExtractResult>
   /**
@@ -173,7 +177,13 @@ export function createAddByLinkActions(
 ): AddByLinkActions {
   const fetchFromBoard =
     deps.fetchFromBoard ?? ((url: string) => fetchPostingByUrl(url))
-  const fetchPage = deps.fetchPage ?? ((url: string) => extractPage(url))
+  const fetchPage =
+    deps.fetchPage ??
+    (async (url: string) => {
+      const fromTavily = await extractPage(url)
+      if (fromTavily.status !== "failed") return fromTavily
+      return extractPageViaApify(url)
+    })
   const createExtractor =
     deps.createExtractor ?? (() => createPostingExtractor())
   const now = deps.now ?? (() => new Date())
@@ -233,8 +243,8 @@ export function createAddByLinkActions(
 
     // No second retrieval after a board's failure — see the note at the head of
     // this file. The board that owns the advertisement was asked and could not
-    // answer, and saying so beats spending another 15 seconds of somebody's wait
-    // on the path least likely to get past that board.
+    // answer, and saying so beats spending more of somebody's wait on the path
+    // least likely to get past that board.
     if (fromBoard.status === "failed") return fail(fromBoard.message)
 
     let posting: StoredPosting
@@ -248,8 +258,8 @@ export function createAddByLinkActions(
       try {
         page = await fetchPage(url)
       } catch (error) {
-        // Same split, same reason: a rejected or missing `TAVILY_API_KEY`
-        // throws rather than answering.
+        // Same split, same reason: a rejected or missing `TAVILY_API_KEY` or
+        // `APIFY_TOKEN` throws rather than answering.
         console.error("postings: could not reach the page fetcher", error)
         return fail("Something went wrong.")
       }
