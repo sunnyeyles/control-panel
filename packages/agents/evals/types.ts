@@ -100,6 +100,8 @@ export interface Score {
   passed: boolean
   /** Why, in a sentence. This is what a human reads when a case regresses. */
   detail: string
+  /** Set when the harness could not produce a number. Left out of the mean. */
+  unscored?: boolean
 }
 
 export interface CaseResult {

@@ -77,11 +77,14 @@ async function runCase(
       ...(await judge({ kase, result }, judgeModel)),
     ]
 
+    // An unscored grader is the harness failing, not the agent, so it is left
+    // out of the mean rather than averaged in as a zero.
+    const scored = scores.filter((score) => !score.unscored)
     const overall =
-      scores.length === 0
+      scored.length === 0
         ? 1
-        : scores.reduce((total, score) => total + score.score, 0) /
-          scores.length
+        : scored.reduce((total, score) => total + score.score, 0) /
+          scored.length
 
     return {
       ...base,
@@ -107,10 +110,12 @@ async function runCase(
 async function readBaseline(): Promise<Baseline | undefined> {
   try {
     return JSON.parse(await readFile(BASELINE_PATH, "utf8")) as Baseline
-  } catch {
+  } catch (error) {
     // No baseline is the ordinary first run, and is not worth a warning that
-    // would then be printed on every fresh checkout.
-    return undefined
+    // would then be printed on every fresh checkout. A baseline that exists and
+    // will not parse is the other case the docblock promises to exit on.
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined
+    throw error
   }
 }
 
@@ -172,6 +177,17 @@ async function main(): Promise<void> {
   // Stamped here rather than inside the pure report functions, which take the
   // timestamp as an argument so they stay testable.
   const recordedAt = new Date().toISOString()
+  const stamp = recordedAt.replace(/[:.]/g, "-")
+
+  // The raw results go to disk before anything reads them. Summarising,
+  // comparing against a baseline or rendering markdown can all throw, and a run
+  // that already cost minutes of real model calls should not be lost to one.
+  await mkdir(RESULTS_DIR, { recursive: true })
+  await writeFile(
+    join(RESULTS_DIR, `${stamp}.json`),
+    JSON.stringify({ recordedAt, model, judgeModelName, results }, null, 2)
+  )
+
   const summaries = summarise(results)
   const comparisons = compare(summaries, await readBaseline())
   const markdown = toMarkdown(summaries, comparisons, {
@@ -180,12 +196,6 @@ async function main(): Promise<void> {
     recordedAt,
   })
 
-  await mkdir(RESULTS_DIR, { recursive: true })
-  const stamp = recordedAt.replace(/[:.]/g, "-")
-  await writeFile(
-    join(RESULTS_DIR, `${stamp}.json`),
-    JSON.stringify({ recordedAt, model, judgeModelName, results }, null, 2)
-  )
   await writeFile(join(RESULTS_DIR, `${stamp}.md`), markdown)
 
   console.log(`\n${markdown}`)

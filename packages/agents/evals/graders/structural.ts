@@ -63,8 +63,10 @@ function partial(
  * and gets `Redis Cache`. Both are the box the case meant, and a grader strict
  * enough to reject them would report a regression every time the model chose a
  * better word. Punctuation and spacing go, then either string containing the
- * other is a match.
+ * other is a match — but only once the shorter side is long enough to mean
+ * something. Below that, containment is coincidence: `API` is inside `Rapid`.
  */
+const MIN_SUBSTRING_LENGTH = 4
 function normalise(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]/g, "")
 }
@@ -73,6 +75,8 @@ function labelsMatch(expected: string, actual: string): boolean {
   const a = normalise(expected)
   const b = normalise(actual)
   if (a.length === 0 || b.length === 0) return false
+  if (a === b) return true
+  if (Math.min(a.length, b.length) < MIN_SUBSTRING_LENGTH) return false
   return a.includes(b) || b.includes(a)
 }
 

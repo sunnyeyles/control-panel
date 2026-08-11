@@ -122,6 +122,12 @@ describe("edges", () => {
     expect(score.passed).toBe(true)
   })
 
+  it("does not match a short label by coincidence — `res` is inside `Postgres`", () => {
+    const score = gradeEdges(kase({ expect: { edges: ["API -> res"] } }), drawn)
+
+    expect(score.passed).toBe(false)
+  })
+
   it("does not accept the arrow pointing the other way", () => {
     const score = gradeEdges(
       kase({ expect: { edges: ["API -> Client"] } }),

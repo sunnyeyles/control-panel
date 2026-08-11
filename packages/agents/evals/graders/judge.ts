@@ -97,8 +97,9 @@ function renderRequest(kase: EvalCase, result: TurnResult): string {
  *
  * A judge that fails to answer is **not** a score of zero — that would blame
  * the agent for the harness's own bad day and quietly poison a baseline. It
- * comes back as a failed grader whose detail says so, which is visible in the
- * report and obviously not a regression in the thing being graded.
+ * comes back marked `unscored`, which keeps it out of the case's mean, and as a
+ * failed grader whose detail says so, which is visible in the report and
+ * obviously not a regression in the thing being graded.
  */
 export async function judge(
   input: JudgeInput,
@@ -135,6 +136,7 @@ export async function judge(
         score: 0,
         passed: false,
         detail: `the judge did not answer: ${error instanceof Error ? error.message : String(error)}`,
+        unscored: true,
       },
     ]
   }

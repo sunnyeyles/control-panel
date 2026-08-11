@@ -163,7 +163,7 @@ export function createCanvasTools(
   const drawDiagram = tool(withOps(session.drawDiagram.bind(session)), {
     name: "draw_diagram",
     description:
-      "Draw a whole diagram at once — the boxes and the arrows between them. You supply NO coordinates: the positions are worked out from the arrows, so the boxes come out in reading order, evenly spaced and never on top of each other or on top of anything already on the board. Use this for anything with more than two boxes. An arrow may also point at a shape already on the board by its id, which is how you extend an existing diagram; those shapes are never moved.",
+      "Draw a whole diagram at once — the boxes and the arrows between them. You supply NO coordinates: the positions are worked out from the arrows, so the boxes come out in reading order, evenly spaced, never on top of each other, and — unless you give x and y yourself — clear of anything already on the board. Use this for anything with more than two boxes. An arrow may also point at a shape already on the board by its id, which is how you extend an existing diagram; those shapes are never moved.",
     schema: z.object({
       nodes: z
         .array(
@@ -348,7 +348,7 @@ export function createCanvasTools(
         .number()
         .optional()
         .describe(
-          `Pixels between neighbours, for row, column and grid. Defaults to ${DEFAULT_GAP}.`
+          `Pixels between neighbours, for the flow, row, column and grid layouts. Defaults to ${DEFAULT_GAP}.`
         ),
     }),
   })

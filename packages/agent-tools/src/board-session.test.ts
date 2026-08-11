@@ -524,6 +524,26 @@ describe("overlap reporting", () => {
       session.arrangeShapes({ ids: ["s1", "s2"], layout: "row" })
     ).not.toContain("overlap")
   })
+
+  it("names a shape the layout buried that it was never asked to arrange", () => {
+    const session = createBoardSession(
+      context({
+        shapes: [
+          shape({ id: "s1", x: 0, y: 0 }),
+          shape({ id: "s2", x: 0, y: 200 }),
+          shape({ id: "s3", x: 320, y: 0, text: "not selected" }),
+        ],
+        connections: [{ id: "s4", fromId: "s1", toId: "s2" }],
+      })
+    )
+
+    const message = session.arrangeShapes({
+      ids: ["s1", "s2"],
+      layout: "flow-right",
+    })
+
+    expect(message).toContain("s2 and s3 now overlap")
+  })
 })
 
 describe("flow layouts", () => {
@@ -754,6 +774,41 @@ describe("draw_diagram", () => {
     session.drawDiagram({ nodes: [{ key: "a", text: "A" }], x: 1000, y: 500 })
 
     expect(session.shapes()[0]).toMatchObject({ x: 1000, y: 500 })
+  })
+
+  it("says what an explicit origin landed on, rather than stacking quietly", () => {
+    const session = createBoardSession(
+      context({ shapes: [shape({ id: "s1", x: 0, y: 0, w: 400, h: 400 })] })
+    )
+
+    const message = session.drawDiagram({
+      nodes: [{ key: "a", text: "A" }],
+      x: 0,
+      y: 0,
+    })
+
+    expect(message).toContain("s1 and s2 overlap")
+    expect(message).toContain("omit x and y")
+  })
+
+  it("ranks an edge whose key was typed with a stray space", () => {
+    const chainOf = (from: string) => {
+      const session = createBoardSession(context())
+      session.drawDiagram({
+        nodes: [
+          { key: "a", text: "A" },
+          { key: "b", text: "B" },
+          { key: "c", text: "C" },
+        ],
+        edges: [
+          { from, to: "b" },
+          { from: "b", to: "c" },
+        ],
+      })
+      return session.shapes().map((s) => `${s.id}@${s.x},${s.y}`)
+    }
+
+    expect(chainOf("a ")).toEqual(chainOf("a"))
   })
 
   it("reports an arrow that names nothing, and draws the rest", () => {

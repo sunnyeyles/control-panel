@@ -257,19 +257,21 @@ export function createBoardSession(context: BoardContext): BoardSession {
       .map((other) => other.id)
   }
 
-  /** `"s1 and s2"` for every overlapping pair within a set. Empty when clean. */
+  /**
+   * `"s1 and s2"` for every overlap a subject is part of. Empty when clean.
+   *
+   * Against the whole board, not just the subjects: a layout that tidies three
+   * shapes onto a fourth it was never asked about has still buried it, and the
+   * point of reporting is to say so.
+   */
   const overlappingPairs = (subjects: BoardShape[]): string[] => {
-    const pairs: string[] = []
-    for (let i = 0; i < subjects.length; i += 1) {
-      for (let j = i + 1; j < subjects.length; j += 1) {
-        const a = subjects[i]
-        const b = subjects[j]
-        if (!a || !b) continue
-        if (a.kind === "text" || b.kind === "text") continue
-        if (overlaps(a, b)) pairs.push(`${a.id} and ${b.id}`)
+    const pairs = new Set<string>()
+    for (const subject of subjects) {
+      for (const other of collidingWith(subject)) {
+        pairs.add([subject.id, other].sort().join(" and "))
       }
     }
-    return pairs
+    return [...pairs]
   }
 
   /**
@@ -660,7 +662,7 @@ export function createBoardSession(context: BoardContext): BoardSession {
       const left = overlappingPairs(subjects)
       const clash =
         left.length > 0
-          ? ` ${left.join(", ")} now overlap — a flow-right, flow-down, row, column or grid layout separates them.`
+          ? ` ${left.join(", ")} now overlap — move one, or lay the group out with flow-right, flow-down, row, column or grid.`
           : ""
 
       return ops.length === 0
@@ -712,8 +714,10 @@ export function createBoardSession(context: BoardContext): BoardSession {
         // at an existing shape says nothing about where this block should rank,
         // because that shape is staying where it is.
         edges
-          .filter((edge) => seen.has(edge.from) && seen.has(edge.to))
-          .map((edge) => ({ from: edge.from, to: edge.to })),
+          .filter(
+            (edge) => seen.has(edge.from.trim()) && seen.has(edge.to.trim())
+          )
+          .map((edge) => ({ from: edge.from.trim(), to: edge.to.trim() })),
         { direction }
       )
 
@@ -732,6 +736,7 @@ export function createBoardSession(context: BoardContext): BoardSession {
       const origin = resolveOrigin(input, block, existing, edges, seen)
 
       const idByKey = new Map<string, string>()
+      const drawnShapes: BoardShape[] = []
       for (const node of nodes) {
         const at = placed.get(node.key) ?? { x: 0, y: 0 }
         const shape = addShape({
@@ -744,6 +749,7 @@ export function createBoardSession(context: BoardContext): BoardSession {
           ...(node.color ? { color: node.color } : {}),
         })
         idByKey.set(node.key, shape.id)
+        drawnShapes.push(shape)
       }
 
       // A key names a box just drawn; anything else has to be a shape already
@@ -777,7 +783,16 @@ export function createBoardSession(context: BoardContext): BoardSession {
           ? ` These arrows named something that is not a node here and not a shape on the board, so they were skipped: ${unresolved.join("; ")}.`
           : ""
 
-      return `Drew ${nodes.length} shape(s) and ${drawn} arrow(s), laid out ${direction === "right" ? "left to right" : "top to bottom"}. Ids: ${naming}.${missed}`
+      // Only reachable through an explicit `x`/`y`, which skips the search for
+      // clear space by design. The block is still drawn — this says what it
+      // landed on rather than quietly stacking it on the user's work.
+      const left = overlappingPairs(drawnShapes)
+      const clash =
+        left.length > 0
+          ? ` ${left.join(", ")} overlap — move them, or omit x and y to have clear space chosen for you.`
+          : ""
+
+      return `Drew ${nodes.length} shape(s) and ${drawn} arrow(s), laid out ${direction === "right" ? "left to right" : "top to bottom"}. Ids: ${naming}.${missed}${clash}`
     },
 
     focusViewport(ids) {

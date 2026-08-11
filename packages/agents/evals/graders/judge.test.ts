@@ -136,6 +136,7 @@ describe("judge", () => {
     expect(scores).toHaveLength(1)
     expect(scores[0]?.grader).toBe("judge")
     expect(scores[0]?.detail).toContain("the judge did not answer")
+    expect(scores[0]?.unscored).toBe(true)
   })
 
   it("rejects a rating outside the rubric rather than scaling it", async () => {
