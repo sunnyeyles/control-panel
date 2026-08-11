@@ -23,9 +23,11 @@ set -uo pipefail
 
 command -v git >/dev/null 2>&1 || exit 0
 
+# shellcheck source=lib/worktree.sh
+. "${BASH_SOURCE[0]%/*}/lib/worktree.sh" 2>/dev/null || exit 0
+
 toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 0
-repo=${common_dir%/.git}
+repo=$(resolve_repo_root) || exit 0
 
 # Only act inside a worktree under .claude/worktrees/.
 case "$toplevel" in
