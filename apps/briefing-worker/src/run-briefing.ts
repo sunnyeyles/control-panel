@@ -20,14 +20,18 @@ import {
   partitionByExcludedTitle,
   scoutLlmCallBudget,
   toSearchBrief,
+  type SearchPass,
 } from "@workspace/job-search"
 import { toNewPostings } from "./postings.ts"
 import { resolvePostings, type PostingLookup } from "./resolve-postings.ts"
 import { runAgent, type AgentLike } from "./run-agent.ts"
 import {
   countBySource,
+  failureSummary,
   SEARCH_TOOL_NAMES,
   successfulSearches,
+  totalResults,
+  type SearchAttemptLike,
 } from "./search-results.ts"
 import { createTracer, type TraceSink } from "./trace.ts"
 
@@ -71,7 +75,13 @@ interface RunReportFields {
    */
   scheduledFor: string
   llmCalls: number
-  /** Searches that actually returned; an error result proves nothing ran. */
+  /**
+   * Searches where the board actually answered, empty answers included.
+   *
+   * Read off the scout's search log rather than off its transcript — a board
+   * that failed answers the *model* with a sentence, which is a perfectly
+   * successful tool result. See `search-results.ts`.
+   */
   searches: number
   /**
    * The same count split by the board it came from, zeroes included — see
@@ -84,6 +94,15 @@ interface RunReportFields {
 export interface SuccessReport extends RunReportFields {
   outcome: "success"
   postings: number
+  /**
+   * How many times the scout was sent out: one, or two when the first pass came
+   * back empty and was worth widening.
+   *
+   * Reported because a `2` is the signal that the criteria are too narrow for
+   * the market — and because a run that took two passes cost roughly twice the
+   * model calls, which is otherwise a mystery in the `llmCalls` field.
+   */
+  scoutPasses: 1 | 2
   /**
    * Postings dropped because their title carried one of the user's excluded
    * words.
@@ -167,6 +186,24 @@ export interface ScoutSessionLike {
   agent: AgentLike
   catalog: PostingLookup
   findings(): ScoutFindings | undefined
+  /**
+   * Every search the session attempted, and whether the board answered.
+   *
+   * The third thing a run holds a session for, and the one that decides whether
+   * to believe the other two: a scout that reported nothing because every actor
+   * was down is a failed run, and a scout that reported nothing because nobody
+   * is advertising the role is a quiet one. Nothing in the transcript
+   * distinguishes them — see `search-results.ts`.
+   */
+  searches(): readonly SearchAttemptLike[]
+}
+
+/** What one attempt at a set of criteria came back with. */
+interface ScoutPassOutcome {
+  /** The findings, after unresolvable ids and excluded titles came out. */
+  kept: Findings
+  /** Every search this pass attempted. */
+  attempts: readonly SearchAttemptLike[]
 }
 
 export interface RunBriefingInput {
@@ -271,6 +308,15 @@ export async function runBriefing(
   let searches = 0
   let searchesBySource = countBySource([])
   let excludedPostings = 0
+  let scoutPasses: 1 | 2 = 1
+
+  /** Every search both passes attempted, in the order they completed. */
+  const attempts: SearchAttemptLike[] = []
+
+  // Postings the scout reported that no search stands behind, across both
+  // passes. Read where the warning is assembled — see `resolve-postings.ts` on
+  // why one unresolvable id costs a posting and not the run.
+  const unresolved: ScoutPosting[] = []
 
   const common = (): RunReportFields => ({
     event: "briefing-run",
@@ -319,165 +365,252 @@ export async function runBriefing(
             `${plural(parsed.titles.length, "title")}, ${plural(parsed.locations.length, "location")}`
         )
 
-        // Held across both steps: the scout writes its findings and its catalog
-        // into the session, and the hand-off reads both back out.
-        // The session comes back out of the step beside the outcome, because
-        // the hand-off needs both and neither is derivable from the other: the
-        // messages say what the scout did, the session holds what it found.
-        const scouted = await trace.step(
-          "scout",
-          async () => {
-            const prompt = toSearchBrief(
-              config,
-              slot.scheduledFor,
-              titleExclusions
-            )
-            trace({ type: "prompt", agent: "scout", text: prompt })
-
-            // Sized to the config rather than to a constant: a sweep is
-            // titles × locations × boards, and a scout that runs out of turns
-            // mid-search still answers with something well-formed.
-            const session = (input.createScout ?? createJobScout)({
-              maxLlmCalls: scoutLlmCallBudget(
+        /**
+         * One attempt at these criteria: search, hand over, filter.
+         *
+         * A closure rather than three inline steps, because a run gets two
+         * attempts now — see the second pass below — and the only thing that
+         * differs between them is the brief the scout is given. What it
+         * accumulates belongs to the run rather than to the pass, so `llmCalls`,
+         * the attempts and what was dropped are written where the report reads
+         * them.
+         *
+         * A fresh session per pass, which is not an optimisation to reverse: the
+         * second pass has to be able to search again, and `submit_findings` is
+         * last-write-wins and answers a scout that has reported with *"do not
+         * search again"* (`packages/agents/src/submit-findings.ts`). A reused
+         * session cannot make a second pass on any terms.
+         */
+        const scoutPass = async (
+          pass: SearchPass
+        ): Promise<ScoutPassOutcome> => {
+          // Held across both steps: the scout writes its findings and its
+          // catalog into the session, and the hand-off reads both back out.
+          // The session comes back out of the step beside the outcome, because
+          // the hand-off needs both and neither is derivable from the other: the
+          // messages say what the scout did, the session holds what it found.
+          const scouted = await trace.step(
+            "scout",
+            async () => {
+              const prompt = toSearchBrief(
                 config,
-                JOB_SCOUT_SEARCH_TOOL_NAMES.length
-              ),
-            })
+                slot.scheduledFor,
+                titleExclusions,
+                pass
+              )
+              trace({ type: "prompt", agent: "scout", text: prompt })
 
-            const outcome = await runAgent(
-              session.agent,
-              "scout",
-              { messages: [new HumanMessage(prompt)] },
-              trace,
-              {
-                ...(callback ? { callbacks: [callback] } : {}),
-                metadata: {
-                  agent: "scout",
-                  jobId: job.id,
-                  runId: slot.runId,
-                },
-                runName: "find-postings",
-                tags: ["briefing", "scout"],
+              // Sized to the config rather than to a constant: a sweep is
+              // titles × locations × boards, and a scout that runs out of turns
+              // mid-search still answers with something well-formed.
+              const session = (input.createScout ?? createJobScout)({
+                maxLlmCalls: scoutLlmCallBudget(
+                  config,
+                  JOB_SCOUT_SEARCH_TOOL_NAMES.length
+                ),
+              })
+
+              const outcome = await runAgent(
+                session.agent,
+                "scout",
+                { messages: [new HumanMessage(prompt)] },
+                trace,
+                {
+                  ...(callback ? { callbacks: [callback] } : {}),
+                  metadata: {
+                    agent: "scout",
+                    jobId: job.id,
+                    runId: slot.runId,
+                  },
+                  runName: "find-postings",
+                  tags: ["briefing", "scout"],
+                }
+              )
+
+              return { ...outcome, session }
+            },
+            (result) =>
+              [
+                ...(pass === "wider" ? ["wider pass"] : []),
+                plural(result.llmCalls, "model call"),
+              ].join(", ")
+          )
+
+          llmCalls += scouted.llmCalls
+
+          // This pass's own searches, and the run's cumulative ones. The gates
+          // below read the pass — a pass that could not search has proved
+          // nothing whatever the pass before it managed — and the report reads
+          // the run.
+          const passAttempts = scouted.session.searches()
+          attempts.push(...passAttempts)
+          const worked = successfulSearches(attempts)
+          searches = worked.length
+          searchesBySource = countBySource(worked)
+
+          let dropped: ScoutPosting[] = []
+
+          const findings = await trace.step(
+            "handoff",
+            async () => {
+              // Not `finalAnswer`: the findings are captured by the
+              // `submit_findings` tool as it validates them, so a scout that
+              // reported and then ran out of turns has still reported. What that
+              // check used to catch — a budget halt — is now only a failure when
+              // the halt came *first*, which is exactly the case below.
+              const reported = scouted.session.findings()
+
+              // Two gates rather than one, because "the scout never searched"
+              // and "every search it made failed" are different faults with the
+              // same symptom, and the second used to pass silently: a failed
+              // board answers with a sentence, so counting the tool results
+              // counted a dead scraper as a live search. Either way the findings,
+              // however well-formed, came from the model rather than from a
+              // board — and a failed run beats a confident brief citing postings
+              // nobody can visit.
+              if (passAttempts.length === 0) {
+                throw new Error(
+                  `The scout called none of ${SEARCH_TOOL_NAMES.join(", ")}, so nothing it reported came from a live search.`
+                )
               }
-            )
 
-            return { ...outcome, session }
-          },
-          (result) => plural(result.llmCalls, "model call")
-        )
+              if (successfulSearches(passAttempts).length === 0) {
+                throw new Error(
+                  `Every one of the scout's ${plural(passAttempts.length, "search")} failed, so nothing it reported came from a live search — ${failureSummary(passAttempts)}.`
+                )
+              }
 
-        llmCalls += scouted.llmCalls
-        const searchesRun = successfulSearches(scouted.messages)
-        searches = searchesRun.length
-        searchesBySource = countBySource(searchesRun)
+              // Distinct from an empty list, and the distinction is the point: a
+              // scout that submits no postings has reported a result, and one that
+              // never submits at all has reported nothing. Only the second is a
+              // failed run.
+              if (reported === undefined) {
+                throw new Error(
+                  `The scout ran ${plural(successfulSearches(passAttempts).length, "search")} and never called submit_findings, so it produced no findings at all. It may have exhausted its model call budget.`
+                )
+              }
 
-        // Postings the scout reported that no search stands behind. Read after
-        // the step, where the warning is assembled — see `resolve-postings.ts`
-        // on why one unresolvable id costs a posting and not the run.
-        let unresolved: ScoutPosting[] = []
-
-        const findings = await trace.step(
-          "handoff",
-          async () => {
-            // Not `finalAnswer`: the findings are captured by the
-            // `submit_findings` tool as it validates them, so a scout that
-            // reported and then ran out of turns has still reported. What that
-            // check used to catch — a budget halt — is now only a failure when
-            // the halt came *first*, which is exactly the case below.
-            const reported = scouted.session.findings()
-
-            // No successful search means the findings, however well-formed, came
-            // from the model rather than a live search. Better a failed run than a
-            // confident brief citing postings nobody can visit.
-            if (searches === 0) {
-              throw new Error(
-                `The scout completed no successful search round trip on any of ${SEARCH_TOOL_NAMES.join(", ")}, so nothing it reported came from a live search.`
+              // The schema has already said every posting names an id; this says
+              // the id names a posting some search returned. `resolve-postings.ts`
+              // owns the lookup and documents what it replaced.
+              const resolved = resolvePostings(
+                reported,
+                scouted.session.catalog
               )
-            }
+              dropped = resolved.dropped
+              unresolved.push(...resolved.dropped)
 
-            // Distinct from an empty list, and the distinction is the point: a
-            // scout that submits no postings has reported a result, and one that
-            // never submits at all has reported nothing. Only the second is a
-            // failed run.
-            if (reported === undefined) {
-              throw new Error(
-                `The scout ran ${plural(searches, "search")} and never called submit_findings, so it produced no findings at all. It may have exhausted its model call budget.`
+              // Nothing left is a different failure from something left: a scout
+              // that reported postings and cannot account for a single one of
+              // them has stopped citing real ids altogether, and a brief built
+              // from the empty remainder would cite nothing at all. An honestly
+              // empty result still passes — it had nothing to account for.
+              if (
+                reported.postings.length > 0 &&
+                resolved.findings.postings.length === 0
+              ) {
+                throw new Error(
+                  `The scout reported ${plural(reported.postings.length, "posting")} and no search returned any of their ids, the first being ${reported.postings[0]?.id}. Every posting must be one a search returned.`
+                )
+              }
+
+              trace({ type: "handoff", findings: resolved.findings })
+              return resolved.findings
+            },
+            // A summary only when something was dropped. The `handoff` event
+            // above already carries the findings that survived, so a detail
+            // restating their count is the same fact twice — but what was *left
+            // out* appears nowhere else in the transcript.
+            () =>
+              dropped.length === 0
+                ? undefined
+                : `${plural(dropped.length, "posting")} dropped — no search returned the id`
+          )
+
+          /**
+           * The user's title filter, enforced.
+           *
+           * ⚠️ **Placement is the whole of this step.** It is *after* the
+           * hand-off, so a posting that is both excluded and unresolvable is
+           * reported once — as unresolvable — rather than twice; and *before* the
+           * writer, so the brief never mentions a role the user has said they do
+           * not want and no model call is spent rendering one. Everything
+           * downstream reads `kept`: the writer, `recordFindings` and the
+           * cumulative `postings` record alike, which is what makes the filter one
+           * decision rather than three places that have to agree.
+           *
+           * `config.exclude` is a different thing and stays where it is: it is
+           * rendered into the scout's brief and the model may weigh it. This is
+           * not weighed.
+           */
+          const kept = await trace.step(
+            "filter",
+            async () => {
+              const split = partitionByExcludedTitle(
+                findings.postings,
+                titleExclusions
               )
-            }
+              // Assigned rather than added to: a second pass only happens when
+              // the first excluded nothing, so the last pass's count is the
+              // run's count.
+              excludedPostings = split.excluded.length
 
-            // The schema has already said every posting names an id; this says
-            // the id names a posting some search returned. `resolve-postings.ts`
-            // owns the lookup and documents what it replaced.
-            const resolved = resolvePostings(reported, scouted.session.catalog)
-            unresolved = resolved.dropped
+              // Rebuilt rather than mutated, and `notes` carried through: the
+              // scout's remarks are about the *search* — a source that failed, a
+              // criterion that returned nothing — and remain true however many
+              // postings the filter took out afterwards.
+              return { ...findings, postings: split.kept }
+            },
+            // Silent when nothing was dropped, so a run with no filter reads
+            // exactly as it did before this step existed. When something was, the
+            // titles are named: "3 dropped" in a trace is the start of a question
+            // rather than the answer to one.
+            () =>
+              excludedPostings === 0
+                ? undefined
+                : `${plural(excludedPostings, "posting")} excluded by title`
+          )
 
-            // Nothing left is a different failure from something left: a scout
-            // that reported postings and cannot account for a single one of
-            // them has stopped citing real ids altogether, and a brief built
-            // from the empty remainder would cite nothing at all. An honestly
-            // empty result still passes — it had nothing to account for.
-            if (
-              reported.postings.length > 0 &&
-              resolved.findings.postings.length === 0
-            ) {
-              throw new Error(
-                `The scout reported ${plural(reported.postings.length, "posting")} and no search returned any of their ids, the first being ${reported.postings[0]?.id}. Every posting must be one a search returned.`
-              )
-            }
+          return { kept, attempts: passAttempts }
+        }
 
-            trace({ type: "handoff", findings: resolved.findings })
-            return resolved.findings
-          },
-          // A summary only when something was dropped. The `handoff` event
-          // above already carries the findings that survived, so a detail
-          // restating their count is the same fact twice — but what was *left
-          // out* appears nowhere else in the transcript.
-          () =>
-            unresolved.length === 0
-              ? undefined
-              : `${plural(unresolved.length, "posting")} dropped — no search returned the id`
-        )
+        let outcome = await scoutPass("first")
 
         /**
-         * The user's title filter, enforced.
+         * The retry, and what it is *not* for.
          *
-         * ⚠️ **Placement is the whole of this step.** It is *after* the
-         * hand-off, so a posting that is both excluded and unresolvable is
-         * reported once — as unresolvable — rather than twice; and *before* the
-         * writer, so the brief never mentions a role the user has said they do
-         * not want and no model call is spent rendering one. Everything
-         * downstream reads `kept`: the writer, `recordFindings` and the
-         * cumulative `postings` record alike, which is what makes the filter one
-         * decision rather than three places that have to agree.
+         * A run that reports nothing has spent its money and produced a briefing
+         * with no postings in it, so one more attempt at a lower price than the
+         * whole run is worth making. It is deliberately not a retry of a
+         * *failure*: a pass whose searches all failed has already thrown above,
+         * and a pass emptied by the title filter is not widened at all — a wider
+         * search finds more of the same roles and the filter eats those too, so
+         * that case gets the warning below instead.
          *
-         * `config.exclude` is a different thing and stays where it is: it is
-         * rendered into the scout's brief and the model may weigh it. This is
-         * not weighed.
+         * `widerPassFailed` is what keeps the property "a second pass can only
+         * make a run better" true. The retry is a bonus, so a board that goes
+         * down between the two passes must not turn a run that honestly found
+         * nothing into a failed one; what went wrong is recorded on the warning
+         * rather than thrown.
          */
-        const kept = await trace.step(
-          "filter",
-          async () => {
-            const split = partitionByExcludedTitle(
-              findings.postings,
-              titleExclusions
-            )
-            excludedPostings = split.excluded.length
+        let widerPassFailed: string | undefined
 
-            // Rebuilt rather than mutated, and `notes` carried through: the
-            // scout's remarks are about the *search* — a source that failed, a
-            // criterion that returned nothing — and remain true however many
-            // postings the filter took out afterwards.
-            return { ...findings, postings: split.kept }
-          },
-          // Silent when nothing was dropped, so a run with no filter reads
-          // exactly as it did before this step existed. When something was, the
-          // titles are named: "3 dropped" in a trace is the start of a question
-          // rather than the answer to one.
-          () =>
-            excludedPostings === 0
-              ? undefined
-              : `${plural(excludedPostings, "posting")} excluded by title`
-        )
+        if (
+          outcome.kept.postings.length === 0 &&
+          excludedPostings === 0 &&
+          successfulSearches(outcome.attempts).length > 0
+        ) {
+          scoutPasses = 2
+
+          try {
+            outcome = await scoutPass("wider")
+          } catch (error) {
+            widerPassFailed =
+              error instanceof Error ? error.message : String(error)
+          }
+        }
+
+        const kept = outcome.kept
 
         const written = await trace.step(
           "writer",
@@ -596,7 +729,51 @@ export async function runBriefing(
               : `not recorded — ${postingsNotRecorded}`
         )
 
-        // One object holding whichever of the three went wrong, so a run that
+        /**
+         * A run that recorded nothing, said plainly.
+         *
+         * ⚠️ **The one warning here that is not about something going wrong.**
+         * The other three are faults — a lost write, an id that resolves to
+         * nothing — and this is a run that worked and came back empty. It is a
+         * warning all the same because the alternative is what this change
+         * exists to end: a `succeeded` row, an unchanged table, and "last ran 5
+         * minutes ago" as the only thing anybody is told.
+         *
+         * {@link SuccessReport.excludedPostings} stays a count and not a warning,
+         * as its docblock argues — the filter doing its job is not a fault. What
+         * is reported here is the *run producing nothing*, which sometimes has
+         * the filter as its cause and says so.
+         *
+         * Two reasons rather than three: a run whose every posting was
+         * unresolvable already threw at the hand-off, so "the ids were all
+         * fabricated" is a failed run and never a quiet one.
+         */
+        const noPostings =
+          kept.postings.length > 0
+            ? undefined
+            : {
+                message: noPostingsMessage({
+                  excluded: excludedPostings,
+                  searches,
+                  results: totalResults(attempts),
+                  passes: scoutPasses,
+                }),
+                reason: excludedPostings > 0 ? "all-excluded" : "no-matches",
+                searched: searches,
+                results: totalResults(attempts),
+                excluded: excludedPostings,
+                passes: scoutPasses,
+                // The scout's own account of the search — a criterion that
+                // returned nothing, a board that would not answer. It is the
+                // closest thing to an explanation anybody gets, and it is
+                // otherwise only in the brief nobody opens when it is empty.
+                ...(kept.notes ? { notes: kept.notes } : {}),
+                ...(widerPassFailed
+                  ? { widerPassFailed: widerPassFailed }
+                  : {}),
+              }
+
+        // One object holding whichever of the four went wrong, so a run that
         // lost more than one says so once rather than picking a winner. Absent
         // entirely when nothing did, because `finishRun` reads an empty
         // `failure` as a run with warnings.
@@ -609,9 +786,11 @@ export async function runBriefing(
         const warnings: RunFailure | undefined =
           findingsNotRecorded === undefined &&
           postingsNotRecorded === undefined &&
+          noPostings === undefined &&
           unresolved.length === 0
             ? undefined
             : {
+                ...(noPostings === undefined ? {} : { noPostings }),
                 ...(findingsNotRecorded === undefined
                   ? {}
                   : { findings: { message: findingsNotRecorded } }),
@@ -622,7 +801,14 @@ export async function runBriefing(
                   ? {}
                   : {
                       unresolvedPostings: {
-                        message: `${plural(unresolved.length, "posting")} left out of the brief: no search returned the id the scout gave.`,
+                        // Every pass's, not only the one the brief came from: a
+                        // fabricated id is worth knowing about whether or not
+                        // the pass that produced it is the pass that was used.
+                        // Which is why the sentence says "dropped" rather than
+                        // "left out of the brief" — with two passes the second
+                        // would name postings that were never candidates for
+                        // the brief that exists.
+                        message: `${plural(unresolved.length, "posting")} dropped: the scout named an id no search returned.`,
                         // The id and the title, because an id alone identifies
                         // nothing to a person reading a warning — and the title
                         // is the scout's own, which is the point when what is
@@ -646,6 +832,7 @@ export async function runBriefing(
           ...common(),
           outcome: "success",
           postings: kept.postings.length,
+          scoutPasses,
           excludedPostings,
           markdownBytes: stored.size,
           objectKey: stored.key,
@@ -675,9 +862,45 @@ function emit<T extends RunReport>(report: T): T {
   return report
 }
 
-/** Trace summaries are read by people, and `1 posting(s)` is not English. */
+/**
+ * Trace summaries are read by people, and `1 posting(s)` is not English.
+ *
+ * `-es` after a sibilant, because "2 searchs" is not English either and the one
+ * noun this is called with that needs it — `search` — is in the sentence a failed
+ * run puts in front of somebody.
+ */
 function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`
+  if (count === 1) return `${count} ${noun}`
+
+  return `${count} ${noun}${/(?:s|x|ch|sh)$/.test(noun) ? "es" : "s"}`
+}
+
+/**
+ * One sentence for the person looking at a briefing that added nothing.
+ *
+ * Written for them and not for a log: it says which of the two things happened
+ * and what they could do about it, because the run itself succeeded and there is
+ * nothing else on the page to explain an unchanged table. The counts are in the
+ * warning's own fields for anybody who wants them.
+ */
+function noPostingsMessage(run: {
+  excluded: number
+  searches: number
+  results: number
+  passes: 1 | 2
+}): string {
+  if (run.excluded > 0) {
+    return `Every posting found was ruled out by your excluded titles, so none were added. ${plural(run.excluded, "posting")} matched the criteria and every one of them carried an excluded word.`
+  }
+
+  const looked =
+    run.passes === 2
+      ? `Searched the boards ${plural(run.searches, "time")}, the second pass with the criteria widened`
+      : `Searched the boards ${plural(run.searches, "time")}`
+
+  return run.results === 0
+    ? `${looked}, and nothing is currently listed for these criteria. Try a broader role title or another location.`
+    : `${looked} and looked at ${plural(run.results, "posting")}, none of which matched closely enough to report. Try a broader role title, or fewer required skills.`
 }
 
 /**

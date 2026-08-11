@@ -1,3 +1,4 @@
+import { MAX_POSTINGS_PER_BRIEF } from "@workspace/job-search"
 import { describe, expect, it } from "vitest"
 
 import { MAX_CRITERIA_ITEMS, searchCriteriaSchema } from "./search-criteria"
@@ -145,5 +146,44 @@ describe("keywords", () => {
       locations: ["Sydney", "Remote (Australia)"],
       keywords: ["TypeScript"],
     })
+  })
+})
+
+describe("maxPostings", () => {
+  it("reads the number out of the string a form posts", () => {
+    expect(parse({ ...REQUIRED, maxPostings: " 12 " }).maxPostings).toBe(12)
+  })
+
+  it.each([
+    ["an empty string", ""],
+    ["whitespace only", "   "],
+    ["a field that was never posted", null],
+    ["a key that is absent entirely", undefined],
+  ])("parses %s as no answer rather than as zero", (_label, maxPostings) => {
+    // `Number("")` is `0`, which the worker's minimum would reject — so a user
+    // who left the box alone must not be told their number is too small. Absent
+    // also has to stay absent all the way through: it is what makes a briefing
+    // follow the default when the default changes.
+    expect(parse({ ...REQUIRED, maxPostings }).maxPostings).toBeUndefined()
+  })
+
+  it("takes its bounds from the worker rather than restating them", () => {
+    expect(parse({ ...REQUIRED, maxPostings: "1" }).maxPostings).toBe(1)
+    expect(
+      parse({ ...REQUIRED, maxPostings: String(MAX_POSTINGS_PER_BRIEF) })
+        .maxPostings
+    ).toBe(MAX_POSTINGS_PER_BRIEF)
+
+    // The ceiling is the scout's: it has to read an advertisement before it can
+    // report one, so a briefing asking for more than it could read is a briefing
+    // that cannot be filled.
+    expect(
+      rejects({ ...REQUIRED, maxPostings: String(MAX_POSTINGS_PER_BRIEF + 1) })
+    ).toBe(true)
+    expect(rejects({ ...REQUIRED, maxPostings: "0" })).toBe(true)
+  })
+
+  it.each(["lots", "12.5", "-3"])("rejects %s", (maxPostings) => {
+    expect(rejects({ ...REQUIRED, maxPostings })).toBe(true)
   })
 })

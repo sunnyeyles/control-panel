@@ -167,6 +167,7 @@ flowchart LR
     IND --> RUN
     LI --> RUN
     RUN --> CAT["posting-catalog.ts<br/>one per run: id → posting"]
+    RUN --> SLOG["search-log.ts<br/>one per run: did the board answer?"]
     DET --> CAT
     SUB --> CAT
     RUN --> A1["unfenced-group~seek-com-au-scraper"]
@@ -189,11 +190,12 @@ flowchart LR
 ```
 
 **The three board tools are one implementation, not three.** `apify-search.ts`
-owns the token, the timeout, the result clamp, the failure split and the
-rendering; a board file supplies only an `ApifyBoardSpec` — an actor id, a
-request body and a field mapping. They take the same five inputs deliberately,
-so the model does not have to learn a different search per board. Adding a board
-is a spec, a factory, and a line in `JOB_SCOUT_SEARCH_TOOL_NAMES`.
+owns the token, the timeout, the result clamp, the failure split, the search log
+and the rendering; a board file supplies only an `ApifyBoardSpec` — a tool name,
+an actor id, a request body and a field mapping. They take the same five inputs
+deliberately, so the model does not have to learn a different search per board.
+Adding a board is a spec, a factory, and a line in
+`JOB_SCOUT_SEARCH_TOOL_NAMES`.
 
 **A search returns two lines per posting, not the advertisement.** Every result
 is recorded in the run's `PostingCatalog` and rendered as an id, a listing date
@@ -391,8 +393,8 @@ flowchart TD
     subgraph brief ["Briefing — worker"]
         direction TB
         B1["EventBridge Tick, hourly"] --> B2["run-tick.ts<br/>dueJobs → claimJob"]
-        B2 --> B3["createJobScout → find-postings"]
-        B3 --> B4["successfulSearches<br/>zero searches fails the Run"]
+        B2 --> B3["createJobScout → find-postings<br/>a second, wider pass if the first is empty"]
+        B3 --> B4["session.searches()<br/>no search, or none that worked, fails the Run"]
         B4 --> B5["session.findings()<br/>+ resolvePostings"]
         B5 --> B6["createBriefWriter → write-brief"]
         B6 --> B7["S3 object → artifacts row → runs.findings"]
@@ -439,12 +441,25 @@ fabrication is worse than an empty result:
   and not showing the model a URL at all makes them unrepeatable. The Run
   survives a drop and carries a warning naming it; only a Run with nothing left
   at all fails.
-- **A Run with no successful search fails.** This is why
-  `JOB_SCOUT_SEARCH_TOOL_NAMES` is exported at all: `search-results.ts` counts
-  evidence against the Scout's real tool set rather than a list maintained
-  separately, which would drift silently the first time a board was added.
-  `extraTools` is deliberately excluded from it, so nothing a caller passes can
-  satisfy the check.
+- **A Run with no successful search fails**, and what counts as one is recorded
+  by the search rather than inferred from the transcript. `JobScoutSession`
+  carries a `SearchLog` alongside the catalog, and each board tool records one
+  `SearchAttempt` per call at whichever exit it takes: `ok` when the board
+  answered — including when it answered with nothing — and `failed` when it did
+  not. The transcript cannot answer the question, which was the bug: a failed
+  actor run returns a _sentence_, and only a thrown tool sets `status: "error"`,
+  so a Run whose every board was down showed three perfectly successful tool
+  results and passed the gate that exists to catch exactly that.
+  `JOB_SCOUT_SEARCH_TOOL_NAMES` is still exported, for the per-board breakdown in
+  the run report: a board that answered nothing has to be named to be reported as
+  a zero.
+- **A Run that reports nothing searches once more, wider.** The worker runs the
+  scout again with the same criteria read as preferences (`toSearchBrief(…,
+"wider")`) on a fresh session — `submit_findings` is last-write-wins and tells a
+  scout that has reported not to search again, so a reused session cannot make a
+  second pass at all. It is skipped when the title filter is what emptied the
+  Run, and it can only improve a Run: a board that goes down between the passes
+  is recorded on the warning rather than thrown.
 
 ---
 

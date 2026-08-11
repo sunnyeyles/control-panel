@@ -12,6 +12,10 @@ import {
   type Job,
   type PrismaClient,
 } from "@workspace/db"
+import {
+  DEFAULT_MAX_POSTINGS,
+  MAX_POSTINGS_PER_BRIEF,
+} from "@workspace/job-search"
 import { z } from "zod"
 
 import {
@@ -222,6 +226,9 @@ export function createJobActions(deps: JobActionsDeps) {
       // than the field. Both mean "none"; neither is a failure. See
       // `optionalCriteriaList` in ./search-criteria.
       keywords: formData.get("keywords"),
+      // Same three-way absence as `keywords`, one type over: never posted,
+      // posted blank, or an actual number. See `optionalPostingCount`.
+      maxPostings: formData.get("maxPostings"),
     })
 
     // Not optional: the worker's `JobSearchConfigSchema` requires both, so a
@@ -248,12 +255,17 @@ export function createJobActions(deps: JobActionsDeps) {
       const failed = new Set(
         criteria.error.issues.map((issue) => issue.path[0])
       )
-      const keywordsAlone = failed.size === 1 && failed.has("keywords")
+      const only = (field: string) => failed.size === 1 && failed.has(field)
 
       return fail(
-        keywordsAlone
+        only("keywords")
           ? `That is more than ${MAX_CRITERIA_ITEMS} keywords. Keep the list to the technologies that matter most for the roles you want — a longer one does not search harder.`
-          : "Add at least one role title and one location."
+          : only("maxPostings")
+            ? // The bound is the scout's rather than the form's — it has to read
+              // an advertisement before it can report it — so the sentence says
+              // what to do and not which schema said no.
+              `Ask for between 1 and ${MAX_POSTINGS_PER_BRIEF} postings, or leave it blank for ${DEFAULT_MAX_POSTINGS}.`
+            : "Add at least one role title and one location."
       )
     }
 
@@ -273,7 +285,7 @@ export function createJobActions(deps: JobActionsDeps) {
      * out keeps "never said" distinguishable from "said none", which is the
      * only form the question can be asked in later.
      */
-    const { keywords, ...requiredCriteria } = criteria.data
+    const { keywords, maxPostings, ...requiredCriteria } = criteria.data
 
     // `optionalCriteriaList` pipes to a plain `z.array(...)`, so this is always
     // a `string[]` — an unfilled field arrives as `[]`, never as `undefined`.
@@ -281,8 +293,16 @@ export function createJobActions(deps: JobActionsDeps) {
     // optional chain here would imply an absent case the type forbids, and
     // would keep working if the schema ever grew one, which is precisely the
     // change that should fail loudly instead.
-    const config =
-      keywords.length > 0 ? { ...requiredCriteria, keywords } : requiredCriteria
+    //
+    // `maxPostings` is left out on the same principle and for a stronger reason:
+    // an absent field means "whatever the default is", so a briefing created
+    // today follows the default when it changes, where a stored `20` would pin
+    // this row to today's number for ever.
+    const config = {
+      ...requiredCriteria,
+      ...(keywords.length > 0 ? { keywords } : {}),
+      ...(maxPostings === undefined ? {} : { maxPostings }),
+    }
 
     let job: Job
 
