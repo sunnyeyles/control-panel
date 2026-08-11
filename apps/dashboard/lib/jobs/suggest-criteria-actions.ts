@@ -9,11 +9,11 @@ import {
 import type { Agent } from "@workspace/agents"
 import type { PrismaClient } from "@workspace/db"
 import { assertDraftable, UndraftableError } from "@workspace/agents/draftable"
-import { parseSearchCriteria } from "@workspace/agents/criteria"
 import {
-  createProfileExtractor as defaultProfileExtractor,
+  parseSearchCriteria,
   toSearchCriteriaPrompt,
-} from "@workspace/agents/profile-extractor"
+} from "@workspace/agents/criteria"
+import { createProfileExtractor as defaultProfileExtractor } from "@workspace/agents/profile-extractor"
 import {
   createRoleTitleSuggester as defaultRoleTitleSuggester,
   toRoleTitleSuggestionsPrompt,

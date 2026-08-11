@@ -1,15 +1,11 @@
-import {
-  claimJob,
-  dueJobs,
-  failRun,
-  finishRun,
-  titleExclusions,
-  type PrismaClient,
-} from "@workspace/db"
+import { claimJob, dueJobs, type PrismaClient } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
-import { prismaRecorders } from "./recorders.ts"
-import { runBriefing } from "./run-briefing.ts"
+import {
+  defaultJobKindRegistry,
+  resolveJobKindEntry,
+  type JobKindEntry,
+} from "./job-kinds.ts"
 
 /**
  * The worker is no longer "the thing that runs at 09:00". It is "the thing that
@@ -62,11 +58,18 @@ export interface TickReport {
  * throw marks the invocation failed and produces the `Errors` datapoint, so a
  * bad run is visible without anyone reading logs. Every due job is attempted
  * first — one failing job must not stop the others from running.
+ *
+ * Kind lookup and config validation happen **before** `claimJob`. An unhandled
+ * kind or a malformed briefing config is knowable from the row alone; claiming
+ * a slot to discover it would advance `next_run_at` for a job that had no
+ * chance of running. Those failures still contribute to the rethrow — the
+ * throw contract is untouched — but the slot is left alone.
  */
 export async function runTick(
   prisma: PrismaClient,
   briefs: BriefStore,
-  now: Date = new Date()
+  now: Date = new Date(),
+  registry: readonly JobKindEntry[] = defaultJobKindRegistry
 ): Promise<TickReport> {
   const startedAtMs = Date.now()
   const report: TickReport = {
@@ -85,6 +88,17 @@ export async function runTick(
   report.due = due.length
 
   for (const job of due) {
+    let entry: JobKindEntry
+    try {
+      entry = resolveJobKindEntry(registry, job)
+    } catch (error) {
+      // No claim. The row's `next_run_at` stays put — Decision 3 of the job-kind
+      // plan — and the failure still fails the tick so the alarm fires.
+      report.failed += 1
+      failures.push(error)
+      continue
+    }
+
     const slot = await claimJob(prisma, job)
 
     // Another party holds this slot — an overlapping tick, a manual invoke, an
@@ -102,45 +116,19 @@ export async function runTick(
       // `slot.scheduledFor` is the occurrence, and is what the brief's S3
       // partition day is derived from — not the instant the run finishes, or a
       // 23:30 slot completing after midnight files under a day its run row
-      // disagrees with. The recorders take the same instant; see `recorders.ts`.
-      const briefing = await runBriefing({
+      // disagrees with.
+      await entry.handle({
         job,
         slot,
+        trigger: "schedule",
+        prisma,
         briefs,
-        // Read after the claim, not before: a slot another party already holds
-        // costs no query at all, and this is the only place that knows the run
-        // is really going ahead. The list is the *user's* and not the job's,
-        // which is why it is loaded here rather than parsed out of `job.config`.
-        titleExclusions: await titleExclusions(prisma, job.userId),
-        ...prismaRecorders(prisma, {
-          userId: job.userId,
-          seenAt: slot.scheduledFor,
-        }),
       })
-
-      // Third argument, and usually `undefined`. A run that produced a brief
-      // but could not keep its findings, or could not add what it found to the
-      // cumulative record, is `succeeded` with a non-empty `failure` — the rule
-      // `packages/db/src/types.ts` states.
-      //
-      // `false` is a lost race — the row was already terminal, so someone else
-      // decided this run's outcome. The work still happened and the brief is
-      // stored, so it counts as succeeded here; the log line is the only trace
-      // the lost transition leaves.
-      if (!(await finishRun(prisma, slot.runId, briefing.warnings))) {
-        console.warn(
-          `run ${slot.runId}: already terminal when the tick went to finish it`
-        )
-      }
       report.succeeded += 1
     } catch (error) {
-      // Recorded, then carried. The row makes the failure queryable; the run
-      // report `runBriefing` already emitted keeps the diagnostics, and remains
-      // the only record if a run dies before it can write at all.
-      await failRun(prisma, slot.runId, {
-        message: error instanceof Error ? error.message : String(error),
-      }).catch(() => undefined)
-
+      // `executeClaimedBriefing` (via the briefing handler) has already recorded
+      // the failure on the row. Carry it so the tick rethrows after every due
+      // job has been attempted.
       report.failed += 1
       failures.push(error)
     }
@@ -154,7 +142,7 @@ export async function runTick(
       ? failures[0]
       : new AggregateError(
           failures,
-          `${failures.length} of ${report.claimed} claimed jobs failed.`
+          `${failures.length} of ${report.due} due jobs failed.`
         )
   }
 

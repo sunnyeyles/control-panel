@@ -1,7 +1,18 @@
 import * as z from "zod"
 
+import { CandidateProfileSchema } from "./candidate-profile.ts"
 import { toPostingRequestPrompt } from "./posting-prompt.ts"
 import { StoredPostingSchema } from "./stored-posting.ts"
+
+export {
+  assertDraftable,
+  CandidateProfileSchema,
+  MAX_BACKGROUND_CHARS,
+  MIN_BACKGROUND_CHARS,
+  UndraftableError,
+  type CandidateProfile,
+  type UndraftableReason,
+} from "./candidate-profile.ts"
 
 /**
  * The contract for one cover letter.
@@ -12,24 +23,15 @@ import { StoredPostingSchema } from "./stored-posting.ts"
  * wrote — and this module is what says whether that request is answerable and
  * what the model is asked. The writer itself is a prompt and an empty tool set.
  *
- * Everything here is pure. Nothing reads the environment, nothing reaches the
- * network, and {@link toCoverLetterPrompt} is a string function — so the
- * decisions that matter (what is refused, what is carried through verbatim)
- * are testable without a provider key.
- *
- * Draftability of the background (`assertDraftable`, the bounds, and
- * `UndraftableError`) lives in `draftable.ts` — shared with every CV-backed
- * write, not owned by letters. Re-exported here so existing
- * `@workspace/agents/cover-letter` imports keep working.
+ * The candidate profile, its bounds and the refusal that guards them live in
+ * `candidate-profile.ts` and are re-exported here so existing imports keep
+ * working — `draftable.ts` re-exports the same three from there too, for
+ * `@workspace/agents/draftable` callers. Everything else here is pure. Nothing
+ * reads the environment, nothing reaches the network, and
+ * {@link toCoverLetterPrompt} is a string function — so the decisions that
+ * matter (what is refused, what is carried through verbatim) are testable
+ * without a provider key.
  */
-
-export {
-  assertDraftable,
-  MAX_BACKGROUND_CHARS,
-  MIN_BACKGROUND_CHARS,
-  UndraftableError,
-  type UndraftableReason,
-} from "./draftable.ts"
 
 /**
  * How much the candidate may write about *how* to write their letters.
@@ -79,20 +81,6 @@ export interface LetterInstructions {
   exampleLetter?: string
 }
 
-export const CandidateProfileSchema = z.object({
-  name: z
-    .string()
-    .optional()
-    .describe(
-      "The candidate's name, if the caller knows it. Absent is fine — the letter then leaves a placeholder rather than inventing one."
-    ),
-  background: z
-    .string()
-    .describe(
-      "The candidate's own words about themselves, verbatim. This is the only source for anything the letter claims about the candidate."
-    ),
-})
-
 export const CoverLetterRequestSchema = z.object({
   // The *stored* shape, not `PostingSchema`: a Posting the user added by
   // pasting its link carries no `matchReason`, and refusing to draft a letter
@@ -101,7 +89,6 @@ export const CoverLetterRequestSchema = z.object({
   profile: CandidateProfileSchema,
 })
 
-export type CandidateProfile = z.infer<typeof CandidateProfileSchema>
 export type CoverLetterRequest = z.infer<typeof CoverLetterRequestSchema>
 
 /**

@@ -1,7 +1,7 @@
 import {
   actorRunUrl,
   requireApifyToken,
-  type BoardSearchDeps,
+  type ApifyHttpDeps,
 } from "./apify-search.ts"
 import { bound, type PageExtractResult } from "./page-extract.ts"
 import { searchApiPost } from "./search-http.ts"
@@ -63,7 +63,7 @@ function text(value: unknown): string | undefined {
  */
 export async function extractPageViaApify(
   url: string,
-  deps: BoardSearchDeps = {}
+  deps: ApifyHttpDeps = {}
 ): Promise<PageExtractResult> {
   const doFetch = deps.fetch ?? globalThis.fetch
   const apiToken = deps.apiToken ?? requireApifyToken("read the page at a link")

@@ -1,6 +1,6 @@
 import * as z from "zod"
 
-import { CandidateProfileSchema } from "./cover-letter.ts"
+import { CandidateProfileSchema } from "./candidate-profile.ts"
 import { parseJsonAgainstSchema, schemaDescription } from "./parse-json.ts"
 import { toPostingRequestPrompt } from "./posting-prompt.ts"
 import { StoredPostingSchema } from "./stored-posting.ts"

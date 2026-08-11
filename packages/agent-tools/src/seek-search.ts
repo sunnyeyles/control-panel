@@ -109,6 +109,23 @@ export interface SeekSearchInput extends BoardSearchInput {
 /** Injected in tests. Both default to the real thing. */
 export type SeekSearchDeps = BoardSearchDeps
 
+/**
+ * Markdown in preference to plain text: the headings and bullets are what
+ * make a requirements section findable, and a reader copying a requirement
+ * word for word needs the line breaks the plain rendering flattens. First
+ * non-empty rather than first non-null — the actor returns `null` for a
+ * description it did not fetch and `""` for one that came back blank, and
+ * falling through both is what makes the plain rendering a real fallback.
+ *
+ * Shared by search and by-URL so an empty markdown string cannot block the
+ * text fallback on one path and not the other.
+ */
+export function pickSeekDescription(job: SeekJob): string | undefined {
+  return [job.descriptionMarkdown, job.descriptionText]
+    .map((value) => value?.trim() ?? "")
+    .find((value) => value.length > 0)
+}
+
 /** Everything SEEK-shaped in one place, exported for its test. */
 export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
   board: "SEEK",
@@ -146,16 +163,6 @@ export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
   },
 
   toPosting(job: SeekJob) {
-    // Markdown in preference to plain text: the headings and bullets are what
-    // make a requirements section findable, and a reader copying a requirement
-    // word for word needs the line breaks the plain rendering flattens. First
-    // non-empty rather than first non-null — the actor returns `null` for a
-    // description it did not fetch and `""` for one that came back blank, and
-    // falling through both is what makes the plain rendering a real fallback.
-    const description = [job.descriptionMarkdown, job.descriptionText]
-      .map((value) => value?.trim() ?? "")
-      .find((value) => value.length > 0)
-
     return {
       title: job.title,
       company: job.company,
@@ -164,7 +171,7 @@ export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
       facts: [job.location, job.workType, job.workArrangement, job.salaryLabel],
       teaser: job.teaser,
       bullets: job.bulletPoints,
-      description,
+      description: pickSeekDescription(job),
     }
   },
 
@@ -199,7 +206,7 @@ export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
         location: job.location,
         postedAt: job.publishDateISO,
         teaser: job.teaser,
-        description: job.descriptionMarkdown ?? job.descriptionText,
+        description: pickSeekDescription(job),
         highlights: job.bulletPoints,
       }
     },

@@ -8,6 +8,7 @@ import {
   END,
   START,
   StateGraph,
+  type BaseCheckpointSaver,
   type ConditionalEdgeRouter,
   type GraphNode,
 } from "@langchain/langgraph"
@@ -19,11 +20,13 @@ import {
   type AgentTool,
 } from "./tools.ts"
 
-export const DEFAULT_SYSTEM_PROMPT = [
-  "You are a helpful assistant with access to tools.",
-  "Use a tool whenever the answer depends on information you cannot know on your own — the current time, or anything a tool can look up. Do not guess at it.",
-  "Lead with the outcome: answer first, supporting detail after.",
-].join("\n")
+/**
+ * Sterile runtime default. Product persona belongs on the agent that owns it —
+ * see `ASSISTANT_SYSTEM_PROMPT` in `@workspace/agents`. Kept only so callers
+ * that omit `systemPrompt` still get a runnable graph.
+ */
+export const DEFAULT_SYSTEM_PROMPT =
+  "You are a helpful assistant with access to tools."
 
 /**
  * Ceiling on model calls per run. Each tool round trip costs one, so this
@@ -66,11 +69,7 @@ export interface CreateAgentOptions {
   tools?: AgentTool[]
   systemPrompt?: string
   /** Pass a checkpointer (e.g. `new MemorySaver()`) to persist threads. */
-  checkpointer?: Parameters<
-    StateGraph<typeof AgentState>["compile"]
-  >[0] extends { checkpointer?: infer C } | undefined
-    ? C
-    : never
+  checkpointer?: BaseCheckpointSaver
   maxLlmCalls?: number
 }
 
@@ -103,7 +102,10 @@ export function createAgent(options: CreateAgentOptions = {}) {
       ...state.messages,
     ])
 
-    return { messages: [response], llmCalls: 1 }
+    // Absolute count: `llmCalls` is untracked (last-write), not a sum reducer.
+    // `UntrackedValue` types the read as `number | undefined` even with a
+    // default; treat a missing count as zero rather than NaN the budget.
+    return { messages: [response], llmCalls: (state.llmCalls ?? 0) + 1 }
   }
 
   const pendingToolCalls = (state: typeof AgentState.State): ToolCall[] => {
@@ -138,7 +140,7 @@ export function createAgent(options: CreateAgentOptions = {}) {
     Nodes: "tools" | "halt"
   }> = (state) => {
     if (pendingToolCalls(state).length === 0) return END
-    return state.llmCalls >= maxLlmCalls ? "halt" : "tools"
+    return (state.llmCalls ?? 0) >= maxLlmCalls ? "halt" : "tools"
   }
 
   return new StateGraph(AgentState)

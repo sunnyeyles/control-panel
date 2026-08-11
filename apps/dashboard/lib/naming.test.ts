@@ -52,7 +52,9 @@ const AGENT_FACTORIES = new Set(
 const JOBS_ALLOWLIST = [
   "lib/jobs/",
   "lib/briefing-runs/",
-  "lib/dev/fake-prisma.ts",
+  // Matches both the assembler (`fake-prisma.ts`) and its domain delegates
+  // (`fake-prisma/*.ts`) — the prefix has no trailing `.ts` on purpose.
+  "lib/dev/fake-prisma",
   "lib/dev/fixtures.ts",
   "components/jobs/job-tabs.tsx",
   // Reads `jobs` rows directly — `getPrisma().job.findMany` — and maps them to
