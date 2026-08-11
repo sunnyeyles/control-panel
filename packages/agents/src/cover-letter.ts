@@ -25,10 +25,12 @@ export {
  *
  * The candidate profile, its bounds and the refusal that guards them live in
  * `candidate-profile.ts` and are re-exported here so existing imports keep
- * working. Everything else here is pure. Nothing reads the environment, nothing
- * reaches the network, and {@link toCoverLetterPrompt} is a string function —
- * so the decisions that matter (what is refused, what is carried through
- * verbatim) are testable without a provider key.
+ * working — `draftable.ts` re-exports the same three from there too, for
+ * `@workspace/agents/draftable` callers. Everything else here is pure. Nothing
+ * reads the environment, nothing reaches the network, and
+ * {@link toCoverLetterPrompt} is a string function — so the decisions that
+ * matter (what is refused, what is carried through verbatim) are testable
+ * without a provider key.
  */
 
 /**

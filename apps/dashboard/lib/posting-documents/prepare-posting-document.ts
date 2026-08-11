@@ -9,10 +9,7 @@ import {
   loadStoredPosting,
   storedPostingMessage,
 } from "@/lib/postings/load-stored-posting"
-import {
-  assertDraftable,
-  UndraftableError,
-} from "@workspace/agents/cover-letter"
+import { assertDraftable, UndraftableError } from "@workspace/agents/draftable"
 import type { StoredPosting } from "@workspace/agents/stored-posting"
 import type { PrismaClient } from "@workspace/db"
 import type { ResumeStore } from "@workspace/user-storage"

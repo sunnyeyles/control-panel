@@ -23,6 +23,7 @@ export {
   MIN_BACKGROUND_CHARS,
   UndraftableError,
   type CandidateProfile,
+  type UndraftableReason,
 } from "./candidate-profile.ts"
 
 export {

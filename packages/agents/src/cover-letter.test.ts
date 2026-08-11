@@ -19,6 +19,8 @@ const REQUEST: CoverLetterRequest = {
 /**
  * `TailoredResumeRequestSchema` is this same object under the other feature's
  * name, so this suite is the request shape's one home.
+ *
+ * Draftability (`assertDraftable`) lives in `draftable.test.ts`.
  */
 describe("CoverLetterRequestSchema", () => {
   it("parses a request whose Posting carries no highlights", () => {

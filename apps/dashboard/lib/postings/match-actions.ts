@@ -7,10 +7,7 @@ import {
   type NoBackgroundReason,
 } from "@/lib/candidate/candidate-background"
 import type { Agent } from "@workspace/agents"
-import {
-  assertDraftable,
-  UndraftableError,
-} from "@workspace/agents/cover-letter"
+import { assertDraftable, UndraftableError } from "@workspace/agents/draftable"
 import { createMatchAssessor as defaultMatchAssessor } from "@workspace/agents/match-assessor"
 import { parsePostingMatch, toMatchPrompt } from "@workspace/agents/match"
 import {

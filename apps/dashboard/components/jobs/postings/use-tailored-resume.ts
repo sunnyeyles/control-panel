@@ -16,20 +16,17 @@ import type { TailoredResumeView } from "@/lib/tailored-resumes/tailored-resume-
  */
 
 /**
- * The tailored resumes for one user, as the page hands them down.
+ * The tailored resumes for one page of Postings, as the page hands them down.
  *
  * ⚠️ **A promise, not a result, and `null` is not an empty list.** `null` means
- * the store could not be read; an empty array means it was read and this user
- * has generated nothing. Collapsing the two would tell someone who has already
- * generated one that they have not — and would offer to spend a model call
- * replacing a document nothing could see.
+ * the store could not be read; an empty array means it was read and this page
+ * has none. Collapsing the two would tell someone who has already generated one
+ * that they have not — and would offer to spend a model call replacing a
+ * document nothing could see.
  *
- * ⚠️ **This one is not bounded by the page, unlike `CoverLetterPromise`.**
- * `loadTailoredResumeViews` makes a single `ListObjectsV2` call rather than a
- * `HeadObject` per visible row, so what arrives is every tailored resume the
- * user has. That is deliberate — see the function's own comment — and it is why
- * the scan below is described as bounded by a job search rather than by
- * `PAGE_SIZE`.
+ * Bounded by the page size — same pipeline as {@link CoverLetterPromise}: list
+ * the user early, filter with `tailoredResumeViewsFor` once the posting ids are
+ * known.
  */
 export type TailoredResumePromise = Promise<
   readonly TailoredResumeView[] | null
@@ -50,8 +47,7 @@ export type TailoredResumeLookup =
  * all. It belongs in a leaf with its own `<Suspense>` boundary — the tailored
  * resume section of the expanded detail, and nowhere else today.
  *
- * A linear scan, not a lookup map: the array is one person's generated resumes,
- * which is a small number and one that grows only when they click the button.
+ * A linear scan, not a lookup map: the array is bounded by `PAGE_SIZE`.
  */
 export function useTailoredResume(
   postingId: string,
