@@ -12,10 +12,9 @@ import type { Findings } from "@workspace/agents"
  * that".
  *
  * It exists because `.invoke()` throws that transcript away. A run holds the
- * whole exchange in memory and then reduces it to two integers — which is why
- * `successfulSearches` in `search-results.ts` has to *re-derive* a search
- * count by filtering the finished message array, from data that was
- * observable live.
+ * whole exchange in memory and then reduces it to two integers, and everything
+ * that happened on the way to them — which searches were made, what came back,
+ * what the model did with it — is observable live and gone afterwards.
  *
  * Nothing here writes anywhere. A trace is a stream of events and a
  * {@link TraceSink} is whatever consumes them, so the same run feeds a terminal

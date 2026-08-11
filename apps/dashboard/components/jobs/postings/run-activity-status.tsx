@@ -39,7 +39,14 @@ export function RunActivityStatus({ activity }: { activity: RunActivity }) {
       )
 
     case "succeeded":
-      return <Muted>Last ran {activity.ranAt}</Muted>
+      // The note is only ever there when the run added nothing, and it is the
+      // only thing on the page that says so — the table simply looks unchanged.
+      return (
+        <Muted>
+          Last ran {activity.ranAt}
+          {activity.note ? ` — ${activity.note}` : ""}
+        </Muted>
+      )
 
     case "failed":
       return (

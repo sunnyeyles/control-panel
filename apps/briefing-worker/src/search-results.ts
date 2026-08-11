@@ -1,53 +1,102 @@
-import { ToolMessage, type BaseMessage } from "@langchain/core/messages"
 import { JOB_SCOUT_SEARCH_TOOL_NAMES } from "@workspace/agents"
 
 /**
- * Which of a scout's tool results count as searches, and how many came from
- * where.
+ * What the scout actually looked up, as opposed to what it said.
  *
- * Its own module because the question is one thing and `run-briefing.ts` asks
- * it once: what did the scout actually look up, as opposed to what did it say?
- * The count in the run report and the "nothing came from a live search" gate
- * both read the answer this gives.
+ * Its own module because the question is one thing and `run-briefing.ts` asks it
+ * once: the count in the run report, the "nothing came from a live search" gate,
+ * and the warning on a run that recorded nothing all read the answer this gives.
+ *
+ * ⚠️ **It used to read the transcript, and that was the bug.** A board search
+ * that fails comes back to the model as a *sentence* — an actor run that 500s, a
+ * timeout, a body that will not parse — and LangChain wraps a returned string as
+ * a `status: "success"` ToolMessage, because only a throw sets the error status.
+ * So counting non-error tool results counted every failed search as a successful
+ * one, and a run whose every actor was down passed the gate that exists to catch
+ * exactly that: the scout honestly reported nothing, the brief was written, and
+ * the `postings` table went untouched with the run marked `succeeded`.
+ *
+ * What is read instead is the search log the tools write as they run — see
+ * `search-log.ts` in `@workspace/agent-tools`, and
+ * {@link JobScoutSession.searches}.
  */
 
 /**
  * Every search tool the scout carries, by name, taken from `@workspace/agents`
  * so that adding a board is one edit over there rather than two edits in two
  * packages, the second of which nothing would catch.
+ *
+ * Still needed now that the outcomes are recorded rather than inferred: it is
+ * what {@link countBySource} seeds its zeroes from, so a board that answered
+ * nothing is named in the report rather than merely absent from it.
  */
 export const SEARCH_TOOL_NAMES: readonly string[] = JOB_SCOUT_SEARCH_TOOL_NAMES
 
 /**
+ * One recorded search, in the terms this worker drives.
+ *
+ * Structural on purpose, exactly like `PostingLookup` in `resolve-postings.ts`:
+ * a real `SearchAttempt` from `@workspace/agent-tools` satisfies it, and so does
+ * a hand-rolled fake in a test, without this app taking a dependency on that
+ * package for a shape. `query` and `location` are on the real one and left out
+ * here — nothing over here reads them.
+ */
+export interface SearchAttemptLike {
+  /** The tool that ran, e.g. `seek_search` — the key the report is filed under. */
+  toolName: string
+  /** How prose spells the board, for a message a person reads. */
+  board: string
+  /** `ok` means the board answered, whether or not it had anything to say. */
+  outcome: "ok" | "failed"
+  /** Postings the search returned. Zero is a legitimate `ok`. */
+  results: number
+  /** What the model was told instead of results, when the board did not answer. */
+  message?: string
+}
+
+/**
  * Every search that actually worked, as the name of the board tool it ran on.
  *
- * The name is the whole answer now. It used to carry the rendered result text
- * beside it, because the URL check re-extracted every URL a search had returned
- * from that text; the run's posting catalog holds those directly, so what is
- * left of this question is how many searches ran and on which boards.
- *
- * Two exclusions, and they mean different things. An error result proves
- * nothing ran — the tool was called and did not answer. A result from a tool
- * that is not a search tool is not evidence anyone searched at all, which is
- * why widening this from one name to a set must not widen it to "any tool the
- * scout happens to be holding": `get_posting_details` answers out of the
- * catalog and would otherwise count as a search that never happened.
+ * `ok` is the board having answered, and an empty answer counts: "nobody is
+ * advertising this" is a search that happened. What does not count is a board
+ * that never answered — see the module note on why that cannot be read off a
+ * tool result.
  */
 export function successfulSearches(
-  messages: BaseMessage[],
-  toolNames: readonly string[] = SEARCH_TOOL_NAMES
+  attempts: readonly SearchAttemptLike[]
 ): string[] {
-  // `flatMap` rather than filter-then-map: a type predicate cannot carry the
-  // `name !== undefined` narrowing across into the map, and the alternative is
-  // asserting a name the filter already proved.
-  return messages.flatMap((message) =>
-    ToolMessage.isInstance(message) &&
-    message.name !== undefined &&
-    toolNames.includes(message.name) &&
-    message.status !== "error"
-      ? [message.name]
-      : []
-  )
+  return attempts
+    .filter((attempt) => attempt.outcome === "ok")
+    .map((attempt) => attempt.toolName)
+}
+
+/** Postings returned across every search that answered. */
+export function totalResults(attempts: readonly SearchAttemptLike[]): number {
+  return attempts.reduce((total, attempt) => total + attempt.results, 0)
+}
+
+/**
+ * The failed searches, named by board and quoted once.
+ *
+ * For the run that dies because *every* search failed, where the whole
+ * diagnostic value is in which boards were tried and what they said — a count
+ * would send whoever reads the run row to the trace that production does not
+ * keep. One message rather than all of them: three actor runs behind the same
+ * outage say the same sentence three times.
+ */
+export function failureSummary(
+  attempts: readonly SearchAttemptLike[]
+): string | undefined {
+  const failed = attempts.filter((attempt) => attempt.outcome === "failed")
+  if (failed.length === 0) return undefined
+
+  const boards = [...new Set(failed.map((attempt) => attempt.board))]
+  const first = failed.find((attempt) => attempt.message !== undefined)
+
+  return [
+    `${failed.length} search(es) failed on ${boards.join(", ")}`,
+    ...(first?.message ? [`the first saying: ${first.message}`] : []),
+  ].join(", ")
 }
 
 /**

@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { AgentLike, AgentStreamOptions } from "./run-agent.ts"
 import { runBriefing, type ScoutSessionLike } from "./run-briefing.ts"
-import { SEARCH_TOOL_NAMES } from "./search-results.ts"
+import { SEARCH_TOOL_NAMES, type SearchAttemptLike } from "./search-results.ts"
 import type { TraceEvent } from "./trace.ts"
 
 /**
@@ -91,7 +91,7 @@ function noSearches(): Record<string, number> {
   return Object.fromEntries(SEARCH_TOOL_NAMES.map((name) => [name, 0]))
 }
 
-/** A successful search result — what proves the scout actually searched. */
+/** What a search puts in the transcript, which is not what proves it happened. */
 function searchResult(name = "seek_search", callId = "call_1"): ToolMessage {
   return new ToolMessage({
     content: `1. [${POSTING_ID}] Senior Backend Engineer — Acme\n   listed: 2026-07-28 · Sydney`,
@@ -101,14 +101,36 @@ function searchResult(name = "seek_search", callId = "call_1"): ToolMessage {
   })
 }
 
-/** A search that was called and did not answer. */
-function failedSearch(name = "seek_search", callId = "call_1"): ToolMessage {
-  return new ToolMessage({
-    content: "search failed",
-    tool_call_id: callId,
-    name,
-    status: "error",
-  })
+/**
+ * A board that answered, as its own search log recorded it.
+ *
+ * ⚠️ **This, and not a ToolMessage, is what the run believes.** A board search
+ * that fails answers the model with a *sentence* and therefore produces a
+ * perfectly successful tool result, so a run reading the transcript counted a
+ * dead scraper as a live search — see `search-results.ts`. These tests used to
+ * express "a search worked" as a `status: "success"` message, which was the
+ * broken premise stated twice.
+ */
+function searched(
+  toolName = "seek_search",
+  results = 1,
+  board = "SEEK"
+): SearchAttemptLike {
+  return { toolName, board, outcome: "ok", results }
+}
+
+/** A board that was called and did not answer. */
+function searchFailed(
+  toolName = "seek_search",
+  board = "SEEK"
+): SearchAttemptLike {
+  return {
+    toolName,
+    board,
+    outcome: "failed",
+    results: 0,
+    message: `The ${board} search for "senior backend engineer" failed with HTTP 500. Continue with what you already have.`,
+  }
 }
 
 /**
@@ -140,24 +162,26 @@ function fakeAgent(messages: BaseMessage[], llmCalls = 2): AgentLike {
 }
 
 /**
- * A fake scout session: an agent, the catalog its searches filled, and whatever
- * it submitted.
+ * A fake scout session: an agent, the catalog its searches filled, what it
+ * submitted, and what its searches actually did.
  *
- * The three arrive together because the run needs all three and none is
- * derivable from the others — the messages say what the scout *did*, the
- * findings say what it *reported*, and only the catalog says what an id names.
- * Satisfying `ScoutSessionLike` outright rather than by a cast is what widening
- * that seam to a structural type bought.
+ * The four arrive together because the run needs all four and none is derivable
+ * from the others — the messages say what the scout *did*, the findings say what
+ * it *reported*, only the catalog says what an id names, and only the search log
+ * says whether a board answered. Satisfying `ScoutSessionLike` outright rather
+ * than by a cast is what widening that seam to a structural type bought.
  */
 function fakeSession(options: {
   findings?: ScoutFindings
   messages?: BaseMessage[]
   catalog?: Record<string, string>
+  attempts?: SearchAttemptLike[]
   /** `null` ends the run on a tool result, which is what a budget halt does. */
   reply?: string | null
   llmCalls?: number
 }): ScoutSessionLike {
   const entries = options.catalog ?? CATALOG
+  const attempts = options.attempts ?? [searched()]
 
   return {
     agent: fakeAgent(
@@ -171,14 +195,29 @@ function fakeSession(options: {
     ),
     catalog: { get: (id) => (entries[id] ? { url: entries[id] } : undefined) },
     findings: () => options.findings,
+    searches: () => attempts,
   }
 }
 
 function scoutReturning(
   findings: ScoutFindings | undefined = SCOUT_FINDINGS,
-  messages: BaseMessage[] = [searchResult()]
+  attempts: SearchAttemptLike[] = [searched()]
 ) {
-  return () => fakeSession({ findings, messages })
+  return () => fakeSession({ findings, attempts })
+}
+
+/**
+ * A different session per pass, for the runs that get two.
+ *
+ * The run builds a fresh session for each pass — it has to, since
+ * `submit_findings` is last-write-wins and tells a scout that has reported not
+ * to search again — so a test can hand back what the first pass found and then
+ * what the wider one did. The last entry answers any further call.
+ */
+function scoutPerPass(...sessions: ScoutSessionLike[]) {
+  let calls = 0
+
+  return () => sessions[Math.min(calls++, sessions.length - 1)]!
 }
 
 function writerReturning(markdown: string) {
@@ -333,6 +372,179 @@ describe("runBriefing", () => {
     expect(report.outcome).toBe("success")
     expect(report.postings).toBe(0)
     expect(recorded).toHaveLength(1)
+  })
+
+  /**
+   * A run that reports nothing has spent its money and produced a briefing with
+   * no postings in it, so one more attempt is worth making before it gives up.
+   * What these pin is *when* the second pass happens — the cases where it does
+   * not are as much of the rule as the case where it does.
+   */
+  describe("the second, wider pass", () => {
+    it("runs when the first pass found nothing and finds something", async () => {
+      const report = await run({
+        createScout: scoutPerPass(
+          fakeSession({ findings: { postings: [] } }),
+          fakeSession({ findings: SCOUT_FINDINGS })
+        ),
+      })
+
+      expect(report.scoutPasses).toBe(2)
+      expect(report.postings).toBe(1)
+      // A run that recovered is a run that found postings: no warning, because
+      // nothing is being explained away.
+      expect(report.warnings).toBeUndefined()
+      expect(tracked[0]?.postings).toHaveLength(1)
+    })
+
+    it("asks for the same criteria, read wider", async () => {
+      const prompts: string[] = []
+
+      await run({
+        createScout: scoutPerPass(
+          fakeSession({ findings: { postings: [] } }),
+          fakeSession({ findings: SCOUT_FINDINGS })
+        ),
+        trace: (event) => {
+          if (event.type === "prompt" && event.agent === "scout") {
+            prompts.push(event.text)
+          }
+        },
+      })
+
+      expect(prompts).toHaveLength(2)
+      expect(prompts[0]).not.toMatch(/search wider/i)
+      // The criteria themselves are unchanged — a wider brief relaxes how they
+      // are read, and never invents a role the candidate never asked for.
+      expect(prompts[1]).toMatch(/search wider/i)
+      expect(prompts[1]).toContain("senior backend engineer")
+    })
+
+    it("does not run when the first pass found postings", async () => {
+      const report = await run()
+
+      expect(report.scoutPasses).toBe(1)
+    })
+
+    it("does not run when the title filter is what emptied the run", async () => {
+      // A wider search finds more of the same roles and the filter eats those
+      // too, so a second pass would spend a scout's worth of model calls to
+      // arrive back here. The warning says so instead.
+      const report = await run({
+        titleExclusions: ["senior"],
+        createScout: scoutPerPass(fakeSession({ findings: SCOUT_FINDINGS })),
+      })
+
+      expect(report.scoutPasses).toBe(1)
+      expect(report.postings).toBe(0)
+      expect(report.excludedPostings).toBe(1)
+      expect(report.warnings?.noPostings).toMatchObject({
+        reason: "all-excluded",
+      })
+    })
+
+    it("cannot make a run worse than not having attempted it", async () => {
+      // The retry is a bonus. A board that goes down between the two passes must
+      // not turn a run that honestly found nothing into a failed one — so the
+      // wider pass's failure is recorded on the warning rather than thrown.
+      const report = await run({
+        createScout: scoutPerPass(
+          fakeSession({ findings: { postings: [] } }),
+          fakeSession({
+            findings: { postings: [] },
+            attempts: [searchFailed()],
+          })
+        ),
+        createWriter: writerReturning("No roles matched this week."),
+      })
+
+      expect(report.outcome).toBe("success")
+      expect(report.scoutPasses).toBe(2)
+      expect(report.warnings?.noPostings).toMatchObject({
+        reason: "no-matches",
+        widerPassFailed: expect.stringMatching(/failed/) as unknown as string,
+      })
+    })
+  })
+
+  /**
+   * The silence this whole change exists to end.
+   *
+   * A run that recorded nothing used to be indistinguishable from a perfect one:
+   * `succeeded`, a brief in S3, `recordPostings` early-returning zero without
+   * touching the database, and "last ran 5 minutes ago" as the only thing
+   * anybody was told.
+   */
+  describe("a run that recorded no postings", () => {
+    /** Both passes find nothing, which is the ordinary quiet-market run. */
+    function quietRun(
+      overrides: Partial<Parameters<typeof runBriefing>[0]> = {}
+    ) {
+      return run({
+        createScout: scoutPerPass(
+          fakeSession({
+            findings: { postings: [], notes: "Nothing open this week." },
+            attempts: [
+              searched("seek_search", 0),
+              searched("indeed_search", 0),
+            ],
+          })
+        ),
+        createWriter: writerReturning("No roles matched this week."),
+        ...overrides,
+      })
+    }
+
+    it("says so, and says why", async () => {
+      const report = await quietRun()
+
+      expect(report.postings).toBe(0)
+      expect(report.warnings?.noPostings).toMatchObject({
+        reason: "no-matches",
+        searched: 4,
+        results: 0,
+        excluded: 0,
+        passes: 2,
+        // The scout's own account of the search, which is otherwise only in a
+        // brief nobody opens when it is empty.
+        notes: "Nothing open this week.",
+      })
+    })
+
+    it("writes a sentence a person can act on", async () => {
+      const report = await quietRun()
+      const noPostings = report.warnings?.noPostings as { message: string }
+
+      // It is read on the briefing strip beside "last ran …", so it has to be
+      // prose rather than counts: the run succeeded, and there is nothing else
+      // on the page to explain an unchanged table.
+      expect(noPostings.message).toMatch(/nothing is currently listed/i)
+      expect(noPostings.message).toMatch(/broader role title/i)
+    })
+
+    it("says something different when the boards had plenty to look at", async () => {
+      const report = await run({
+        createScout: scoutPerPass(
+          fakeSession({
+            findings: { postings: [] },
+            attempts: [searched("seek_search", 40)],
+          })
+        ),
+        createWriter: writerReturning("No roles matched this week."),
+      })
+
+      const noPostings = report.warnings?.noPostings as { message: string }
+
+      // "Nothing is listed" and "80 roles were listed and none of them fit" are
+      // different problems with different answers.
+      expect(noPostings.message).toMatch(/none of which matched/i)
+    })
+
+    it("stays quiet on a run that recorded something", async () => {
+      const report = await run()
+
+      expect(report.warnings).toBeUndefined()
+    })
   })
 
   /**
@@ -681,7 +893,7 @@ describe("runBriefing", () => {
       expect(report.warnings).toEqual({
         unresolvedPostings: {
           message:
-            "1 posting left out of the brief: no search returned the id the scout gave.",
+            "1 posting dropped: the scout named an id no search returned.",
           postings: [{ id: INVENTED.id, title: "Staff Engineer" }],
         },
       })
@@ -753,14 +965,43 @@ describe("runBriefing", () => {
       expect(recorded).toHaveLength(0)
     })
 
-    it("no search actually succeeded", async () => {
-      // Well-formed findings that never touched the web — the failure mode the
-      // whole search-count check exists to catch.
+    it("every search it made failed", async () => {
+      // ⚠️ **The regression this whole change exists for.** Every board down,
+      // and the scout honestly reporting what it could see, which was nothing.
+      // This used to *succeed*: a failed search answers the model with a
+      // sentence, so the transcript showed three perfectly successful tool
+      // results and the gate below never fired. The brief was written, the
+      // `postings` table went untouched, and the run said `succeeded`.
       await expect(
         run({
-          createScout: scoutReturning(SCOUT_FINDINGS, [failedSearch()]),
+          createScout: scoutReturning(SCOUT_FINDINGS, [
+            searchFailed("seek_search", "SEEK"),
+            searchFailed("indeed_search", "Indeed"),
+          ]),
         })
-      ).rejects.toThrow(/no successful search .* on any of seek_search/)
+      ).rejects.toThrow(/Every one of the scout's 2 searches failed/)
+      expect(puts).toHaveLength(0)
+    })
+
+    it("names the boards and quotes one failure, since nothing else will", async () => {
+      // The run row carries this sentence and production keeps no trace, so
+      // "which board, and what did it say" has to be in the message itself.
+      await expect(
+        run({
+          createScout: scoutReturning(SCOUT_FINDINGS, [
+            searchFailed("seek_search", "SEEK"),
+          ]),
+        })
+      ).rejects.toThrow(/SEEK.*HTTP 500/s)
+    })
+
+    it("it never searched at all", async () => {
+      // Distinct from every search failing: no board was even called. Same
+      // conclusion — nothing it reported came from a live search — and a
+      // different diagnosis.
+      await expect(
+        run({ createScout: scoutReturning(SCOUT_FINDINGS, []) })
+      ).rejects.toThrow(/called none of seek_search/)
       expect(puts).toHaveLength(0)
     })
 
@@ -841,28 +1082,39 @@ describe("runBriefing", () => {
   })
 
   /**
-   * The wiring only. That a search from a *second* board counts is a property
-   * of the rule rather than of this file, and it is proved in
-   * `search-results.test.ts`, where the tool names can be passed in — only one
-   * board exists to run through `runBriefing` today.
+   * The wiring only. That the rule itself holds — an empty answer counting, a
+   * failed board not counting — is `search-results.test.ts`'s subject, where the
+   * attempts can be handed in directly.
    */
   describe("the search count reaching the run report", () => {
-    it("excludes a tool that is not a search tool", async () => {
-      // A clock answering successfully is not evidence that anyone searched,
-      // so widening the gate to a set must not widen it to "any tool the
-      // scout happens to carry".
+    it("counts each board that answered, under its own name", async () => {
       const report = await run({
         createScout: scoutReturning(SCOUT_FINDINGS, [
-          searchResult(),
-          searchResult("get_current_time", "call_2"),
+          searched("seek_search"),
+          searched("seek_search"),
+          searched("indeed_search", 1, "Indeed"),
+        ]),
+      })
+
+      expect(report.searches).toBe(3)
+      expect(report.searchesBySource).toEqual({
+        ...noSearches(),
+        seek_search: 2,
+        indeed_search: 1,
+      })
+    })
+
+    it("counts a board that answered with nothing", async () => {
+      // The distinction the search log exists for: nobody advertising the role
+      // is a search that happened, and this run is a quiet market rather than a
+      // broken pipeline.
+      const report = await run({
+        createScout: scoutReturning(SCOUT_FINDINGS, [
+          searched("seek_search", 0),
         ]),
       })
 
       expect(report.searches).toBe(1)
-      expect(report.searchesBySource).toEqual({
-        ...noSearches(),
-        seek_search: 1,
-      })
     })
 
     it("survives a search that failed alongside one that worked", async () => {
@@ -871,8 +1123,8 @@ describe("runBriefing", () => {
       // built from postings that were genuinely looked up.
       const report = await run({
         createScout: scoutReturning(SCOUT_FINDINGS, [
-          failedSearch(),
-          searchResult("seek_search", "call_2"),
+          searchFailed("indeed_search", "Indeed"),
+          searched("seek_search"),
         ]),
       })
 
@@ -887,7 +1139,7 @@ describe("runBriefing", () => {
 
       await expect(
         run({
-          createScout: scoutReturning(SCOUT_FINDINGS, [failedSearch()]),
+          createScout: scoutReturning(SCOUT_FINDINGS, [searchFailed()]),
         })
       ).rejects.toThrow()
 

@@ -9,6 +9,7 @@ import {
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
 import type { PostingCatalog } from "./posting-catalog.ts"
+import type { SearchLog } from "./search-log.ts"
 
 /**
  * Indeed job search, via Apify's `misceres/indeed-scraper` actor.
@@ -184,6 +185,7 @@ function matchesWorkType(
 
 export const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
   board: "Indeed",
+  toolName: INDEED_TOOL_NAME,
   actorId: ACTOR_ID,
   defaultMaxResults: DEFAULT_MAX_RESULTS,
   maxResultsLimit: MAX_RESULTS_LIMIT,
@@ -309,9 +311,10 @@ export const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
 export async function apifyIndeedSearch(
   input: IndeedSearchInput,
   catalog: PostingCatalog,
-  deps: IndeedSearchDeps = {}
+  deps: IndeedSearchDeps = {},
+  log?: SearchLog
 ): Promise<string> {
-  return apifyBoardSearch(INDEED_SPEC, input, catalog, deps)
+  return apifyBoardSearch(INDEED_SPEC, input, catalog, deps, log)
 }
 
 /**
@@ -325,10 +328,10 @@ export async function apifyIndeedSearch(
  * recorded in one run's catalog and named by it.
  */
 export function createIndeedSearch(
-  catalog: PostingCatalog
+  catalog: PostingCatalog,
+  log: SearchLog
 ): StructuredToolInterface {
-  return createBoardSearchTool(INDEED_SPEC, catalog, {
-    name: INDEED_TOOL_NAME,
+  return createBoardSearchTool(INDEED_SPEC, catalog, log, {
     source: "au.indeed.com",
     locationDescription:
       'Where, as Indeed writes it — "Sydney NSW", "Melbourne VIC", "Remote". Omit to search all of Australia.',

@@ -9,6 +9,7 @@ import {
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
 import type { PostingCatalog } from "./posting-catalog.ts"
+import type { SearchLog } from "./search-log.ts"
 
 /**
  * LinkedIn job search, via Apify's `curious_coder/linkedin-jobs-scraper` actor.
@@ -184,6 +185,7 @@ function buildSearchUrl(search: ResolvedBoardSearch): string {
 
 export const LINKEDIN_SPEC: ApifyBoardSpec<LinkedinJob> = {
   board: "LinkedIn",
+  toolName: LINKEDIN_TOOL_NAME,
   actorId: ACTOR_ID,
   defaultMaxResults: DEFAULT_MAX_RESULTS,
   maxResultsLimit: MAX_RESULTS_LIMIT,
@@ -229,9 +231,10 @@ export const LINKEDIN_SPEC: ApifyBoardSpec<LinkedinJob> = {
 export async function apifyLinkedinSearch(
   input: LinkedinSearchInput,
   catalog: PostingCatalog,
-  deps: LinkedinSearchDeps = {}
+  deps: LinkedinSearchDeps = {},
+  log?: SearchLog
 ): Promise<string> {
-  return apifyBoardSearch(LINKEDIN_SPEC, input, catalog, deps)
+  return apifyBoardSearch(LINKEDIN_SPEC, input, catalog, deps, log)
 }
 
 /**
@@ -245,12 +248,12 @@ export async function apifyLinkedinSearch(
  * recorded in one run's catalog and named by it.
  */
 export function createLinkedinSearch(
-  catalog: PostingCatalog
+  catalog: PostingCatalog,
+  log: SearchLog
 ): StructuredToolInterface {
   // "live listings for currently-open job postings", via the shared template —
   // this description had drifted into a transposition of the other boards'.
-  return createBoardSearchTool(LINKEDIN_SPEC, catalog, {
-    name: LINKEDIN_TOOL_NAME,
+  return createBoardSearchTool(LINKEDIN_SPEC, catalog, log, {
     source: "LinkedIn",
     locationDescription:
       'Where, as LinkedIn writes it — "Sydney, New South Wales, Australia", "Melbourne, Victoria, Australia", "Australia". Defaults to all of Australia.',
