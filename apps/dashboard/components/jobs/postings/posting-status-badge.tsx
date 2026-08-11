@@ -11,24 +11,39 @@ import { Badge } from "@workspace/ui/components/badge"
  * ⚠️ **`new` is `outline` because it is the majority, not because it is
  * unimportant.** Every Posting starts there and most stay there, so a filled
  * badge on every row would be the loudest thing on the page — louder than the
- * Match column, which is the cell the table is actually scanned for. The two
- * that mean somebody *did* something are the ones that stand out.
+ * Match column, which is the cell the table is actually scanned for. The ones
+ * that mean somebody *did* something are what stand out against it.
  *
  * `destructive` is already the muted `bg-destructive/10` treatment rather than
  * solid red — see `packages/ui/src/components/badge.tsx`. A rejection is
  * information, not an error.
  *
+ * ⚠️ **`not-interested` is the one status drawn quieter than `new`, and that
+ * inverts the rule above on purpose.** It is a decision like `applied` is, but
+ * it is the decision to stop reading the row — so `ghost`, which draws the
+ * label with no chip around it at all, is the only variant that lets a passed-on
+ * advertisement recede while still saying which state it is in. Weighting it
+ * like `applied` would give the column its loudest mark for the rows the user
+ * has finished with. See {@link PostingStatus} in `@workspace/db` for why the
+ * two are a pair despite looking nothing alike here.
+ *
  * ⚠️ **`secondary` is deliberately unused here**, though it would suit `new`:
  * the Source column two cells to the left renders a `secondary` badge on every
  * recognised board, and two adjacent columns of identically-styled badges is a
- * row that reads as one wide field. See `posting-table-body.tsx`.
+ * row that reads as one wide field. See `posting-table-body.tsx`. That is also
+ * what leaves `ghost` as the only candidate above rather than one of two.
  *
- * `satisfies` rather than a bare object, so a fourth `PostingStatus` fails to
- * compile here as well as in {@link POSTING_STATUS_LABELS}.
+ * `satisfies` rather than a bare object, so a fifth `PostingStatus` fails to
+ * compile here as well as in {@link POSTING_STATUS_LABELS} — as a fourth did,
+ * in the deployment that merged `not-interested` and this column together.
+ *
+ * Ordered as {@link POSTING_STATUS_LABELS} orders it: the sequence a person
+ * moves through, not the order the union declares.
  */
 const STATUS_VARIANTS = {
   new: "outline",
   applied: "default",
+  "not-interested": "ghost",
   rejected: "destructive",
 } satisfies Record<PostingStatus, ComponentProps<typeof Badge>["variant"]>
 
