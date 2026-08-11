@@ -1,26 +1,12 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 
 import {
-  CATALOG,
-  FINDINGS,
-  JOB,
-  POSTING_ID,
   SCOUT_FINDINGS,
-  SLOT,
-  fakeAgent,
   fakeSession,
   installRunBriefingFixtures,
-  kept,
-  noSearches,
-  puts,
-  recorded,
   run,
   scoutPerPass,
-  scoutReturning,
   searchFailed,
-  searchResult,
-  searched,
-  streamOptions,
   tracked,
   writerReturning,
 } from "./run-briefing.test-helpers.ts"

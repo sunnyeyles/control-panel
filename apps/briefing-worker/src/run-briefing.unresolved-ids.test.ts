@@ -1,8 +1,6 @@
-import type { ScoutFindings } from "@workspace/agents"
 import { describe, expect, it } from "vitest"
 
 import {
-  CATALOG,
   FINDINGS,
   POSTING_ID,
   SCOUT_FINDINGS,

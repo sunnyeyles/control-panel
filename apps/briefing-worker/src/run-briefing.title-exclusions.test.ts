@@ -1,4 +1,4 @@
-import { AIMessage, ToolMessage } from "@langchain/core/messages"
+import { ToolMessage } from "@langchain/core/messages"
 import type { ScoutFindings } from "@workspace/agents"
 import { describe, expect, it } from "vitest"
 
@@ -10,7 +10,6 @@ import {
   installRunBriefingFixtures,
   kept,
   run,
-  streamOptions,
   tracked,
 } from "./run-briefing.test-helpers.ts"
 import type { TraceEvent } from "./trace.ts"
