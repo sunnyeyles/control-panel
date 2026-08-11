@@ -3,13 +3,14 @@ import type { BriefStore } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
- * The orchestration around a run someone asked for, with the run itself faked.
+ * The orchestration around a run someone asked for, with the briefing path
+ * faked at `runBriefing`.
  *
- * `runBriefing` has its own suite next door; what is asserted here is
- * everything around it — that a duplicate delivery runs nothing, that a failure
- * is recorded rather than thrown, and that the occurrence handed to the
- * pipeline is the row's own instant. Each of those is a property of this file
- * and invisible from the other one.
+ * Ad-hoc goes through `executeClaimedBriefing`, which still calls `runBriefing`
+ * — so mocking that seam keeps asserting everything around the claim: that a
+ * duplicate delivery runs nothing, that a failure is recorded rather than
+ * thrown, and that the occurrence handed to the pipeline is the row's own
+ * instant.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   finishRun: vi.fn(async () => true),
   recordArtifact: vi.fn(),
   recordRunFindings: vi.fn(),
+  recordPostings: vi.fn(),
   runBriefing: vi.fn(),
   titleExclusions: vi.fn(async () => [] as string[]),
 }))

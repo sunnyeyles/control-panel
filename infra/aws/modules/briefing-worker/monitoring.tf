@@ -13,6 +13,12 @@
 # A tick that ran and threw. `runTick` rethrows after emitting its tick report
 # — and each failing job has already emitted its own run report — while the
 # handler catches nothing, so any bad tick lands here.
+#
+# Period is one hour, not one day. A 24-hour window with threshold 1 is a latch:
+# one failed tick keeps every subsequent window non-zero until a full day is
+# clean, so the alarm cannot return to OK and cannot signal the next real
+# failure. With an hourly period, a single clean tick clears it — and ad-hoc
+# runs still return rather than throw, so they do not feed this metric.
 resource "aws_cloudwatch_metric_alarm" "errors" {
   alarm_name        = "${var.function_name}-errors"
   alarm_description = "The briefing worker failed. Check the tick line for counts, then the briefing-run line with outcome=failure for the reason."
@@ -22,12 +28,12 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
   dimensions  = { FunctionName = aws_lambda_function.worker.function_name }
 
   statistic           = "Sum"
-  period              = 86400
+  period              = 3600
   evaluation_periods  = 1
   threshold           = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
 
-  # A day with no invocation at all produces no datapoint. That is not a
+  # An hour with no invocation at all produces no datapoint. That is not a
   # failure of this alarm — it is what the missed-run alarm below is for.
   treat_missing_data = "notBreaching"
 

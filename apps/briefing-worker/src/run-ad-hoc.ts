@@ -1,14 +1,7 @@
-import {
-  claimAdHocRun,
-  failRun,
-  finishRun,
-  titleExclusions,
-  type PrismaClient,
-} from "@workspace/db"
+import { claimAdHocRun, failRun, type PrismaClient } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
 
-import { prismaRecorders } from "./recorders.ts"
-import { runBriefing } from "./run-briefing.ts"
+import { executeClaimedBriefing } from "./execute-claimed-briefing.ts"
 
 /**
  * One briefing, run because a person asked for it rather than because a slot
@@ -65,13 +58,11 @@ export interface AdHocRequest {
  *
  * **Returns rather than throws on failure, unlike `runTick`.** The tick rethrows
  * because that throw is what produces the Lambda `Errors` datapoint its alarm
- * watches; that alarm is a 24-hour latching one, so it cannot signal a second
- * failure until a whole window is clean. A run someone triggered already
- * reports its failure twice over — on the `runs` row, and in the UI that is
- * watching it — and routing it into the alarm as well would spend the only
- * signal that says *the schedule is broken* on something a person can already
- * see. The hourly tick still throws, so a worker that is genuinely broken is
- * still caught within the hour.
+ * watches. A run someone triggered already reports its failure twice over — on
+ * the `runs` row, and in the UI that is watching it — and routing it into the
+ * alarm as well would spend the only signal that says *the schedule is broken*
+ * on something a person can already see. The hourly tick still throws, so a
+ * worker that is genuinely broken is still caught within the hour.
  *
  * A claim that comes back empty means another delivery of the same invocation
  * already has this run, or the run is terminal. Both end the same way: do
@@ -125,46 +116,21 @@ export async function runAdHocBriefing(
   }
 
   try {
-    const briefing = await runBriefing({
+    // `claimed.startedAt` — the row's own value — rather than `now`. The
+    // object key partitions on this, and taking it from the row is what keeps
+    // the key derivable from the run alone, exactly as a claimed slot is for
+    // a scheduled run.
+    await executeClaimedBriefing(prisma, briefs, {
       job,
-      // `claimed.startedAt` — the row's own value — rather than `now`. The
-      // object key partitions on this, and taking it from the row is what keeps
-      // the key derivable from the run alone, exactly as a claimed slot is for
-      // a scheduled run. The recorders take the same instant; see `recorders.ts`.
       slot: { runId: request.runId, scheduledFor: claimed.startedAt },
       trigger: "manual",
-      briefs,
-      // The same filter a scheduled run gets. A run someone started by hand is
-      // the same pipeline — the trigger changes reporting and nothing else —
-      // so a briefing that honoured the user's exclusions overnight and
-      // ignored them on the button would be the surprising thing.
-      titleExclusions: await titleExclusions(prisma, job.userId),
-      ...prismaRecorders(prisma, {
-        userId: job.userId,
-        seenAt: claimed.startedAt,
-      }),
     })
-
-    // Third argument, usually `undefined`. A run that produced a brief but could
-    // not keep its findings, or could not add what it found to the cumulative
-    // record, is `succeeded` with a non-empty `failure` — the rule
-    // `packages/db/src/types.ts` states.
-    //
-    // `false` is a lost race — the row was already terminal. The brief is
-    // stored either way, so the outcome reported is still success; the log
-    // line is the only trace the lost transition leaves.
-    if (!(await finishRun(prisma, request.runId, briefing.warnings))) {
-      console.warn(
-        `run ${request.runId}: already terminal when this run went to finish it`
-      )
-    }
     return report("succeeded")
   } catch (error) {
+    // `executeClaimedBriefing` has already recorded the failure on the row.
+    // Returned, not thrown — see the function docblock on why ad-hoc must not
+    // feed the Errors alarm.
     const message = error instanceof Error ? error.message : String(error)
-
-    // Recorded and not carried. `runBriefing` has already emitted its run
-    // report, which keeps the diagnostics; the row is what the UI reads.
-    await failRun(prisma, request.runId, { message }).catch(() => undefined)
     return report("failed", message)
   }
 }
