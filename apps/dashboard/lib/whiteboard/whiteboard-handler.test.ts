@@ -72,9 +72,9 @@ const signedIn = async () =>
 
 describe("authorization", () => {
   it("refuses an anonymous caller before it parses the body", async () => {
-    const createAgent = vi.fn()
+    const createWhiteboardAgent = vi.fn()
     const handle = createWhiteboardHandler({
-      createAgent,
+      createWhiteboardAgent,
       getUser: async () => ({ status: "anonymous" }) as never,
     })
 
@@ -89,12 +89,12 @@ describe("authorization", () => {
     )
 
     expect(response.status).toBe(401)
-    expect(createAgent).not.toHaveBeenCalled()
+    expect(createWhiteboardAgent).not.toHaveBeenCalled()
   })
 
   it("refuses a signed-in caller who is not on the allowlist, with the same 401", async () => {
     const handle = createWhiteboardHandler({
-      createAgent: vi.fn(),
+      createWhiteboardAgent: vi.fn(),
       getUser: async () => ({ status: "refused" }) as never,
     })
 
@@ -104,20 +104,23 @@ describe("authorization", () => {
 
 describe("validation", () => {
   it("rejects a board that does not match the shared contract", async () => {
-    const createAgent = vi.fn()
-    const handle = createWhiteboardHandler({ createAgent, getUser: signedIn })
+    const createWhiteboardAgent = vi.fn()
+    const handle = createWhiteboardHandler({
+      createWhiteboardAgent,
+      getUser: signedIn,
+    })
 
     const response = await handle(
       request(validBody({ board: { shapes: [{ id: "s1", kind: "sphere" }] } }))
     )
 
     expect(response.status).toBe(400)
-    expect(createAgent).not.toHaveBeenCalled()
+    expect(createWhiteboardAgent).not.toHaveBeenCalled()
   })
 
   it("rejects a request carrying no board at all", async () => {
     const handle = createWhiteboardHandler({
-      createAgent: vi.fn(),
+      createWhiteboardAgent: vi.fn(),
       getUser: signedIn,
     })
 
@@ -129,7 +132,7 @@ describe("validation", () => {
 
   it("rejects malformed messages", async () => {
     const handle = createWhiteboardHandler({
-      createAgent: vi.fn(),
+      createWhiteboardAgent: vi.fn(),
       getUser: signedIn,
     })
 
@@ -142,13 +145,16 @@ describe("validation", () => {
 
 describe("the run", () => {
   it("hands the agent the board it was sent, and a turn id to group ops by", async () => {
-    const createAgent = vi.fn(() => fakeSession(emptyStream()))
-    const handle = createWhiteboardHandler({ createAgent, getUser: signedIn })
+    const createWhiteboardAgent = vi.fn(() => fakeSession(emptyStream()))
+    const handle = createWhiteboardHandler({
+      createWhiteboardAgent,
+      getUser: signedIn,
+    })
 
     const response = await handle(request(validBody()))
 
     expect(response.status).toBe(200)
-    expect(createAgent).toHaveBeenCalledWith({
+    expect(createWhiteboardAgent).toHaveBeenCalledWith({
       context: BOARD,
       turnId: expect.any(String),
     })
@@ -157,7 +163,7 @@ describe("the run", () => {
   it("streams in custom mode as well, which is what carries the canvas ops", async () => {
     const stream = emptyStream()
     const handle = createWhiteboardHandler({
-      createAgent: () => fakeSession(stream),
+      createWhiteboardAgent: () => fakeSession(stream),
       getUser: signedIn,
     })
 
@@ -177,7 +183,7 @@ describe("the run", () => {
     createLangfuseCallback.mockReturnValue(callback)
     const stream = emptyStream()
     const handle = createWhiteboardHandler({
-      createAgent: () => fakeSession(stream),
+      createWhiteboardAgent: () => fakeSession(stream),
       getUser: signedIn,
     })
 
@@ -201,7 +207,7 @@ describe("the run", () => {
 
   it("answers 500 rather than throwing when the agent cannot be built", async () => {
     const handle = createWhiteboardHandler({
-      createAgent: () => {
+      createWhiteboardAgent: () => {
         throw new Error("OPENAI_API_KEY is not set")
       },
       getUser: signedIn,

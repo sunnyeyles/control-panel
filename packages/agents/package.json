@@ -34,6 +34,7 @@
     "@langchain/core": "^1.2.3",
     "@workspace/agent-tools": "workspace:*",
     "@workspace/agents-core": "workspace:*",
+    "@workspace/user-storage": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -41,7 +42,6 @@
     "@workspace/eslint-config": "workspace:*",
     "@workspace/langfuse": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
-    "@workspace/user-storage": "workspace:*",
     "eslint": "^9",
     "tsx": "^4.23.1",
     "typescript": "^5",

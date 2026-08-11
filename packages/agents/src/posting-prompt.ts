@@ -28,15 +28,33 @@
  * validate a request stay with the features that accept one.
  */
 
-/** The Posting fields the prompt reads — the shape `PostingSchema` parses to. */
+/**
+ * The Posting fields the prompt reads — the shape `StoredPostingSchema` parses
+ * to.
+ *
+ * `matchReason` is optional because a Posting the user added by pasting its
+ * link was matched against no criteria and legitimately has none. See
+ * `stored-posting.ts`; the block below is simply left out when it is absent,
+ * which is the only honest thing to do with a heading whose content would have
+ * to be made up.
+ */
 export interface PromptPosting {
   title: string
   company: string
   location: string
   url: string
   summary: string
-  matchReason: string
+  matchReason?: string | undefined
   postedAt?: string | undefined
+  /**
+   * What the advertisement said about years of experience, in its own words.
+   *
+   * Free text and never a number, for the reason `posted-at.ts` gives about
+   * dates: whoever produced it copied a phrase rather than working one out, so
+   * "5+ years" and "at least 3 years in a similar role" are what arrives, and
+   * absent means the advertisement stated none.
+   */
+  experience?: string | undefined
   highlights?: string[] | undefined
 }
 
@@ -74,15 +92,15 @@ export function toPostingRequestPrompt(
   ]
 
   if (posting.postedAt) lines.push(`Posted: ${posting.postedAt}`)
+  if (posting.experience) {
+    lines.push(`Experience the advertisement asks for: ${posting.experience}`)
+  }
 
-  lines.push(
-    "",
-    "What the search recorded about the role:",
-    posting.summary,
-    "",
-    "Why it was matched to me:",
-    posting.matchReason
-  )
+  lines.push("", "What the search recorded about the role:", posting.summary)
+
+  if (posting.matchReason) {
+    lines.push("", "Why it was matched to me:", posting.matchReason)
+  }
 
   if (posting.highlights && posting.highlights.length > 0) {
     lines.push(

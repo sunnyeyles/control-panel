@@ -6,6 +6,8 @@ import { getBriefingInvoker } from "@/lib/briefing-runs/invoke-worker"
 import { createRunActions } from "@/lib/briefing-runs/run-actions"
 import { createCoverLetterActions } from "@/lib/cover-letters/cover-letter-actions"
 import { getPrisma } from "@/lib/db"
+import { createAddByLinkActions } from "@/lib/postings/add-by-link-actions"
+import { createMatchActions } from "@/lib/postings/match-actions"
 import { createPostingActions } from "@/lib/postings/posting-actions"
 import {
   getCoverLetterStore,
@@ -56,6 +58,17 @@ const postingActions = createPostingActions({
   getPrisma,
   getCoverLetters: getCoverLetterStore,
   getTailoredResumes: getTailoredResumeStore,
+})
+
+const addByLinkActions = createAddByLinkActions({
+  getUser: getCurrentUser,
+  getPrisma,
+})
+
+const matchActions = createMatchActions({
+  getUser: getCurrentUser,
+  getPrisma,
+  getResumes: getResumeStore,
 })
 
 /** Create a manually written cover letter from the blank editor. */
@@ -174,6 +187,29 @@ export async function saveTailoredResumeAction(
 }
 
 /**
+ * Add a Posting the user found themselves, from its link.
+ *
+ * `refresh()` on success is the whole of what puts the new row on the page —
+ * `/jobs` is `force-dynamic` and `staleTimes.dynamic` lets the client router
+ * reuse the segment for 30 seconds, so without it somebody would paste a link,
+ * be told it was added, and look at a table that does not contain it.
+ *
+ * It is the slowest action in this file by a wide margin: a page fetch and then
+ * a model call, in sequence, both on the request. `maxDuration` on `page.tsx`
+ * is sized for it.
+ */
+export async function addPostingByLinkAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await addByLinkActions.addPostingByLink(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
  * Set where one application stands.
  *
  * `refresh()` on success for the reason the draft above gives, with one extra
@@ -217,6 +253,34 @@ export async function deletePostingsAction(
   const result = await postingActions.deletePostings(state, formData)
 
   if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Score a batch of this user's unscored Postings against their resume.
+ *
+ * ⚠️ **Takes neither `state` nor `FormData`, like `loadPostingDetailAction`
+ * below and for the same reason**: `ActionState` exists to carry a message back
+ * into the form that submitted it, and there is no form here — the caller is a
+ * component that mounted. It is still a `"use server"` export and therefore
+ * still a POST endpoint reachable without the UI, which is why every
+ * authorization branch lives in `lib/postings/match-actions.ts`.
+ *
+ * `refresh()` **only when something was written**, which is the difference
+ * between this and every other action in this file. The scoring component calls
+ * it in a loop until a round writes nothing, and a refresh on the round that
+ * wrote nothing would be a full re-render of `/jobs` for no change at all — on
+ * every page view, since the last round of every run is that round.
+ *
+ * It is load-bearing on the rounds that do write: the Match column and the
+ * order it sorts by are server-rendered, so without this a page would finish
+ * scoring and go on showing em-dashes until something else invalidated it.
+ */
+export async function scorePendingMatchesAction() {
+  const result = await matchActions.scorePendingMatches()
+
+  if (result.status === "success" && result.scored > 0) refresh()
 
   return result
 }

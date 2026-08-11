@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   formatDocumentFile,
   parseDocumentFile,
-  RESUME_ID_PATTERN,
+  DOCUMENT_ID_PATTERN,
 } from "./document-ref"
 
 const ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
@@ -11,7 +11,7 @@ const ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 describe("parseDocumentFile", () => {
   it("splits a well-formed segment into its two halves", () => {
     expect(parseDocumentFile(`${ID}.pdf`)).toEqual({
-      resumeId: ID,
+      documentId: ID,
       extension: ".pdf",
     })
   })
@@ -65,7 +65,7 @@ describe("formatDocumentFile", () => {
   it("round-trips through parseDocumentFile", () => {
     // The property that matters: the list page formats this string and the
     // download route parses it, and they used to do so from separate literals.
-    const ref = { resumeId: ID, extension: ".pdf" }
+    const ref = { documentId: ID, extension: ".pdf" }
 
     expect(parseDocumentFile(formatDocumentFile(ref))).toEqual(ref)
   })
@@ -75,7 +75,7 @@ describe("the exported id half", () => {
   it("matches exactly what the composite accepts", () => {
     // The Zod schema in `document-actions.ts` uses this directly, so a
     // delete and a download have to agree on which ids exist.
-    expect(RESUME_ID_PATTERN.test(ID)).toBe(true)
-    expect(RESUME_ID_PATTERN.test(`${ID}x`)).toBe(false)
+    expect(DOCUMENT_ID_PATTERN.test(ID)).toBe(true)
+    expect(DOCUMENT_ID_PATTERN.test(`${ID}x`)).toBe(false)
   })
 })

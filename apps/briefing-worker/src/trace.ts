@@ -33,10 +33,11 @@ export type TraceAgent = "scout" | "writer"
  * Named for what they accomplish rather than for the function that does it, so
  * a reader who has never opened `run-briefing.ts` can still follow a trace.
  */
-export type TraceStep =
+type TraceStep =
   | "config"
   | "scout"
   | "handoff"
+  | "filter"
   | "writer"
   | "upload"
   | "record"
@@ -57,7 +58,7 @@ export interface TraceToolCall {
  * so that spelling collapses the whole thing to `{ type }` and rejects every
  * event that carries a payload.
  */
-export type TraceEventBody =
+type TraceEventBody =
   | {
       type: "run"
       phase: "start"

@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   claimAdHocRun,
   claimJob,
+  countUnmatchedPostings,
   coverLetterInstructions,
   createJob,
   createPrismaClient,
@@ -23,21 +24,27 @@ import {
   latestRunPerJob,
   listDocumentsForUser,
   listPostingPage,
+  listUnmatchedPostingIds,
   loadBoard,
   pauseJob,
   POSTING_STATUSES,
   ownedPostingIds,
+  postingFilters,
   postingPayload,
   recordDocument,
   recordArtifact,
+  recordLinkedPosting,
+  recordPostingMatch,
   recordPostings,
   recordRunFindings,
   resumeJob,
   runningRunForJob,
   saveBoard,
   saveCoverLetterInstructions,
+  savePostingFilters,
   setPostingStatus,
   startAdHocRun,
+  titleExclusions,
   updateJobSchedule,
   type DocumentType,
   type DueJob,
@@ -484,7 +491,7 @@ describeWithDatabase("against a real database", () => {
       return prisma.posting.findFirst({ where: { userId, postingId } })
     }
 
-    it("accepts each of the three statuses and refuses a fourth", async () => {
+    it("accepts each of the four statuses and refuses a fifth", async () => {
       const runId = await aRun()
       const posting = aPosting()
       await recordPostings(prisma, {
@@ -500,12 +507,14 @@ describeWithDatabase("against a real database", () => {
         ).toBe(true)
       }
 
-      // The compiler forbids a fourth, so the cast is what makes this a test of
-      // the CHECK rather than of the type.
-      const fourth = "archived" as string as PostingStatus
+      // The compiler forbids a fifth, so the cast is what makes this a test of
+      // the CHECK rather than of the type. `not_interested` rather than some
+      // unrelated word: the underscore spelling is the plausible near-miss for
+      // `not-interested`, and the CHECK is the only thing that catches one.
+      const fifth = "not_interested" as string as PostingStatus
 
       await expect(
-        setPostingStatus(prisma, userId, posting.postingId, fourth)
+        setPostingStatus(prisma, userId, posting.postingId, fifth)
       ).rejects.toThrow()
 
       expect((await readBack(posting.postingId))?.status).toBe("rejected")
@@ -568,6 +577,114 @@ describeWithDatabase("against a real database", () => {
       expect(row?.lastSeenRunId).toBe(refound)
       expect(row?.firstSeenAt.toISOString()).toBe(FIRST_SIGHTING.toISOString())
       expect(row?.lastSeenAt.toISOString()).toBe(SECOND_SIGHTING.toISOString())
+    })
+
+    /**
+     * The second writer, and every case here is about what it must *not* do.
+     *
+     * `recordLinkedPosting` exists because a Posting the user pasted has no Run
+     * behind it, but the reason it is a separate function rather than a flag on
+     * `recordPostings` is its `ON CONFLICT DO NOTHING`: a link may create a
+     * Posting and may never revise one. Each assertion below is a way that
+     * could silently stop being true.
+     */
+    describe("added by link", () => {
+      it("records a posting with no run at either end", async () => {
+        const posting = aPosting()
+
+        expect(
+          await recordLinkedPosting(prisma, {
+            userId,
+            seenAt: FIRST_SIGHTING,
+            posting,
+          })
+        ).toBe(true)
+
+        const row = await readBack(posting.postingId)
+
+        // NULL in both is the whole of how a link-added Posting is
+        // distinguishable from a found one. There is no `source` column.
+        expect(row?.firstSeenRunId).toBeNull()
+        expect(row?.lastSeenRunId).toBeNull()
+        expect(row?.status).toBe("new")
+        expect(row?.firstSeenAt.toISOString()).toBe(
+          FIRST_SIGHTING.toISOString()
+        )
+      })
+
+      it("answers false for an advertisement already tracked, and changes nothing", async () => {
+        const discovered = await aRun()
+        const posting = aPosting()
+
+        await recordPostings(prisma, {
+          userId,
+          runId: discovered,
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+        await setPostingStatus(prisma, userId, posting.postingId, "applied")
+
+        expect(
+          await recordLinkedPosting(prisma, {
+            userId,
+            seenAt: SECOND_SIGHTING,
+            posting: { ...posting, title: "Something Else Entirely" },
+          })
+        ).toBe(false)
+
+        const row = await readBack(posting.postingId)
+
+        // ⚠️ The three losses `DO NOTHING` prevents, in order: a status a
+        // person set walked back to `new`, a Run's provenance blanked by a
+        // path that has none, and a Run-written payload swapped for a thinner
+        // one.
+        expect(row?.status).toBe("applied")
+        expect(row?.lastSeenRunId).toBe(discovered)
+        expect(row?.title).toBe("Senior Backend Engineer")
+      })
+
+      it("lets a later Run claim the sighting without claiming the discovery", async () => {
+        const refound = await aRun()
+        const posting = aPosting()
+
+        await recordLinkedPosting(prisma, {
+          userId,
+          seenAt: FIRST_SIGHTING,
+          posting,
+        })
+
+        await recordPostings(prisma, {
+          userId,
+          runId: refound,
+          seenAt: SECOND_SIGHTING,
+          postings: [posting],
+        })
+
+        const row = await readBack(posting.postingId)
+
+        // "You found this one yourself, and a briefing has since found it too."
+        // `first_seen_run_id` is absent from the upsert's DO UPDATE SET list,
+        // so it stays NULL rather than being backfilled with the Run that
+        // merely re-found it.
+        expect(row?.firstSeenRunId).toBeNull()
+        expect(row?.lastSeenRunId).toBe(refound)
+        expect(row?.lastSeenAt.toISOString()).toBe(
+          SECOND_SIGHTING.toISOString()
+        )
+      })
+
+      it("refuses an id that is not the shape a derived posting id takes", async () => {
+        // The CHECK applies to this path too: the value is still an object key
+        // segment, and a second writer is a second way past a constraint if it
+        // is not tested for.
+        await expect(
+          recordLinkedPosting(prisma, {
+            userId,
+            seenAt: FIRST_SIGHTING,
+            posting: aPosting({ postingId: "../../etc/passwd" }),
+          })
+        ).rejects.toThrow()
+      })
     })
 
     it("stores the posting date, and NULL when the caller supplied none", async () => {
@@ -650,6 +767,211 @@ describeWithDatabase("against a real database", () => {
       expect(row?.statusChangedAt).not.toBeNull()
       // …and the sighting was still recorded, so this is not a no-op upsert.
       expect(row?.lastSeenRunId).toBe(refound)
+    })
+
+    describe("the match against a resume", () => {
+      const RESUME_ID = "3f8d1b2a-0000-4000-8000-0000000000c1"
+      const OTHER_RESUME_ID = "3f8d1b2a-0000-4000-8000-0000000000c2"
+      const MATCHED_AT = new Date("2026-08-03T09:00:00.000Z")
+
+      async function aScoredPosting(resumeId = RESUME_ID) {
+        const posting = aPosting()
+
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        expect(
+          await recordPostingMatch(prisma, {
+            userId,
+            postingId: posting.postingId,
+            score: 82,
+            reason: "The CV evidences the stack this role names.",
+            gaps: ["Kubernetes in production"],
+            resumeId,
+            matchedAt: MATCHED_AT,
+          })
+        ).toBe(true)
+
+        return posting
+      }
+
+      it("records all five columns and reads them back together", async () => {
+        const posting = await aScoredPosting()
+
+        expect(
+          await postingPayload(prisma, userId, posting.postingId)
+        ).toMatchObject({
+          match: {
+            score: 82,
+            reason: "The CV evidences the stack this role names.",
+            gaps: ["Kubernetes in production"],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          },
+        })
+      })
+
+      /**
+       * ⚠️ **The reason the five are columns rather than payload keys, and the
+       * exact analogue of the `status` test above.** A Briefing on a daily
+       * cadence re-finds the advertisements it already found, so a `DO UPDATE
+       * SET` list that named any of these would blank every score on a
+       * schedule, with no error and no trace. `turbo test` alone cannot catch
+       * that — this file skips itself without `DATABASE_URL_UNPOOLED`.
+       */
+      it("survives a later run re-reporting the same advertisement", async () => {
+        const posting = await aScoredPosting()
+        const refound = await aRun()
+
+        await recordPostings(prisma, {
+          userId,
+          runId: refound,
+          seenAt: SECOND_SIGHTING,
+          postings: [posting],
+        })
+
+        const row = await readBack(posting.postingId)
+        expect(row?.matchScore).toBe(82)
+        expect(row?.matchResumeId).toBe(RESUME_ID)
+        expect(row?.matchedAt?.toISOString()).toBe(MATCHED_AT.toISOString())
+        // …and the sighting was still recorded, so this is not a no-op upsert.
+        expect(row?.lastSeenRunId).toBe(refound)
+      })
+
+      it("refuses a score outside 0 to 100", async () => {
+        const posting = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        await expect(
+          recordPostingMatch(prisma, {
+            userId,
+            postingId: posting.postingId,
+            score: 101,
+            reason: "Out of range.",
+            gaps: [],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          })
+        ).rejects.toThrow()
+      })
+
+      /**
+       * A score nobody can date or attribute to a document is not a score. The
+       * CHECK is what makes "all five or none" a property of the table rather
+       * than of whichever caller wrote the row last.
+       */
+      it("refuses a half-written match", async () => {
+        const posting = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [posting],
+        })
+
+        await expect(
+          prisma.posting.updateMany({
+            where: { userId, postingId: posting.postingId },
+            data: { matchScore: 70 },
+          })
+        ).rejects.toThrow()
+      })
+
+      it("never inserts a Posting that is not already there", async () => {
+        expect(
+          await recordPostingMatch(prisma, {
+            userId,
+            postingId: derivedId(),
+            score: 50,
+            reason: "Nothing to attach this to.",
+            gaps: [],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          })
+        ).toBe(false)
+      })
+
+      /**
+       * ⚠️ **Both arms of the staleness predicate, in one test.** A Posting
+       * nobody has scored has `match_resume_id` NULL and a plain `<>` would
+       * exclude it — which would make the unscored rows invisible to the one
+       * query whose job is to find them. A Posting scored against a CV the user
+       * has replaced carries some other id and wants scoring again.
+       */
+      it("lists the never-scored and the scored-against-something-else", async () => {
+        const unscored = aPosting()
+        await recordPostings(prisma, {
+          userId,
+          runId: await aRun(),
+          seenAt: FIRST_SIGHTING,
+          postings: [unscored],
+        })
+
+        const stale = await aScoredPosting(OTHER_RESUME_ID)
+        const current = await aScoredPosting(RESUME_ID)
+
+        const pending = await listUnmatchedPostingIds(
+          prisma,
+          userId,
+          RESUME_ID,
+          100
+        )
+
+        expect(pending).toContain(unscored.postingId)
+        expect(pending).toContain(stale.postingId)
+        expect(pending).not.toContain(current.postingId)
+        expect(await countUnmatchedPostings(prisma, userId, RESUME_ID)).toBe(
+          pending.length
+        )
+      })
+
+      it("bounds the batch it hands back", async () => {
+        for (let index = 0; index < 3; index += 1) {
+          await recordPostings(prisma, {
+            userId,
+            runId: await aRun(),
+            seenAt: FIRST_SIGHTING,
+            postings: [aPosting()],
+          })
+        }
+
+        expect(
+          await listUnmatchedPostingIds(prisma, userId, RESUME_ID, 2)
+        ).toHaveLength(2)
+        // A caller that asked for nothing is asking no question, and must not
+        // be answered with the whole table.
+        expect(
+          await listUnmatchedPostingIds(prisma, userId, RESUME_ID, 0)
+        ).toEqual([])
+      })
+
+      it("cannot be written through another user's id", async () => {
+        const posting = await aScoredPosting()
+        const stranger = await ensureUserForAuth(prisma, `auth_${randomUUID()}`)
+
+        expect(
+          await recordPostingMatch(prisma, {
+            userId: stranger.id,
+            postingId: posting.postingId,
+            score: 5,
+            reason: "Somebody else's row.",
+            gaps: [],
+            resumeId: RESUME_ID,
+            matchedAt: MATCHED_AT,
+          })
+        ).toBe(false)
+
+        expect((await readBack(posting.postingId))?.matchScore).toBe(82)
+      })
     })
 
     it("does not drag the last-seen values backwards for an older sighting", async () => {
@@ -761,7 +1083,9 @@ describeWithDatabase("against a real database", () => {
         })
 
         expect(await postingPayload(prisma, userId, posting.postingId)).toEqual(
-          { payload: posting.payload, lastSeenRunId: runId }
+          // `match: null` because a Run cannot write one — the worker holds no
+          // grant on the resumes it would be scored against. See `0011`.
+          { payload: posting.payload, lastSeenRunId: runId, match: null }
         )
       })
 
@@ -810,7 +1134,11 @@ describeWithDatabase("against a real database", () => {
         })
 
         expect(await postingPayload(prisma, userId, posting.postingId)).toEqual(
-          { payload: { matchReason: "rewritten" }, lastSeenRunId: refound }
+          {
+            payload: { matchReason: "rewritten" },
+            lastSeenRunId: refound,
+            match: null,
+          }
         )
       })
     })
@@ -1081,7 +1409,13 @@ describeWithDatabase("against a real database", () => {
       it("answers page one for a user with nothing", async () => {
         const empty = await page(await freshUser())
 
-        expect(empty).toEqual({ rows: [], total: 0, page: 1, pageCount: 1 })
+        expect(empty).toEqual({
+          rows: [],
+          total: 0,
+          hidden: 0,
+          page: 1,
+          pageCount: 1,
+        })
       })
 
       it("shows no row twice across a boundary when the sort column ties", async () => {
@@ -1114,6 +1448,192 @@ describeWithDatabase("against a real database", () => {
           new Set(tied.map((posting) => posting.postingId))
         )
       })
+
+      /**
+       * The title filter, against the generated column rather than against a
+       * belief about it.
+       *
+       * ⚠️ **This is the half of the rule that only Postgres can answer.**
+       * `normalizeTitle()` in `@workspace/job-search` is unit-tested next door,
+       * but `title_normalized` is `GENERATED ALWAYS … STORED` in `0010` and
+       * restates that rule in SQL — so whether the two agree is a property of
+       * this database and of nothing a fake could be made to disagree with.
+       * Every case below is one where a naive substring filter gets a
+       * different answer.
+       */
+      describe("filtering by a word in the title", () => {
+        const TITLED = [
+          "Senior Backend Engineer",
+          "Backend Engineer",
+          "Seniority Partners Analyst",
+          "HTML Developer",
+          "Staff/Senior Platform Engineer",
+        ] as const
+
+        let filteredId: string
+
+        beforeAll(async () => {
+          filteredId = await freshUser()
+
+          await recordPostings(prisma, {
+            userId: filteredId,
+            runId: await aRun(),
+            seenAt: FIRST_SIGHTING,
+            postings: TITLED.map((title) => aPosting({ title })),
+          })
+        })
+
+        it("removes a whole-word match wherever the punctuation falls", async () => {
+          const result = await page(filteredId, {
+            order: "title",
+            direction: "asc",
+            excludeTitlePatterns: [" senior "],
+          })
+
+          // "Staff/Senior Platform Engineer" goes because the slash flattens to
+          // a space — the case a `LIKE '% senior %'` on the raw title misses.
+          expect(titles(result).sort()).toEqual([
+            "Backend Engineer",
+            "HTML Developer",
+            "Seniority Partners Analyst",
+          ])
+        })
+
+        it("keeps a row where the word is only a substring", async () => {
+          // The whole reason the column is padded. A substring filter would
+          // take "Seniority Partners Analyst" out with the senior roles, and
+          // `ml` would empty the table of every HTML role — silently, because
+          // the row simply would not be there to notice.
+          const bySubstring = await page(filteredId, {
+            excludeTitlePatterns: [" ml "],
+          })
+
+          expect(titles(bySubstring)).toContain("HTML Developer")
+          expect(bySubstring.total).toBe(TITLED.length)
+          expect(bySubstring.hidden).toBe(0)
+        })
+
+        it("counts the filtered set, and reports what it left out", async () => {
+          const result = await page(filteredId, {
+            pageSize: 2,
+            excludeTitlePatterns: [" senior "],
+          })
+
+          // ⚠️ `total` and `pageCount` describe the rows actually shown — a
+          // total that counted hidden rows would paginate past the end — while
+          // `hidden` is the separate fact the table has to say out loud.
+          expect(result.total).toBe(3)
+          expect(result.pageCount).toBe(2)
+          expect(result.hidden).toBe(2)
+        })
+
+        it("takes several patterns as any-of", async () => {
+          const result = await page(filteredId, {
+            excludeTitlePatterns: [" senior ", " html developer "],
+          })
+
+          expect(titles(result).sort()).toEqual([
+            "Backend Engineer",
+            "Seniority Partners Analyst",
+          ])
+        })
+
+        it("filters nothing, and counts nothing hidden, without patterns", async () => {
+          for (const patterns of [undefined, []]) {
+            const result = await page(filteredId, {
+              ...(patterns ? { excludeTitlePatterns: patterns } : {}),
+            })
+
+            expect(result.total).toBe(TITLED.length)
+            expect(result.hidden).toBe(0)
+          }
+        })
+
+        it("still scopes to the user asking", async () => {
+          // The exclusion is added beside `where: { userId }`, never in place
+          // of it — a filter must not become the ownership check.
+          const stranger = await page(await freshUser(), {
+            excludeTitlePatterns: [" senior "],
+          })
+
+          expect(stranger.rows).toEqual([])
+          expect(stranger.total).toBe(0)
+        })
+      })
+    })
+  })
+
+  describe("posting filters", () => {
+    it("reads an empty list for a user who has never saved one", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      // A missing row and an empty list are different things — the first is
+      // still `undefined` — but both filter nothing, which is what lets every
+      // enforcer read `titleExclusions` and never branch.
+      expect(await postingFilters(prisma, fresh.id)).toBeUndefined()
+      expect(await titleExclusions(prisma, fresh.id)).toEqual([])
+    })
+
+    it("creates the row on the first save and reads it back", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      const saved = await savePostingFilters(prisma, fresh.id, {
+        titleExclusions: ["senior", "tech lead"],
+      })
+
+      expect(saved.userId).toBe(fresh.id)
+      expect(await titleExclusions(prisma, fresh.id)).toEqual([
+        "senior",
+        "tech lead",
+      ])
+    })
+
+    it("replaces the list on a second save rather than adding to it", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      await savePostingFilters(prisma, fresh.id, {
+        titleExclusions: ["senior", "principal"],
+      })
+      await savePostingFilters(prisma, fresh.id, { titleExclusions: [] })
+
+      // A save is the whole setting, not a patch of it, so clearing the field
+      // is an ordinary save and not its own operation.
+      expect(await titleExclusions(prisma, fresh.id)).toEqual([])
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".posting_filters where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.count).toBe("1")
+    })
+
+    it("refuses a list longer than the bound", async () => {
+      const fresh = await prisma.user.create({ data: {} })
+
+      // The backstop for every path that does not go through the form, which
+      // is where `MAX_TITLE_EXCLUSIONS` produces the message a user reads.
+      await expect(
+        savePostingFilters(prisma, fresh.id, {
+          titleExclusions: Array.from({ length: 51 }, (_, at) => `term${at}`),
+        })
+      ).rejects.toThrow()
+    })
+
+    it("goes when the user does", async () => {
+      // Cascades, unlike almost everything else here: a preference with no
+      // independent existence must not make a user undeletable.
+      const fresh = await prisma.user.create({ data: {} })
+      await savePostingFilters(prisma, fresh.id, {
+        titleExclusions: ["senior"],
+      })
+
+      await prisma.user.delete({ where: { id: fresh.id } })
+
+      const { rows } = await admin.query<{ count: string }>(
+        `select count(*)::text as count from "${SCHEMA}".posting_filters where user_id = $1`,
+        [fresh.id]
+      )
+      expect(rows[0]?.count).toBe("0")
     })
   })
 

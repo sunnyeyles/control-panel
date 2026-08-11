@@ -18,8 +18,8 @@ export interface DatabaseConfig {
  * re-provision them; it consumes what the integration sets. Both point at the
  * same database and differ only in which endpoint they terminate on.
  */
-export const DATABASE_URL = "DATABASE_URL"
-export const DATABASE_URL_UNPOOLED = "DATABASE_URL_UNPOOLED"
+const DATABASE_URL = "DATABASE_URL"
+const DATABASE_URL_UNPOOLED = "DATABASE_URL_UNPOOLED"
 
 /**
  * The connection the application uses at runtime — the **pooled** endpoint.
@@ -45,13 +45,33 @@ export function readDatabaseConfig(
 // A line comment, not a doc block: TypeScript attaches a leading `/** */` to the
 // next declaration, which would make this the hover text for `required()`.
 
+/**
+ * The prefix Vercel's Neon integration writes its variables under.
+ *
+ * The integration provisions `storage_DATABASE_URL` rather than the bare name,
+ * and the value is an `integration-store-secret` reference that Vercel resolves
+ * per deployment — which is what lets a preview deployment reach *its own* Neon
+ * branch instead of main's. A hand-added plain `DATABASE_URL` shadows it and
+ * pins every preview to whichever branch that value names, which is the state
+ * this repo was in: CI applied each pull request's migrations to
+ * `preview/<branch>` (`.github/workflows/migrate.yml`) while the deployed app
+ * connected to main and never saw them.
+ *
+ * Read as a fallback rather than as the primary name so nothing changes for an
+ * environment that sets the bare name, and so a local `.env.local` — which the
+ * integration knows nothing about — keeps working.
+ */
+const INTEGRATION_PREFIX = "storage_"
+
 function required(env: NodeJS.ProcessEnv, name: string): string {
-  const value = env[name]?.trim()
+  // `||`, not `??`: an empty or whitespace-only bare name should fall through to
+  // the integration's value rather than count as "set" and then throw below.
+  const value = env[name]?.trim() || env[`${INTEGRATION_PREFIX}${name}`]?.trim()
   if (value) return value
 
   throw new Error(
-    `${name} is not set. @workspace/db reads ${DATABASE_URL} for the application (the pooled endpoint) ` +
+    `${name} is not set (nor ${INTEGRATION_PREFIX}${name}). @workspace/db reads ${DATABASE_URL} for the application (the pooled endpoint) ` +
       `and ${DATABASE_URL_UNPOOLED} for migrations (the direct endpoint, because the pooler breaks ` +
-      `session-level advisory locks). Vercel's Neon integration provisions both.`
+      `session-level advisory locks). Vercel's Neon integration provisions both, under ${INTEGRATION_PREFIX}.`
   )
 }

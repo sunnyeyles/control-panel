@@ -1,5 +1,12 @@
-import { PostingSchema } from "@workspace/agents/findings"
-import { postingPayload, type PrismaClient } from "@workspace/db"
+import { StoredPostingSchema } from "@workspace/agents/stored-posting"
+import {
+  postingPayload,
+  type PrismaClient,
+  type StoredPostingPayload,
+} from "@workspace/db"
+import { z } from "zod"
+
+import { formatUtcDateTime } from "@/lib/format-dates"
 
 /**
  * The part of a Posting that only the expanded row shows.
@@ -35,6 +42,42 @@ export interface PostingDetailView {
   matchReason?: string
   /** Lines copied from the advertisement. Empty when it carried none. */
   highlights: string[]
+  /**
+   * What the advertisement said about years of experience, in its own words.
+   *
+   * Absent when it stated none, which is the ordinary case — every producer is
+   * instructed to copy the phrase or omit the field, never to work one out from
+   * the seniority in the title. Goes with `summary` when the payload no longer
+   * parses, for the reason above.
+   */
+  experience?: string
+  /**
+   * The score against the user's resume, with the words behind it.
+   *
+   * ⚠️ **Read from the row's own columns, not from `payload`** — so it survives
+   * a payload the schema has stopped matching, exactly as `title` and `url` do
+   * in `list-postings.ts`. A drifted advertisement still has a real score.
+   *
+   * Absent when nobody has scored this Posting yet. The score itself is on
+   * {@link PostingView} too, because a column sorts on it; what is only here is
+   * the reason and the gaps, which are prose and would otherwise ship with all
+   * twenty-five rows of every page render.
+   */
+  match?: PostingMatchView
+}
+
+/** One match, as the expanded panel renders it. */
+export interface PostingMatchView {
+  /** 0–100. A CHECK on the column holds the bound. */
+  score: number
+  reason: string
+  /**
+   * The requirements the advertisement stated that the CV does not evidence.
+   * Empty is a real answer and means the resume evidenced everything stated.
+   */
+  gaps: string[]
+  /** When it was scored, formatted UTC on the server. */
+  matchedAt: string
 }
 
 /**
@@ -65,19 +108,58 @@ export async function loadPostingDetail(
 
   if (!row) return undefined
 
-  const parsed = PostingSchema.safeParse(row.payload)
+  // Independent of the parse below, deliberately: the match lives in columns of
+  // its own, written by a Server Action rather than by whatever produced the
+  // payload, so an advertisement whose stored JSON has drifted still has a real
+  // score to show. Same rule `toView` in `list-postings.ts` follows for `url`.
+  const match = toMatchView(row.match)
+
+  const parsed = StoredPostingSchema.safeParse(row.payload)
 
   if (!parsed.success) {
     // Once, and naming the row: a payload the schema stopped matching is a
     // contract drift, and the panel that renders this says only "could not be
     // read". Without this line the drift is invisible from the server side.
     console.error("postings: could not read the stored payload for", postingId)
-    return { highlights: [] }
+    return { highlights: [], ...(match ? { match } : {}) }
   }
 
   return {
     summary: parsed.data.summary,
     matchReason: parsed.data.matchReason,
     highlights: parsed.data.highlights ?? [],
+    ...(parsed.data.experience ? { experience: parsed.data.experience } : {}),
+    ...(match ? { match } : {}),
+  }
+}
+
+/**
+ * The stored match, narrowed to what the panel renders.
+ *
+ * ⚠️ **`gaps` is parsed rather than cast.** `@workspace/db` keeps it `unknown`
+ * on purpose — it must not depend on the agent stack to say what shape a
+ * producer's JSON has — so this is the seam where that shape is asserted, and
+ * the same degradation rule applies as everywhere else on this page: a column
+ * that will not read costs the gaps list and not the score. An empty list and an
+ * unreadable one render identically, which is honest here in a way it is not for
+ * a summary: an empty gaps list is the common, meaningful answer.
+ *
+ * Every `Date` becomes a string on the server, for the reason
+ * `list-postings.ts` gives at length — a `Date` formatted in the browser uses
+ * the browser's locale and zone, and React reports the disagreement as a
+ * hydration mismatch rather than as the timezone bug it is.
+ */
+function toMatchView(
+  match: StoredPostingPayload["match"]
+): PostingMatchView | undefined {
+  if (match === null) return undefined
+
+  const gaps = z.array(z.string()).safeParse(match.gaps)
+
+  return {
+    score: match.score,
+    reason: match.reason,
+    gaps: gaps.success ? gaps.data : [],
+    matchedAt: formatUtcDateTime(match.matchedAt),
   }
 }

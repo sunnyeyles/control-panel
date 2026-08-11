@@ -17,6 +17,7 @@ import { runWithLangfuseTrace } from "@workspace/langfuse"
 
 import {
   parseJobSearchConfig,
+  partitionByExcludedTitle,
   scoutLlmCallBudget,
   toSearchBrief,
 } from "@workspace/job-search"
@@ -83,6 +84,20 @@ interface RunReportFields {
 export interface SuccessReport extends RunReportFields {
   outcome: "success"
   postings: number
+  /**
+   * Postings dropped because their title carried one of the user's excluded
+   * words.
+   *
+   * ⚠️ **Not a warning, and deliberately not in {@link SuccessReport.warnings}.**
+   * The other things a run can lose — an unresolvable id, a findings write that
+   * failed — are faults, and the warning is how somebody finds out. This is the
+   * filter doing exactly what it was asked to, so it is a count.
+   *
+   * It is still reported, because it is the difference between "the market is
+   * quiet" and "your filter is eating everything", and a brief that came back
+   * thin says nothing about which. Zero on almost every run.
+   */
+  excludedPostings: number
   markdownBytes: number
   objectKey: string
   /**
@@ -97,7 +112,7 @@ export interface SuccessReport extends RunReportFields {
 }
 
 /** Anything else. `error` carries the diagnostic detail. */
-export interface FailureReport extends RunReportFields {
+interface FailureReport extends RunReportFields {
   outcome: "failure"
   error: string
 }
@@ -108,7 +123,7 @@ export interface FailureReport extends RunReportFields {
  * write a row, and it carries the diagnostics — search counts, model calls —
  * that nothing will ever query but a human will want when a brief looks thin.
  */
-export type RunReport = SuccessReport | FailureReport
+type RunReport = SuccessReport | FailureReport
 
 /**
  * Whether the tick asked for this run, or a person did.
@@ -117,7 +132,7 @@ export type RunReport = SuccessReport | FailureReport
  * someone pressing the button in the dashboard. The pipeline itself is
  * identical either way — this changes reporting and nothing else.
  */
-export type RunTrigger = "schedule" | "manual"
+type RunTrigger = "schedule" | "manual"
 
 /**
  * What a run needs to know about the occurrence it is filling.
@@ -129,7 +144,7 @@ export type RunTrigger = "schedule" | "manual"
  * the compiler helps tell. Same reasoning as {@link AgentLike}: ask for what
  * you drive.
  */
-export interface RunOccurrence {
+interface RunOccurrence {
   runId: string
   /**
    * The instant this brief is filed under — a claimed slot for a scheduled run,
@@ -164,6 +179,17 @@ export interface RunBriefingInput {
   job: Job
   slot: RunOccurrence
   briefs: BriefStore
+  /**
+   * Words that rule a posting out by its title, for the user this job belongs
+   * to.
+   *
+   * ⚠️ **An input rather than something read out of `job.config`, because it is
+   * not the job's.** The list is per *user* — `posting_filters` — and applies to
+   * every briefing they have; the caller loads it beside the job for the same
+   * reason it supplies the recorders, which is that this function talks to
+   * nothing. Absent or empty filters nothing.
+   */
+  titleExclusions?: readonly string[]
   /** Reported, never acted on. Defaults to `schedule`. */
   trigger?: RunTrigger
   /**
@@ -233,6 +259,7 @@ export async function runBriefing(
   input: RunBriefingInput
 ): Promise<SuccessReport> {
   const { job, slot, briefs, recordArtifact } = input
+  const titleExclusions = input.titleExclusions ?? []
   const startedAtMs = Date.now()
   const startedAt = new Date(startedAtMs).toISOString()
   const trace = createTracer(input.trace)
@@ -243,6 +270,7 @@ export async function runBriefing(
   let llmCalls = 0
   let searches = 0
   let searchesBySource = countBySource([])
+  let excludedPostings = 0
 
   const common = (): RunReportFields => ({
     event: "briefing-run",
@@ -299,7 +327,11 @@ export async function runBriefing(
         const scouted = await trace.step(
           "scout",
           async () => {
-            const prompt = toSearchBrief(config, slot.scheduledFor)
+            const prompt = toSearchBrief(
+              config,
+              slot.scheduledFor,
+              titleExclusions
+            )
             trace({ type: "prompt", agent: "scout", text: prompt })
 
             // Sized to the config rather than to a constant: a sweep is
@@ -406,10 +438,51 @@ export async function runBriefing(
               : `${plural(unresolved.length, "posting")} dropped — no search returned the id`
         )
 
+        /**
+         * The user's title filter, enforced.
+         *
+         * ⚠️ **Placement is the whole of this step.** It is *after* the
+         * hand-off, so a posting that is both excluded and unresolvable is
+         * reported once — as unresolvable — rather than twice; and *before* the
+         * writer, so the brief never mentions a role the user has said they do
+         * not want and no model call is spent rendering one. Everything
+         * downstream reads `kept`: the writer, `recordFindings` and the
+         * cumulative `postings` record alike, which is what makes the filter one
+         * decision rather than three places that have to agree.
+         *
+         * `config.exclude` is a different thing and stays where it is: it is
+         * rendered into the scout's brief and the model may weigh it. This is
+         * not weighed.
+         */
+        const kept = await trace.step(
+          "filter",
+          async () => {
+            const split = partitionByExcludedTitle(
+              findings.postings,
+              titleExclusions
+            )
+            excludedPostings = split.excluded.length
+
+            // Rebuilt rather than mutated, and `notes` carried through: the
+            // scout's remarks are about the *search* — a source that failed, a
+            // criterion that returned nothing — and remain true however many
+            // postings the filter took out afterwards.
+            return { ...findings, postings: split.kept }
+          },
+          // Silent when nothing was dropped, so a run with no filter reads
+          // exactly as it did before this step existed. When something was, the
+          // titles are named: "3 dropped" in a trace is the start of a question
+          // rather than the answer to one.
+          () =>
+            excludedPostings === 0
+              ? undefined
+              : `${plural(excludedPostings, "posting")} excluded by title`
+        )
+
         const written = await trace.step(
           "writer",
           async () => {
-            const prompt = toWriterPrompt(findings)
+            const prompt = toWriterPrompt(kept)
             trace({ type: "prompt", agent: "writer", text: prompt })
 
             const writer = (input.createWriter ?? createBriefWriter)()
@@ -482,7 +555,11 @@ export async function runBriefing(
           "findings",
           async () => {
             try {
-              await input.recordFindings(slot.runId, findings)
+              // `kept`, not `findings`. What is stored against the run has to
+              // be what the brief was written from — a `runs.findings` holding
+              // postings the brief never mentions would read as a writer that
+              // silently skipped them.
+              await input.recordFindings(slot.runId, kept)
             } catch (error) {
               findingsNotRecorded =
                 error instanceof Error ? error.message : String(error)
@@ -490,7 +567,7 @@ export async function runBriefing(
           },
           () =>
             findingsNotRecorded === undefined
-              ? plural(findings.postings.length, "posting")
+              ? plural(kept.postings.length, "posting")
               : `not recorded — ${findingsNotRecorded}`
         )
 
@@ -500,7 +577,7 @@ export async function runBriefing(
         // set on it — outlives every individual run through. Losing it is
         // likewise a warning: the brief is the product, and a run that produced
         // one succeeded whatever happened to the accessory record.
-        const postings = toNewPostings(findings)
+        const postings = toNewPostings(kept)
         let postingsNotRecorded: string | undefined
 
         await trace.step(
@@ -568,7 +645,8 @@ export async function runBriefing(
         return emit({
           ...common(),
           outcome: "success",
-          postings: findings.postings.length,
+          postings: kept.postings.length,
+          excludedPostings,
           markdownBytes: stored.size,
           objectKey: stored.key,
           ...(warnings ? { warnings } : {}),

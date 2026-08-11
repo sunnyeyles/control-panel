@@ -109,6 +109,7 @@ describe("the two posting shapes", () => {
     "company",
     "location",
     "postedAt",
+    "experience",
     "summary",
     "matchReason",
     "highlights",

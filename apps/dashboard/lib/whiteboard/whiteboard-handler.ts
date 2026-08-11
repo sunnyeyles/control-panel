@@ -2,7 +2,7 @@ import { toBaseMessages, toUIMessageStream } from "@ai-sdk/langchain"
 import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/current-user"
 import { boardContextSchema } from "@workspace/agent-tools/canvas-schema"
-import { createWhiteboardAgent } from "@workspace/agents/whiteboard"
+import { createWhiteboardAgent as defaultWhiteboardAgent } from "@workspace/agents/whiteboard"
 import type { WhiteboardSession } from "@workspace/agents/whiteboard"
 import { createLangfuseCallback } from "@workspace/langfuse"
 import {
@@ -44,7 +44,7 @@ import { z } from "zod"
  * `"custom"` is what makes `runtime.writer` exist inside the canvas tools; drop
  * it and every tool still succeeds while the canvas silently never changes.
  */
-export const WHITEBOARD_STREAM_MODE: ["values", "messages", "custom"] = [
+const WHITEBOARD_STREAM_MODE: ["values", "messages", "custom"] = [
   "values",
   "messages",
   "custom",
@@ -60,7 +60,7 @@ const requestBodySchema = z.object({
 
 export interface WhiteboardHandlerDeps {
   /** Agent factory — the seam a test fake plugs into. */
-  createAgent?: typeof createWhiteboardAgent
+  createWhiteboardAgent?: typeof defaultWhiteboardAgent
   /** Who is asking. Lets the handler be exercised without a live session. */
   getUser?: () => Promise<CurrentUser>
 }
@@ -85,7 +85,8 @@ function maskErrorChunks(
 export function createWhiteboardHandler(
   deps: WhiteboardHandlerDeps = {}
 ): (req: Request) => Promise<Response> {
-  const createAgent = deps.createAgent ?? createWhiteboardAgent
+  const createWhiteboardAgent =
+    deps.createWhiteboardAgent ?? defaultWhiteboardAgent
   const getUser = deps.getUser ?? getCurrentUser
 
   return async function POST(req: Request): Promise<Response> {
@@ -135,7 +136,7 @@ export function createWhiteboardHandler(
       // browser, so it has to be decided here — before any op is written — and
       // travel with every batch.
       const turnId = crypto.randomUUID()
-      const session: WhiteboardSession = createAgent({
+      const session: WhiteboardSession = createWhiteboardAgent({
         context: board.data,
         turnId,
       })

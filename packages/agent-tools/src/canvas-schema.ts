@@ -103,7 +103,7 @@ export type Layout = z.infer<typeof layoutSchema>
  * roughly ten times this size and none of the difference is something the model
  * can act on.
  */
-export const boardShapeSchema = z.object({
+const boardShapeSchema = z.object({
   id: z.string(),
   kind: shapeKindSchema,
   x: z.number(),
@@ -122,7 +122,7 @@ export type BoardShape = z.infer<typeof boardShapeSchema>
  * connects nothing the model can name, so describing it as a connection would
  * be a lie the model would then reason from.
  */
-export const boardConnectionSchema = z.object({
+const boardConnectionSchema = z.object({
   id: z.string(),
   fromId: z.string(),
   toId: z.string(),
@@ -130,7 +130,7 @@ export const boardConnectionSchema = z.object({
 })
 export type BoardConnection = z.infer<typeof boardConnectionSchema>
 
-export const viewportSchema = z.object({
+const viewportSchema = z.object({
   x: z.number(),
   y: z.number(),
   w: z.number(),
@@ -197,7 +197,7 @@ export type BoardContext = z.infer<typeof boardContextSchema>
  * is a known failure source — it reuses them, or refers to one it never made —
  * and allocating from the snapshot means numbering repairs itself each turn.
  */
-export const canvasOpSchema = z.discriminatedUnion("op", [
+const canvasOpSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("create"),
     id: z.string(),

@@ -48,16 +48,23 @@ describe("postingId", () => {
   /**
    * The cost of that conservatism, stated rather than hidden: a parameter not
    * on the list is part of the identity even when it is arguably decoration.
-   * SEEK's `type=standout` is fixed per advertisement, so it does not vary
-   * between Runs — but a site that varied one would defeat the merge, and that
-   * is the deliberate trade. Failing to merge duplicates a posting; merging two
-   * distinct postings serves the wrong role's content under the right role's
-   * id.
+   * Failing to merge duplicates a posting; merging two distinct postings serves
+   * the wrong role's content under the right role's id, so the default falls the
+   * first way.
+   *
+   * This case used to be spelled `type=standout` on SEEK, with a note that it is
+   * fixed per advertisement and so cannot vary between Runs. That was true and
+   * it was the wrong example, because it was reasoning about the only producer
+   * there was. A Run meets the actor's bare `seek.com.au/job/{id}`; a person
+   * pastes what SEEK put in their address bar, which carries `type=`, and the
+   * two would never have merged. `type` is on SEEK's per-host list now — see
+   * `job-boards.ts` — and the general rule below is asserted on a host no board
+   * claims, where it belongs.
    */
   it("keeps every parameter not on the tracking list", () => {
-    expect(postingId({ url: `${CANONICAL}?type=standout` })).not.toBe(
-      postingId({ url: CANONICAL })
-    )
+    expect(
+      postingId({ url: "https://example.com/jobs/1?type=standout" })
+    ).not.toBe(postingId({ url: "https://example.com/jobs/1" }))
   })
 
   it("treats paths as case-sensitive, because servers do", () => {
@@ -136,7 +143,49 @@ describe("postingId", () => {
     ).not.toBe(postingId({ url: "https://notlinkedin.com/jobs/view/1" }))
   })
 
-  it("still distinguishes two LinkedIn postings", () => {
+  /**
+   * The stamps that ride on a link somebody *copies*, rather than on one an
+   * actor reports.
+   *
+   * A Run only ever meets a board's canonical URL, so these were invisible until
+   * a Posting could be added by pasting a link — and then they matter twice
+   * over: the pasted link would not match the board's own answer, and the row it
+   * wrote would not merge with the same advertisement found later by a Run.
+   */
+  it.each([
+    [
+      "SEEK's advertising-product flag",
+      "https://www.seek.com.au/job/93431609",
+      "https://www.seek.com.au/job/93431609?type=standard&ref=search-standalone",
+    ],
+    [
+      "Indeed's result-page and session stamps",
+      "https://au.indeed.com/viewjob?jk=8f21c0d5aa11be32",
+      "https://au.indeed.com/viewjob?jk=8f21c0d5aa11be32&from=serp&tk=1iaq0ck9tk3ma801",
+    ],
+  ])("drops %s from a link out of the address bar", (_name, bare, pasted) => {
+    expect(postingId({ url: pasted })).toBe(postingId({ url: bare }))
+  })
+
+  /**
+   * ⚠️ `vjk` is not on Indeed's list and must not be added to it. On a search
+   * page it names the posting open in the preview pane, so it can change *which*
+   * advertisement a URL refers to — which makes it identity, not decoration, and
+   * dropping it would merge two distinct postings.
+   */
+  it("keeps Indeed's vjk, which names a posting rather than a route to one", () => {
+    const base = "https://au.indeed.com/jobs?q=engineer"
+
+    expect(postingId({ url: `${base}&vjk=aaaaaaaaaaaaaaaa` })).not.toBe(
+      postingId({ url: `${base}&vjk=bbbbbbbbbbbbbbbb` })
+    )
+  })
+
+  it("still distinguishes two SEEK and two LinkedIn postings", () => {
+    expect(postingId({ url: "https://www.seek.com.au/job/93431609" })).not.toBe(
+      postingId({ url: "https://www.seek.com.au/job/93431610" })
+    )
+
     expect(
       postingId({ url: "https://au.linkedin.com/jobs/view/x-4446494860" })
     ).not.toBe(

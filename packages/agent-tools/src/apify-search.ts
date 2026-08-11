@@ -45,8 +45,6 @@ import type {
 } from "./posting-catalog.ts"
 import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
 
-export type { BoardPosting } from "./posting-catalog.ts"
-
 /** Caps every actor run server-side, in seconds. */
 const RUN_TIMEOUT_SECONDS = 120
 
@@ -94,6 +92,61 @@ export interface ResolvedBoardSearch {
   daysOld: number
 }
 
+/**
+ * One advertisement, in the vocabulary of a stored Posting rather than of a
+ * search result.
+ *
+ * Distinct from {@link BoardPosting}, which is what a *search* renders: that one
+ * folds location, employment type and salary into a `facts` line for a two-line
+ * stanza, and this one keeps the location apart because a Posting row has a
+ * column for it. Same actor item, read for a different purpose.
+ *
+ * Every field is optional for the reason `BoardPosting`'s are: these are
+ * community-maintained scrapers, and a missing field is something to render
+ * around. What happens when the mandatory ones are missing is
+ * `board-posting.ts`'s decision, not a board's.
+ */
+export interface BoardAdvertisement {
+  /**
+   * The advertisement's own canonical link, as the actor reports it. Checked
+   * against the URL that was asked for rather than stored — see
+   * `fetchBoardPosting`.
+   */
+  url?: string
+  title?: string
+  company?: string
+  location?: string
+  /** When the board says it was listed. ISO where the actor supplies one. */
+  postedAt?: string
+  /** The board's own teaser, where it publishes one. */
+  teaser?: string
+  /** The advertisement's full text, for when there is no teaser. */
+  description?: string | null
+  /** Bullet points the advertiser wrote, reproduced rather than composed. */
+  highlights?: string[]
+}
+
+/**
+ * How a board answers "what is the advertisement at this exact URL?".
+ *
+ * ⚠️ **Optional, and LinkedIn's absence is the point.** Two of the three actors
+ * take `startUrls` and will fetch a named posting; `curious_coder/linkedin-jobs-scraper`
+ * accepts search-results URLs only and has no way to be handed a single job
+ * page. A board with no entry here is one a pasted link falls past, which is
+ * what `board-fetch.ts` in `@workspace/agents` turns into `unsupported`.
+ */
+export interface BoardUrlFetch<TItem> {
+  /**
+   * The actor input that fetches exactly this advertisement and nothing else.
+   *
+   * ⚠️ **Send no search field here.** Both actors treat `startUrls` as an
+   * alternative to a search, and adding a query beside it is how one URL becomes
+   * a crawl — which is also why every body below bounds its item count.
+   */
+  buildRequestBody(url: string): Record<string, unknown>
+  toAdvertisement(item: TItem): BoardAdvertisement
+}
+
 /** Everything a board has to say for itself. */
 export interface ApifyBoardSpec<TItem> {
   /** How prose spells the board — it appears in every message to the model. */
@@ -119,6 +172,11 @@ export interface ApifyBoardSpec<TItem> {
    */
   keepItem?(item: TItem, search: ResolvedBoardSearch): boolean
   toPosting(item: TItem): BoardPosting
+  /**
+   * How this board answers a direct link, when it can. Absent means it cannot —
+   * see {@link BoardUrlFetch}.
+   */
+  byUrl?: BoardUrlFetch<TItem>
 }
 
 /** Injected in tests. Both default to the real thing. */
@@ -130,9 +188,24 @@ export interface BoardSearchDeps {
 /**
  * A function, not a module constant, so importing a board's tool never throws.
  * Mirrors `getTavilyApiKey()` in `web-search.ts`.
+ *
+ * `purpose` completes "there is no way to …", so it reads as `search SEEK` from
+ * a board search and `read the SEEK posting at a link` from `board-posting.ts`.
  */
-function getApifyToken(board: string): string {
-  return requireEnv("APIFY_TOKEN", `search ${board}`)
+export function requireApifyToken(purpose: string): string {
+  return requireEnv("APIFY_TOKEN", purpose)
+}
+
+/**
+ * Apify's synchronous run endpoint for one actor, with the run's server-side
+ * timeout on it.
+ *
+ * Shared because the timeout is the caller's to choose and the URL is not: a
+ * board search runs on a schedule inside a Lambda and can afford
+ * {@link RUN_TIMEOUT_SECONDS}, while a person waiting on a form cannot.
+ */
+export function actorRunUrl(actorId: string, timeoutSeconds: number): string {
+  return `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items?timeout=${timeoutSeconds}`
 }
 
 /**
@@ -148,14 +221,37 @@ function getApifyToken(board: string): string {
  * This is a summary of a posting, not a rendering of one.
  */
 function teaserFor(posting: BoardPosting): string | undefined {
-  const source = [posting.teaser, posting.description]
+  return condense(posting.teaser, posting.description, MAX_TEASER_CHARS)
+}
+
+/**
+ * The teaser if the board wrote one, else the head of the advertisement,
+ * collapsed onto one line and cut to `maxChars`.
+ *
+ * Exported because `board-posting.ts` needs the same rule at a different bound:
+ * a search result has two lines to spend and a stored Posting's `summary` is
+ * read on its own, so the length differs and the rule must not. Both callers
+ * rely on the same property of this data — a job advertisement puts its
+ * substance first and closes with boilerplate — which is what makes cutting
+ * from the end safe here and unsafe on a whole web page.
+ *
+ * First non-empty rather than first non-null: an actor returns `null` for a
+ * description it did not fetch and `""` for one that came back blank, and
+ * falling through both is what makes the second source a real fallback.
+ */
+export function condense(
+  teaser: string | undefined,
+  description: string | null | undefined,
+  maxChars: number
+): string | undefined {
+  const source = [teaser, description]
     .map((value) => value?.replace(/\s+/g, " ").trim() ?? "")
     .find((value) => value.length > 0)
 
   if (!source) return undefined
 
-  return source.length > MAX_TEASER_CHARS
-    ? `${source.slice(0, MAX_TEASER_CHARS).trimEnd()}…`
+  return source.length > maxChars
+    ? `${source.slice(0, maxChars).trimEnd()}…`
     : source
 }
 
@@ -221,7 +317,7 @@ export async function apifyBoardSearch<TItem>(
 ): Promise<string> {
   const { query } = input
   const doFetch = deps.fetch ?? globalThis.fetch
-  const apiToken = deps.apiToken ?? getApifyToken(spec.board)
+  const apiToken = deps.apiToken ?? requireApifyToken(`search ${spec.board}`)
 
   const requested = input.maxResults ?? spec.defaultMaxResults
   const maxResults = clampMaxResults(requested, spec.maxResultsLimit)
@@ -239,7 +335,7 @@ export async function apifyBoardSearch<TItem>(
 
   const result = await searchApiPost({
     fetch: doFetch,
-    url: `https://api.apify.com/v2/acts/${spec.actorId}/run-sync-get-dataset-items?timeout=${RUN_TIMEOUT_SECONDS}`,
+    url: actorRunUrl(spec.actorId, RUN_TIMEOUT_SECONDS),
     token: apiToken,
     body: spec.buildRequestBody(search),
     subject,

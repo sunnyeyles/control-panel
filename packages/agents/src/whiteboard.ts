@@ -39,6 +39,11 @@ import type { ExtraToolsAgentOptions } from "./agent-options.ts"
  * fits without overlapping, what an unlabelled arrow implies — and then keep
  * that model consistent across ten or more tool calls. The mini model draws
  * boxes on top of each other and loses track of which id it just made.
+ *
+ * Exported for `evals/run.ts`, which defaults both the agent under test and the
+ * judge to it — an eval that scored a different model than the one that ships
+ * would be measuring the wrong thing. Not re-exported from `index.ts`: R3 fixes
+ * the package's surface at three names per agent, and this is not one of them.
  */
 export const WHITEBOARD_MODEL = "gpt-5.4"
 

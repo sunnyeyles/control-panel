@@ -3,6 +3,7 @@ import {
   dueJobs,
   failRun,
   finishRun,
+  titleExclusions,
   type PrismaClient,
 } from "@workspace/db"
 import type { BriefStore } from "@workspace/user-storage"
@@ -106,6 +107,11 @@ export async function runTick(
         job,
         slot,
         briefs,
+        // Read after the claim, not before: a slot another party already holds
+        // costs no query at all, and this is the only place that knows the run
+        // is really going ahead. The list is the *user's* and not the job's,
+        // which is why it is loaded here rather than parsed out of `job.config`.
+        titleExclusions: await titleExclusions(prisma, job.userId),
         ...prismaRecorders(prisma, {
           userId: job.userId,
           seenAt: slot.scheduledFor,

@@ -1,7 +1,8 @@
 import { Suspense } from "react"
 
-import { BriefingSection } from "@/components/briefings/jobs/briefing-section"
-import { BriefingSectionSkeleton } from "@/components/briefings/jobs/briefing-section-skeleton"
+import { BriefingSection } from "@/components/jobs/schedules/briefing-section"
+import { BriefingSectionSkeleton } from "@/components/jobs/schedules/briefing-section-skeleton"
+import { PostingFilterSection } from "@/components/jobs/schedules/posting-filter-section"
 import { JobTabs } from "@/components/jobs/job-tabs"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 
@@ -50,6 +51,16 @@ export default async function BriefingSchedulesPage() {
           */}
           <Suspense fallback={<BriefingSectionSkeleton cards={2} />}>
             <BriefingSection userId={user.userId} />
+          </Suspense>
+
+          {/*
+            Its own boundary, below the briefings and streamed independently:
+            it is a second unrelated query, and putting it inside the briefings'
+            boundary would hold both behind whichever landed last. Same
+            arrangement, and the same reason, as the four loads on `/jobs`.
+          */}
+          <Suspense fallback={<BriefingSectionSkeleton cards={1} />}>
+            <PostingFilterSection userId={user.userId} />
           </Suspense>
         </div>
       </div>

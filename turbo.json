@@ -26,7 +26,8 @@
     "NEON_AUTH_COOKIE_SECRET",
     "AUTH_ALLOWED_EMAILS",
     "DEV_AUTH_BYPASS",
-    "NODE_ENV"
+    "NODE_ENV",
+    "storage_*"
   ],
   "globalPassThroughEnv": ["VERCEL_OIDC_TOKEN", "NO_COLOR"],
   "tasks": {

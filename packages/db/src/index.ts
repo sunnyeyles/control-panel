@@ -35,6 +35,12 @@ export {
   saveCoverLetterInstructions,
 } from "./cover-letter-instructions.ts"
 
+export {
+  postingFilters,
+  savePostingFilters,
+  titleExclusions,
+} from "./posting-filters.ts"
+
 export { loadBoard, saveBoard } from "./boards.ts"
 
 export {
@@ -73,18 +79,24 @@ export {
 } from "./documents.ts"
 
 export {
+  countUnmatchedPostings,
   deletePostings,
   listPostingPage,
+  listUnmatchedPostingIds,
   ownedPostingIds,
   postingPayload,
-  POSTING_ORDERS,
   POSTING_STATUSES,
+  recordLinkedPosting,
+  recordPostingMatch,
   recordPostings,
   setPostingStatus,
+  type LinkedPosting,
   type NewPosting,
   type PostingDirection,
   type PostingListPage,
   type PostingListRow,
+  type PostingMatchRow,
+  type PostingMatchWrite,
   type PostingOrder,
   type PostingPageQuery,
   type SeenPostings,
@@ -102,6 +114,7 @@ export type {
   Job,
   JobConfig,
   Posting,
+  PostingFilters,
   PostingStatus,
   Run,
   RunFailure,

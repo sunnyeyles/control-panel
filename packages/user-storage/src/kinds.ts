@@ -7,7 +7,7 @@
  * lets a lifecycle rule treat resumes differently from briefs, so a kind that
  * exists on only one side gets no retention policy at all.
  */
-export const OBJECT_KINDS = {
+const OBJECT_KINDS = {
   /**
    * Markdown briefs written by the scheduled worker. Regenerated, never
    * uploaded, so exactly one file type.

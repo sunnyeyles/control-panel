@@ -4,13 +4,15 @@ import {
   BriefingStrip,
   BriefingStripSkeleton,
   type BriefingStripEntry,
-} from "@/components/briefings/briefing-strip"
-import { CoverLetterAlert } from "@/components/briefings/cover-letter-alert"
-import type { CoverLetterPromise } from "@/components/briefings/cover-letter-cell"
-import { PostingTable } from "@/components/briefings/posting-table"
-import { PostingTableSkeleton } from "@/components/briefings/posting-table-skeleton"
-import { RefreshWhileRunning } from "@/components/briefings/refresh-while-running"
-import type { TailoredResumePromise } from "@/components/briefings/use-tailored-resume"
+} from "@/components/jobs/postings/briefing-strip"
+import { AddPostingByLink } from "@/components/jobs/postings/add-posting-by-link"
+import { CoverLetterAlert } from "@/components/jobs/postings/cover-letter-alert"
+import type { CoverLetterPromise } from "@/components/jobs/postings/cover-letter-cell"
+import { PostingTable } from "@/components/jobs/postings/posting-table"
+import { PostingTableSkeleton } from "@/components/jobs/postings/posting-table-skeleton"
+import { RefreshWhileRunning } from "@/components/jobs/postings/refresh-while-running"
+import { ScorePendingMatches } from "@/components/jobs/postings/score-pending-matches"
+import type { TailoredResumePromise } from "@/components/jobs/postings/use-tailored-resume"
 import { JobTabs } from "@/components/jobs/job-tabs"
 import { requirePageUser } from "@/lib/auth/require-page-user"
 import {
@@ -50,8 +52,15 @@ export const dynamic = "force-dynamic"
  *
  * The tailored resumes added one more S3 call and not one more per row — a
  * single `ListObjectsV2` — so this did not move again for them.
+ *
+ * ⚠️ **Raised to 60 for `addPostingByLinkAction`, which is not a page load.**
+ * A Server Action posts to the route it was rendered from, so this number
+ * bounds it too — and that action fetches a page through Tavily and then makes
+ * a model call, in sequence. Thirty seconds is a plausible total for the two
+ * and therefore not a safe one; a timeout there reads to the user as a link
+ * that could not be read.
  */
-export const maxDuration = 30
+export const maxDuration = 60
 
 /**
  * Every Posting this user's briefings have ever found.
@@ -216,6 +225,14 @@ export default async function BriefingsPage({
             <code className="text-foreground">.rtf</code> can be stored but not
             yet read.
           </p>
+
+          {/*
+            Outside every `<Suspense>` below, deliberately: it depends on no
+            query, so it paints as soon as the session resolves rather than
+            waiting behind the strip or the table. Its height is fixed, which is
+            what lets `loading.tsx` reserve it exactly rather than guess.
+          */}
+          <AddPostingByLink />
 
           {/*
             One reserved strip row. The height genuinely depends on how many
@@ -412,6 +429,20 @@ async function PostingsSection({
       <Suspense fallback={null}>
         <CoverLetterAlert letters={lettersPromise} />
       </Suspense>
+
+      {/*
+        ⚠️ **Mounted only when there are rows, and it decides the rest for
+        itself.** Whether anything actually needs scoring depends on which
+        document is currently labelled Resume, and answering that here would put
+        a second document query on the render path of every page view — so the
+        component asks the action, which already has to resolve the CV before it
+        can score anything. A user whose Postings are all scored pays one cheap
+        query and renders nothing.
+
+        It is not inside a `<Suspense>` and has no server work of its own: it is
+        a client component that starts a Server Action on mount.
+      */}
+      {postings.total > 0 ? <ScorePendingMatches /> : null}
 
       <PostingTable
         page={postings}

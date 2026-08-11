@@ -23,11 +23,32 @@ model User {
 
   jobs                    Job[]
   coverLetterInstructions CoverLetterInstructions?
+  postingFilters          PostingFilters?
   postings                Posting[]
   documents               Document[]
   board                   Board?
 
   @@map("users")
+}
+
+model PostingFilters {
+  userId String @id @map("user_id") @db.Uuid
+  // Words that rule a Posting out by its title, lowercased and normalised by
+  // `parseTitleExclusions` in `@workspace/job-search` before they get here.
+  // A real `text[]` rather than JSON — unlike `jobs.config`, this package does
+  // read these: `listPostingPage` filters on them, so they are data with a
+  // shape rather than a blob it merely stores. `cardinality` is bounded by a
+  // CHECK in the migration SQL.
+  titleExclusions String[] @map("title_exclusions")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Cascades, like `CoverLetterInstructions` and `Board` and for the reason
+  // both give: a preference with no independent existence is not a record that
+  // something happened, so `Restrict` would make a user undeletable for the
+  // sake of a settings row.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("posting_filters")
 }
 
 model Document {
@@ -170,6 +191,21 @@ model Posting {
   // SQL pins it to sixteen lowercase hex characters.
   postingId       String    @map("posting_id")
   title           String
+  // ⚠️ **`GENERATED ALWAYS AS … STORED` in `0010`, and Prisma cannot say so.**
+  // It is `title` lowercased, with every run of non-alphanumerics flattened to
+  // one space and a space at each end — `" senior staff engineer remote "` —
+  // which is what turns a whole-word title filter into an ordinary `LIKE
+  // '%…%'` the database can answer while paginating. `normalizeTitle()` in
+  // `@workspace/job-search` is the other half of the rule and the two must
+  // agree.
+  //
+  // **Never write it, and do not "tidy" it into a plain column**, the same
+  // instruction this file's header gives about the partial indexes and CHECKs.
+  // Optional here only so Prisma never demands it on a create; both posting
+  // inserts are raw SQL with explicit column lists, so nothing offers it a
+  // value. A `prisma migrate dev` would try to re-derive it — migrations here
+  // are hand-authored and forward-only, and that is why.
+  titleNormalized String?   @map("title_normalized")
   company         String
   location        String
   url             String
@@ -178,29 +214,63 @@ model Posting {
   // words, so "3 days ago" is an ordinary answer and not a failure.
   //
   // Unlike the four columns above this one is *derived* rather than copied:
-  // `parsePostedAt()` in `apps/briefing-worker/src/postings.ts` is the only rule
-  // that produces it, and the backfill in `0006` restates that rule in SQL.
+  // `parsePostedAt()` in `@workspace/agents` is the only rule that produces it,
+  // and the backfill in `0006` restates that rule in SQL.
   postedAt        DateTime? @map("posted_at") @db.Timestamptz(6)
   // The validated Posting as its producer wrote it, opaque here exactly as
   // `runs.findings` and `jobs.config` are. The five columns above are the
   // projection this table sorts and displays on.
   payload         Json
-  // text + CHECK in migration SQL rather than a Postgres enum, as `runs.status`
-  // is. The only column in this schema a person writes, which is why
-  // `recordPostings` leaves it out of its `DO UPDATE SET` list.
+  // `new`, `applied`, `not-interested` or `rejected` — text + CHECK in
+  // migration SQL rather than a Postgres enum, as `runs.status` is. The only
+  // column in this schema a person writes, which is why `recordPostings`
+  // leaves it out of its `DO UPDATE SET` list.
+  //
+  // The first three are the user's own; `rejected` is the employer's answer,
+  // so it can only follow `applied`. Nothing enforces that ordering and
+  // nothing should — see `PostingStatus` in `src/types.ts`.
   status          String    @default("new")
   // NULL means nobody has ever moved it off `new`.
   statusChangedAt DateTime? @map("status_changed_at") @db.Timestamptz(6)
+  // How well this advertisement matches the candidate's own resume, 0–100, with
+  // the reason and the stated requirements it does not evidence. Distinct from
+  // `payload -> matchReason`, which is one sentence about the *criteria* a scout
+  // was handed; criteria are a lossy projection of a person, and this is the
+  // judgement against the document itself.
+  //
+  // All five are NULL together or set together — a CHECK in `0011` says so —
+  // because a score nobody can date or attribute to a document is not a score.
+  //
+  // ⚠️ Written only by the dashboard, never by a Run. They join `status` in the
+  // list `recordPostings` leaves out of its `DO UPDATE SET`, and for the same
+  // reason: a Run re-finding a scored advertisement must not blank the score.
+  matchScore      Int?      @map("match_score") @db.SmallInt
+  matchReason     String?   @map("match_reason")
+  matchGaps       Json?     @map("match_gaps")
+  // The `documents.id` the score was computed against, and deliberately not an
+  // FK — see `0011`. A value other than the user's current resume is the whole
+  // of "this needs scoring again".
+  matchResumeId   String?   @map("match_resume_id") @db.Uuid
+  matchedAt       DateTime? @map("matched_at") @db.Timestamptz(6)
   firstSeenAt     DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(6)
   lastSeenAt      DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
-  firstSeenRunId  String    @map("first_seen_run_id") @db.Uuid
-  lastSeenRunId   String    @map("last_seen_run_id") @db.Uuid
+  // NULL in either means no Run has seen this: the user added it by pasting the
+  // advertisement's link. There is no `source` column and there must not be one
+  // — see `0009` and `posting-source.ts`, which makes the same argument for the
+  // board a Posting came from.
+  //
+  // The two move independently. A Run that later finds a link-added
+  // advertisement sets `last_seen_run_id` and leaves `first_seen_run_id` NULL,
+  // because a second sighting cannot change who saw it first.
+  firstSeenRunId  String?   @map("first_seen_run_id") @db.Uuid
+  lastSeenRunId   String?   @map("last_seen_run_id") @db.Uuid
 
   user         User @relation(fields: [userId], references: [id], onDelete: Restrict)
-  firstSeenRun Run  @relation("PostingFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: Restrict)
-  lastSeenRun  Run  @relation("PostingLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: Restrict)
+  firstSeenRun Run? @relation("PostingFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: Restrict)
+  lastSeenRun  Run? @relation("PostingLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: Restrict)
 
   @@unique([userId, postingId], map: "postings_user_id_posting_id_key")
   @@index([userId, lastSeenAt(sort: Desc), postingId(sort: Desc)], map: "postings_user_last_seen_idx")
+  @@index([userId, matchScore(sort: Desc), postingId(sort: Desc)], map: "postings_user_match_idx")
   @@map("postings")
 }

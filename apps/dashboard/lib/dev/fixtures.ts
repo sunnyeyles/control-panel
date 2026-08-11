@@ -1,6 +1,7 @@
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
+import type { StoredPosting } from "@workspace/agents/stored-posting"
 /**
  * ⚠️ **Value imports use subpaths, not the barrels.** `current-user.ts` imports
  * `DEV_USER` from here and runs on every request, so the barrels would put
@@ -16,6 +17,7 @@ import type {
   PostingStatus,
   Run,
 } from "@workspace/db/types"
+import { normalizeTitle } from "@workspace/job-search"
 import { contentTypeFor } from "@workspace/user-storage/kinds"
 import type {
   NewCoverLetter,
@@ -122,6 +124,26 @@ const CORVUS: Posting = {
 }
 
 /**
+ * A Posting nobody's Run found: the user pasted its link.
+ *
+ * ⚠️ **It carries no `matchReason`, and that is the point of it being here.**
+ * There were no criteria behind a pasted link, so the field is absent — which
+ * is legal only against `StoredPostingSchema` and not against the scout's own
+ * `PostingSchema`. Under `DEV_AUTH_BYPASS` this is the row that proves a
+ * link-added Posting parses, renders "Added by link" where the others name a
+ * Briefing, and still opens a detail panel with no Match reason block.
+ */
+const HOLLOWAY: StoredPosting = {
+  title: "Backend Engineer",
+  company: "Holloway Labs",
+  location: "Remote (Australia)",
+  url: "https://boards.greenhouse.io/holloway/jobs/dev-fixture-linked",
+  postedAt: "2026-08-04",
+  summary:
+    "Small platform team, mostly TypeScript and Postgres, four-day week.",
+}
+
+/**
  * Derived rather than written out, so the letter and the Posting cannot drift —
  * the match is what draws the drafted state on the card.
  */
@@ -219,8 +241,9 @@ export function devRuns(): Run[] {
  * - **A third of the rows have no posting date**, which is what makes the
  *   Posted column's NULLS-LAST order checkable: they must sit at the bottom
  *   under *both* directions, not float to the top when it is reversed.
- * - **One row per status**, on the three hand-written Postings, so the status
- *   column is not thirty copies of `new`.
+ * - **One row per status**, on the four hand-written Postings, so the status
+ *   column is not thirty copies of `new`. Exactly one each, which is why
+ *   changing one of these four means finding the status it gave up.
  * - **Both Briefings are represented, on both pages.** The Run a row names is
  *   what the detail dialog resolves into a Briefing name, so rows alternate
  *   between the two — see the loop below.
@@ -256,10 +279,19 @@ export function devPostings(): PostingRow[] {
       runId: DEV_RUN_PAUSED_ID,
       postedOn: new Date("2026-07-30T00:00:00.000Z"),
     },
+    // No Run at all: the user added this one by pasting its link. Its status
+    // is the fourth of four and carries no further meaning — a link-added
+    // Posting is an ordinary one, and `new` is already on NORTHWIND.
+    {
+      posting: HOLLOWAY,
+      status: "not-interested",
+      runId: null,
+      postedOn: new Date("2026-08-04T00:00:00.000Z"),
+    },
   ] as const satisfies readonly {
-    posting: Posting
+    posting: StoredPosting
     status: PostingStatus
-    runId: string
+    runId: string | null
     postedOn: Date | null
   }[]
 
@@ -314,18 +346,20 @@ const DEV_POSTING_COUNT = 30
  * a wrong `orderBy` invisible.
  *
  * ⚠️ **`postedOn` is passed in rather than parsed out of `posting.postedAt`,
- * deliberately.** The rule for reading a date out of what the scout copied lives
- * in `parsePostedAt()` in `apps/briefing-worker/src/postings.ts`, and this app
- * does not depend on the worker. Restating it here would be a third copy of a
- * rule that already exists twice — the other being the SQL backfill in
- * `0006_posting_posted_at` — so the caller supplies the answer as data instead,
- * which is all a fixture ever needed to do.
+ * deliberately.** A fixture is data, and the rule for reading a date out of
+ * what a producer copied — `parsePostedAt()` in `@workspace/agents` — is
+ * already stated twice, the other being the SQL backfill in
+ * `0006_posting_posted_at`. Calling it here would put a rule in a fixture; the
+ * caller supplies the answer instead, which is all a fixture ever needed to do.
+ *
+ * `runId` is `null` for a Posting the user added by pasting its link, which is
+ * the state `0009` made legal.
  */
 function devPosting(
   index: number,
-  posting: Posting,
+  posting: StoredPosting,
   status: PostingStatus,
-  runId: string,
+  runId: string | null,
   postedOn: Date | null
 ): PostingRow {
   const lastSeenAt = new Date(RAN_AT.getTime() - index * 3_600_000)
@@ -338,6 +372,13 @@ function devPosting(
     userId: DEV_USER_ID,
     postingId: postingId(posting),
     title: posting.title,
+    // ⚠️ **Derived, unlike `postedOn` above.** `title_normalized` is a
+    // `GENERATED ALWAYS … STORED` column: Postgres computes it from `title` and
+    // nobody can write a value that disagrees, so a fixture stating one by hand
+    // would be stating something the database cannot produce. `normalizeTitle()`
+    // is the TypeScript half of that same rule, which is why calling it here is
+    // reproducing the column rather than putting a rule in a fixture.
+    titleNormalized: normalizeTitle(posting.title),
     company: posting.company,
     location: posting.location,
     url: posting.url,
@@ -349,8 +390,67 @@ function devPosting(
     statusChangedAt: status === "new" ? null : RAN_AT,
     firstSeenAt,
     lastSeenAt,
+    // NULL in both for a Posting added by link: no Run has ever seen it.
     firstSeenRunId: runId,
     lastSeenRunId: runId,
+    ...devMatch(index),
+  }
+}
+
+/**
+ * The match columns for one fixture row — a score for two rows in every three,
+ * and nothing at all for the third.
+ *
+ * ⚠️ **Both states are needed and neither is the default.** A page where every
+ * row is scored never renders the em-dash the Match column shows for an
+ * unscored advertisement, and never starts the scoring loop in
+ * `score-pending-matches.tsx`; a page where none is never renders a number, a
+ * reason or a gaps list. Two in three is what puts several of each on both
+ * pages of the fixture set.
+ *
+ * ⚠️ **`matchResumeId` is the Markdown CV, which is the *newest* document
+ * labelled Resume — so these rows read as scored against the current one.**
+ * Naming the PDF instead would make every row stale, and every page view under
+ * the flag would spend a real model call re-scoring thirty advertisements.
+ *
+ * All five together or none, which is what `postings_match_complete_check`
+ * enforces in Postgres and what this returns as one object rather than five
+ * fields for.
+ */
+function devMatch(
+  index: number
+): Pick<
+  PostingRow,
+  "matchScore" | "matchReason" | "matchGaps" | "matchResumeId" | "matchedAt"
+> {
+  if (index % 3 === 0) {
+    return {
+      matchScore: null,
+      matchReason: null,
+      matchGaps: null,
+      matchResumeId: null,
+      matchedAt: null,
+    }
+  }
+
+  // Spread across the bands the assessor's prompt names, so the column is not
+  // thirty numbers in the seventies — and so sorting by it visibly reorders the
+  // page rather than nearly preserving it.
+  const score = 31 + ((index * 17) % 69)
+
+  return {
+    matchScore: score,
+    matchReason:
+      score >= 70
+        ? "Your CV evidences the stack this role names and the seniority it asks for, with the domain the closest thing to a stretch."
+        : "Adjacent rather than direct: the tools overlap, but the CV does not show the scale or the specialism this advertisement leads with.",
+    // An empty list on some rows, because that is a real answer — the CV
+    // evidenced everything stated — and the panel renders it by showing no
+    // heading at all.
+    matchGaps:
+      score >= 70 ? [] : ["Kubernetes in production", "Team leadership"],
+    matchResumeId: DEV_DOCUMENT_IDS.markdownCv,
+    matchedAt: new Date(RAN_AT.getTime() - index * 60_000),
   }
 }
 
@@ -471,7 +571,7 @@ export function devCoverLetterInstructions(): CoverLetterInstructions[] {
 /**
  * ⚠️ **A Document is two fixtures, and they have to agree.**
  *
- * {@link devResumes} is the bytes in the fake bucket; {@link devDocuments} is
+ * {@link devUploads} is the bytes in the fake bucket; {@link devDocuments} is
  * the row in the fake database, and the row is what the application reads. The
  * `id` of a row is the `resumeId` of its object — that is the real key
  * relationship, not a convention of the fixtures — so a row without a matching
@@ -490,7 +590,7 @@ const DEV_DOCUMENT_IDS = {
  * read back as text, so the Markdown CV is what makes drafting work end to end;
  * the PDF is here because its refusal has a UI.
  */
-export function devResumes(): NewResume[] {
+export function devUploads(): NewResume[] {
   return [
     {
       userId: DEV_USER_ID,

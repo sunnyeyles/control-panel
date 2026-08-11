@@ -248,13 +248,109 @@ than minting two. Runs are provenance, recorded as `first_seen_run_id` and
 `last_seen_run_id` instead of as part of the key. The row accumulates across
 every Run of every **Briefing** the user owns, which is what lets a **Posting
 Status** outlive the Run that found the advertisement.
+
+**A Posting need not come from a Run at all.** Pasting an advertisement's link
+on `/jobs` adds one directly — from the **Job Board**'s own actor where the board
+is SEEK or Indeed, and otherwise read by the **Posting Extractor** off a page the
+fetcher retrieved — and there is no Run behind it to name, so both run columns
+are nullable and **NULL means the user added it by link**. That absence is the
+whole of how the two are told apart: there is no `source` column and there must
+not be one, for the reason `posting-source.ts` gives about the **Job Board** a
+Posting came from. The two columns move independently, so a Run that later finds
+a link-added advertisement sets `last_seen_run_id` and leaves `first_seen_run_id`
+NULL — which reads, correctly, as "you found this one yourself". A link may
+create a Posting and may never revise one: `recordLinkedPosting` is
+`ON CONFLICT DO NOTHING`, so it cannot walk back a **Posting Status**, blank a
+Run's provenance, or replace a Run-written payload with a thinner one.
+
+The payload of a link-added Posting carries **no `matchReason`** — it was
+matched against no criteria, and inventing one would be a fabrication — which is
+why `StoredPostingSchema` exists beside `PostingSchema`. The first is what a
+stored row may hold, the second is what a **Scout** must produce, and only the
+first is optional in that field.
+
+**A Posting also carries the experience its advertisement asked for, in the
+advertisement's own words.** `experience` is free text — "5+ years", "at least 3
+years in a similar role" — and never a number, exactly as `postedAt` is free
+text and never a date: whoever produced the Posting copied a phrase or left the
+field out, and is instructed never to read one off the seniority in the title.
+Most advertisements state none, so absent is the ordinary answer. The one
+producer with no model behind it is the **Job Board** path, where
+`findExperienceStatement()` reads the phrase off what the board published — and
+that rule is applied there and nowhere else, because a pattern running on top of
+a model that was shown the advertisement would be a second rule producing the
+same field.
 _Avoid_: job, listing, vacancy, opening
 
+**Match**:
+How well one **Posting** fits the person reading it, as a score from 0 to 100
+with the reason behind it and the requirements it does not answer. Held in five
+columns on `postings` — `match_score`, `match_reason`, `match_gaps`,
+`match_resume_id`, `matched_at` — all NULL together or all set together, which a
+CHECK enforces.
+
+**Distinct from a Posting's `matchReason`, and neither replaces the other.**
+`matchReason` is one sentence a **Scout** wrote about the **Search Criteria** it
+was handed; criteria are a lossy projection of a person, so "why this fits your
+search" is not an answer to "should I apply". A Match is the judgement against
+the **Document** the user labelled Resume, which is. A Posting added by link has
+a Match and no `matchReason` at all.
+
+**Only the dashboard writes one**, and the reason is a boundary rather than a
+preference: the briefing worker's IAM role grants the `briefs` shelf and nothing
+else, so the one process that finds an advertisement structurally cannot read
+the CV it would be scored against. The consequence is stated plainly in the UI —
+a **Briefing** that runs overnight leaves its Postings unscored until somebody
+opens `/jobs`, where a bounded loop works through the backlog.
+
+The five columns join **Posting Status** in the list `recordPostings` leaves out
+of its `DO UPDATE SET`, and for the same reason: a Run re-finding a scored
+advertisement must not blank the score.
+
+`match_resume_id` names the `documents.id` the score was computed against, and
+is the whole of how a score goes stale — a value other than the user's current
+resume means the Match describes a document they have replaced, and the row is
+scored again.
+_Avoid_: fit, rating, relevance, rank
+
+**Match Assessor**:
+The agent that produces a **Match**. Tool-less, like the **Letter Writer** and
+the **Resume Tailor**, and for the identical reason: it holds the candidate's CV
+and an advertisement side by side, the advertisement is written by whoever paid
+to place it, and copied bullet points reach the prompt verbatim. An agent that
+can both read a CV and issue an outbound request can be induced to put one
+inside the other. Having no tools is what makes quoting the advertisement
+acceptable — injected text can move a number the user then reads beside the
+advertisement that moved it, and can reach nothing else.
+
+It credits only what the resume names and penalises only what the advertisement
+states, so a thin advertisement is an easy match rather than a bad one, and a
+gap is always a requirement that was actually asked for.
+_Avoid_: scorer, matcher, ranker
+
 **Posting Status**:
-Where the user has got to with one **Posting**: `new`, `applied` or `rejected`,
-held in `postings.status` behind a CHECK that admits nothing else. **`new` is
-the only one discovery writes** — it is the column's default, and `status` is
-the one column in this schema a _person_ writes.
+Where the user has got to with one **Posting**: `new`, `applied`,
+`not-interested` or `rejected`, held in `postings.status` behind a CHECK that
+admits nothing else. **`new` is the only one discovery writes** — it is the
+column's default, and `status` is the one column in this schema a _person_
+writes.
+
+**Who acts is not the same across the four, and the words only read correctly
+if you know that.** `applied` and `not-interested` are decisions the user takes
+about the advertisement — one to pursue it, one to pass on it. `rejected` is
+the **employer's** answer to an application already sent, so it can only
+sensibly follow `applied`. Nothing enforces that ordering and nothing should: a
+person may revise any of these in any direction, including back to `new`, and
+the CHECK says which words exist rather than which move to which.
+
+`not-interested` is the one that stops a decision being lost. Without it,
+passing on an advertisement leaves the row at `new` — indistinguishable from
+one nobody has opened — and deleting it does not settle the question either,
+because the next Run to re-find the advertisement inserts it again at `new`.
+
+Spelled with a hyphen, not `not_interested`: that is how this schema already
+spells a multi-word CHECK value, as `documents.doc_type` does with
+`cover-letter`.
 
 **A Run must never overwrite the other two**, and that is the whole feature. It
 lives in one place: the `DO UPDATE SET` list of `recordPostings`, which omits
@@ -303,8 +399,10 @@ The platform stores that column and never reads inside it, so the meaning lives
 with whatever runs the job.
 
 Titles and locations are required, and with **keywords** — optional to the
-worker, collected anyway — they are what the new-briefing form takes; exclusions,
-preferred boards and the cap reach a row only by hand. Naming no keywords leaves
+worker, collected anyway — they are what the new-briefing form takes; `exclude`,
+preferred boards and the cap reach a row only by hand. `exclude` is a hint the
+scout may weigh and is **not** the **Title Filter** below, which is enforced and
+belongs to the user rather than to the job. Naming no keywords leaves
 the field _absent_ from `config` rather than present and empty, so "never said"
 stays distinguishable from "said none".
 
@@ -313,6 +411,70 @@ form**. It writes nothing: a suggestion is a value the fields render, and the ro
 is still written by the user pressing Create. That is what makes "the user saw
 these before they were saved" a property of the path rather than a promise the
 interface makes — there is no write on it to review after.
+
+Every criterion here is inclusive — each one widens a search. The subtractive one
+is the **Title Filter**, and it is not part of this: it belongs to the **User**
+rather than to a **Job**.
+
+**Title Filter**:
+Words that rule a **Posting** out by its title. One list per **User**, in
+`posting_filters.title_exclusions`, edited on `/jobs/schedules` and applying to
+every **Briefing** that user has.
+
+**Enforced, not requested, and that is the whole difference from `exclude`.**
+`jobs.config -> 'exclude'` is a **Search Criterion**: it is rendered into the
+scout's brief and the model may weigh it. This is applied twice as a rule the
+model has no part in — the worker drops a matching posting after the hand-off and
+before the **Brief Writer** sees it, so nothing new arrives; and the Postings
+table leaves out a matching row it already holds, so nothing old lingers. The
+scout is told about it as well, which buys fewer wasted searches and no
+correctness at all.
+
+Matching is **whole-word and case-insensitive, against the title only**:
+`senior` rules out "Senior Backend Engineer" and never "Seniority Partners". The
+rule is `normalizeTitle()` in `@workspace/job-search` and, restated in SQL, the
+`postings.title_normalized` generated column — both sides lowercase the text,
+flatten punctuation to single spaces and pad the result, which is what turns
+whole-word matching into a substring test a paginated query can answer.
+
+**Hiding is never silent**, which is the property the feature would otherwise
+break: the Postings table says how many rows the filter removed, the **Run
+Report** carries `excludedPostings`, and pasting a link for a posting the filter
+would hide is refused rather than added invisibly. Nothing is deleted — clearing
+the list brings every row back with the **Posting Status** it had.
+_Avoid_: blocklist, blacklist, mute
+
+**Posting Extractor**:
+The agent that reads one retrieved web page and reports the **Posting** in it,
+for a link the user pasted. Has no tools, and here that is the strongest
+containment case in the repo after the **Profile Extractor**'s — it reads a page
+fetched from a host the user merely named, which is the least trusted input
+anywhere in the system, and it reads it verbatim because summarising a page
+before extracting from it would be doing the extraction twice.
+
+**It is never shown the URL and cannot return one.** The platform already holds
+the link; a page is full of others — an apply button, a related role, the
+company's own site — and one copied into the row would be stored as though it
+were the advertisement. That is the **Scout**'s rule (see `resolve-postings.ts`)
+applied to a second path, and here it is structural twice over: the prompt
+carries no URL, and the answer schema has no field for one.
+
+Its answer is a union rather than a shape, so a refusal is data: a
+search-results page, a careers index, an article or a sign-in wall come back as
+`not-a-posting` with a reason the user is shown. Returning a Posting assembled
+out of a page that contains none is the failure that branch exists to prevent.
+
+The page reaches it through `extractPage` in `@workspace/agent-tools`, which is
+**deliberately not a tool** — a plain function, absent from `allTools`, carried
+by no agent. Retrieval is delegated to Tavily, so nothing in this system opens a
+socket to a host somebody typed into a form.
+
+**It is not reached at all for a link a Job Board can answer.** SEEK's and
+Indeed's actors take a single advertisement's URL and return its fields, so
+`board-fetch.ts` builds the Posting from what the board published and no model
+runs. This agent is the path for everything else — including LinkedIn, whose
+actor accepts search-results URLs only.
+_Avoid_: scraper, page reader, link parser
 
 **Profile Extractor**:
 The agent that reads the candidate's CV and proposes **Search Criteria** out of
@@ -515,8 +677,8 @@ Two independent mechanisms produce one, and they do not feed each other:
   harness passes one and renders it.
 - **Langfuse** receives a trace per agent invocation over OpenTelemetry —
   `generate-briefing` from the worker, and `chat-response`, `cover-letter`,
-  `search-criteria`, `tailored-resume` and `whiteboard-turn` from the dashboard
-  — through `@workspace/langfuse`. Only the first is a **Run**; the dashboard
+  `posting-extract`, `search-criteria`, `tailored-resume` and `whiteboard-turn`
+  from the dashboard — through `@workspace/langfuse`. Only the first is a **Run**; the dashboard
   traces are things a person clicked, and no `runs` row is minted for any of
   them, so the trace is the only place their prompt survives. Missing keys make
   it a no-op rather than an error, so this too is a thing a runtime opts into.

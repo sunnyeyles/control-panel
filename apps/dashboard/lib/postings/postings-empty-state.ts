@@ -18,7 +18,8 @@
  * briefings have not run yet" are different situations with different next
  * steps, and the old single message could only address one of them.
  */
-export type PostingsEmptyState = "no-briefings" | "no-runs" | "no-postings"
+export type PostingsEmptyState =
+  "no-briefings" | "no-runs" | "no-postings" | "all-filtered"
 
 /**
  * What the strip above the table knows: how many briefings this user has, and
@@ -42,8 +43,16 @@ export interface BriefingCounts {
  * "nothing found yet".
  */
 export function postingsEmptyState(
-  counts: BriefingCounts | undefined
+  counts: BriefingCounts | undefined,
+  hidden = 0
 ): PostingsEmptyState {
+  // ⚠️ **First, ahead of every other cause.** A user whose filters removed
+  // every row has postings — the table is empty because they asked for it —
+  // and telling them "your briefings found nothing, widen your criteria" would
+  // send them to fix a search that is working. It is also the only state with
+  // an undo, which is the thing worth saying.
+  if (hidden > 0) return "all-filtered"
+
   if (counts === undefined) return "no-postings"
   if (counts.briefings === 0) return "no-briefings"
   if (counts.runs === 0) return "no-runs"
@@ -62,4 +71,6 @@ export const POSTINGS_EMPTY_MESSAGES: Record<PostingsEmptyState, string> = {
     "None of your briefings has run yet. Use Run now above, or wait for the next scheduled run.",
   "no-postings":
     "No postings yet. Your briefings have run and found nothing matching their search criteria — you can widen those in Schedules.",
+  "all-filtered":
+    "Every posting you have is hidden by your title filters. Edit or clear them in Schedules to see them again — nothing has been deleted.",
 }

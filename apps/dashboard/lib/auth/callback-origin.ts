@@ -24,6 +24,21 @@
  * side effect: the session cookie is set for the origin OAuth returns to, and
  * the alias is the origin that stays valid for the next push.
  *
+ * **Nothing here adds that entry, and for a year nothing did.** One command per
+ * branch is a treadmill slow enough to walk and still a treadmill: the list
+ * reached 103 entries of which three were branch aliases, and every open pull
+ * request's preview was refused. `.github/workflows/preview-auth-domain.yml`
+ * now runs the command on `pull_request` and removes the entry when the pull
+ * request closes, so this module's half of the arrangement can be relied on.
+ *
+ * **Which allowlist that entry lands on depends on where the deployment's
+ * `NEON_AUTH_BASE_URL` points.** Once a preview reaches the auth instance Neon
+ * provisions for its own branch — see `requiredFromIntegration` in
+ * `lib/auth/server.ts` — the integration maintains that instance's list itself,
+ * adding both this alias and the per-deployment host, and the workflow has
+ * nothing left to do. It stays because production and any deployment still
+ * falling back to main's instance are checked against main's list.
+ *
  * A wildcard entry is not the alternative. Neon wildcards a whole hostname
  * segment (`https://*.example.com`), and Vercel varies the hash *inside* the
  * first label, so the only pattern that would match is `https://*.vercel.app` —

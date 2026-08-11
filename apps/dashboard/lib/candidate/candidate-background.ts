@@ -70,6 +70,18 @@ export type CandidateBackground =
       background: string
       /** What it was called, for a message that names the document actually used. */
       displayName: string
+      /**
+       * Which document this text came out of — `documents.id`, the same uuid
+       * that is the object's key segment.
+       *
+       * ⚠️ **Carried because a match has to be attributable to a document, and
+       * that is the whole of how a score goes stale.** `postings.match_resume_id`
+       * stores it; a value other than this one means the score describes a CV the
+       * user has since replaced. Every other caller ignores the field — a letter
+       * is written once and read immediately, so nothing about it needs to be
+       * re-derivable later.
+       */
+      documentId: string
     }
   | { ok: false; reason: NoBackgroundReason }
 
@@ -121,7 +133,7 @@ export async function loadCandidateBackground(
     // ownership again underneath; this is what makes that check a second line
     // rather than the only one.
     userId,
-    resumeId: newest.resumeId,
+    resumeId: newest.documentId,
     extension,
   })
 
@@ -154,5 +166,6 @@ export async function loadCandidateBackground(
     ok: true,
     background,
     displayName: newest.displayName,
+    documentId: newest.documentId,
   }
 }

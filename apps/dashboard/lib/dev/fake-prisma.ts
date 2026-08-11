@@ -11,6 +11,7 @@ import type {
   Document,
   Job,
   Posting,
+  PostingFilters,
   PrismaClient,
   Run,
 } from "@workspace/db"
@@ -109,6 +110,21 @@ export function createDevPrisma(): PrismaClient {
         db.upsertCoverLetterInstructions(query),
     },
     /**
+     * The account-wide title filter. Read on every `/jobs` render — it decides
+     * which rows that page shows — and written from `/jobs/schedules`.
+     *
+     * `findUnique` ignores the `select` `titleExclusions()` sends, which is
+     * safe in the one direction that matters: the answer is a superset of the
+     * question and no caller can tell. `projectPosting` had to stop doing that
+     * because its `select` names a *relation*; this one names a column.
+     */
+    postingFilters: {
+      findUnique: async (query: ByUserId) =>
+        db.findPostingFilters(query.where.userId),
+      upsert: async (query: UpsertPostingFilters) =>
+        db.upsertPostingFilters(query),
+    },
+    /**
      * The whiteboard, which starts empty under the flag and stays wherever the
      * session leaves it. No fixture: a canned diagram is not what anyone is
      * checking on this page, and an empty canvas is the state the feature has
@@ -190,7 +206,37 @@ interface FindManyJobs {
 export interface PostingWhere {
   userId: string
   postingId?: { in: string[] }
+  /**
+   * The "not scored against this document" predicate, and the only `OR` this
+   * fake understands.
+   *
+   * ⚠️ **Two arms, and dropping either would break the loop it serves in
+   * opposite directions.** `unmatchedAgainst()` in `@workspace/db` spells it
+   * out rather than relying on a `not` filter's null handling; matching only
+   * the `not` arm here would hide every Posting nobody has scored — the ones
+   * the loop exists to find — and matching only the `null` arm would never
+   * re-score after the user uploads a new CV.
+   */
+  OR?: readonly PostingMatchClause[]
+  /**
+   * The account's title filter, as `listPostingPage` spells it: admit a row that
+   * matches *none* of these patterns.
+   *
+   * Typed exactly as the real query builds it rather than loosely, so a change
+   * to that shape is a compile error here instead of a clause this fake ignores
+   * — which under the flag would show every posting the filter is supposed to
+   * hide.
+   */
+  NOT?: { OR: TitleExclusion[] }
 }
+
+/** One arm of the exclusion: a substring test against the generated column. */
+interface TitleExclusion {
+  titleNormalized: { contains: string }
+}
+
+type PostingMatchClause =
+  { matchResumeId: null } | { matchResumeId: { not: string } }
 
 /**
  * The whole of the row scoping the table applies, and the whole of what the
@@ -276,6 +322,17 @@ interface UpsertCoverLetterInstructions extends ByUserId {
   update: CoverLetterInstructionsValues
 }
 
+/**
+ * Both halves carry the whole list, because a save is the whole setting — see
+ * `savePostingFilters`. Neither is `Partial`: an omitted `titleExclusions` would
+ * be a write of `undefined` into a column typed `string[]`, and the real thing
+ * has no default to fall back on the way the cover-letter columns do.
+ */
+interface UpsertPostingFilters extends ByUserId {
+  create: { userId: string; titleExclusions: string[] }
+  update: { titleExclusions: string[] }
+}
+
 interface UpsertBoard extends ByUserId {
   create: { userId: string; snapshot: unknown }
   update: { snapshot: unknown }
@@ -304,6 +361,12 @@ class DevDb {
     devCoverLetterInstructions()
   private readonly postings: Posting[] = devPostings()
   private readonly documents: Document[] = devDocuments()
+  /**
+   * No fixture, and that is the useful starting point: an unfiltered table is
+   * what every other dev assertion about `/jobs` assumes, and a canned
+   * blocklist would silently hide fixture rows somebody is counting.
+   */
+  private readonly postingFilters: PostingFilters[] = []
   /** No fixture — the dev whiteboard starts empty. See the accessor above. */
   private board: Board | undefined
   private nextId = 1
@@ -497,7 +560,9 @@ class DevDb {
       }
 
       if (field === "lastSeenRun" && isBriefingNameSelect(wanted)) {
-        projected[field] = { job: { name: this.briefingThatFound(row) } }
+        const briefing = this.briefingThatFound(row)
+        projected[field] =
+          briefing === null ? null : { job: { name: briefing } }
         continue
       }
 
@@ -520,12 +585,17 @@ class DevDb {
    * copied onto a Posting could disagree with the Briefing that fixture claims
    * to have come from, and disagree silently.
    *
-   * ⚠️ **A dangling reference throws.** Both foreign keys are NOT NULL with
-   * `ON DELETE RESTRICT`, so this is not a state the page has to survive — it
-   * is a fixture that has drifted, and it should say so by name here rather
-   * than reach `list-postings.ts` as an unnamed Briefing.
+   * ⚠️ **`null` and a dangling reference are not the same thing.** A Posting
+   * with no `lastSeenRunId` is one the user added by pasting its link, which
+   * `0009` made legal and which the page renders as "Added by link" — so it
+   * answers `null` rather than throwing. An id that names *no* run still
+   * throws: the foreign key makes that impossible in Postgres, so it is a
+   * fixture that has drifted, and it should say so by name here rather than
+   * reach `list-postings.ts` as an unnamed Briefing.
    */
-  private briefingThatFound(row: Posting): string {
+  private briefingThatFound(row: Posting): string | null {
+    if (row.lastSeenRunId === null) return null
+
     const run = this.runs.find(
       (candidate) => candidate.id === row.lastSeenRunId
     )
@@ -711,6 +781,38 @@ class DevDb {
     return row
   }
 
+  /**
+   * `null` for a user who has never saved one, exactly as
+   * {@link DevDb.findCoverLetterInstructions} answers: `titleExclusions()` in
+   * `@workspace/db` turns that into `[]`, and the distinction between "never
+   * set" and "set to nothing" stays available to anything that wants it.
+   */
+  findPostingFilters(userId: string): PostingFilters | null {
+    return this.postingFilters.find((row) => row.userId === userId) ?? null
+  }
+
+  /**
+   * A save is the whole list, not a patch of it — so unlike the cover-letter
+   * upsert there is nothing to merge with what was there: an empty list is a
+   * legitimate value and must not be filled in from the previous one.
+   */
+  upsertPostingFilters(query: UpsertPostingFilters): PostingFilters {
+    const { userId } = query.where
+    const existing = this.findPostingFilters(userId)
+    const written = existing ? query.update : query.create
+
+    const row: PostingFilters = {
+      userId,
+      titleExclusions: [...written.titleExclusions],
+      updatedAt: new Date(),
+    }
+
+    if (existing) return Object.assign(existing, row)
+
+    this.postingFilters.push(row)
+    return row
+  }
+
   findBoard(userId: string): Board | null {
     return this.board?.userId === userId ? this.board : null
   }
@@ -819,10 +921,25 @@ class DevDb {
   }
 }
 
-/** The two columns every Postings filter in this app is written against. */
+/**
+ * The columns every Postings filter in this app is written against.
+ *
+ * `matchResumeId` is optional so that the narrower doubles which share this
+ * predicate — `posting-actions.test.ts` builds one — do not have to carry a
+ * column their `where` never mentions. Absent is read as NULL, which is what an
+ * unscored Posting holds.
+ *
+ * `titleNormalized` is optional because the delete path builds its own rows from
+ * the two identifying columns and has no title in hand — and because a `where`
+ * with no exclusion in it never reads the field. A row that *is* filtered on and
+ * carries no value is a fixture that has drifted, and
+ * {@link matchesPostingWhere} says so by name rather than silently admitting it.
+ */
 interface PostingKey {
   userId: string
   postingId: string
+  matchResumeId?: string | null
+  titleNormalized?: string | null
 }
 
 /**
@@ -846,6 +963,12 @@ export function matchesPostingWhere(
 ): boolean {
   if (row.userId !== where.userId) return false
 
+  if (where.OR !== undefined && !matchesUnscored(row, where.OR)) return false
+
+  if (where.NOT !== undefined && matchesAnyTitlePattern(row, where.NOT.OR)) {
+    return false
+  }
+
   const byId = where.postingId
   if (byId === undefined) return true
 
@@ -857,6 +980,74 @@ export function matchesPostingWhere(
   }
 
   return byId.in.includes(row.postingId)
+}
+
+/**
+ * The `OR` arm of a "not scored against this document" filter.
+ *
+ * ⚠️ **Throws on any other clause rather than ignoring it**, the whole file's
+ * principle: an `OR` quietly treated as "everything matches" would hand the
+ * scoring loop every Posting the dev user has and spend a model call on each,
+ * every page view.
+ */
+function matchesUnscored(
+  row: PostingKey,
+  clauses: readonly PostingMatchClause[]
+): boolean {
+  return clauses.some((clause) => {
+    // Absent is NULL, which is what an unscored Posting holds.
+    const scoredAgainst = row.matchResumeId ?? null
+
+    if (clause.matchResumeId === null) return scoredAgainst === null
+
+    if (
+      typeof clause.matchResumeId === "object" &&
+      typeof clause.matchResumeId.not === "string"
+    ) {
+      return (
+        scoredAgainst !== null && scoredAgainst !== clause.matchResumeId.not
+      )
+    }
+
+    throw new DevPrismaError(
+      "prisma.posting where.OR",
+      "The only `OR` understood here is the unscored-against-a-document pair from unmatchedAgainst() in @workspace/db. Teach matchesUnscored() in this file the new shape — ignoring it would match every posting the dev user has."
+    )
+  })
+}
+
+/**
+ * Whether a row's normalised title carries any of the excluded patterns.
+ *
+ * ⚠️ **A plain substring test, and that is the *real* rule rather than a
+ * simplification of it.** Both sides are space-padded and punctuation-flattened
+ * — `titleMatchPattern()` on one side, the `title_normalized` generated column
+ * on the other — which is exactly what turns whole-word matching into
+ * `contains`. Reimplementing word boundaries here would make this fake stricter
+ * than Postgres and hide the case the padding exists to handle.
+ *
+ * Throws on a row with no `titleNormalized` rather than admitting it: under the
+ * flag that means a fixture missing the field, and quietly keeping the row would
+ * make the filter look broken in the one environment it is built in.
+ */
+function matchesAnyTitlePattern(
+  row: PostingKey,
+  patterns: TitleExclusion[]
+): boolean {
+  if (patterns.length === 0) return false
+
+  const normalized = row.titleNormalized
+
+  if (typeof normalized !== "string") {
+    throw new DevPrismaError(
+      "prisma.posting where.NOT",
+      "This row has no `titleNormalized`. It is a generated column in `0010`, so lib/dev/fixtures.ts has to derive it with normalizeTitle() from @workspace/job-search — the same rule the SQL states."
+    )
+  }
+
+  return patterns.some((pattern) =>
+    normalized.includes(pattern.titleNormalized.contains)
+  )
 }
 
 /**

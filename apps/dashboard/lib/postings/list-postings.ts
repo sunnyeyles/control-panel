@@ -1,12 +1,14 @@
-import { PostingSchema } from "@workspace/agents/findings"
+import { StoredPostingSchema } from "@workspace/agents/stored-posting"
 import {
   listPostingPage,
   POSTING_STATUSES,
+  titleExclusions,
   type PostingListRow,
   type PostingOrder,
   type PostingStatus,
   type PrismaClient,
 } from "@workspace/db"
+import { titleMatchPattern } from "@workspace/job-search"
 
 import { formatCalendarDate, formatUtcDateTime } from "@/lib/format-dates"
 
@@ -76,6 +78,22 @@ export interface PostingView {
    */
   source?: PostingSource
   /**
+   * How well this advertisement matches the user's resume, 0–100.
+   *
+   * Absent when nobody has scored it yet, which is every Posting until the
+   * scoring loop on this page reaches it — see
+   * `components/jobs/postings/score-pending-matches.tsx`. Absent is a state the
+   * column renders rather than a fault: an unscored Posting is not a
+   * badly-matched one, and the order puts it last either way.
+   *
+   * ⚠️ **The number and nothing else.** The reason behind it and the gaps it
+   * names arrive with `load-posting-detail.ts` when a row is opened, for the
+   * reason the docblock above gives about `summary`: they are prose, and
+   * carrying them for twenty-five rows to serve the one that gets expanded is
+   * what that split exists to stop.
+   */
+  matchScore?: number
+  /**
    * How long ago this advertisement was first found, as "3 weeks ago".
    *
    * Relative rather than absolute because the question the detail panel is
@@ -122,8 +140,21 @@ export interface PostingView {
 
 export interface PostingPage {
   postings: PostingView[]
-  /** Every Posting this user has, not the length of {@link postings}. */
+  /**
+   * Every Posting this user has *that their filters admit*, not the length of
+   * {@link postings}.
+   */
   total: number
+  /**
+   * How many of this user's Postings their title filters removed.
+   *
+   * ⚠️ **The page is expected to say this out loud.** A filter that quietly
+   * shrinks a table is indistinguishable from briefings that stopped finding
+   * anything, and the row is not there to be noticed — so the count is the only
+   * thing standing between a working filter and a bug report. `0` when nothing
+   * is filtered, which is the usual case.
+   */
+  hidden: number
   /** The page actually rendered, which is not always the one asked for. */
   page: number
   pageCount: number
@@ -157,7 +188,20 @@ export async function listPostings(
   userId: string,
   query: PostingQuery
 ): Promise<PostingPage> {
-  const { rows, total, page, pageCount } = await listPostingPage(
+  // ⚠️ **Serial, and it has to be**: the patterns are an argument to the page
+  // query, so there is nothing to overlap it with. One indexed primary-key
+  // lookup, and the alternative — caching it across requests — would mean a
+  // save that does not take effect until something expires.
+  //
+  // ⚠️ **Words become patterns here, and only here.** `@workspace/db` is handed
+  // `" senior "` rather than `"senior"` because it filters and does not
+  // interpret: what a user's word *means* is `@workspace/job-search`'s, and the
+  // package that owns the SQL must not have a second opinion about it.
+  const excludeTitlePatterns = (await titleExclusions(prisma, userId)).map(
+    titleMatchPattern
+  )
+
+  const { rows, total, hidden, page, pageCount } = await listPostingPage(
     prisma,
     userId,
     {
@@ -165,6 +209,7 @@ export async function listPostings(
       direction: query.direction,
       page: query.page,
       pageSize: PAGE_SIZE,
+      excludeTitlePatterns,
     }
   )
 
@@ -182,10 +227,15 @@ export async function listPostings(
     // `PostingView`; it comes from `load-posting-detail.ts` now. Doing the
     // parse in this one place keeps the reporting honest without parsing every
     // payload twice.
-    const parsed = PostingSchema.safeParse(row.payload)
+    const parsed = StoredPostingSchema.safeParse(row.payload)
 
     if (!parsed.success) unreadable += 1
-    if (briefingName(row.briefing) === undefined) unnamed += 1
+    // Only a row a Run *should* have named counts as unnamed. A Posting the
+    // user added by link has no Briefing behind it by construction, and
+    // reporting one as a fault would bury a real relation failure in noise.
+    if (!row.addedByLink && briefingName(row.briefing) === undefined) {
+      unnamed += 1
+    }
 
     return toView(row, parsed, now)
   })
@@ -220,7 +270,7 @@ export async function listPostings(
     )
   }
 
-  return { postings, total, page, pageCount, pageSize: PAGE_SIZE }
+  return { postings, total, hidden, page, pageCount, pageSize: PAGE_SIZE }
 }
 
 /**
@@ -228,7 +278,7 @@ export async function listPostings(
  *
  * ⚠️ **Two enums, and the mapping between them is the point.**
  * `POSTING_SORTS` in `posting-query.ts` is how a *URL* spells a sort;
- * `POSTING_ORDERS` in `@workspace/db` is what the query orders by. Keeping them
+ * `PostingOrder` in `@workspace/db` is what the query orders by. Keeping them
  * separate is what stops an address bar from naming a database column — a value
  * arriving from outside has to survive this table, rather than being handed to
  * the query because it happened to parse. Two of the four differ in spelling for
@@ -242,6 +292,7 @@ const ORDER_FOR = {
   title: "title",
   company: "company",
   posted: "postedAt",
+  match: "match",
 } as const satisfies Record<PostingSort, PostingOrder>
 
 /**
@@ -267,7 +318,7 @@ const ORDER_FOR = {
  */
 function toView(
   row: PostingListRow,
-  parsed: ReturnType<typeof PostingSchema.safeParse>,
+  parsed: ReturnType<typeof StoredPostingSchema.safeParse>,
   now: Date
 ): PostingView {
   // Independent of the parse, deliberately: `url` is a projected column
@@ -283,11 +334,18 @@ function toView(
     url: row.url,
     status: toStatus(row.status),
     ...(source ? { source } : {}),
+    // Nullish rather than `=== null`, for the reason `toMatchRow` in
+    // `@workspace/db` gives: a client that answered less than it was asked
+    // would otherwise put `matchScore: undefined` on the view, which the cell
+    // renders as a blank rather than as the absent score it is.
+    ...(row.matchScore == null ? {} : { matchScore: row.matchScore }),
     firstSeen: formatSeenAgo(row.firstSeenAt, now),
     firstSeenExact: formatUtcDateTime(row.firstSeenAt),
     lastSeen: formatSeenAgo(row.lastSeenAt, now),
     lastSeenExact: formatUtcDateTime(row.lastSeenAt),
-    briefing: briefingName(row.briefing) ?? UNKNOWN_BRIEFING,
+    briefing:
+      briefingName(row.briefing) ??
+      (row.addedByLink ? ADDED_BY_LINK : UNKNOWN_BRIEFING),
     // The column when the write path could read a date out of the
     // advertisement, the advertisement's own words when it could not, and
     // nothing when it said nothing. See {@link PostingView.postedAt} for why
@@ -307,6 +365,17 @@ function toView(
 
 /** What the dialog shows when the relation could not name a Briefing. */
 const UNKNOWN_BRIEFING = "Unknown briefing"
+
+/**
+ * What it shows instead when there was never a Briefing to name.
+ *
+ * ⚠️ **Distinct from {@link UNKNOWN_BRIEFING}, and the distinction is the whole
+ * reason `addedByLink` is carried out of `@workspace/db`.** Both are a `null`
+ * briefing; one is a Posting the user added themselves and the other is a fault.
+ * Rendering them the same word would tell somebody their own paste had lost its
+ * provenance.
+ */
+const ADDED_BY_LINK = "Added by link"
 
 /**
  * The Briefing's name as the row carries it, or `undefined` when it has none.
@@ -333,13 +402,17 @@ function briefingName(briefing: string | null): string | undefined {
 }
 
 /**
- * The stored status, narrowed to the three the app knows.
+ * The stored status, narrowed to the four the app knows.
  *
- * `postings_status_check` makes a fourth value impossible, so this is not a
+ * `postings_status_check` makes a fifth value impossible, so this is not a
  * defensive branch against the database — it is the branch that fires if a
- * fourth status is ever added to the schema and this app is deployed before the
+ * fifth status is ever added to the schema and this app is deployed before the
  * label map catches up. `new` is the honest fallback: it is what a Posting
  * nobody has touched is, and the alternative is an empty cell.
+ *
+ * The window it covers is real and was widened by `not-interested`: a
+ * migration reaches production on merge to `main`, and the deployment that
+ * knows the new word lands separately.
  */
 function toStatus(status: string): PostingStatus {
   const known = POSTING_STATUSES.find((candidate) => candidate === status)

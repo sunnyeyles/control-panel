@@ -29,7 +29,7 @@ export const DEFAULT_SYSTEM_PROMPT = [
  * Ceiling on model calls per run. Each tool round trip costs one, so this
  * bounds a loop where the model keeps calling tools without converging.
  */
-export const DEFAULT_MAX_LLM_CALLS = 5
+const DEFAULT_MAX_LLM_CALLS = 5
 
 /**
  * Super-steps a run of `maxLlmCalls` model calls needs.
@@ -40,7 +40,7 @@ export const DEFAULT_MAX_LLM_CALLS = 5
  * recursion limit reached is a thrown `GraphRecursionError` rather than a
  * graceful stop, and `halt` is the graceful stop this graph already has.
  */
-export function recursionLimitFor(maxLlmCalls: number): number {
+function recursionLimitFor(maxLlmCalls: number): number {
   return maxLlmCalls * 2 + 1
 }
 

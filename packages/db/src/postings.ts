@@ -4,18 +4,24 @@ import type { PostingPayload, PostingStatus } from "./types.ts"
 type DbClient = PrismaClient | Prisma.TransactionClient
 
 /**
- * The three statuses, as a value.
+ * The four statuses, as a value, in the order the interface offers them —
+ * which is the order a person moves through them.
  *
  * Lives here rather than in `types.ts`, which is type-only and erases: a
  * runtime array there would make that module emit, and every consumer that
  * imports a type from it would start pulling in a value.
  *
- * `satisfies` rather than a hand-kept copy, so adding a status to
- * {@link PostingStatus} without adding it here fails to compile.
+ * `satisfies` catches a value here that is *not* a {@link PostingStatus}, and
+ * that is the only direction it catches: a short array still satisfies
+ * `readonly PostingStatus[]`, so adding a member to the union and forgetting
+ * this list compiles cleanly. **The exhaustiveness gate is
+ * `POSTING_STATUS_LABELS`** in `apps/dashboard/lib/postings/`, which is
+ * `satisfies Record<PostingStatus, string>` and does fail on a missing member.
  */
 export const POSTING_STATUSES = [
   "new",
   "applied",
+  "not-interested",
   "rejected",
 ] as const satisfies readonly PostingStatus[]
 
@@ -77,7 +83,7 @@ export interface SeenPostings {
  * `postings.length`: a sighting older than the one already recorded matches the
  * `WHERE` below, changes nothing, and is not counted.
  *
- * ⚠️ **Four things about the `DO UPDATE SET` list below are load-bearing, and
+ * ⚠️ **Five things about the `DO UPDATE SET` list below are load-bearing, and
  * every one of them is silently undoable.**
  *
  * 1. **`status` is absent, and that absence is the feature.** It is the only
@@ -89,11 +95,19 @@ export interface SeenPostings {
  * 2. **`status_changed_at` is absent for the same reason.** It answers "when
  *    did the user last touch this", and a Run touching the row is not the user
  *    touching it.
- * 3. **`first_seen_at` and `first_seen_run_id` are absent too.** They answer
+ * 3. **The five `match_*` columns are absent, and this is the same hazard
+ *    wearing different clothes.** A match is a model call against a document a
+ *    Run cannot even read — the worker holds the `briefs` grant and nothing
+ *    else — so there is no value for `EXCLUDED` to carry but NULL. Adding any
+ *    of them here would blank a score every time a Briefing re-found the
+ *    advertisement it belongs to, which for a live search is nightly, and the
+ *    completeness CHECK in `0011` would not catch it because all five would go
+ *    together. {@link recordPostingMatch} is the only writer.
+ * 4. **`first_seen_at` and `first_seen_run_id` are absent too.** They answer
  *    "when did this first appear, and which Run found it" — a question a second
  *    sighting cannot change the answer to. Writing them here would make every
  *    row claim it was first seen by the most recent Run.
- * 4. **The trailing `WHERE` is what makes this write order-independent.** The
+ * 5. **The trailing `WHERE` is what makes this write order-independent.** The
  *    backfill walks Runs oldest-first while live ticks are recording new ones;
  *    without the guard an old sighting arriving late would drag `last_seen_at`
  *    backwards and leave `last_seen_run_id` naming a Run that is not the most
@@ -148,6 +162,78 @@ export async function recordPostings(
   `)
 }
 
+/** One Posting somebody added by pasting its link. */
+export interface LinkedPosting {
+  userId: string
+  /**
+   * When they added it. Both `first_seen_at` and `last_seen_at` take it, for
+   * the reason {@link SeenPostings.seenAt} gives: the caller owns the clock.
+   */
+  seenAt: Date
+  posting: NewPosting
+}
+
+/**
+ * Record a Posting no Run found. Answers whether a row was actually inserted.
+ *
+ * Both run columns are absent from the column list, so they take the NULL that
+ * `0009` made legal — which is the whole of how a link-added Posting is
+ * distinguishable from a found one. There is no `source` column.
+ *
+ * ⚠️ **`DO NOTHING`, and that is the entire safety argument for this function
+ * existing beside {@link recordPostings} rather than as a flag on it.** A link
+ * may *create* a Posting and may never *revise* one. Every way of writing an
+ * update here is a way of destroying something:
+ *
+ * - `status` is the one column a person writes, and re-pasting a link for an
+ *   advertisement already marked `applied` must not walk it back to `new`.
+ * - `last_seen_run_id` records which Run most recently found it. Overwriting a
+ *   Run's id with the NULL this path carries would erase provenance and make a
+ *   Posting several Runs have found read as one nobody ever did.
+ * - `payload` written by a Run carries a `matchReason` this path has none of, so
+ *   an update would swap a fuller record for a thinner one.
+ * - The five `match_*` columns are not in the column list at all, so they take
+ *   NULL on an insert and are untouched on a conflict. Re-pasting the link for
+ *   an advertisement already scored against the user's resume leaves the score
+ *   where it is.
+ *
+ * The caller checks for an existing Posting before it spends a page fetch and a
+ * model call, so a duplicate paste normally never reaches this statement. What
+ * this clause covers is the race the check cannot: two submissions in flight at
+ * once, and a Run recording the same advertisement in between.
+ *
+ * A `false` return is therefore not a failure — it means the advertisement is
+ * already tracked, which is an ordinary thing to tell somebody.
+ */
+export async function recordLinkedPosting(
+  prisma: DbClient,
+  linked: LinkedPosting
+): Promise<boolean> {
+  const { posting } = linked
+
+  const inserted = await prisma.$executeRaw(Prisma.sql`
+    INSERT INTO postings (
+      user_id, posting_id, title, company, location, url, posted_at, payload,
+      first_seen_at, last_seen_at
+    )
+    VALUES (
+      ${linked.userId}::uuid,
+      ${posting.postingId},
+      ${posting.title},
+      ${posting.company},
+      ${posting.location},
+      ${posting.url},
+      ${posting.postedAt ?? null}::timestamptz,
+      ${JSON.stringify(posting.payload)}::jsonb,
+      ${linked.seenAt}::timestamptz,
+      ${linked.seenAt}::timestamptz
+    )
+    ON CONFLICT (user_id, posting_id) DO NOTHING
+  `)
+
+  return inserted > 0
+}
+
 /** One Posting's stored payload, and the Run that most recently reported it. */
 export interface StoredPostingPayload {
   /**
@@ -159,8 +245,27 @@ export interface StoredPostingPayload {
    * longer parses" branch rather than being handed one.
    */
   payload: PostingPayload
-  /** `last_seen_run_id`: provenance, and no part of the identity. */
-  lastSeenRunId: string
+  /**
+   * `last_seen_run_id`: provenance, and no part of the identity.
+   *
+   * `null` for a Posting the user added by pasting its link, which no Run has
+   * ever seen. Callers that stamp provenance onto something they generate — a
+   * cover letter, a tailored resume — leave the field off rather than
+   * substituting anything for it.
+   */
+  lastSeenRunId: string | null
+  /**
+   * The match against the user's resume, or `null` when nobody has scored this
+   * advertisement yet.
+   *
+   * ⚠️ **Read with the payload rather than with the page, and that placement is
+   * the point.** `reason` is a sentence or two and `gaps` is a short list, which
+   * is small per row and a page of prose across twenty-five of them — the exact
+   * weight `load-posting-detail.ts` exists to keep out of every sort click. The
+   * *score* travels with the page, because a column sorts on it; the words
+   * behind the score arrive when somebody opens the row.
+   */
+  match: PostingMatchRow | null
 }
 
 /**
@@ -190,7 +295,15 @@ export async function postingPayload(
 ): Promise<StoredPostingPayload | undefined> {
   const row = await prisma.posting.findUnique({
     where: { userId_postingId: { userId, postingId } },
-    select: { payload: true, lastSeenRunId: true },
+    select: {
+      payload: true,
+      lastSeenRunId: true,
+      matchScore: true,
+      matchReason: true,
+      matchGaps: true,
+      matchResumeId: true,
+      matchedAt: true,
+    },
   })
 
   if (!row) return undefined
@@ -198,6 +311,7 @@ export async function postingPayload(
   return {
     payload: row.payload as PostingPayload,
     lastSeenRunId: row.lastSeenRunId,
+    match: toMatchRow(row),
   }
 }
 
@@ -213,17 +327,12 @@ export async function postingPayload(
  * somebody wrote, rather than being handed to the query because it happened to
  * parse.
  *
- * Four, and no more. Every entry here is a column with an ordering the table
- * offers; adding one is a decision about the index, not a convenience.
+ * Five, and no more. Every entry here is a column with an ordering the table
+ * offers; adding one is a decision about the index, not a convenience —
+ * `match` came with `postings_user_match_idx` in `0011`.
  */
-export const POSTING_ORDERS = [
-  "lastSeenAt",
-  "title",
-  "company",
-  "postedAt",
-] as const
-
-export type PostingOrder = (typeof POSTING_ORDERS)[number]
+export type PostingOrder =
+  "lastSeenAt" | "title" | "company" | "postedAt" | "match"
 
 export type PostingDirection = "asc" | "desc"
 
@@ -237,6 +346,51 @@ export interface PostingPageQuery {
    * many rows a *table* shows, and nothing here renders one.
    */
   pageSize: number
+  /**
+   * Title patterns whose rows are left out of the page and the counts.
+   *
+   * ⚠️ **Patterns, not words**, and the distinction is what keeps this package
+   * free of a dependency on `@workspace/job-search`. A pattern is what
+   * `titleMatchPattern()` produces — `" senior "`, space-padded and normalised —
+   * and matching it is a substring test against `postings.title_normalized`,
+   * which `0010` generates by the same rule. This package filters; it does not
+   * decide what a user's word means, exactly as it stores a `payload` it will
+   * not parse.
+   *
+   * Absent or empty filters nothing, which is what makes "no filter set" and
+   * "an empty filter" the same query.
+   */
+  excludeTitlePatterns?: readonly string[]
+}
+
+/**
+ * One Posting's match against a resume, as a reader gets it.
+ *
+ * The five columns are set together or NULL together, so a reader is handed
+ * either all of this or nothing — see `postings_match_complete_check`.
+ */
+export interface PostingMatchRow {
+  /** 0–100. A CHECK on the column holds the bound, not this type. */
+  score: number
+  reason: string
+  /**
+   * The stated requirements the resume does not evidence. Opaque to this
+   * package, exactly as {@link PostingPayload} is: it is a producer's validated
+   * JSON, and the schema that says it is an array of strings lives on the other
+   * side of the seam.
+   */
+  gaps: unknown
+  /**
+   * The `documents.id` this was scored against.
+   *
+   * ⚠️ **This is the staleness key and the only one.** A caller compares it
+   * with the user's current resume; a different value means the score describes
+   * a document they have replaced. Nothing here decides that — this package
+   * does not know which document is current — which is why the field is carried
+   * out rather than turned into a boolean.
+   */
+  resumeId: string
+  matchedAt: Date
 }
 
 /** One `postings` row as a page of the table needs it. */
@@ -255,6 +409,16 @@ export interface PostingListRow {
   firstSeenAt: Date
   lastSeenAt: Date
   /**
+   * How well this advertisement matches the user's resume, 0–100, or `null`
+   * when nobody has scored it yet.
+   *
+   * ⚠️ **The score and nothing else.** The reason and the gaps behind it are
+   * read with the payload — see {@link StoredPostingPayload.match} — because a
+   * page carries twenty-five rows and at most one of them is ever expanded.
+   * What a column has to sort on is the number.
+   */
+  matchScore: number | null
+  /**
    * The name of the Briefing that most recently found this advertisement,
    * flattened out of `postings.last_seen_run_id` → `runs.job_id` → `jobs.name`.
    *
@@ -265,19 +429,54 @@ export interface PostingListRow {
    * reimplement the shape, and what made a fake that answered *less* than it was
    * asked take a whole page down with a `TypeError` on `.job`.
    *
-   * `null` when the relation answered nothing. Both foreign keys are NOT NULL
-   * with `onDelete: Restrict`, so Postgres cannot produce that — the null is for
-   * a client that narrowed the projection, not a claim about the database. **A
-   * blank name is not treated as absent here**; that is a display rule and
-   * belongs with whatever renders it.
+   * `null` in two quite different situations, which {@link addedByLink}
+   * separates. Either no Run has ever seen this advertisement — the user added
+   * it by pasting its link, and there is no Briefing to name — or the relation
+   * answered nothing when it should have, which is a client that narrowed the
+   * projection rather than anything Postgres can produce. **A blank name is not
+   * treated as absent here**; that is a display rule and belongs with whatever
+   * renders it.
    */
   briefing: string | null
+  /**
+   * No Run has ever found this: `first_seen_run_id IS NULL`, which the user
+   * pasting a link is the only way to produce.
+   *
+   * Derived rather than stored, for the reason `posting-source.ts` gives about
+   * the board a Posting came from: the row already carries the fact, and a
+   * second copy is a second thing to keep true. It is on the row rather than
+   * left to the caller so that {@link briefing} being `null` stays a reportable
+   * fault — a page full of link-added Postings must not read as a page full of
+   * broken relations.
+   */
+  addedByLink: boolean
 }
 
 export interface PostingListPage {
   rows: PostingListRow[]
-  /** Every Posting this user has, not the length of {@link rows}. */
+  /**
+   * Every Posting this user has *that the filter admits*, not the length of
+   * {@link rows}.
+   *
+   * ⚠️ **The filter is in this count, deliberately.** It is what
+   * {@link PostingListPage.pageCount} is derived from and what a table renders
+   * as "N postings", so a total that counted rows the page will not show would
+   * paginate past the end and label the table with a number nothing on it adds
+   * up to. What was left out is {@link hidden}, which is a separate fact.
+   */
   total: number
+  /**
+   * How many of this user's Postings the filter removed.
+   *
+   * `0` whenever no patterns were supplied — there is nothing to report and no
+   * second count is issued.
+   *
+   * ⚠️ **This exists so that hiding is never silent.** A filter that quietly
+   * shrinks a table is indistinguishable from a briefing that stopped finding
+   * anything, and the person best placed to notice is the one who set it. The
+   * caller is expected to say the number out loud.
+   */
+  hidden: number
   /** The page actually read, which is not always the one asked for. */
   page: number
   pageCount: number
@@ -336,14 +535,20 @@ export async function listPostingPage(
   userId: string,
   query: PostingPageQuery
 ): Promise<PostingListPage> {
-  const [total, requested] = await Promise.all([
-    prisma.posting.count({ where: { userId } }),
+  const filtered = query.excludeTitlePatterns?.length ? true : false
+
+  const [total, unfiltered, requested] = await Promise.all([
+    prisma.posting.count({ where: postingPageWhere(userId, query) }),
+    // Only when there is a filter to account for. Without one the answer is
+    // `total` and a second count would be the same query twice.
+    filtered ? prisma.posting.count({ where: { userId } }) : Promise.resolve(0),
     findPostingPage(prisma, userId, query, query.page),
   ])
 
+  const hidden = filtered ? unfiltered - total : 0
   const pageCount = Math.max(1, Math.ceil(total / query.pageSize))
 
-  if (total === 0) return { rows: [], total, page: 1, pageCount }
+  if (total === 0) return { rows: [], total, hidden, page: 1, pageCount }
 
   const page = Math.min(query.page, pageCount)
 
@@ -355,7 +560,40 @@ export async function listPostingPage(
       ? requested
       : await findPostingPage(prisma, userId, query, page)
 
-  return { rows: rows.map(toListRow), total, page, pageCount }
+  return { rows: rows.map(toListRow), total, hidden, page, pageCount }
+}
+
+/**
+ * Which of this user's rows the page is about.
+ *
+ * ⚠️ **One builder, used by the count and by the fetch**, because a filter
+ * applied to only one of them is a table whose pager walks off the end of
+ * itself. That is the same reason `findPostingPage` exists as one function
+ * rather than two copies of a projection.
+ *
+ * ⚠️ **`userId` is the ownership check and not a filter in front of one.** A
+ * Posting is not addressable without naming a user — `(user_id, posting_id)` is
+ * the natural key — so it is here unconditionally and the exclusions are added
+ * beside it, never in place of it.
+ *
+ * The exclusion is a `NOT (OR …)`: a row is admitted when it matches *no*
+ * pattern. Each arm is a substring test against `title_normalized`, the
+ * `GENERATED ALWAYS … STORED` column `0010` adds — see the migration for why
+ * whole-word matching reduces to a substring at all.
+ */
+function postingPageWhere(userId: string, query: PostingPageQuery) {
+  const patterns = query.excludeTitlePatterns ?? []
+
+  if (patterns.length === 0) return { userId }
+
+  return {
+    userId,
+    NOT: {
+      OR: patterns.map((pattern) => ({
+        titleNormalized: { contains: pattern },
+      })),
+    },
+  }
 }
 
 /**
@@ -374,7 +612,7 @@ function findPostingPage(
   page: number
 ) {
   return prisma.posting.findMany({
-    where: { userId },
+    where: postingPageWhere(userId, query),
     orderBy: orderByFor(query),
     skip: (page - 1) * query.pageSize,
     take: query.pageSize,
@@ -389,6 +627,10 @@ function findPostingPage(
       payload: true,
       firstSeenAt: true,
       lastSeenAt: true,
+      // The score alone — see {@link PostingListRow.matchScore}. The reason and
+      // the gaps are a page of prose across twenty-five rows and belong with the
+      // payload read that a single expanded row pays for.
+      matchScore: true,
       // Which Briefing found it, asked for with the page rather than resolved
       // row by row afterwards. **`lastSeenRun`, not `firstSeenRun`** — the
       // Briefing that most recently found the advertisement is the one whose
@@ -396,6 +638,10 @@ function findPostingPage(
       // on. Flattened before it leaves this module; see
       // {@link PostingListRow.briefing}.
       lastSeenRun: { select: { job: { select: { name: true } } } },
+      // Not rendered, and not carried past {@link toListRow}: it is what tells
+      // "no Run has ever seen this" apart from "the relation answered nothing",
+      // which are the same `briefing: null` and are not the same fault.
+      firstSeenRunId: true,
     },
   })
 }
@@ -443,6 +689,17 @@ function orderByFor(query: PostingPageQuery) {
         { postedAt: { sort: to, nulls: "last" as const } },
         { postingId: to },
       ]
+
+    case "match":
+      // NULLS LAST both ways, exactly as `postedAt`, and for the same reason
+      // stated more sharply: an unscored Posting is not a badly-matched one.
+      // Under `DESC` Postgres would put every row nobody has looked at above
+      // every row somebody has, and ascending does not make them interesting
+      // either — they belong at the bottom whichever way the column runs.
+      return [
+        { matchScore: { sort: to, nulls: "last" as const } },
+        { postingId: to },
+      ]
   }
 }
 
@@ -457,7 +714,9 @@ function toListRow(row: {
   payload: unknown
   firstSeenAt: Date
   lastSeenAt: Date
+  matchScore: number | null
   lastSeenRun: { job: { name: string } | null } | null
+  firstSeenRunId: string | null
 }): PostingListRow {
   return {
     postingId: row.postingId,
@@ -470,12 +729,180 @@ function toListRow(row: {
     payload: row.payload as PostingPayload,
     firstSeenAt: row.firstSeenAt,
     lastSeenAt: row.lastSeenAt,
+    matchScore: row.matchScore,
     // ⚠️ **Both halves are read optionally although neither relation is
     // optional in the schema.** The nullability is not a claim about the
     // database — it is what keeps a client that answered *less* than it was
     // asked from taking a whole page down with a `TypeError` on `.job`.
     briefing: row.lastSeenRun?.job?.name ?? null,
+    addedByLink: row.firstSeenRunId === null,
   }
+}
+
+/**
+ * The five match columns as one object, or `null`.
+ *
+ * ⚠️ **`match_score IS NULL` is the test, and the other four are read through
+ * it rather than checked again.** `postings_match_complete_check` makes all
+ * five NULL together or set together, so a row with a score and a missing
+ * reason is not a state this function has to have an opinion about — it is a
+ * state the database refuses.
+ *
+ * ⚠️ **Nullish rather than `=== null`, and the `??` fallbacks are the same
+ * concession** — both are for the clients that are not Postgres. The dashboard's
+ * dev fake and the test doubles under it are hand-written, and one that answered
+ * *less* than it was asked would otherwise produce a match object with
+ * `undefined` inside it: a score that renders as a blank rather than as the
+ * absent score it is. Same reasoning `toListRow` gives for reading its relations
+ * optionally although neither is optional in the schema.
+ */
+function toMatchRow(row: {
+  matchScore?: number | null
+  matchReason?: string | null
+  matchGaps?: unknown
+  matchResumeId?: string | null
+  matchedAt?: Date | null
+}): PostingMatchRow | null {
+  if (row.matchScore === null || row.matchScore === undefined) return null
+
+  return {
+    score: row.matchScore,
+    reason: row.matchReason ?? "",
+    gaps: row.matchGaps ?? [],
+    resumeId: row.matchResumeId ?? "",
+    matchedAt: row.matchedAt ?? new Date(0),
+  }
+}
+
+/** One score, and the document it was computed against. */
+export interface PostingMatchWrite {
+  userId: string
+  postingId: string
+  /** 0–100. The CHECK on the column is what enforces it, not this package. */
+  score: number
+  reason: string
+  /**
+   * The stated requirements the resume does not evidence, as its producer
+   * validated them. Stored as JSON and never read here — see
+   * {@link PostingMatchRow.gaps}.
+   */
+  gaps: unknown
+  /** The `documents.id` scored against. Deliberately not an FK; see `0011`. */
+  resumeId: string
+  /**
+   * When it was scored. The caller's clock, for the reason
+   * {@link SeenPostings.seenAt} gives — and here it is also what a reader dates
+   * a stale score by.
+   */
+  matchedAt: Date
+}
+
+/**
+ * Record a match against a Posting that already exists. `false` means there is
+ * no such Posting for this user.
+ *
+ * ⚠️ **It updates and never inserts, and that is not a convenience.** A score
+ * is about an advertisement somebody already tracks; a statement that could
+ * insert would let a caller mint a Posting out of a score, with no title, no
+ * URL and no sighting. `updateMany` rather than `update` for the reason
+ * {@link setPostingStatus} gives: a guarded write whose row count is the
+ * answer, where `update` would turn an ordinary miss into a thrown error.
+ *
+ * **`userId` in the `where` is the ownership check**, again as
+ * {@link setPostingStatus} sets out — a Posting is not addressable without
+ * naming a user, so filtering on both halves of the natural key *is* the check.
+ *
+ * All five columns are written in one statement, which is what keeps
+ * `postings_match_complete_check` satisfiable at all: there is no legal
+ * intermediate state to pass through.
+ */
+export async function recordPostingMatch(
+  prisma: DbClient,
+  match: PostingMatchWrite
+): Promise<boolean> {
+  const updated = await prisma.posting.updateMany({
+    where: { userId: match.userId, postingId: match.postingId },
+    data: {
+      matchScore: match.score,
+      matchReason: match.reason,
+      matchGaps: match.gaps as Prisma.InputJsonValue,
+      matchResumeId: match.resumeId,
+      matchedAt: match.matchedAt,
+    },
+  })
+
+  return updated.count > 0
+}
+
+/**
+ * "Not scored against this document", as one predicate two readers share.
+ *
+ * ⚠️ **The `OR` is the whole of the staleness rule and the `null` arm is not
+ * redundant.** A row that has never been scored has `match_resume_id` NULL; a
+ * row scored against a CV the user has since replaced carries some *other* id.
+ * Both want scoring. Written as a bare inequality it would be `col <> $1`,
+ * which NULL does not satisfy — every unscored Posting in the table would be
+ * silently invisible to the one loop whose job is to find them. Spelled out
+ * rather than left to a `not` filter's null handling, because that behaviour is
+ * a property of whichever client version is installed and this is not.
+ *
+ * One function rather than two copies because the list and the count must agree
+ * exactly: a loop that stops when the count says zero, over a list built from a
+ * different predicate, either never terminates or terminates early.
+ */
+function unmatchedAgainst(resumeId: string) {
+  return {
+    OR: [{ matchResumeId: null }, { matchResumeId: { not: resumeId } }],
+  }
+}
+
+/**
+ * The Postings this user has that are not scored against `resumeId`, newest
+ * sighting first, at most `limit` of them.
+ *
+ * **Bounded, and the caller has to say by how much.** Scoring is one model call
+ * per row against a whole CV, so an unbounded list here would be an unbounded
+ * bill and a request that outlives its own timeout. What this returns is one
+ * round's worth; the caller comes back for the next.
+ *
+ * Ordered by `last_seen_at DESC` rather than by anything about the match, so a
+ * page of newly-found advertisements scores before a backlog nobody has looked
+ * at in a month.
+ */
+export async function listUnmatchedPostingIds(
+  prisma: DbClient,
+  userId: string,
+  resumeId: string,
+  limit: number
+): Promise<string[]> {
+  if (limit <= 0) return []
+
+  const rows = await prisma.posting.findMany({
+    where: { userId, ...unmatchedAgainst(resumeId) },
+    orderBy: [{ lastSeenAt: "desc" }, { postingId: "desc" }],
+    take: limit,
+    select: { postingId: true },
+  })
+
+  return rows.map((row) => row.postingId)
+}
+
+/**
+ * How many of this user's Postings are not scored against `resumeId`.
+ *
+ * The same predicate as {@link listUnmatchedPostingIds} and deliberately beside
+ * it: what drives the scoring loop is "is there more", and a caller inferring
+ * that from a short page would stop early the moment a round happened to
+ * return fewer rows than it asked for.
+ */
+export async function countUnmatchedPostings(
+  prisma: DbClient,
+  userId: string,
+  resumeId: string
+): Promise<number> {
+  return prisma.posting.count({
+    where: { userId, ...unmatchedAgainst(resumeId) },
+  })
 }
 
 /**

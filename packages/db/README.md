@@ -20,7 +20,7 @@ cover-letter-instructions.ts
 jobs.ts        create / claim / due / schedule helpers
 runs.ts        finish / fail / startAdHoc / recordFindings
 artifacts.ts   record / latest helpers
-postings.ts    recordPostings / setPostingStatus — the cumulative tracker
+postings.ts    recordPostings / setPostingStatus / recordPostingMatch — the cumulative tracker
 documents.ts   list / find / create / delete Document metadata rows
 boards.ts      load / save one whiteboard snapshot per user
 client.ts      createPrismaClient() — adapter + pooled URL
@@ -168,19 +168,36 @@ Postgres:
   record a brief was written from can be read back without cloud credentials.
   It has no lifecycle rule and will accumulate — known, and accepted because a
   forward-only migration is easier to add than to withdraw.
-- **`on delete restrict` everywhere provenance is involved**, and
-  `cover_letter_instructions` is the single exception.
-- **`cover_letter_instructions` cascades from `users`, and only it does.** The
-  rule elsewhere is restrict, because deleting a user who owns jobs — or a job
-  with runs — should fail loudly rather than silently erase provenance. This row
-  records no such thing: it is a preference with no independent existence, and
-  restricting on it would make a user undeletable for the sake of a settings
-  row. Any new table gets `restrict` unless it can make the same argument.
+- **`on delete restrict` everywhere provenance is involved.** The exceptions are
+  the settings rows — `cover_letter_instructions`, `posting_filters` and
+  `boards`.
+- **`cover_letter_instructions` cascades from `users`, and so do the other two
+  settings rows.** The rule elsewhere is restrict, because deleting a user who
+  owns jobs — or a job with runs — should fail loudly rather than silently erase
+  provenance. These rows record no such thing: they are preferences with no
+  independent existence, and restricting on one would make a user undeletable
+  for the sake of a settings row. Any new table gets `restrict` unless it can
+  make the same argument.
   Its two text columns default to `''` rather than being nullable, so "nothing
   set" has one representation. They stay two columns rather than one because
   the prompt built from them fences each differently — rules are followed, an
   example letter is imitated and never mined for facts — and one column could
   not express that distinction.
+- **A Posting may have no Run at either end, and NULL is what says so.**
+  `first_seen_run_id` and `last_seen_run_id` are nullable as of `0009`: pasting
+  an advertisement's link on `/jobs` adds a Posting directly, and minting a
+  synthetic `jobs` row and `runs` row to satisfy a foreign key would put an
+  execution in the database that never executed. There is no `source` column and
+  there must not be one — the fact is already on the row, and a second copy can
+  drift. Same idiom as `next_run_at IS NULL` and `scheduled_for IS NULL`.
+- **`recordLinkedPosting` is `ON CONFLICT DO NOTHING`, and that is the whole
+  reason it is a second function rather than a flag on `recordPostings`.** A
+  link may create a Posting and may never revise one. Every update it could make
+  destroys something: `status` is the one column a person writes; overwriting
+  `last_seen_run_id` with the NULL this path carries erases which Run last found
+  the advertisement; and a Run-written `payload` carries a `matchReason` a
+  pasted link has none of. A `false` return means "already tracked", which is an
+  ordinary answer rather than a failure.
 - **A Posting's identity is `(user_id, posting_id)`, with no Run in it.**
   `posting_id` is the id `postingId()` derives from the advertisement's
   normalised URL — the same value a stored cover letter is keyed on, so the two
@@ -194,6 +211,24 @@ Postgres:
   DELETE + INSERT — reverts every Posting marked `applied` the next time a Run
   re-finds it, on a schedule, with no error. The `first_seen_*` pair answers
   "when did this first appear", which a second sighting cannot change.
+- **The five `match_*` columns are absent from that list for the same reason,
+  and are the second set a Run must not write.** A match is a model call against
+  the user's resume, which the worker cannot even read — its IAM role grants the
+  `briefs` shelf alone — so there is no value for `EXCLUDED` to carry but NULL.
+  Adding any of them would blank a score every time a Briefing re-found the
+  advertisement it belongs to, which for a live search is nightly, and
+  `postings_match_complete_check` would not catch it because all five would go
+  together. `recordPostingMatch` is the only writer, and it updates rather than
+  inserts: a statement that could insert would let a caller mint a Posting out
+  of a score, with no title, no URL and no sighting.
+- **`match_resume_id` is a plain UUID and deliberately not a foreign key.**
+  `RESTRICT` would make a Document undeletable the moment anything scored
+  against it, and `SET NULL` would violate the all-five-or-none CHECK. What it
+  is for is one comparison — a value other than the user's current resume means
+  the score is for a document they have replaced — and `unmatchedAgainst()`
+  spells that predicate out as an `OR` rather than relying on a `not` filter's
+  null handling, because a bare inequality would silently exclude every row
+  nobody has scored yet.
 - **The upsert's trailing `WHERE EXCLUDED.last_seen_at >= postings.last_seen_at`
   is what makes the write order-independent**, so a backfill walking Runs
   oldest-first can race live traffic without dragging `last_seen_at` backwards
@@ -201,6 +236,27 @@ Postgres:
   `recordPostings` also dedupes its own batch, because Postgres raises `21000`
   when one statement affects a row twice and two links to the same
   advertisement in one findings list is the ordinary case.
+- **`postings.title_normalized` is `GENERATED ALWAYS … STORED`, and nothing may
+  write it.** It is `title` lowercased, with runs of non-alphanumerics flattened
+  to single spaces and a space at each end — `' senior staff engineer remote '`.
+  The padding is what turns the whole-word title filter into an ordinary
+  `LIKE '%…%'`, which is the only reason a paginated query can answer it at all;
+  without it the exclusion would need a regex `where` Prisma cannot express, or
+  a rewrite of `listPostingPage` into raw SQL. Generated rather than maintained
+  by the write path so it cannot drift from the title however a row is written,
+  and both posting inserts are raw SQL with explicit column lists, so neither
+  had to learn about it. **The rule is stated twice** — here in SQL and as
+  `normalizeTitle()` in `@workspace/job-search` — exactly as `0006`'s date regex
+  restates `parsePostedAt()`, and the two must agree. A `prisma migrate dev`
+  would try to re-derive the column as a plain one; migrations here are
+  hand-authored and forward-only, and that is why.
+- **`posting_filters` is per user and read by this package, unlike
+  `jobs.config`.** The platform stores a config and never looks inside it, but
+  `listPostingPage` _filters_ on these terms — so they are a real `text[]` with a
+  cardinality CHECK rather than an opaque blob. What it is handed is a
+  **pattern** (`' senior '`) and not the word a user typed: deciding what a word
+  means belongs to `@workspace/job-search`, and this package filtering on a rule
+  it also interpreted would be two owners for one rule.
 - **`postings.posting_id` has a CHECK, and it is not a duplicated validation.**
   `apps/dashboard/lib/cover-letters/cover-letter-ref.ts` keeps the one copy of
   the rule for _untrusted input_. This one says the database must not hold a

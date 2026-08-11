@@ -45,6 +45,31 @@ describe("toPostingRequestPrompt", () => {
     expect(prompt).toContain(POSTING.matchReason)
   })
 
+  /**
+   * A Posting the user added by pasting its link was matched against no
+   * criteria, so `matchReason` is absent from what the row holds.
+   *
+   * ⚠️ **The heading goes with it.** Rendering "Why it was matched to me:" over
+   * nothing invites the model to fill the gap, and what it would fill it with
+   * is a claim about a judgement nobody made.
+   */
+  it("omits the match-reason block entirely when there is none", () => {
+    const { matchReason: _omitted, ...unmatched } = POSTING
+
+    const withoutReason = toPostingRequestPrompt(
+      { ...REQUEST, posting: unmatched },
+      WORDING
+    )
+
+    expect(withoutReason).not.toContain("Why it was matched to me")
+    expect(withoutReason).not.toContain(POSTING.matchReason)
+    // Everything else still arrives — an absent reason costs the block and
+    // nothing around it.
+    expect(withoutReason).toContain(POSTING.summary)
+    expect(withoutReason).toContain(`Title: ${POSTING.title}`)
+    expect(withoutReason).toContain(BACKGROUND)
+  })
+
   it("reproduces the URL exactly, tracking parameters and all", () => {
     const url = "https://www.seek.com.au/job/93431609?type=standard&ref=search"
 

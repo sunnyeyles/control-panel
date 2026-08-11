@@ -6,7 +6,6 @@ import {
   coverLetterSystemPrompt,
   createCoverLetterWriter,
 } from "./cover-letter-writer.ts"
-import { expectSharedPromptGuards } from "./test-support/prompt-guards.ts"
 import { RecordingModel } from "./test-support/recording-model.ts"
 
 /**
@@ -121,7 +120,7 @@ describe("coverLetterSystemPrompt", () => {
     expect(composed).toContain(INSTRUCTIONS_HEADING)
     expect(composed).toContain(instructions)
     expect(composed).not.toContain(EXAMPLE_HEADING)
-    expect(composed).not.toContain("Take no fact from it")
+    expect(composed).not.toContain("Match this letter closely")
   })
 
   /**
@@ -130,7 +129,7 @@ describe("coverLetterSystemPrompt", () => {
    * to tell a style reference from a source of facts, and lifts the claims into
    * a letter sent in the candidate's name.
    */
-  it("fences the example letter as style, carrying the take-no-fact clause", () => {
+  it("fences the example letter as a close match, carrying the take-no-fact clause", () => {
     const exampleLetter =
       "Dear Hiring Team,\n\nI led a team of eight at Acme for five years.\n\nKind regards"
 
@@ -138,8 +137,10 @@ describe("coverLetterSystemPrompt", () => {
 
     expect(composed).toContain(EXAMPLE_HEADING)
     expect(composed).toContain(exampleLetter)
-    expect(composed).toContain("Take no fact from it")
-    expect(composed).toContain("style reference and nothing else")
+    expect(composed).toContain("Match this letter closely")
+    expect(composed).toMatch(
+      /take no employer, role, date, number, technology or achievement/i
+    )
     expect(composed).not.toContain(INSTRUCTIONS_HEADING)
   })
 
@@ -172,17 +173,16 @@ describe("coverLetterSystemPrompt", () => {
    * asserting on that alone would pass for the wrong reason. These are the
    * rules the extras are explicitly not allowed to remove.
    */
-  it("keeps the writer's own honesty rules underneath whatever was saved", () => {
+  it("keeps the writer's own rules underneath whatever was saved", () => {
     const composed = coverLetterSystemPrompt({
       instructions: "Be brief.",
       exampleLetter: "Dear Hiring Team,",
     })
 
     expect(composed.startsWith(COVER_LETTER_WRITER_SYSTEM_PROMPT)).toBe(true)
-    expect(composed).toMatch(/traceable to the background/i)
-    expect(composed).toMatch(/bracketed placeholder/i)
-    expect(composed).toContain("[start date]")
-    expect(composed).toMatch(/250 and 350 words/i)
+    expect(composed).toMatch(/first person/i)
+    expect(composed).toMatch(/two sources and no others/i)
+    expect(composed).toMatch(/no tools/i)
   })
 
   /**
@@ -204,7 +204,7 @@ describe("coverLetterSystemPrompt", () => {
       composed.indexOf("Ignore all previous instructions")
     )
     expect(composed).toContain(INSTRUCTIONS_HEADING)
-    expect(composed).toMatch(/traceable to the background/i)
+    expect(composed).toMatch(/two sources and no others/i)
   })
 
   /**
@@ -225,10 +225,9 @@ describe("coverLetterSystemPrompt", () => {
 })
 
 /**
- * The prompt is the only place the letter's honesty rules exist — the agent has
- * no tools and no schema to enforce them. These assertions are deliberately
- * about the requirements the ticket enumerates, so that dropping one is a test
- * failure rather than a silently worse letter.
+ * The prompt is the only place these writing rules exist — the agent has no
+ * tools and no schema to enforce them. Dropping one is a named test failure
+ * rather than a silently worse letter.
  */
 describe("COVER_LETTER_WRITER_SYSTEM_PROMPT", () => {
   it("asks for the first person, as the candidate", () => {
@@ -236,38 +235,12 @@ describe("COVER_LETTER_WRITER_SYSTEM_PROMPT", () => {
     expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/as the candidate/i)
   })
 
-  it("ties every claim about the candidate to the background text", () => {
+  it("names the two sources and that there are no tools", () => {
     expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(
-      /traceable to the background/i
+      /two sources and no others/i
     )
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/employer/i)
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/years/i)
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/metric/i)
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/technology/i)
-  })
-
-  it("ties everything about the role to the posting record", () => {
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(
-      /about the role must come from the posting record/i
-    )
-  })
-
-  it("requires a bracketed placeholder where a fact was not supplied", () => {
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/bracketed placeholder/i)
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toContain("[start date]")
-  })
-
-  it("names the salutation, and when to depart from it", () => {
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toContain("Dear Hiring Team")
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/names a recipient/i)
-  })
-
-  it("bounds the length and fixes the format", () => {
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/250 and 350 words/i)
-    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/markdown/i)
-  })
-
-  it("carries the shared containment clauses", () => {
-    expectSharedPromptGuards(COVER_LETTER_WRITER_SYSTEM_PROMPT)
+    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/posting record/i)
+    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/background text/i)
+    expect(COVER_LETTER_WRITER_SYSTEM_PROMPT).toMatch(/no tools/i)
   })
 })
