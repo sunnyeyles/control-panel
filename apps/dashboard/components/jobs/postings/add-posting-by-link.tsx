@@ -1,10 +1,20 @@
 "use client"
 
-import { useActionState } from "react"
+import { useActionState, useState } from "react"
 
 import { addPostingByLinkAction } from "@/app/(app)/jobs/actions"
 import { ActionAlert } from "@/components/forms/action-alert"
-import { IDLE } from "@/lib/actions/action-state"
+import {
+  ADD_BY_LINK_IDLE,
+  CONFIRM_FIELD,
+  type AddByLinkState,
+} from "@/lib/postings/add-by-link-state"
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@workspace/ui/components/alert"
+import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import { SubmitButton } from "@workspace/ui/components/submit-button"
@@ -29,22 +39,131 @@ import { SubmitButton } from "@workspace/ui/components/submit-button"
  * ⚠️ **Keyed on `resetKey`, which is what clears the field.** A success mints
  * the Posting's id; remounting on it empties the input, so the next paste does
  * not start by selecting what is already there. A failure carries the previous
- * key unchanged (`carryResetKey`), so the link stays in the box to be corrected
- * — which is the whole reason this is two components rather than one.
+ * key unchanged (`carryForward`), so the link stays in the box to be corrected
+ * — which is the whole reason this is two components rather than one. A
+ * `duplicate` carries it forward for the same reason: the link has to survive
+ * the question being asked about it, or "Add anyway" would have nothing to add.
  */
 export function AddPostingByLink() {
   const [state, formAction, pending] = useActionState(
     addPostingByLinkAction,
-    IDLE
+    ADD_BY_LINK_IDLE
   )
+
+  /**
+   * The link whose duplicate warning has been waved away.
+   *
+   * `useActionState` has no reset, so "Cancel" cannot clear the state — it
+   * records *which* question was answered instead. Keyed on the URL rather than
+   * a boolean so that dismissing one warning does not suppress the next one: a
+   * second paste of a different link is a different question.
+   */
+  const [dismissed, setDismissed] = useState<string | undefined>(undefined)
 
   const key = state.status === "idle" ? "new" : (state.resetKey ?? "new")
 
   return (
     <div className="flex flex-col gap-2">
       <LinkField key={key} formAction={formAction} pending={pending} />
-      <ActionAlert state={state} />
+
+      {state.status === "duplicate" ? (
+        state.url === dismissed ? null : (
+          <DuplicateChoice
+            state={state}
+            formAction={formAction}
+            pending={pending}
+            onCancel={() => setDismissed(state.url)}
+          />
+        )
+      ) : (
+        <ActionAlert state={state} />
+      )}
     </div>
+  )
+}
+
+/**
+ * The advertisement is already on the list under another link — add it anyway?
+ *
+ * **Asked rather than decided, and the two rows are never merged.** See
+ * `lib/postings/duplicate-posting.ts`: `status` is the only column in `postings`
+ * a person writes and the `match_*` columns cost a model call, so a wrong merge
+ * would destroy something silently. A wrong *question* costs one click.
+ *
+ * ⚠️ **"Add anyway" resubmits the URL and nothing else.** The fields the
+ * extractor produced are deliberately not held here to be sent back — a Server
+ * Function is reachable by direct POST, so a form that carried a title and a
+ * company would be a way to write either. The cost is that confirming re-reads
+ * the page, which is why the button keeps the same "Reading the page…" pending
+ * label as the first submit: it really is doing that again.
+ *
+ * The link to what is already tracked opens the advertisement itself rather than
+ * the row on `/jobs`. The question is "are these the same job", and only the
+ * advertisement answers it.
+ */
+function DuplicateChoice({
+  state,
+  formAction,
+  pending,
+  onCancel,
+}: {
+  state: Extract<AddByLinkState, { status: "duplicate" }>
+  formAction: (formData: FormData) => void
+  pending: boolean
+  onCancel: () => void
+}) {
+  const { duplicate } = state
+
+  return (
+    <Alert role="status" aria-live="polite">
+      <AlertTitle>Possible duplicate</AlertTitle>
+
+      <AlertDescription className="flex flex-col gap-2">
+        <span>
+          {state.message} It was added on {duplicate.addedOn}
+          {duplicate.location ? ` — ${duplicate.location}` : ""}.
+        </span>
+
+        <a
+          href={duplicate.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline underline-offset-4"
+        >
+          Open the one you already track
+        </a>
+
+        <span>
+          If this link is a different opening, add it — nothing is merged either
+          way.
+        </span>
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <form action={formAction}>
+            <input type="hidden" name="url" value={state.url} />
+            <input type="hidden" name={CONFIRM_FIELD} value={state.url} />
+
+            <SubmitButton
+              pending={pending}
+              variant="outline"
+              size="sm"
+              label="Add anyway"
+              pendingLabel="Reading the page…"
+            />
+          </form>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+            disabled={pending}
+          >
+            Cancel
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
   )
 }
 

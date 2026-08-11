@@ -1,6 +1,9 @@
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
-import type { ActionState } from "@/lib/actions/action-state"
 import type { CurrentUser } from "@/lib/auth/current-user"
+import {
+  CONFIRM_FIELD,
+  type AddByLinkState,
+} from "@/lib/postings/add-by-link-state"
 import {
   ANONYMOUS,
   REFUSED,
@@ -9,6 +12,7 @@ import {
 } from "@/lib/test-support/identities"
 import type { Agent } from "@workspace/agents"
 import type { PostingFetch } from "@workspace/agents/board-fetch"
+import { postingId } from "@workspace/agents/posting-id"
 import type { PageExtractResult } from "@workspace/agent-tools/page-extract"
 import type { PrismaClient } from "@workspace/db"
 import { describe, expect, it, vi } from "vitest"
@@ -95,6 +99,17 @@ interface StoredRow {
   url: string
   payload: unknown
   postedAt?: Date
+  /**
+   * The three the duplicate check reads, defaulted rather than required so the
+   * tests that predate it keep seeding two fields and a URL.
+   *
+   * `company` and `location` default to `""`, which is the one value
+   * `findDuplicatePosting` treats as "not evidence of anything" — so a row
+   * seeded by an older test cannot accidentally become somebody's duplicate.
+   */
+  company?: string
+  location?: string
+  firstSeenAt?: Date
 }
 
 /**
@@ -111,6 +126,7 @@ class FakePostings {
   /** The account's title filter, and whether reading it works at all. */
   private exclusions: string[] = []
   private filtersUnreadable = false
+  private identitiesUnreadable = false
 
   seed(row: StoredRow): this {
     this.rows.push(row)
@@ -126,6 +142,12 @@ class FakePostings {
   /** Make the settings read fail, which must not cost somebody their paste. */
   breakFilters(): this {
     this.filtersUnreadable = true
+    return this
+  }
+
+  /** Make the duplicate scan fail, which must not cost somebody their paste. */
+  breakIdentities(): this {
+    this.identitiesUnreadable = true
     return this
   }
 
@@ -158,19 +180,54 @@ class FakePostings {
             ) ?? null
           )
         },
+        /**
+         * What `postingIdentities` reads, projected as it selects.
+         *
+         * The defaults matter: a row seeded without a company or a location
+         * answers `""` for both, and `findDuplicatePosting` refuses to match on
+         * an empty half. So every test written before this check existed keeps
+         * reaching the write, which is what makes their spend assertions still
+         * mean what they say.
+         */
+        findMany: async ({ where }: { where: { userId: string } }) => {
+          if (this.identitiesUnreadable) {
+            throw new Error("the postings table is gone")
+          }
+
+          return held
+            .filter((row) => row.userId === where.userId)
+            .map((row) => ({
+              postingId: row.postingId,
+              title: row.title,
+              company: row.company ?? "",
+              location: row.location ?? "",
+              url: row.url,
+              firstSeenAt: row.firstSeenAt ?? NOW,
+            }))
+        },
       },
       $executeRaw: async (statement: { values: unknown[] }) => {
-        const [userId, postingId, title, , , url, postedAt, payload] =
-          statement.values as [
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            Date | null,
-            string,
-          ]
+        const [
+          userId,
+          postingId,
+          title,
+          company,
+          location,
+          url,
+          postedAt,
+          payload,
+          firstSeenAt,
+        ] = statement.values as [
+          string,
+          string,
+          string,
+          string,
+          string,
+          string,
+          Date | null,
+          string,
+          Date,
+        ]
 
         if (
           held.some(
@@ -184,7 +241,10 @@ class FakePostings {
           userId,
           postingId,
           title,
+          company,
+          location,
           url,
+          firstSeenAt,
           payload: JSON.parse(payload),
           ...(postedAt ? { postedAt } : {}),
         }
@@ -197,7 +257,7 @@ class FakePostings {
 }
 
 interface Harness {
-  add: (state: ActionState, formData: FormData) => Promise<ActionState>
+  add: (state: AddByLinkState, formData: FormData) => Promise<AddByLinkState>
   postings: FakePostings
   extractor: FakeExtractor
   /** How many boards were asked. The board path is tried first, so this leads. */
@@ -274,9 +334,9 @@ function form(url: string): FormData {
   return data
 }
 
-const IDLE: ActionState = { status: "idle" }
+const IDLE: AddByLinkState = { status: "idle" }
 
-function messageOf(state: ActionState): string {
+function messageOf(state: AddByLinkState): string {
   return state.status === "idle" ? "" : state.message
 }
 
@@ -710,5 +770,168 @@ describe("addPostingByLink, against the user's title filters", () => {
     // somebody the advertisement they explicitly asked for.
     expect(state.status).toBe("success")
     expect(error).toHaveBeenCalled()
+  })
+})
+
+/**
+ * One *opening* advertised under two different links.
+ *
+ * Distinct from the `ALREADY_TRACKED` refusal, and the distinction is the whole
+ * point: that one is the same URL and is answered before anything is spent,
+ * this one is a different URL and cannot be answered until the page has been
+ * read. What is asserted here is mostly that nothing is decided on the user's
+ * behalf — the row is not written, the row that exists is not touched, and the
+ * question can be answered either way.
+ */
+describe("addPostingByLink, a duplicate under another link", () => {
+  const SEEK_URL = "https://www.seek.com.au/job/93431609?type=standard"
+
+  /** The same opening SEEK carries, as the company's own careers page words it. */
+  const ON_CAREERS_PAGE: PostingFetch = {
+    status: "fetched",
+    board: "SEEK",
+    posting: {
+      title: "Senior Backend Engineer",
+      company: "Holloway Labs",
+      location: "Sydney NSW",
+      url: SEEK_URL,
+      summary: "Own the data platform.",
+    },
+  }
+
+  /** The row already held, under the registered entity name and another link. */
+  function alreadyHolding(): FakePostings {
+    return new FakePostings().seed({
+      userId: USER_ID,
+      postingId: "1111111111111111",
+      title: "Senior Backend Engineer - Sydney",
+      company: "Holloway Labs Pty Ltd",
+      location: "Sydney NSW",
+      url: "https://holloway.example/careers/senior-backend-engineer",
+      firstSeenAt: new Date("2026-07-20T00:00:00.000Z"),
+      payload: {},
+    })
+  }
+
+  /** The form as the "Add anyway" button submits it. */
+  function confirmed(url: string, confirmingUrl: string): FormData {
+    const data = form(url)
+    data.append(CONFIRM_FIELD, confirmingUrl)
+    return data
+  }
+
+  it("asks rather than adding, and writes nothing", async () => {
+    const it_ = harness({ board: ON_CAREERS_PAGE, postings: alreadyHolding() })
+
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    expect(state.status).toBe("duplicate")
+    expect(it_.postings.inserts).toHaveLength(0)
+  })
+
+  it("names the advertisement already held, so the two can be compared", async () => {
+    const it_ = harness({ board: ON_CAREERS_PAGE, postings: alreadyHolding() })
+
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    if (state.status !== "duplicate") throw new Error("expected a duplicate")
+
+    expect(state.duplicate.postingId).toBe("1111111111111111")
+    expect(state.duplicate.company).toBe("Holloway Labs Pty Ltd")
+    expect(state.duplicate.url).toBe(
+      "https://holloway.example/careers/senior-backend-engineer"
+    )
+    // Already a string, and the shared `formatCalendarDate` rendered it. A
+    // `Date` here would not survive the RSC boundary.
+    expect(state.duplicate.addedOn).toBe("20 July 2026")
+    // Handed back so "Add anyway" has something to resubmit.
+    expect(state.url).toBe(SEEK_URL)
+  })
+
+  it("adds it when the person says to, leaving the first row alone", async () => {
+    const postings = alreadyHolding()
+    const it_ = harness({ board: ON_CAREERS_PAGE, postings })
+
+    const state = await it_.add(IDLE, confirmed(SEEK_URL, SEEK_URL))
+
+    expect(state.status).toBe("success")
+    expect(it_.postings.inserts).toHaveLength(1)
+    // Two rows, never merged: the one already held is untouched.
+    expect(postings.rows).toHaveLength(2)
+  })
+
+  /**
+   * ⚠️ **The security property.** A Server Function is reachable by direct
+   * POST, so a confirmation that meant "skip this check" rather than "skip it
+   * for this link" would be a permanent opt-out any client could keep sending.
+   */
+  it("ignores a confirmation given for a different link", async () => {
+    const it_ = harness({ board: ON_CAREERS_PAGE, postings: alreadyHolding() })
+
+    const state = await it_.add(
+      IDLE,
+      confirmed(SEEK_URL, "https://example.com/something-else")
+    )
+
+    expect(state.status).toBe("duplicate")
+    expect(it_.postings.inserts).toHaveLength(0)
+  })
+
+  it("does not call a different role at the same employer a duplicate", async () => {
+    const postings = new FakePostings().seed({
+      userId: USER_ID,
+      postingId: "1111111111111111",
+      title: "Data Analyst",
+      company: "Holloway Labs",
+      location: "Sydney NSW",
+      url: "https://holloway.example/careers/data-analyst",
+      payload: {},
+    })
+
+    const state = await harness({ board: ON_CAREERS_PAGE, postings }).add(
+      IDLE,
+      form(SEEK_URL)
+    )
+
+    expect(state.status).toBe("success")
+  })
+
+  it("still adds the posting when the scan cannot be read", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const it_ = harness({
+      board: ON_CAREERS_PAGE,
+      postings: alreadyHolding().breakIdentities(),
+    })
+
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    // Advisory only. A read that failed must not cost somebody the paste —
+    // missing a duplicate leaves a second row to delete, refusing loses the
+    // advertisement they explicitly asked for.
+    expect(state.status).toBe("success")
+    expect(error).toHaveBeenCalled()
+  })
+
+  /**
+   * The cheap refusal still wins. Pasting the *same* link is answered by
+   * `postingId()` before a board is asked, so it never reaches this check —
+   * which is what keeps a repeat paste free.
+   */
+  it("leaves the same-URL refusal to answer first, before any spend", async () => {
+    const postings = alreadyHolding().seed({
+      userId: USER_ID,
+      postingId: postingId({ url: SEEK_URL }),
+      title: "Senior Backend Engineer",
+      company: "Holloway Labs",
+      location: "Sydney NSW",
+      url: SEEK_URL,
+      payload: {},
+    })
+
+    const it_ = harness({ board: ON_CAREERS_PAGE, postings })
+    const state = await it_.add(IDLE, form(SEEK_URL))
+
+    expect(messageOf(state)).toBe(ALREADY_TRACKED)
+    expect(it_.boardFetches()).toBe(0)
   })
 })

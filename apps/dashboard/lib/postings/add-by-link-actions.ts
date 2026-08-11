@@ -1,4 +1,3 @@
-import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import { extractPageViaApify } from "@workspace/agent-tools/page-extract-apify"
@@ -21,12 +20,19 @@ import {
 } from "@workspace/agents/posting-extractor"
 import type { StoredPosting } from "@workspace/agents/stored-posting"
 import {
+  postingIdentities,
   postingPayload,
   recordLinkedPosting,
   titleExclusions,
   type PrismaClient,
 } from "@workspace/db"
 import { isExcludedTitle } from "@workspace/job-search"
+import { formatCalendarDate } from "@/lib/format-dates"
+import {
+  CONFIRM_FIELD,
+  type AddByLinkState,
+} from "@/lib/postings/add-by-link-state"
+import { findDuplicatePosting } from "@/lib/postings/duplicate-posting"
 import { z } from "zod"
 
 /**
@@ -86,6 +92,15 @@ import { z } from "zod"
  * the caller is authorized before the body is touched, and an advertisement
  * already tracked is answered before the fetch and before the model. The order
  * of the steps in {@link createAddByLinkActions} is the design.
+ *
+ * **"Already tracked" means two different things here, and only one of them is
+ * free.** The same *link* is caught by `postingId()` before anything is spent,
+ * and refused outright. The same *opening* under a different link — the SEEK
+ * listing and the company's own careers page — cannot be seen until the page has
+ * been read, because it is a comparison of titles and companies rather than of
+ * URLs; and it is not refused but *asked about*, because the rule can be wrong
+ * and two rows are only ever a tidying problem where a wrong merge would destroy
+ * a status. `duplicate-posting.ts` holds that rule and the argument for it.
  */
 
 /**
@@ -132,6 +147,16 @@ export const READ_FAILED =
 export const ALREADY_TRACKED =
   "That posting is already in your list — look for it in the table below."
 
+/**
+ * How many of a user's advertisements a paste is compared against.
+ *
+ * A bound rather than a page: the comparison is over the whole set by design —
+ * see `postingIdentities` — and this only stops one pathological account from
+ * turning one paste into an unbounded read. Well past what anybody accumulates,
+ * so in practice it is the whole set and the check is exact.
+ */
+const MAX_COMPARED = 5_000
+
 export interface AddByLinkActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
   getUser: () => Promise<CurrentUser>
@@ -169,9 +194,27 @@ export interface AddByLinkActionsDeps {
 
 export interface AddByLinkActions {
   addPostingByLink: (
-    state: ActionState,
+    state: AddByLinkState,
     formData: FormData
-  ) => Promise<ActionState>
+  ) => Promise<AddByLinkState>
+}
+
+/**
+ * An error that preserves whatever reset key the previous state held.
+ *
+ * `carryResetKey` in `lib/actions/action-state.ts` does exactly this and cannot
+ * be reused: it is typed to `ActionState`, which has no `duplicate` case. The
+ * reasoning it documents applies here unchanged — a form keys its fields on
+ * `resetKey`, so a key that vanished on failure would remount the field and
+ * throw away the link at the moment the user is being asked to fix it.
+ */
+function carryForward(
+  previous: AddByLinkState,
+  message: string
+): AddByLinkState {
+  const resetKey = previous.status === "idle" ? undefined : previous.resetKey
+
+  return { status: "error", message, ...(resetKey ? { resetKey } : {}) }
 }
 
 export function createAddByLinkActions(
@@ -191,10 +234,10 @@ export function createAddByLinkActions(
   const now = deps.now ?? (() => new Date())
 
   async function addPostingByLink(
-    state: ActionState,
+    state: AddByLinkState,
     formData: FormData
-  ): Promise<ActionState> {
-    const fail = (message: string) => carryResetKey(state, message)
+  ): Promise<AddByLinkState> {
+    const fail = (message: string) => carryForward(state, message)
 
     // Before the body is touched. For a Server Action `proxy.ts` is not a
     // second layer — the auth SDK cannot evaluate a POST session — so this is
@@ -326,6 +369,65 @@ export function createAddByLinkActions(
       return fail(
         `“${blocked}” is one of your excluded title words, so “${posting.title}” would be hidden as soon as it was added. Change your filters in Schedules first.`
       )
+    }
+
+    /*
+      One *opening* advertised twice under two links — see
+      `duplicate-posting.ts` for what that means and why nothing is merged.
+
+      ⚠️ **This cannot move above the fetch, and the URL check above cannot move
+      below it.** The two look like the same check and are not: `postingId()`
+      derives an id from the link alone, so a repeat paste is refused before a
+      penny is spent, while this one compares the *title and company* — which
+      nothing knows until the board or the page has answered. Same constraint as
+      the excluded-title refusal directly above, for the same reason.
+
+      Skipped when the person has already been shown this duplicate and said to
+      add it anyway. The confirmation names the link it was given for, so it
+      cannot be replayed against a different one — see {@link CONFIRM_FIELD}.
+    */
+    if (formData.get(CONFIRM_FIELD) !== url) {
+      let duplicate
+      try {
+        duplicate = findDuplicatePosting(
+          await postingIdentities(
+            deps.getPrisma(),
+            caller.userId,
+            MAX_COMPARED
+          ),
+          posting,
+          id
+        )
+      } catch (error) {
+        // Same degradation as the title filters above, and for the same reason:
+        // a read that failed must not cost somebody the paste they asked for.
+        // Missing a duplicate leaves a second row to delete; refusing here would
+        // lose an advertisement over a question that is only advisory.
+        console.error("postings: could not check for a similar posting", error)
+      }
+
+      if (duplicate !== undefined) {
+        return {
+          status: "duplicate",
+          message: `You already track “${duplicate.title}” at ${duplicate.company}.`,
+          duplicate: {
+            postingId: duplicate.postingId,
+            title: duplicate.title,
+            company: duplicate.company,
+            location: duplicate.location,
+            url: duplicate.url,
+            addedOn: formatCalendarDate(duplicate.firstSeenAt),
+          },
+          url,
+          // Carried forward exactly as `carryForward` does it, and omitted
+          // rather than set to `undefined` for the same reason: the field is
+          // optional, and an explicit `undefined` is one more thing to
+          // serialise across the boundary for no gain.
+          ...(state.status !== "idle" && state.resetKey
+            ? { resetKey: state.resetKey }
+            : {}),
+        }
+      }
     }
 
     // The advertisement's own words survive in the payload; the column takes
