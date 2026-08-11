@@ -3,6 +3,10 @@
 import { Suspense } from "react"
 
 import {
+  PostingAdvertisementDetail,
+  PostingMatchProse,
+} from "@/components/jobs/postings/posting-advertisement-detail"
+import {
   useCoverLetter,
   type CoverLetterPromise,
 } from "@/components/jobs/postings/cover-letter-cell"
@@ -12,6 +16,9 @@ import { DraftCoverLetterButton } from "@/components/jobs/postings/draft-cover-l
 import { EditCoverLetterButton } from "@/components/jobs/postings/edit-cover-letter-button"
 import { EditTailoredResumeButton } from "@/components/jobs/postings/edit-tailored-resume-button"
 import { GenerateTailoredResumeButton } from "@/components/jobs/postings/generate-tailored-resume-button"
+import { PostingDetailSection } from "@/components/jobs/postings/posting-detail-section"
+import type { PostingDetailState } from "@/components/jobs/postings/posting-detail-state"
+import { PostingDocumentSection } from "@/components/jobs/postings/posting-document-section"
 import { PostingStatusSelect } from "@/components/jobs/postings/posting-status-select"
 import { TailoredResumeDownloadLink } from "@/components/jobs/postings/tailored-resume-download-link"
 import { TailoredResumePdfButton } from "@/components/jobs/postings/tailored-resume-pdf-button"
@@ -21,23 +28,11 @@ import {
 } from "@/components/jobs/postings/use-tailored-resume"
 import { coverLetterFilename } from "@/lib/cover-letters/cover-letter-ref"
 import type { PostingView } from "@/lib/postings/list-postings"
-import type { PostingDetailView } from "@/lib/postings/load-posting-detail"
 import { tailoredResumeFilename } from "@/lib/tailored-resumes/tailored-resume-ref"
 import { Badge } from "@workspace/ui/components/badge"
 import { Skeleton } from "@workspace/ui/components/skeleton"
-import { cn } from "@workspace/ui/lib/utils"
 
-/**
- * One row's detail, as the table body holds it.
- *
- * Lives here rather than beside the fetch because this is the component the
- * three states are *for*: the panel renders one branch each, and a fourth state
- * would have to earn a branch here to exist at all.
- */
-export type PostingDetailState =
-  | { status: "loading" }
-  | { status: "ready"; view: PostingDetailView }
-  | { status: "failed"; message: string }
+export type { PostingDetailState } from "@/components/jobs/postings/posting-detail-state"
 
 /**
  * One advertisement in full, shown in the expanded table row beneath it.
@@ -114,14 +109,12 @@ export function PostingDetail({
    */
   letters: CoverLetterPromise
   /**
-   * Every tailored resume this user has, still in flight.
+   * Every tailored resume on this page, still in flight.
    *
    * A **second** promise rather than one merged object, because the two loads
    * fail independently: they list two different prefixes, so one can be
    * unreadable while the other is fine, and each section says so for itself.
    * Merging them would make either failure blank both.
-   *
-   * Note it is not scoped to this page — see `TailoredResumePromise`.
    */
   tailoredResumes: TailoredResumePromise
 }) {
@@ -191,13 +184,13 @@ export function PostingDetail({
         is also why the heading stays: below `md` the column is not rendered and
         this is the whole of it.
       */}
-      <Section title="Status">
+      <PostingDetailSection title="Status">
         <PostingStatusSelect
           postingId={posting.id}
           status={posting.status}
           title={posting.title}
         />
-      </Section>
+      </PostingDetailSection>
 
       {/*
         ⚠️ **The score comes from the row, the words behind it come from the
@@ -212,7 +205,7 @@ export function PostingDetail({
         yet" would be a section that is empty for every row on a first visit.
       */}
       {posting.matchScore === undefined ? null : (
-        <Section title="Match against your resume">
+        <PostingDetailSection title="Match against your resume">
           <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
             <span className="text-base font-medium tabular-nums">
               {posting.matchScore}
@@ -238,38 +231,8 @@ export function PostingDetail({
             say.
           </p>
 
-          {detail.status === "loading" ? (
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-4 w-full max-w-lg" />
-              <Skeleton className="h-4 w-full max-w-sm" />
-            </div>
-          ) : detail.status === "ready" && detail.view.match ? (
-            <>
-              <p className="text-sm whitespace-normal text-muted-foreground">
-                {detail.view.match.reason}
-              </p>
-
-              {/*
-                An empty list is a real answer — the CV evidenced everything the
-                advertisement stated — so the heading only appears when there is
-                something under it rather than over the word "none".
-              */}
-              {detail.view.match.gaps.length > 0 ? (
-                <>
-                  <p className="text-xs font-medium">
-                    What the advertisement asks for that your resume does not
-                    show
-                  </p>
-                  <ul className="list-disc pl-5 text-sm whitespace-normal text-muted-foreground">
-                    {detail.view.match.gaps.map((gap, index) => (
-                      <li key={`${posting.id}-gap-${index}`}>{gap}</li>
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-            </>
-          ) : null}
-        </Section>
+          <PostingMatchProse postingId={posting.id} detail={detail} />
+        </PostingDetailSection>
       )}
 
       {/*
@@ -289,7 +252,7 @@ export function PostingDetail({
         content — labelled single facts — and two grid shapes for that in one
         panel would read as two different things.
       */}
-      <Section title="Where and when" className="lg:hidden">
+      <PostingDetailSection title="Where and when" className="lg:hidden">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm text-muted-foreground">
           <dt className="md:hidden">Location</dt>
           <dd className="md:hidden">{posting.location}</dd>
@@ -328,113 +291,16 @@ export function PostingDetail({
             )}
           </dd>
         </dl>
-      </Section>
+      </PostingDetailSection>
 
-      {/*
-        Three states, not two. The request for this content is made when the row
-        is expanded — see `lib/postings/load-posting-detail.ts` for why it is
-        not shipped with the row — so "not here yet" is a state of its own, and
-        it must not look like "the advertisement carried no description".
-      */}
-      {detail.status === "loading" ? (
-        /*
-          ⚠️ **The real `Section` scaffolding, not three bars in a box.** What
-          lands here is two or three headed sections separated by the parent's
-          `gap-5`; three bare `gap-2` bars were roughly half that height, so the
-          panel grew under the reader's cursor every time a row was expanded.
-          Only the two sections that always render are reserved — "From the
-          advertisement" is conditional on the advertisement having highlights,
-          so reserving it would be wrong whenever it did not.
+      <PostingAdvertisementDetail
+        postingId={posting.id}
+        postingTitle={posting.title}
+        detail={detail}
+        payloadUnreadable={payloadUnreadable}
+      />
 
-          The headings are the real words rather than placeholders: they are
-          static, they are what arrives, and a grey bar where a heading goes is
-          a second thing to move.
-        */
-        <>
-          <Section title="Summary">
-            <div
-              aria-busy="true"
-              aria-label={`Loading the details for ${posting.title}`}
-              className="flex flex-col gap-2"
-            >
-              <Skeleton className="h-4 w-full max-w-xl" />
-              <Skeleton className="h-4 w-full max-w-md" />
-            </div>
-          </Section>
-
-          <Section title="Why it matched">
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-4 w-full max-w-lg" />
-              <Skeleton className="h-4 w-full max-w-sm" />
-            </div>
-          </Section>
-        </>
-      ) : detail.status === "failed" ? (
-        <p className="text-sm text-muted-foreground">
-          {detail.message} The advertisement itself still opens above.
-        </p>
-      ) : payloadUnreadable ? (
-        <p className="text-sm text-muted-foreground">
-          The details this posting was found with could not be read, so only
-          what the table shows is available. The advertisement itself still
-          opens above.
-        </p>
-      ) : (
-        <>
-          <Section title="Summary">
-            <p className="text-sm whitespace-normal">{detail.view.summary}</p>
-          </Section>
-
-          {/*
-            ⚠️ **The advertisement's own words, and absent is the ordinary
-            case.** Whoever produced this Posting was instructed to copy the
-            phrase or leave the field out — never to read a number of years off
-            the seniority in the title — so most advertisements have none, and a
-            row showing nothing here is a row whose advertisement said nothing.
-            See `findings.ts`, and `experience.ts` for the one path with no model
-            behind it.
-          */}
-          {detail.view.experience ? (
-            <Section title="Experience asked for">
-              <p className="text-sm whitespace-normal text-muted-foreground">
-                {detail.view.experience}
-              </p>
-            </Section>
-          ) : null}
-
-          {detail.view.highlights.length > 0 ? (
-            <Section title="From the advertisement">
-              <ul className="list-disc pl-5 text-sm whitespace-normal text-muted-foreground">
-                {/*
-                  Keyed by position, not by the line itself: highlights are
-                  copied from an advertisement and two identical bullets are
-                  a thing an advertisement does. The list is never reordered
-                  or filtered, so an index is a stable key here.
-                */}
-                {detail.view.highlights.map((highlight, index) => (
-                  <li key={`${posting.id}-${index}`}>{highlight}</li>
-                ))}
-              </ul>
-            </Section>
-          ) : null}
-
-          {/*
-            Absent for a Posting the user added by pasting its link: it was
-            matched against no criteria, so there is nothing for this section to
-            say. Left out entirely rather than filled with a sentence somebody
-            would have had to invent — see `StoredPostingSchema`.
-          */}
-          {detail.view.matchReason ? (
-            <Section title="Why it matched">
-              <p className="text-sm whitespace-normal text-muted-foreground">
-                {detail.view.matchReason}
-              </p>
-            </Section>
-          ) : null}
-        </>
-      )}
-
-      <Section title="Seen">
+      <PostingDetailSection title="Seen">
         {/*
           Both sighting times, and the reason this table exists at all: a
           Posting accumulates across Runs, so "found once, weeks ago" and
@@ -461,13 +327,13 @@ export function PostingDetail({
           <dt>Last seen</dt>
           <dd title={posting.lastSeenExact}>{posting.lastSeen}</dd>
         </dl>
-      </Section>
+      </PostingDetailSection>
 
-      <Section title="Cover letter">
+      <PostingDetailSection title="Cover letter">
         <Suspense fallback={<Skeleton className="h-8 w-56" />}>
           <CoverLetterControls posting={posting} letters={letters} />
         </Suspense>
-      </Section>
+      </PostingDetailSection>
 
       {/*
         Its own `<Suspense>`, not shared with the letter's. `use()` suspends the
@@ -475,14 +341,14 @@ export function PostingDetail({
         boundary would hold the letter controls behind a `ListObjectsV2` that has
         nothing to do with them, and vice versa.
       */}
-      <Section title="Tailored resume">
+      <PostingDetailSection title="Tailored resume">
         <Suspense fallback={<Skeleton className="h-8 w-56" />}>
           <TailoredResumeControls
             posting={posting}
             tailoredResumes={tailoredResumes}
           />
         </Suspense>
-      </Section>
+      </PostingDetailSection>
     </div>
   )
 }
@@ -512,10 +378,15 @@ function CoverLetterControls({
 
   if (lookup.state === "unavailable") {
     return (
-      <p className="text-sm text-muted-foreground">
-        Your cover letters could not be loaded, so whether one has already been
-        written for this posting is unknown. Try again in a moment.
-      </p>
+      <PostingDocumentSection
+        unavailable={
+          <p className="text-sm text-muted-foreground">
+            Your cover letters could not be loaded, so whether one has already
+            been written for this posting is unknown. Try again in a moment.
+          </p>
+        }
+        actions={null}
+      />
     )
   }
 
@@ -541,63 +412,44 @@ function CoverLetterControls({
   })
 
   return (
-    <>
-      {/*
-        A Posting with a letter says so, and offers the letter. Without
-        this the detail offers a *first* draft for something already
-        drafted, which is the one thing a user cannot tell from the button
-        alone — and it would take clicking it, and spending a model call,
-        to find out.
-      */}
-      {letter ? (
-        <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
-          <span>Drafted {letter.draftedAt}.</span>
-          <CoverLetterDownloadLink
-            postingId={letter.postingId}
-            displayName={posting.title}
-            filename={filename}
-          />
-        </p>
-      ) : null}
-
-      {/*
-        A row, so the two actions on a drafted Posting read as
-        alternatives to each other — replace what the model wrote, or edit
-        it. The draft button renders its own column (a form stacked over
-        its alert), which nests inside this row unchanged.
-      */}
-      <div className="flex flex-wrap items-start gap-2">
-        <DraftCoverLetterButton
-          postingId={posting.id}
-          title={posting.title}
-          drafted={letter !== undefined}
-        />
-
-        {!letter ? (
-          <CreateCoverLetterButton
+    <PostingDocumentSection
+      existing={
+        letter ? (
+          <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
+            <span>Drafted {letter.draftedAt}.</span>
+            <CoverLetterDownloadLink
+              postingId={letter.postingId}
+              displayName={posting.title}
+              filename={filename}
+            />
+          </p>
+        ) : undefined
+      }
+      actions={
+        <>
+          <DraftCoverLetterButton
             postingId={posting.id}
             title={posting.title}
+            drafted={letter !== undefined}
           />
-        ) : null}
 
-        {/*
-          Conditional on the letter for the reason the download link is:
-          with nothing drafted there is nothing to edit, and the editor
-          would open on an empty document.
+          {!letter ? (
+            <CreateCoverLetterButton
+              postingId={posting.id}
+              title={posting.title}
+            />
+          ) : null}
 
-          Edit opens `FileEditorDialog` — the shared rich-text editor —
-          after fetching `/api/cover-letters/[postingId]`. That identity is
-          exactly what this table is keyed on.
-        */}
-        {letter ? (
-          <EditCoverLetterButton
-            postingId={letter.postingId}
-            displayName={posting.title}
-            filename={filename}
-          />
-        ) : null}
-      </div>
-    </>
+          {letter ? (
+            <EditCoverLetterButton
+              postingId={letter.postingId}
+              displayName={posting.title}
+              filename={filename}
+            />
+          ) : null}
+        </>
+      }
+    />
   )
 }
 
@@ -610,10 +462,10 @@ function CoverLetterControls({
  *
  * ⚠️ **Every name shown here comes from `posting`, not from storage.** The
  * lookup carries a Posting id and a date and nothing else, because
- * `loadTailoredResumeViews` reads the whole set with one `ListObjectsV2` and a
- * listing carries no user metadata. The title and company the download link and
- * the PDF button need are already on this component's props — the same values,
- * out of Postgres rather than S3.
+ * `listTailoredResumes` reads with one `ListObjectsV2` and a listing carries
+ * no user metadata. The title and company the download link and the PDF button
+ * need are already on this component's props — the same values, out of
+ * Postgres rather than S3.
  *
  * ⚠️ **Two ways to a PDF, and neither is redundant.** The button below makes one
  * from the stored markdown without opening anything; the editor's own *Download
@@ -632,103 +484,76 @@ function TailoredResumeControls({
 
   if (lookup.state === "unavailable") {
     return (
-      <p className="text-sm text-muted-foreground">
-        Your tailored resumes could not be loaded, so whether one has already
-        been generated for this posting is unknown. Try again in a moment.
-      </p>
+      <PostingDocumentSection
+        unavailable={
+          <p className="text-sm text-muted-foreground">
+            Your tailored resumes could not be loaded, so whether one has
+            already been generated for this posting is unknown. Try again in a
+            moment.
+          </p>
+        }
+        actions={null}
+      />
     )
   }
 
   const resume = lookup.state === "generated" ? lookup.resume : undefined
 
   return (
-    <>
-      {resume ? (
-        <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <span>Generated {resume.generatedAt}.</span>
-          <TailoredResumeDownloadLink
+    <PostingDocumentSection
+      existing={
+        resume ? (
+          <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <span>Generated {resume.generatedAt}.</span>
+            <TailoredResumeDownloadLink
+              postingId={posting.id}
+              title={posting.title}
+              company={posting.company}
+            />
+            <TailoredResumePdfButton
+              postingId={posting.id}
+              title={posting.title}
+              company={posting.company}
+            />
+          </p>
+        ) : undefined
+      }
+      emptyHint={
+        resume ? undefined : (
+          // Said once, where the decision is made, rather than in the page-level
+          // paragraph above the table: a tailored resume is a rearrangement of a
+          // document the user wrote, and the one failure mode worth naming is the
+          // model quietly adding something. Reading it against the original is
+          // the whole of what the user has to do about that.
+          <p className="text-sm text-muted-foreground">
+            Rewrites the newest document you have labelled <em>Resume</em> for
+            this advertisement — reordering and re-emphasising what is already
+            in it, never adding to it. Read the result against your own CV
+            before you send it.
+          </p>
+        )
+      }
+      actions={
+        <>
+          <GenerateTailoredResumeButton
             postingId={posting.id}
             title={posting.title}
-            company={posting.company}
+            generated={resume !== undefined}
           />
-          <TailoredResumePdfButton
-            postingId={posting.id}
-            title={posting.title}
-            company={posting.company}
-          />
-        </p>
-      ) : (
-        // Said once, where the decision is made, rather than in the page-level
-        // paragraph above the table: a tailored resume is a rearrangement of a
-        // document the user wrote, and the one failure mode worth naming is the
-        // model quietly adding something. Reading it against the original is
-        // the whole of what the user has to do about that.
-        <p className="text-sm text-muted-foreground">
-          Rewrites the newest document you have labelled <em>Resume</em> for
-          this advertisement — reordering and re-emphasising what is already in
-          it, never adding to it. Read the result against your own CV before you
-          send it.
-        </p>
-      )}
 
-      <div className="flex flex-wrap items-start gap-2">
-        <GenerateTailoredResumeButton
-          postingId={posting.id}
-          title={posting.title}
-          generated={resume !== undefined}
-        />
-
-        {/*
-          Conditional for the reason the download link is: with nothing
-          generated there is nothing to edit, and the editor would open on an
-          empty document.
-        */}
-        {resume ? (
-          <EditTailoredResumeButton
-            postingId={posting.id}
-            displayName={posting.title}
-            filename={tailoredResumeFilename({
-              postingId: posting.id,
-              title: posting.title,
-              company: posting.company,
-            })}
-          />
-        ) : null}
-      </div>
-    </>
-  )
-}
-
-/**
- * A labelled block of the detail.
- *
- * A heading per section rather than an undifferentiated stack of paragraphs:
- * the summary, the copied highlights and the reason it matched come from three
- * different places and read as one wall of text without labels.
- */
-function Section({
-  title,
-  className,
-  children,
-}: {
-  title: string
-  /**
-   * Extra classes on the `<section>` itself.
-   *
-   * Exists for one caller: **Where and when** is only on screen below `lg`, and
-   * the heading has to disappear with its own content — a `lg:hidden` on the
-   * grid inside would leave the parent's `gap-5` and an uppercase heading above
-   * nothing.
-   */
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className={cn("flex flex-col gap-2", className)}>
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {title}
-      </h3>
-      {children}
-    </section>
+          {resume ? (
+            <EditTailoredResumeButton
+              postingId={posting.id}
+              displayName={posting.title}
+              filename={tailoredResumeFilename({
+                postingId: posting.id,
+                title: posting.title,
+                company: posting.company,
+              })}
+            />
+          ) : null}
+        </>
+      }
+    />
   )
 }

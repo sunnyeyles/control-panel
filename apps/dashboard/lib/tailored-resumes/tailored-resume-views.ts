@@ -1,10 +1,16 @@
-import type { TailoredResumeStore } from "@workspace/user-storage"
+import type {
+  StoredTailoredResume,
+  TailoredResumeStore,
+} from "@workspace/user-storage"
 
 import { formatUtcDateTime } from "@/lib/format-dates"
-import { listPostingDocuments } from "@/lib/posting-documents/posting-document-views"
+import {
+  listPostingDocuments,
+  postingDocumentViewsFor,
+} from "@/lib/posting-documents/posting-document-views"
 
 /**
- * The tailored-resume metadata rendered for one Posting.
+ * The tailored-resume metadata rendered for one visible Posting.
  *
  * A `View` and not a `Row` (`NAMING.md` R5): it crosses into the table's client
  * boundary, so every `Date` is already a string — and there is no
@@ -23,27 +29,29 @@ export interface TailoredResumeView {
 }
 
 /**
- * Every tailored resume this user has, in one call.
+ * Every tailored resume this user has, in one request.
  *
- * The single-listing shape and the error policy — reject on an unreadable
- * store, empty only for a never-written prefix — are `listPostingDocuments`'s
- * contract, shared with the cover letters.
- *
- * ⚠️ **It takes no posting ids and is not bounded by the page**, unlike the
- * letters' views. The cost is O(tailored resumes this user has) rather than
- * O(rows rendered) — for one person's job search that stays smaller than the
- * page size for a long time, and it does not grow when the page does.
- *
- * An array rather than a `Map`, because this crosses the RSC boundary into
- * client components, where a `Map` is an awkward payload.
+ * The single-listing shape, the start-early property and the error policy —
+ * reject on an unreadable store, empty only for a never-written prefix — are
+ * `listPostingDocuments`'s contract, shared with the cover letters.
  */
-export async function loadTailoredResumeViews(
+export async function listTailoredResumes(
   userId: string,
   resumes: TailoredResumeStore
-): Promise<TailoredResumeView[]> {
-  const listed = await listPostingDocuments(userId, resumes)
+): Promise<readonly StoredTailoredResume[]> {
+  return listPostingDocuments(userId, resumes)
+}
 
-  return listed.map((resume) => ({
+/**
+ * The views for one page of Postings, out of everything
+ * {@link listTailoredResumes} found. The bounded-filter shape is
+ * `postingDocumentViewsFor`'s; what belongs here is the field mapping.
+ */
+export function tailoredResumeViewsFor(
+  listed: readonly StoredTailoredResume[],
+  postingIds: readonly string[]
+): TailoredResumeView[] {
+  return postingDocumentViewsFor(listed, postingIds, (resume) => ({
     postingId: resume.postingId,
     // From the object's write time rather than the `generated-at` metadata,
     // because a listing carries no metadata — `instantFrom` in

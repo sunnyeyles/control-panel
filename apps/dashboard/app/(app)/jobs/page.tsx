@@ -33,10 +33,16 @@ import {
 } from "@/lib/postings/posting-query"
 import type { BriefingCounts } from "@/lib/postings/postings-empty-state"
 import { getCoverLetterStore, getTailoredResumeStore } from "@/lib/storage"
-import { loadTailoredResumeViews } from "@/lib/tailored-resumes/tailored-resume-views"
+import {
+  listTailoredResumes,
+  tailoredResumeViewsFor,
+} from "@/lib/tailored-resumes/tailored-resume-views"
 import { timed } from "@/lib/timed"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import type { StoredCoverLetter } from "@workspace/user-storage"
+import type {
+  StoredCoverLetter,
+  StoredTailoredResume,
+} from "@workspace/user-storage"
 
 /** Required of any server component reading the session — it depends on cookies. */
 export const dynamic = "force-dynamic"
@@ -172,6 +178,21 @@ export default async function BriefingsPage({
     return null
   })
 
+  // ⚠️ **Same start-early shape as the letters, and for the same reason.**
+  // `listTailoredResumes` takes the user and nothing else — narrowing to the
+  // twenty-five ids on screen is `tailoredResumeViewsFor`. Starting it after
+  // `listPostings` would pay an S3 round trip in series for no dependency.
+  //
+  // `null` on failure, never an empty list — same correctness property as the
+  // letters. `prod:tailored-resumes` is the newest grant, so the
+  // missing-permission case is the likely one.
+  const listedResumes: ListedResumes = timed("briefings.tailored-resumes", () =>
+    listTailoredResumes(user.userId, getTailoredResumeStore())
+  ).catch((error) => {
+    console.error("tailored-resumes: could not load", error)
+    return null
+  })
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-8 lg:px-6">
@@ -251,6 +272,7 @@ export default async function BriefingsPage({
               query={query}
               activity={activityPromise}
               letters={listedLetters}
+              resumes={listedResumes}
             />
           </Suspense>
         </section>
@@ -273,6 +295,12 @@ type ActivityPromise = Promise<
  * are known. `PostingsSection` narrows it once they are.
  */
 type ListedLetters = Promise<readonly StoredCoverLetter[] | null>
+
+/**
+ * Every tailored resume this user has, or `null` when the store could not be
+ * read. Same start-early / narrow-later shape as {@link ListedLetters}.
+ */
+type ListedResumes = Promise<readonly StoredTailoredResume[] | null>
 
 /**
  * The per-briefing strip above the table, and the poller.
@@ -332,6 +360,7 @@ async function PostingsSection({
   query,
   activity,
   letters,
+  resumes,
 }: {
   userId: string
   query: PostingQuery
@@ -345,6 +374,11 @@ async function PostingsSection({
    * hold the table behind a second service.
    */
   letters: ListedLetters
+  /**
+   * The whole user's tailored resumes, already in flight — same rule as
+   * {@link letters}.
+   */
+  resumes: ListedResumes
 }) {
   let postings: PostingPage
 
@@ -391,25 +425,13 @@ async function PostingsSection({
     listed === null ? null : coverLetterViewsFor(listed, postingIds)
   )
 
-  // ⚠️ **A second storage read, alongside the letters rather than behind them.**
-  // Also a single `ListObjectsV2` over one prefix — see
-  // `lib/tailored-resumes/tailored-resume-views.ts` — and it takes no posting ids
-  // for the same reason the letters now take theirs only to filter: what comes
-  // back is everything this user has generated, not a page of it.
-  //
-  // Not awaited, `.catch()` attached now rather than at the `await`, and `null`
-  // on failure never an empty list — all three for the reasons the letters give
-  // one comment up. Degrading this one to "nothing generated" would offer to
-  // spend a model call replacing a document the page simply could not see, and
-  // `prod:tailored-resumes` is the newest grant, so the missing-permission case
-  // is the likely one.
-  const tailoredResumesPromise: TailoredResumePromise = timed(
-    "briefings.tailored-resumes",
-    () => loadTailoredResumeViews(userId, getTailoredResumeStore())
-  ).catch((error) => {
-    console.error("tailored-resumes: could not load", error)
-    return null
-  })
+  // Same pipeline as the letters: list early, filter to the page, keep `null`
+  // distinct from empty. Bounded by `PAGE_SIZE` once it crosses the RSC
+  // boundary — the unbounded inventory no longer does.
+  const tailoredResumesPromise: TailoredResumePromise = resumes.then(
+    (listed) =>
+      listed === null ? null : tailoredResumeViewsFor(listed, postingIds)
+  )
 
   // Only known when the activity load succeeded, which is exactly why it is
   // optional: "you have no briefings" is the wrong thing to tell someone whose

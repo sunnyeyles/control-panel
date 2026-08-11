@@ -1,13 +1,12 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { POSTING_NOT_FOUND } from "@/lib/actions/not-found"
-import { storageMessage } from "@/lib/actions/storage-message"
 import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { NoBackgroundReason } from "@/lib/candidate/candidate-background"
 import { editPostingDocument } from "@/lib/posting-documents/edit-posting-document"
-import { preparePostingDocument } from "@/lib/posting-documents/prepare-posting-document"
+import { generatePostingDocument } from "@/lib/posting-documents/generate-posting-document"
 import type { Agent } from "@workspace/agents"
-import type { UndraftableError } from "@workspace/agents/cover-letter"
+import type { UndraftableError } from "@workspace/agents/draftable"
 import { createResumeTailor as defaultResumeTailor } from "@workspace/agents/resume-tailor"
 import {
   TailoredResumeRequestSchema,
@@ -177,76 +176,88 @@ export function createTailoredResumeActions(deps: TailoredResumeActionsDeps) {
     // Who is asking, which Posting, whether there is a CV, and whether it is
     // enough of one — all of it before the tailor is constructed, so a user with
     // nothing to rewrite spends nothing. The order is `preparePostingDocument`'s
-    // and is a property rather than plumbing; only the two sentences below are
-    // this feature's to write.
-    const prepared = await preparePostingDocument(deps, formData, KIND)
+    // (inside `generatePostingDocument`); only the sentences below and the
+    // resume-only `produce` middle are this feature's.
+    const generated = await generatePostingDocument(deps, formData, {
+      kind: KIND,
+      store: deps.getTailoredResumes(),
+      produce: async (prepared) => {
+        const { userId, postingId, posting, lastSeenRunId, displayName } =
+          prepared
 
-    if (!prepared.ok) {
-      switch (prepared.reason) {
+        let request: TailoredResumeRequest
+        try {
+          request = TailoredResumeRequestSchema.parse({
+            posting,
+            profile: { background: prepared.background },
+          })
+        } catch (error) {
+          console.error(
+            "tailored-resumes: the request would not validate",
+            error
+          )
+          return {
+            ok: false as const,
+            message: "That posting could not be turned into a resume.",
+          }
+        }
+
+        let markdown: string
+        try {
+          markdown = await tailor(request, userId)
+        } catch (error) {
+          console.error("tailored-resumes: the tailor failed", error)
+          return {
+            ok: false as const,
+            message:
+              "The resume could not be generated. Try again in a moment.",
+          }
+        }
+
+        return {
+          ok: true as const,
+          document: {
+            // ⚠️ **The session's userId, never anything from the form.**
+            userId,
+            postingId,
+            markdown,
+            generatedAt: now(),
+            provenance: {
+              // Absent for a Posting added by link — see the same spread in
+              // `cover-letter-actions.ts`.
+              ...(lastSeenRunId ? { runId: lastSeenRunId } : {}),
+              title: posting.title,
+              company: posting.company,
+              url: posting.url,
+              // Which Document this was rewritten from. `loadCandidateBackground`
+              // picks the newest one labelled Resume, so the answer changes the
+              // moment another is uploaded — recording it is the only way to know
+              // afterwards which CV a given output came out of.
+              sourceDocument: displayName,
+            },
+          },
+        }
+      },
+    })
+
+    if (!generated.ok) {
+      switch (generated.reason) {
         case "refused":
-          return fail(prepared.message)
+          return fail(generated.message)
         case "no-background":
-          return fail(describeMissingBackground(prepared.missing))
+          return fail(describeMissingBackground(generated.missing))
         case "undraftable":
-          return fail(describeUndraftable(prepared.error, prepared.displayName))
+          return fail(
+            describeUndraftable(generated.error, generated.displayName)
+          )
         default: {
-          const _exhaustive: never = prepared
+          const _exhaustive: never = generated
           return _exhaustive
         }
       }
     }
 
-    const { userId, postingId, posting, lastSeenRunId, displayName } = prepared
-
-    let request: TailoredResumeRequest
-    try {
-      request = TailoredResumeRequestSchema.parse({
-        posting,
-        profile: { background: prepared.background },
-      })
-    } catch (error) {
-      console.error("tailored-resumes: the request would not validate", error)
-      return fail("That posting could not be turned into a resume.")
-    }
-
-    let markdown: string
-    try {
-      markdown = await tailor(request, userId)
-    } catch (error) {
-      console.error("tailored-resumes: the tailor failed", error)
-      return fail("The resume could not be generated. Try again in a moment.")
-    }
-
-    try {
-      await deps.getTailoredResumes().put({
-        // ⚠️ **The session's userId, never anything from the form.** There is
-        // no way to *name* another user's prefix from here, which is what makes
-        // the key-segment assertion in the store a second line of defence.
-        userId,
-        postingId,
-        markdown,
-        generatedAt: now(),
-        // Provenance rides here rather than in the key — the key holds the
-        // Posting id and nothing else, so re-generating overwrites one object.
-        // Each value is model- or user-copied text and is stripped to what an
-        // HTTP header can carry by the store; see `toMetadataRecord`.
-        provenance: {
-          // Absent for a Posting added by link — see the same spread in
-          // `cover-letter-actions.ts`.
-          ...(lastSeenRunId ? { runId: lastSeenRunId } : {}),
-          title: posting.title,
-          company: posting.company,
-          url: posting.url,
-          // Which Document this was rewritten from. `loadCandidateBackground`
-          // picks the newest one labelled Resume, so the answer changes the
-          // moment another is uploaded — recording it is the only way to know
-          // afterwards which CV a given output came out of.
-          sourceDocument: displayName,
-        },
-      })
-    } catch (error) {
-      return fail(storageMessage(`${KIND}: write failed`, error))
-    }
+    const { posting, displayName } = generated.prepared
 
     return {
       status: "success",

@@ -6,11 +6,11 @@ import { invokeTracedAgent } from "@/lib/agents/invoke-traced-agent"
 import type { CurrentUser } from "@/lib/auth/current-user"
 import type { NoBackgroundReason } from "@/lib/candidate/candidate-background"
 import { editPostingDocument } from "@/lib/posting-documents/edit-posting-document"
+import { generatePostingDocument } from "@/lib/posting-documents/generate-posting-document"
 import {
   BAD_REQUEST,
   POSTING_ID_PATTERN,
 } from "@/lib/posting-documents/posting-document-ref"
-import { preparePostingDocument } from "@/lib/posting-documents/prepare-posting-document"
 import {
   loadStoredPosting,
   storedPostingMessage,
@@ -21,12 +21,12 @@ import {
   toCoverLetterPrompt,
   type CoverLetterRequest,
   type LetterInstructions,
-  type UndraftableError,
 } from "@workspace/agents/cover-letter"
 import {
   coverLetterSystemPrompt,
   createCoverLetterWriter as defaultCoverLetterWriter,
 } from "@workspace/agents/cover-letter-writer"
+import type { UndraftableError } from "@workspace/agents/draftable"
 import { coverLetterInstructions, type PrismaClient } from "@workspace/db"
 import {
   isUserStorageError,
@@ -222,101 +222,101 @@ export function createCoverLetterActions(deps: CoverLetterActionsDeps) {
     // Who is asking, which Posting, whether there is a CV, and whether it is
     // enough of one — all of it before the writer is constructed, so a user with
     // nothing to write from spends nothing. The order is
-    // `preparePostingDocument`'s and is a property rather than plumbing; only the
-    // two sentences below are this feature's to write.
-    const prepared = await preparePostingDocument(deps, formData, KIND)
+    // `preparePostingDocument`'s (inside `generatePostingDocument`); only the
+    // sentences below and the letter-only `produce` middle are this feature's.
+    const generated = await generatePostingDocument(deps, formData, {
+      kind: KIND,
+      store: deps.getCoverLetters(),
+      produce: async (prepared) => {
+        const { userId, postingId, posting, lastSeenRunId } = prepared
 
-    if (!prepared.ok) {
-      switch (prepared.reason) {
+        let request: CoverLetterRequest
+        try {
+          request = CoverLetterRequestSchema.parse({
+            posting,
+            profile: { background: prepared.background },
+          })
+        } catch (error) {
+          console.error("cover-letters: the request would not validate", error)
+          return {
+            ok: false as const,
+            message: "That posting could not be turned into a letter.",
+          }
+        }
+
+        // ⚠️ **A failed read fails the draft — it never drafts without them.**
+        // Drafting anyway produces a letter that looks perfect and quietly
+        // ignores every rule the user wrote. That is the same silent-failure
+        // shape `assertDraftable` refuses one step earlier.
+        //
+        // A user with *no row* is a different thing and is the ordinary case:
+        // they never opened Settings, `coverLetterSystemPrompt` composes
+        // byte-identically to the constant, and the draft proceeds.
+        let extras: LetterInstructions
+        try {
+          const saved = await coverLetterInstructions(deps.getPrisma(), userId)
+
+          extras = {
+            instructions: saved?.instructions ?? "",
+            exampleLetter: saved?.exampleLetter ?? "",
+          }
+        } catch (error) {
+          console.error("cover-letters: could not read the instructions", error)
+          return { ok: false as const, message: "Something went wrong." }
+        }
+
+        let markdown: string
+        try {
+          markdown = await draft(request, userId, extras)
+        } catch (error) {
+          console.error("cover-letters: the writer failed", error)
+          return {
+            ok: false as const,
+            message: "The letter could not be drafted. Try again in a moment.",
+          }
+        }
+
+        return {
+          ok: true as const,
+          document: {
+            // ⚠️ **The session's userId, never anything from the form.**
+            userId,
+            postingId,
+            markdown,
+            draftedAt: now(),
+            // Provenance rides here rather than in the key — the key holds the
+            // Posting id and nothing else, so a redraft overwrites one object.
+            provenance: {
+              // Absent, rather than blank, for a Posting the user added by
+              // pasting its link: no Run ever saw it.
+              ...(lastSeenRunId ? { runId: lastSeenRunId } : {}),
+              title: posting.title,
+              company: posting.company,
+              url: posting.url,
+            },
+          },
+        }
+      },
+    })
+
+    if (!generated.ok) {
+      switch (generated.reason) {
         case "refused":
-          return fail(prepared.message)
+          return fail(generated.message)
         case "no-background":
-          return fail(describeMissingBackground(prepared.missing))
+          return fail(describeMissingBackground(generated.missing))
         case "undraftable":
-          return fail(describeUndraftable(prepared.error, prepared.displayName))
+          return fail(
+            describeUndraftable(generated.error, generated.displayName)
+          )
         default: {
-          const _exhaustive: never = prepared
+          const _exhaustive: never = generated
           return _exhaustive
         }
       }
     }
 
-    const { userId, postingId, posting, lastSeenRunId } = prepared
-
-    let request: CoverLetterRequest
-    try {
-      request = CoverLetterRequestSchema.parse({
-        posting,
-        profile: { background: prepared.background },
-      })
-    } catch (error) {
-      console.error("cover-letters: the request would not validate", error)
-      return fail("That posting could not be turned into a letter.")
-    }
-
-    // ⚠️ **A failed read fails the draft — it never drafts without them.**
-    // Drafting anyway produces a letter that looks perfect and quietly ignores
-    // every rule the user wrote: the sign-off they asked for is missing, the
-    // word they banned is back, and nothing anywhere says why. That is the same
-    // silent-failure shape `assertDraftable` refuses one step earlier, and the
-    // reason the failure is loud here rather than degraded to the built-in
-    // behaviour.
-    //
-    // A user with *no row* is a different thing and is the ordinary case: they
-    // never opened Settings, `coverLetterSystemPrompt` composes byte-identically
-    // to the constant, and the draft proceeds.
-    let extras: LetterInstructions
-    try {
-      const saved = await coverLetterInstructions(deps.getPrisma(), userId)
-
-      extras = {
-        instructions: saved?.instructions ?? "",
-        exampleLetter: saved?.exampleLetter ?? "",
-      }
-    } catch (error) {
-      console.error("cover-letters: could not read the instructions", error)
-      return fail("Something went wrong.")
-    }
-
-    let markdown: string
-    try {
-      markdown = await draft(request, userId, extras)
-    } catch (error) {
-      console.error("cover-letters: the writer failed", error)
-      return fail("The letter could not be drafted. Try again in a moment.")
-    }
-
-    try {
-      await deps.getCoverLetters().put({
-        // ⚠️ **The session's userId, never anything from the form.** There is
-        // no way to *name* another user's prefix from here, which is what makes
-        // the key-segment assertion in the store a second line of defence.
-        userId,
-        postingId,
-        markdown,
-        draftedAt: now(),
-        // Provenance rides here rather than in the key — the key holds the
-        // Posting id and nothing else, so a redraft overwrites one object. Each
-        // value is model-copied text and is stripped to what an HTTP header can
-        // carry by the store; see `toMetadataRecord`.
-        provenance: {
-          // The Run that most recently reported this advertisement, carried
-          // off the row rather than looked up. Provenance exactly as it was
-          // when this action read a Run directly — "which Run found this" is
-          // worth keeping, and it is still no part of the key.
-          //
-          // Absent, rather than blank, for a Posting the user added by pasting
-          // its link: no Run ever saw it, and a stamped placeholder would read
-          // as a Run whose id had been lost.
-          ...(lastSeenRunId ? { runId: lastSeenRunId } : {}),
-          title: posting.title,
-          company: posting.company,
-          url: posting.url,
-        },
-      })
-    } catch (error) {
-      return fail(storageMessage(`${KIND}: write failed`, error))
-    }
+    const { posting } = generated.prepared
 
     return {
       status: "success",

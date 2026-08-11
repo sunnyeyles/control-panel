@@ -14,11 +14,17 @@ export {
 
 export {
   assertDraftable,
+  MAX_BACKGROUND_CHARS,
+  MIN_BACKGROUND_CHARS,
+  UndraftableError,
+  type UndraftableReason,
+} from "./draftable.ts"
+
+export {
   CoverLetterRequestSchema,
   MAX_EXAMPLE_LETTER_CHARS,
   MAX_INSTRUCTIONS_CHARS,
   toCoverLetterPrompt,
-  UndraftableError,
   type CoverLetterRequest,
   type LetterInstructions,
 } from "./cover-letter.ts"

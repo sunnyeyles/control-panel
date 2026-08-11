@@ -15,7 +15,7 @@
  * unidentifiable Posting, no storage call once the Posting is missing.
  */
 
-import { UndraftableError } from "@workspace/agents/cover-letter"
+import { UndraftableError } from "@workspace/agents/draftable"
 import type { Posting } from "@workspace/agents/findings"
 import { postingId } from "@workspace/agents/posting-id"
 import type { PrismaClient } from "@workspace/db"

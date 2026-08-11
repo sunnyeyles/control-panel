@@ -8,10 +8,7 @@ import {
 } from "@/lib/candidate/candidate-background"
 import type { Agent } from "@workspace/agents"
 import type { PrismaClient } from "@workspace/db"
-import {
-  assertDraftable,
-  UndraftableError,
-} from "@workspace/agents/cover-letter"
+import { assertDraftable, UndraftableError } from "@workspace/agents/draftable"
 import { parseSearchCriteria } from "@workspace/agents/criteria"
 import {
   createProfileExtractor as defaultProfileExtractor,
