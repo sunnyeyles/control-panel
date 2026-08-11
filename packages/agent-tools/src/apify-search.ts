@@ -190,10 +190,16 @@ export interface ApifyBoardSpec<TItem> {
 }
 
 /** Injected in tests. Both default to the real thing. */
-export interface BoardSearchDeps {
+export interface ApifyHttpDeps {
   fetch?: typeof globalThis.fetch
   apiToken?: string
 }
+
+/**
+ * Board search and page-extract share the same Apify HTTP surface. Prefer
+ * {@link ApifyHttpDeps}; this alias keeps older call sites readable.
+ */
+export type BoardSearchDeps = ApifyHttpDeps
 
 /**
  * A function, not a module constant, so importing a board's tool never throws.
@@ -330,7 +336,7 @@ export async function apifyBoardSearch<TItem>(
   spec: ApifyBoardSpec<TItem>,
   input: BoardSearchInput,
   catalog: PostingCatalog,
-  deps: BoardSearchDeps = {},
+  deps: ApifyHttpDeps = {},
   log?: SearchLog
 ): Promise<string> {
   const { query } = input

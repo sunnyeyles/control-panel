@@ -11,7 +11,7 @@ import { toPostingRequestPrompt } from "./posting-prompt.ts"
  * candidate already wrote, and this module says what the model is asked. The
  * agent itself is a prompt and an empty tool set.
  *
- * ⚠️ **The bounds live in `cover-letter.ts` and are reused, not restated.**
+ * ⚠️ **The bounds live in `candidate-profile.ts` and are reused, not restated.**
  * `assertDraftable` and `UndraftableError` are already structural — the guard
  * takes `{ background }` rather than a `CandidateProfile` — and
  * `suggest-criteria-actions.ts` in the dashboard is the standing precedent for a

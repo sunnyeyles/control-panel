@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   apifyBoardSearch,
   type ApifyBoardSpec,
-  type BoardSearchDeps,
+  type ApifyHttpDeps,
   type BoardSearchInput,
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
@@ -99,7 +99,7 @@ beforeEach(() => {
 function search<TItem>(
   spec: ApifyBoardSpec<TItem>,
   input: BoardSearchInput,
-  deps: BoardSearchDeps = {}
+  deps: ApifyHttpDeps = {}
 ): Promise<string> {
   return apifyBoardSearch(spec, input, catalog, deps, log)
 }

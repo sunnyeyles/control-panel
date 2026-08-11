@@ -381,10 +381,10 @@ recorded. `boardForHost()` is the one rule that turns a host into a board;
 the answer, as the Source badge on `/jobs`, and a host no board claims
 shows as the bare hostname rather than as nothing.
 
-`JOB_BOARDS` in `packages/agents/src/job-boards.ts` is **not** a registry of
-tools and selects nothing: a board is listed there when its URLs need
-normalising, and its `trackingParameters` are the stamps that would otherwise
-give one advertisement two ids across two Runs.
+`JOB_BOARDS` in `packages/agents/src/job-boards.ts` is the single board wiring
+table: hosts and `trackingParameters` for URL normalisation, `toolName` and
+`createSearch` for the scout, and optional `fetchByUrl` for a pasted link.
+`JOB_SCOUT_SEARCH_TOOL_NAMES` and `board-fetch`'s fetchers are derived from it.
 
 Not to be confused with **Search Criteria**'s `sources`, which is a list of
 boards the candidate follows, is context for ranking, and is explicitly not a

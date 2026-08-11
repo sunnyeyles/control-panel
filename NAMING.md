@@ -93,11 +93,6 @@ two constants that were missing — `BRIEF_WRITER_SYSTEM_PROMPT` unexported and
 `PROFILE_EXTRACTOR_SYSTEM_PROMPT` absent from `index.ts` — are what this rule was
 written to catch.
 
-**`assistant.ts` is the one exception and stays one.** It deliberately has no
-prompt of its own: an `ASSISTANT_SYSTEM_PROMPT` lived there and was byte-for-byte
-`DEFAULT_SYSTEM_PROMPT` in `@workspace/agents-core`. Duplicating it would have
-made the two drift. The test names the exception explicitly.
-
 ## R4 — prompt builders and parsers are named for their output, never their input
 
 `to<Output>Prompt` and `parse<Output>`. A builder takes whatever it needs; what
@@ -234,5 +229,3 @@ longer one.** `@workspace/db` used to carry the column's word out through
 four now, translated at the boundary per R5. The **column** is untouched and
 stays `match_resume_id`; only `packages/db/src/postings.ts` and the Prisma-shaped
 test fakes may spell it that way.
-
-**`assistant.ts` exports no system prompt.** See R3.

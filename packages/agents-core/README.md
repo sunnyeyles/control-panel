@@ -101,7 +101,9 @@ await agent.invoke(
 ```
 
 `MemorySaver` is in-process only — swap in a durable checkpointer to survive a
-restart.
+restart. The model-call budget (`llmCalls`) is deliberately _not_ resumed: it
+bounds a runaway loop within one invoke, and a thread that inherited the prior
+turn's burn would shrink that budget into a lifetime counter.
 
 ### Streaming
 
