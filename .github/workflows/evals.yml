@@ -54,8 +54,9 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       EVAL_CASES: ${{ inputs.cases }}
       EVAL_REPEATS: ${{ inputs.repeats || '1' }}
-      # Optional. Absent keys make every function in `@workspace/langfuse` a
-      # no-op, so the run works without them — it is simply not traceable.
+      # Required, not optional. The run is a Langfuse experiment: the scores,
+      # the summary and the comparison against the last run all live there, so
+      # without keys there would be nothing to read at the end of it.
       LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
       LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
       LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
@@ -64,11 +65,16 @@ jobs:
       # Before the install, which is the pattern `migrate.yml` sets: a job that
       # cannot possibly succeed should say why in ten seconds rather than after
       # two minutes of dependency resolution.
-      - name: Check the OPENAI_API_KEY secret is set
+      - name: Check the secrets this needs are set
         run: |
           if [ -z "${OPENAI_API_KEY:-}" ]; then
             echo "::error::OPENAI_API_KEY is not set for this repository."
             echo "These evals call a real model; add the secret in Settings → Secrets → Actions."
+            exit 1
+          fi
+          if [ -z "${LANGFUSE_PUBLIC_KEY:-}" ] || [ -z "${LANGFUSE_SECRET_KEY:-}" ]; then
+            echo "::error::LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not both set."
+            echo "An eval records its scores in Langfuse; add both in Settings → Secrets → Actions."
             exit 1
           fi
 
@@ -88,22 +94,13 @@ jobs:
       # the packages this consumes as `dist/` are compiled first. `run` is
       # explicit because `generate` is a Turborepo builtin and the bare form is
       # ambiguous once a task name could collide with one.
+      #
+      # `tee` rather than a redirect, so the summary reaches both the log and
+      # the run page, and `pipefail` so piping does not swallow the non-zero a
+      # crashed case exits with. The scores themselves live in Langfuse — this
+      # is the copy for whoever clicked the button, and the link to the run is
+      # the last line of it.
       - name: Run the evals
-        run: pnpm turbo run eval --filter=@workspace/agents
-
-      # `always()`, because a run that scored badly is exactly the one whose
-      # report someone wants to read. The step above only fails when a case
-      # *crashed*, but a low-scoring pass still writes everything.
-      - name: Upload the report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: whiteboard-evals
-          path: packages/agents/evals/results/
-          if-no-files-found: warn
-
-      # The report is the deliverable, so it goes where the person who clicked
-      # the button is already looking rather than three clicks into an artifact.
-      - name: Summarise
-        if: always()
-        run: cat packages/agents/evals/results/*.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: |
+          set -o pipefail
+          pnpm turbo run eval --filter=@workspace/agents | tee -a "$GITHUB_STEP_SUMMARY"

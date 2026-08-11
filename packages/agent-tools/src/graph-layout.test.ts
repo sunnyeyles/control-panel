@@ -57,35 +57,22 @@ function anyOverlap(placed: ReturnType<typeof boxes>): string | undefined {
   return undefined
 }
 
-describe("overlaps", () => {
-  it("is false for boxes that merely touch", () => {
+describe("the box primitives", () => {
+  // A four-line AABB test and a bounding box do not need a suite each. The
+  // edges that matter are the boundary — touching is not overlapping, one pixel
+  // in is — and that both axes have to intersect.
+  it.each([
+    ["touching edges do not overlap", { x: 200, y: 0 }, false],
+    ["a one-pixel intrusion does", { x: 199, y: 0 }, true],
+    ["clearing on y is enough", { x: 100, y: 500 }, false],
+  ])("overlaps: %s", (_name, other, expected) => {
     expect(
-      overlaps({ x: 0, y: 0, w: 200, h: 120 }, { x: 200, y: 0, w: 200, h: 120 })
-    ).toBe(false)
+      overlaps({ x: 0, y: 0, w: 200, h: 120 }, { ...other, w: 200, h: 120 })
+    ).toBe(expected)
   })
 
-  it("is true for a one-pixel intrusion", () => {
-    expect(
-      overlaps({ x: 0, y: 0, w: 200, h: 120 }, { x: 199, y: 0, w: 200, h: 120 })
-    ).toBe(true)
-  })
-
-  it("needs both axes to intersect", () => {
-    expect(
-      overlaps(
-        { x: 0, y: 0, w: 200, h: 120 },
-        { x: 100, y: 500, w: 200, h: 120 }
-      )
-    ).toBe(false)
-  })
-})
-
-describe("boundsOf", () => {
-  it("is undefined for nothing", () => {
+  it("boundsOf wraps every corner, and is undefined for nothing", () => {
     expect(boundsOf([])).toBeUndefined()
-  })
-
-  it("wraps every corner", () => {
     expect(
       boundsOf([
         { x: 10, y: 20, w: 100, h: 100 },
@@ -100,9 +87,6 @@ describe("findFreeOrigin", () => {
 
   it("centres a block in the viewport when the board is empty", () => {
     expect(findFreeOrigin([], 400, 200, viewport)).toEqual({ x: 400, y: 300 })
-  })
-
-  it("is the origin with no viewport and no shapes", () => {
     expect(findFreeOrigin([], 400, 200)).toEqual({ x: 0, y: 0 })
   })
 
@@ -132,32 +116,21 @@ describe("findFreeOrigin", () => {
 })
 
 describe("layerGraph", () => {
-  it("places nothing for no nodes", () => {
-    expect(layerGraph([], [], { direction: "right" }).size).toBe(0)
-  })
-
-  it("puts a chain in flow order, left to right", () => {
+  // Both axes, one test: the along-axis advances and the across-axis is shared,
+  // which is the whole of "a chain reads in order".
+  it.each([
+    ["right", "x", "y"],
+    ["down", "y", "x"],
+  ] as const)("puts a chain in flow order, %s", (direction, along, across) => {
     const sized = nodes("a", "b", "c")
-    const placed = layerGraph(sized, edges("a>b", "b>c"), {
-      direction: "right",
-    })
+    const placed = layerGraph(sized, edges("a>b", "b>c"), { direction })
     const [a, b, c] = boxes(placed, sized)
 
-    expect(a!.x).toBeLessThan(b!.x)
-    expect(b!.x).toBeLessThan(c!.x)
+    expect(a![along]).toBeLessThan(b![along])
+    expect(b![along]).toBeLessThan(c![along])
     // One rank each, so they share the across axis.
-    expect(a!.y).toBe(b!.y)
-    expect(b!.y).toBe(c!.y)
-  })
-
-  it("puts a chain top to bottom when the flow is down", () => {
-    const sized = nodes("a", "b", "c")
-    const placed = layerGraph(sized, edges("a>b", "b>c"), { direction: "down" })
-    const [a, b, c] = boxes(placed, sized)
-
-    expect(a!.y).toBeLessThan(b!.y)
-    expect(b!.y).toBeLessThan(c!.y)
-    expect(a!.x).toBe(b!.x)
+    expect(a![across]).toBe(b![across])
+    expect(b![across]).toBe(c![across])
   })
 
   it("ranks by the longest path, not the shortest", () => {
@@ -206,27 +179,23 @@ describe("layerGraph", () => {
     expect(anyOverlap(boxes(placed, sized))).toBeUndefined()
   })
 
-  it("terminates on a cycle and still advances the arrows it can", () => {
-    const sized = nodes("a", "b", "c")
-    const placed = layerGraph(sized, edges("a>b", "b>c", "c>a"), {
-      direction: "right",
-    })
-    const [a, b, c] = boxes(placed, sized)
+  it("terminates on a cycle, and on a self-loop, still advancing the rest", () => {
+    // The back-edge is dropped for ranking, so the forward path still reads
+    // left to right. Where it gets drawn is the renderer's problem.
+    const three = nodes("a", "b", "c")
+    const cyclic = boxes(
+      layerGraph(three, edges("a>b", "b>c", "c>a"), { direction: "right" }),
+      three
+    )
+    expect(cyclic[0]!.x).toBeLessThan(cyclic[1]!.x)
+    expect(cyclic[1]!.x).toBeLessThan(cyclic[2]!.x)
 
-    // The back-edge c → a is dropped for ranking, so the forward path still
-    // reads left to right. Where c → a is drawn is the renderer's problem.
-    expect(a!.x).toBeLessThan(b!.x)
-    expect(b!.x).toBeLessThan(c!.x)
-  })
-
-  it("survives a self-loop", () => {
-    const sized = nodes("a", "b")
-    const placed = layerGraph(sized, edges("a>a", "a>b"), {
-      direction: "right",
-    })
-    const [a, b] = boxes(placed, sized)
-
-    expect(a!.x).toBeLessThan(b!.x)
+    const two = nodes("a", "b")
+    const looped = boxes(
+      layerGraph(two, edges("a>a", "a>b"), { direction: "right" }),
+      two
+    )
+    expect(looped[0]!.x).toBeLessThan(looped[1]!.x)
   })
 
   it("ignores an edge naming a node it was not given", () => {
@@ -253,20 +222,15 @@ describe("layerGraph", () => {
     expect(a!.y).not.toBe(x!.y)
   })
 
-  it("lays out unconnected nodes without piling them up", () => {
+  it("lays out unconnected nodes, and nothing at all, without piling up", () => {
+    expect(layerGraph([], [], { direction: "right" }).size).toBe(0)
+
     const sized = nodes("a", "b", "c", "d")
     const placed = layerGraph(sized, [], { direction: "right" })
-
-    expect(anyOverlap(boxes(placed, sized))).toBeUndefined()
-  })
-
-  it("starts at the origin so the caller can put the block anywhere", () => {
-    const sized = nodes("a", "b", "c")
-    const placed = layerGraph(sized, edges("a>b", "a>c"), {
-      direction: "right",
-    })
     const laid = boxes(placed, sized)
 
+    expect(anyOverlap(laid)).toBeUndefined()
+    // And the block starts at the origin, so the caller can put it anywhere.
     expect(Math.min(...laid.map((box) => box.x))).toBe(0)
     expect(Math.min(...laid.map((box) => box.y))).toBe(0)
   })

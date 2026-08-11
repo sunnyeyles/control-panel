@@ -228,6 +228,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@langfuse/client':
+        specifier: 5.10.0
+        version: 5.10.0(@opentelemetry/api@1.9.0)
       '@types/node':
         specifier: ^20
         version: 20.19.41
@@ -1722,6 +1725,11 @@ packages:
 
   '@langchain/protocol@0.0.18':
     resolution: {integrity: sha512-XW1egQtPfsGI41w2AMZNFZrUIwFSQHTjVMZs0OaTpCAvht/QLoaPN8FQcsysMVypOhupG28J29yOorrc70otBQ==}
+
+  '@langfuse/client@5.10.0':
+    resolution: {integrity: sha512-WI//PooxMyFEFtDy77XNv6WxOpd52U6HNgI8cqhPX+S2aJ8Mz2UTWz7olwzLlrwToJpsy5aZNtpdhsol2Umubw==}
+    peerDependencies:
+      '@opentelemetry/api': ^1.9.0
 
   '@langfuse/core@5.10.0':
     resolution: {integrity: sha512-XXz1DBEwGMpNXz8DZHFsixqo+3vBkfYpat3oLLldRMuT8ur6OWQ81Kgh5Obh0CZ31adaR4FrLTHh4N9eBXo64A==}
@@ -9200,6 +9208,13 @@ snapshots:
       - ws
 
   '@langchain/protocol@0.0.18': {}
+
+  '@langfuse/client@5.10.0(@opentelemetry/api@1.9.0)':
+    dependencies:
+      '@langfuse/core': 5.10.0(@opentelemetry/api@1.9.0)
+      '@langfuse/tracing': 5.10.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/api': 1.9.0
+      mustache: 4.2.0
 
   '@langfuse/core@5.10.0(@opentelemetry/api@1.9.0)':
     dependencies:

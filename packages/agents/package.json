@@ -38,6 +38,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@langfuse/client": "5.10.0",
     "@types/node": "^20",
     "@workspace/eslint-config": "workspace:*",
     "@workspace/langfuse": "workspace:*",

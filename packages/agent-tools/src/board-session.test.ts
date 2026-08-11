@@ -48,35 +48,29 @@ describe("id allocation", () => {
     expect(session.shapes().map((s) => s.id)).toEqual(["s1", "s3", "s2", "s4"])
   })
 
-  it("does not collide with an arrow's id, since arrows are shapes too", () => {
-    const session = createBoardSession(
+  // Everything that counts as "taken": an arrow's id, because arrows are
+  // shapes too, and an id the board describes nowhere but `knownIds` reports.
+  it("treats every id the turn can see as taken, wherever it was named", () => {
+    const fromArrow = createBoardSession(
       context({
         shapes: [shape({ id: "s1" }), shape({ id: "s2" })],
         connections: [{ id: "s3", fromId: "s1", toId: "s2" }],
       })
     )
+    fromArrow.createShape({ kind: "rectangle", x: 0, y: 0 })
+    expect(fromArrow.shapes().at(-1)?.id).toBe("s4")
 
-    session.createShape({ kind: "rectangle", x: 0, y: 0 })
-
-    expect(session.shapes().at(-1)?.id).toBe("s4")
-  })
-
-  it("never reuses the id of a shape the user drew by hand", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "Xk3p9vQ2" })] })
-    )
-
-    expect(session.createShape({ kind: "note", x: 0, y: 0 })).toContain("s1")
-  })
-
-  it("skips an id the board describes nowhere but `knownIds` reports", () => {
-    const session = createBoardSession(
+    const fromKnownIds = createBoardSession(
       context({ shapes: [shape({ id: "s1" })], knownIds: ["s1", "s2", "s3"] })
     )
+    fromKnownIds.createShape({ kind: "rectangle", x: 0, y: 0 })
+    expect(fromKnownIds.shapes().at(-1)?.id).toBe("s4")
 
-    session.createShape({ kind: "rectangle", x: 0, y: 0 })
-
-    expect(session.shapes().at(-1)?.id).toBe("s4")
+    // A hand-drawn id is not in the sN space at all, so it blocks nothing.
+    const handDrawn = createBoardSession(
+      context({ shapes: [shape({ id: "Xk3p9vQ2" })] })
+    )
+    expect(handDrawn.createShape({ kind: "note", x: 0, y: 0 })).toContain("s1")
   })
 })
 
@@ -140,7 +134,7 @@ describe("validation", () => {
     expect(session.shapes()[0]).toMatchObject({ x: 50, y: 60 })
   })
 
-  it("refuses to connect a shape to itself", () => {
+  it("refuses a mutation that could not mean anything, and records no op", () => {
     const session = createBoardSession(
       context({ shapes: [shape({ id: "s1" })] })
     )
@@ -148,41 +142,33 @@ describe("validation", () => {
     expect(session.connectShapes({ fromId: "s1", toId: "s1" })).toContain(
       "itself"
     )
+    expect(session.updateShape({ id: "s1" })).toContain("at least one of")
     expect(session.flush()).toEqual([])
   })
 
-  it("says what to pass when an update would change nothing", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "s1" })] })
-    )
+  it("deletes what it can, dedupes a respelling, and names what it could not", () => {
+    const board = context({
+      shapes: [shape({ id: "s1" }), shape({ id: "s2" })],
+      connections: [{ id: "s3", fromId: "s1", toId: "s2" }],
+    })
 
-    expect(session.updateShape({ id: "s1" })).toContain("at least one of")
-  })
-
-  it("deletes what it can and names what it could not", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "s1" }), shape({ id: "s2" })] })
-    )
-
-    const message = session.deleteShapes(["s1", "s9"])
-
+    const partial = createBoardSession(board)
+    const message = partial.deleteShapes(["s1", "s9"])
     expect(message).toContain("Deleted s1")
     expect(message).toContain("No shape matched s9")
-    expect(session.flush()).toEqual([{ op: "delete", ids: ["s1"] }])
-  })
-
-  it("treats a repeated id as one deletion, not a deletion and a miss", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "s1" }), shape({ id: "s2" })] })
-    )
+    expect(partial.flush()).toEqual([{ op: "delete", ids: ["s1"] }])
 
     // The second spelling must not come back as "No shape matched" — a
     // correction that contradicts the deletion beside it.
-    const message = session.deleteShapes(["s1", "shape:s1"])
+    const respelt = createBoardSession(board)
+    const deduped = respelt.deleteShapes(["s1", "shape:s1"])
+    expect(deduped).toContain("Deleted s1")
+    expect(deduped).not.toContain("No shape matched")
+    expect(respelt.flush()).toEqual([{ op: "delete", ids: ["s1"] }])
 
-    expect(message).toContain("Deleted s1")
-    expect(message).not.toContain("No shape matched")
-    expect(session.flush()).toEqual([{ op: "delete", ids: ["s1"] }])
+    // Nothing deleted at all lists the arrows too, not only the boxes.
+    const missed = createBoardSession(board)
+    expect(missed.deleteShapes(["s9"])).toContain("s1, s2, s3")
   })
 
   it("drops arrows whose endpoint was deleted", () => {
@@ -210,17 +196,6 @@ describe("validation", () => {
     expect(session.connections()).toEqual([])
     expect(session.shapes().map((s) => s.id)).toEqual(["s1", "s2"])
     expect(session.flush()).toEqual([{ op: "delete", ids: ["s3"] }])
-  })
-
-  it("lists the arrows too when it deleted nothing at all", () => {
-    const session = createBoardSession(
-      context({
-        shapes: [shape({ id: "s1" }), shape({ id: "s2" })],
-        connections: [{ id: "s3", fromId: "s1", toId: "s2" }],
-      })
-    )
-
-    expect(session.deleteShapes(["s9"])).toContain("s1, s2, s3")
   })
 })
 
@@ -330,17 +305,6 @@ describe("layouts", () => {
     expect(session.shapes().map((s) => s.x)).toEqual([0, 100, 200])
   })
 
-  it("will not distribute two shapes, because there is no space to even out", () => {
-    const session = createBoardSession(three)
-
-    expect(
-      session.arrangeShapes({
-        ids: ["s1", "s2"],
-        layout: "distribute-horizontal",
-      })
-    ).toContain("at least three")
-  })
-
   it("emits one batch of moves, and none for shapes already in place", () => {
     const session = createBoardSession(three)
 
@@ -353,25 +317,24 @@ describe("layouts", () => {
     ])
   })
 
-  it("needs two shapes that exist before it will arrange anything", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "s1" })] })
+  // Two shapes for anything, three to distribute, and the count is of shapes
+  // rather than of spellings — `s1` and `shape:s1` are one.
+  it("counts existing, deduped shapes before it will arrange anything", () => {
+    const session = createBoardSession(three)
+    const one = createBoardSession(context({ shapes: [shape({ id: "s1" })] }))
+
+    expect(one.arrangeShapes({ ids: ["s1", "s9"], layout: "row" })).toContain(
+      "at least two shapes that exist"
     )
-
-    expect(
-      session.arrangeShapes({ ids: ["s1", "s9"], layout: "row" })
-    ).toContain("at least two shapes that exist")
-  })
-
-  it("counts a repeated id once, so one shape named twice is not two", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "s1" }), shape({ id: "s2" })] })
-    )
-
-    // Same shape, two spellings — the guards count shapes, not spellings.
     expect(
       session.arrangeShapes({ ids: ["s1", "shape:s1"], layout: "row" })
     ).toContain("at least two shapes that exist")
+    expect(
+      session.arrangeShapes({
+        ids: ["s1", "s2"],
+        layout: "distribute-horizontal",
+      })
+    ).toContain("at least three")
     expect(
       session.arrangeShapes({
         ids: ["s1", "s1", "s2"],
@@ -441,16 +404,6 @@ function overlappingPairs(shapes: BoardShape[]): string[] {
 }
 
 describe("overlap reporting", () => {
-  it("says nothing when a new shape lands clear", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "s1", x: 0, y: 0 })] })
-    )
-
-    expect(
-      session.createShape({ kind: "rectangle", x: 400, y: 0 })
-    ).not.toContain("overlaps")
-  })
-
   it("names what a new shape landed on, and still creates it", () => {
     const session = createBoardSession(
       context({ shapes: [shape({ id: "s1", x: 0, y: 0 })] })
@@ -463,13 +416,11 @@ describe("overlap reporting", () => {
     // Reported, not refused — the shape exists and the op went out.
     expect(session.shapes()).toHaveLength(2)
     expect(session.flush()).toHaveLength(1)
-  })
 
-  it("exempts a text caption laid over a diagram", () => {
-    const session = createBoardSession(
-      context({ shapes: [shape({ id: "s1", x: 0, y: 0 })] })
-    )
-
+    // Landing clear says nothing, and a text caption is exempt wherever it lands.
+    expect(
+      session.createShape({ kind: "rectangle", x: 900, y: 0 })
+    ).not.toContain("overlaps")
     expect(session.createShape({ kind: "text", x: 10, y: 10 })).not.toContain(
       "overlaps"
     )
@@ -508,10 +459,9 @@ describe("overlap reporting", () => {
     })
 
     expect(message).toContain("s1 and s2 now overlap")
-  })
 
-  it("says nothing about overlap after a row, which cannot produce one", () => {
-    const session = createBoardSession(
+    // And a row, which cannot produce one, says nothing.
+    const row = createBoardSession(
       context({
         shapes: [
           shape({ id: "s1", x: 0, y: 0 }),
@@ -519,9 +469,8 @@ describe("overlap reporting", () => {
         ],
       })
     )
-
     expect(
-      session.arrangeShapes({ ids: ["s1", "s2"], layout: "row" })
+      row.arrangeShapes({ ids: ["s1", "s2"], layout: "row" })
     ).not.toContain("overlap")
   })
 
@@ -829,24 +778,19 @@ describe("draw_diagram", () => {
     expect(message).toContain("a -> ghost")
   })
 
-  it("refuses an empty node list rather than drawing nothing quietly", () => {
-    const session = createBoardSession(context())
+  it("refuses no nodes, and draws a duplicated key once", () => {
+    const empty = createBoardSession(context())
+    expect(empty.drawDiagram({ nodes: [] })).toContain("at least one node")
+    expect(empty.flush()).toEqual([])
 
-    expect(session.drawDiagram({ nodes: [] })).toContain("at least one node")
-    expect(session.flush()).toEqual([])
-  })
-
-  it("draws a duplicated key once", () => {
-    const session = createBoardSession(context())
-
-    session.drawDiagram({
+    const duplicated = createBoardSession(context())
+    duplicated.drawDiagram({
       nodes: [
         { key: "a", text: "A" },
         { key: "a", text: "Again" },
       ],
     })
-
-    expect(session.shapes()).toHaveLength(1)
+    expect(duplicated.shapes()).toHaveLength(1)
   })
 
   it("defaults to rectangles and honours a kind where one is given", () => {

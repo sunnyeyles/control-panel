@@ -34,12 +34,6 @@ dist
 # thing that should land in a shared repository.
 .letters/
 
-# whiteboard eval output: one JSON and one markdown report per run. Timestamped
-# and per-machine, and a full pass writes a new pair every time. What *is*
-# committed is the run beside them — `evals/baseline.json`, the scores the next
-# run is diffed against. See packages/agents/evals/README.md.
-packages/agents/evals/results/
-
 # misc
 .DS_Store
 *.pem

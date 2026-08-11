@@ -93,6 +93,17 @@ export interface TurnResult {
   durationMs: number
 }
 
+/**
+ * What one grader answered.
+ *
+ * The graders' own currency, not Langfuse's — `evaluators.ts` renames these
+ * three fields into an `Evaluation` at the edge. Keeping them apart is what
+ * lets `graders/` stay pure functions with an ordinary vitest suite, and lets
+ * a grader be read without knowing what records it.
+ *
+ * There is no "unscored" case. A grader that cannot answer throws, and the
+ * experiment runner leaves it out of the item entirely.
+ */
 export interface Score {
   grader: string
   /** 0 to 1. Deterministic graders are usually 0 or 1; a fraction is a partial. */
@@ -100,21 +111,6 @@ export interface Score {
   passed: boolean
   /** Why, in a sentence. This is what a human reads when a case regresses. */
   detail: string
-  /** Set when the harness could not produce a number. Left out of the mean. */
-  unscored?: boolean
-}
-
-export interface CaseResult {
-  name: string
-  intent: string
-  repeat: number
-  scores: Score[]
-  /** Mean of the scores. The number a baseline diff compares. */
-  overall: number
-  llmCalls: number
-  durationMs: number
-  /** Set when the run threw. A crash is not a score of zero, it is missing data. */
-  error?: string
 }
 
 export type { BoardContext }

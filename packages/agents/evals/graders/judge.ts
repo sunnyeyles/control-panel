@@ -95,11 +95,12 @@ function renderRequest(kase: EvalCase, result: TurnResult): string {
 /**
  * Ask the judge, and turn its verdict into scores.
  *
- * A judge that fails to answer is **not** a score of zero — that would blame
- * the agent for the harness's own bad day and quietly poison a baseline. It
- * comes back marked `unscored`, which keeps it out of the case's mean, and as a
- * failed grader whose detail says so, which is visible in the report and
- * obviously not a regression in the thing being graded.
+ * **It throws rather than scoring zero when the judge will not answer.** A
+ * harness having a bad day must not read as the agent drawing the wrong thing.
+ * `experiment.run` settles each evaluator on its own, so a rejection here is
+ * logged and this case's judge scores are simply absent — the structural
+ * graders still record, and the run's mean is taken over what was actually
+ * measured rather than over a zero nobody earned.
  */
 export async function judge(
   input: JudgeInput,
@@ -109,37 +110,24 @@ export async function judge(
   const rubric = kase.expect.judge
   if (!rubric) return []
 
-  let verdict: Verdict
-  try {
-    const reply = await model
-      .bindTools([])
-      .invoke([
-        new SystemMessage(JUDGE_SYSTEM_PROMPT),
-        new HumanMessage(
-          `${renderRequest(kase, result)}\n\nWhat this case is testing: ${rubric}`
-        ),
-      ])
+  const reply = await model
+    .bindTools([])
+    .invoke([
+      new SystemMessage(JUDGE_SYSTEM_PROMPT),
+      new HumanMessage(
+        `${renderRequest(kase, result)}\n\nWhat this case is testing: ${rubric}`
+      ),
+    ])
 
-    const text =
-      typeof reply.content === "string"
-        ? reply.content
-        : JSON.stringify(reply.content)
+  const text =
+    typeof reply.content === "string"
+      ? reply.content
+      : JSON.stringify(reply.content)
 
-    verdict = parseJsonAgainstSchema(verdictSchema, text, {
-      producer: "eval judge",
-      schemaName: "verdict",
-    })
-  } catch (error) {
-    return [
-      {
-        grader: "judge",
-        score: 0,
-        passed: false,
-        detail: `the judge did not answer: ${error instanceof Error ? error.message : String(error)}`,
-        unscored: true,
-      },
-    ]
-  }
+  const verdict = parseJsonAgainstSchema(verdictSchema, text, {
+    producer: "eval judge",
+    schemaName: "verdict",
+  })
 
   // Normalised to 0–1 so a rating sits on the same scale as every structural
   // grader and a case's overall score is a plain mean rather than a weighting

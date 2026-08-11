@@ -11,22 +11,22 @@ deliberately outside the default task.
 pnpm turbo run eval --filter=@workspace/agents          # every case, once
 EVAL_CASES=insert-cache,critique-only pnpm turbo run eval --filter=@workspace/agents
 EVAL_REPEATS=3 pnpm turbo run eval --filter=@workspace/agents
-EVAL_WRITE_BASELINE=1 pnpm turbo run eval --filter=@workspace/agents
 ```
 
-`OPENAI_API_KEY` must be set; the run refuses immediately without one. A full
-pass is nineteen cases — the per-case `maxLlmCalls` budgets sum to 81, so expect
-somewhere around sixty agent calls in practice — plus twelve judge calls, one
-for each case carrying a rubric. It takes a few minutes. Treat it as costing a
-couple of dollars rather than as free, and use `EVAL_CASES` while iterating.
+`OPENAI_API_KEY` and the two Langfuse keys must be set; the run refuses
+immediately without either. A full pass is nineteen cases — the per-case
+`maxLlmCalls` budgets sum to 81, so expect somewhere around sixty agent calls in
+practice — plus twelve judge calls, one for each case carrying a rubric. It
+takes a few minutes. Treat it as costing a couple of dollars rather than as
+free, and use `EVAL_CASES` while iterating.
 
-| variable              | default            | what it does                                                   |
-| --------------------- | ------------------ | -------------------------------------------------------------- |
-| `EVAL_CASES`          | all                | Comma-separated case names.                                    |
-| `EVAL_REPEATS`        | `1`                | Runs per case. Raise it to see variance, not to raise a score. |
-| `EVAL_MODEL`          | `WHITEBOARD_MODEL` | The agent under test.                                          |
-| `EVAL_JUDGE_MODEL`    | `WHITEBOARD_MODEL` | The judge.                                                     |
-| `EVAL_WRITE_BASELINE` | unset              | Overwrite `baseline.json` with this run.                       |
+| variable           | default            | what it does                                                   |
+| ------------------ | ------------------ | -------------------------------------------------------------- |
+| `EVAL_CASES`       | all                | Comma-separated case names.                                    |
+| `EVAL_REPEATS`     | `1`                | Runs per case. Raise it to see variance, not to raise a score. |
+| `EVAL_MODEL`       | `WHITEBOARD_MODEL` | The agent under test.                                          |
+| `EVAL_JUDGE_MODEL` | `WHITEBOARD_MODEL` | The judge.                                                     |
+| `EVAL_CONCURRENCY` | `4`                | Cases in flight at once. Lower it if the account is tight.     |
 
 ## Why the whiteboard is worth evaluating this way
 
@@ -43,10 +43,21 @@ cannot reach.**
 ## Anatomy of a run
 
 ```
-cases/*.ts   →  runner.ts  →  graders/structural.ts  ─┐
-                                graders/judge.ts     ─┴→  report.ts  →  results/
-                                                                          baseline.json
+cases/*.ts  →  run.ts  →  experiment.run ─┬→ task: runner.ts
+                                          ├→ evaluators: graders/structural.ts
+                                          ├→                graders/judge.ts
+                                          └→ Langfuse: scores, traces, run diff
 ```
+
+**The run is a Langfuse experiment, and that is why this directory is small.**
+Aggregation, the printed summary, per-item traces and comparison against the
+previous run all belong to `@langfuse/client`. What lives here is the part that
+is about whiteboards: the cases, the graders, and a task function.
+
+`evaluators.ts` is the only file that knows Langfuse exists. The graders keep
+their own `(EvalCase, TurnResult) => Score[]` shape and are renamed into
+Langfuse `Evaluation`s at that one seam, which is what lets them stay pure and
+stay tested for free.
 
 `runner.ts` streams the turn in `["values", "messages", "custom"]` mode. **The
 `"custom"` channel is not optional**: the canvas tools write their ops to
@@ -57,7 +68,8 @@ against every case and reports an agent that does nothing.
 ## Writing a case
 
 Add it to a file under `cases/` and export it from the group array. There is no
-registry to update.
+registry to update, and no dataset to upload — cases are code, so they are
+reviewed in the pull request that changes them.
 
 ```ts
 {
@@ -121,52 +133,40 @@ throw away the only signal that says whether a change helped.
 The judge scores faithfulness, readability and reply quality from 1 to 5, and
 those land on the same 0–1 scale as everything else. It reads the board as
 `renderBoard()` text — the same description the agent itself works from — so no
-screenshot is involved. **A judge that fails to answer is reported as the judge
-failing, not as the agent scoring zero**, because folding a harness outage into
-a baseline sends the next person looking for a prompt change that never happened.
+screenshot is involved. **A judge that fails to answer throws**, and
+`experiment.run` settles each evaluator on its own: that case's judge scores are
+absent, its structural scores still record, and nothing reads as the agent
+having drawn badly.
 
 ## Reading the output
 
-Each run writes `results/<timestamp>.json` and `.md` (both gitignored) and
-prints the markdown. The table is scored against `baseline.json`:
+The run prints Langfuse's own summary and a link to the dataset run. **The
+comparison is the point; the absolute score is context.** Nobody knows whether
+0.82 is good. Everybody knows what `insert-cache 0.93 → 0.62` means, and that is
+the only question a prompt change actually poses: did this help, and what did it
+break. Open two runs side by side in Langfuse to see it.
 
-```
-| case            | score | vs baseline | spread | calls | notes |
-| `insert-cache`  | 0.95  | · +0.01     | 0.0    | 4     | —     |
-| `tidy-messy…`   | 0.62  | ▼ -0.31     | 0.1    | 7     | 2     |
-```
+There is no committed baseline file. The previous run _is_ the baseline, it
+lives in Langfuse with its traces attached, and it cannot drift out of step with
+the scores it came from. `meanScore` in `evaluators.ts` publishes one `overall`
+metric per run, which is what a gate would read — see `RegressionError` in
+`@langfuse/client` if this is ever wanted as one. It deliberately is not today:
+scores are stochastic, and a flaky required check is one people learn to re-run
+past.
 
-**The delta is the point; the absolute score is context.** Nobody knows whether
-0.82 is good. Everybody knows what `0.93 → 0.62` means. A move of less than
-0.05 is called `·` — noise, not a change.
+Repeats matter for the same reason. A case that swings 0.4 between identical
+runs is not measuring anything reliable, and either its expectations are too
+tight or the agent is genuinely unstable there. Use `EVAL_REPEATS=3` before
+believing a delta.
 
-`spread` is the range across repeats and is a finding in itself: a case that
-swings 0.4 between identical runs is not measuring anything reliable, and either
-its expectations are too tight or the agent is genuinely unstable there.
-
-The exit code is 0 for a low score and non-zero only when a case **crashed**. A
-score is information; making it a build failure is how a case ends up deleted.
-
-## Baselines
-
-`baseline.json` is committed, and is the last set of scores anyone accepted.
-**It does not exist yet** — there was no key available when the harness was
-written, so the first person to run this creates it. Until then every case
-reports as `new` and there is nothing to regress against.
-
-The workflow when changing a prompt or a tool is: run on `main` first to see
-where you are, make the change, run again, read the deltas. Update the baseline
-with `EVAL_WRITE_BASELINE=1` only once the new numbers are ones you are prepared
-to defend, and commit it in the same change as whatever moved them — a baseline
-committed on its own is a record of nothing.
-
-Because scores are stochastic, a baseline written from `EVAL_REPEATS=1` is
-noisier than the threshold that reads it. Use 3 when writing one.
+The exit code is 0 for a low score and non-zero only when a case **crashed**
+before it could be graded. A score is information; making it a build failure is
+how a case ends up deleted.
 
 ## In CI
 
 `.github/workflows/evals.yml`, on `workflow_dispatch` or by putting the
 `run-evals` label on a pull request. Never on push and never on an ordinary
-pull request — a stochastic check wired to a required gate is one people learn
-to re-run past. It needs an `OPENAI_API_KEY` repository secret, and the
-pull-request path is guarded against forks, where secrets are absent.
+pull request. It needs `OPENAI_API_KEY`, `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY` repository secrets, and the pull-request path is guarded
+against forks, where secrets are absent.

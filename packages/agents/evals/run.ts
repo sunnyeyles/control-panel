@@ -1,122 +1,65 @@
 /**
- * The eval CLI: run every case against a real model, score it, write a report.
+ * The eval CLI: run every case against a real model and record the scores in
+ * Langfuse.
  *
  * A standalone script rather than a vitest suite, and deliberately. Evals are
  * *scored*, repeated to see their variance, and compared against a previous
  * run — none of which fits an assert-or-fail runner, and all of which fits the
  * shape `apps/briefing-worker/src/dev/` already uses for "run it against the
- * real model and write the result to disk".
+ * real model and write the result somewhere".
+ *
+ * **The run is a Langfuse experiment, and that is the whole reason this file is
+ * short.** Scoring, aggregation, the markdown summary, per-item traces and
+ * run-over-run comparison all belong to `experiment.run`. What stays here is
+ * the part that is about whiteboards: which cases to run, how many times, and
+ * which model judges.
  *
  * **It exits non-zero only when it could not run.** A low score is information,
  * not a broken build; making it a failure would push whoever hit it toward
- * deleting the case. A crash, a missing key or an unparseable baseline are
- * different — those mean the numbers are absent rather than bad.
+ * deleting the case. Missing keys, or an item that threw before it could be
+ * graded, are different — those mean the numbers are absent rather than bad.
  *
  *     pnpm turbo run eval --filter=@workspace/agents
  *     EVAL_CASES=insert-cache,critique-only pnpm turbo run eval …
  *     EVAL_REPEATS=3 pnpm turbo run eval …
- *     EVAL_WRITE_BASELINE=1 pnpm turbo run eval …
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
-
+import { LangfuseClient } from "@langfuse/client"
 import { createModel } from "@workspace/agents-core"
-import { createLangfuseCallback } from "@workspace/langfuse"
+import {
+  createLangfuseCallback,
+  initializeLangfuse,
+  shutdownLangfuse,
+} from "@workspace/langfuse"
 
 import { CASES } from "./cases/index.ts"
-import { judge } from "./graders/judge.ts"
-import { gradeStructurally } from "./graders/structural.ts"
-import {
-  compare,
-  summarise,
-  toBaseline,
-  toMarkdown,
-  type Baseline,
-} from "./report.ts"
+import { createJudge, meanScore, structural } from "./evaluators.ts"
 import { runTurn } from "./runner.ts"
 import { WHITEBOARD_MODEL } from "../src/whiteboard.ts"
-import type { CaseResult, EvalCase, Score } from "./types.ts"
-
-const HERE = dirname(fileURLToPath(import.meta.url))
-const BASELINE_PATH = join(HERE, "baseline.json")
-const RESULTS_DIR = join(HERE, "results")
+import type { EvalCase, EvalExpectation } from "./types.ts"
 
 /**
- * Cases run one at a time.
+ * Cases no longer run one at a time.
  *
- * Concurrency would finish sooner and is not worth it: these are long
- * tool-calling runs against one account, and a rate limit part-way through a
- * fan-out turns a handful of unrelated cases into zeroes that look like
- * regressions. A full pass is minutes, not hours.
+ * They used to, because a rate limit part-way through a fan-out turned a
+ * handful of unrelated cases into zeroes that looked like regressions. That is
+ * no longer what happens: `experiment.run` settles each item on its own, so a
+ * throttled case is dropped from the results with an error logged, and the
+ * cases beside it still score. Four at a time is a compromise between a full
+ * pass taking minutes and hammering one account; lower it if the account is
+ * tight.
  */
-async function runCase(
-  kase: EvalCase,
-  repeat: number,
-  judgeModel: ReturnType<typeof createModel>
-): Promise<CaseResult> {
-  const base = { name: kase.name, intent: kase.intent, repeat }
+const DEFAULT_CONCURRENCY = 4
 
-  try {
-    const callback = createLangfuseCallback({
-      tags: ["eval", "whiteboard", kase.name],
-      traceMetadata: {
-        feature: "whiteboard-eval",
-        case: kase.name,
-        repeat: String(repeat),
-      },
-    })
+function selectedCases(): EvalCase[] {
+  const only = (process.env.EVAL_CASES ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0)
 
-    const result = await runTurn(kase, {
-      ...(callback ? { callbacks: [callback] } : {}),
-    })
-
-    const scores: Score[] = [
-      ...gradeStructurally(kase, result),
-      ...(await judge({ kase, result }, judgeModel)),
-    ]
-
-    // An unscored grader is the harness failing, not the agent, so it is left
-    // out of the mean rather than averaged in as a zero.
-    const scored = scores.filter((score) => !score.unscored)
-    const overall =
-      scored.length === 0
-        ? 1
-        : scored.reduce((total, score) => total + score.score, 0) /
-          scored.length
-
-    return {
-      ...base,
-      scores,
-      overall: Math.round(overall * 100) / 100,
-      llmCalls: result.llmCalls,
-      durationMs: result.durationMs,
-    }
-  } catch (error) {
-    // A thrown run is missing data, not a zero. `summarise` counts it
-    // separately and the report says so rather than folding it into a mean.
-    return {
-      ...base,
-      scores: [],
-      overall: 0,
-      llmCalls: 0,
-      durationMs: 0,
-      error: error instanceof Error ? error.message : String(error),
-    }
-  }
-}
-
-async function readBaseline(): Promise<Baseline | undefined> {
-  try {
-    return JSON.parse(await readFile(BASELINE_PATH, "utf8")) as Baseline
-  } catch (error) {
-    // No baseline is the ordinary first run, and is not worth a warning that
-    // would then be printed on every fresh checkout. A baseline that exists and
-    // will not parse is the other case the docblock promises to exit on.
-    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined
-    throw error
-  }
+  return only.length === 0
+    ? CASES
+    : CASES.filter((kase) => only.includes(kase.name))
 }
 
 async function main(): Promise<void> {
@@ -128,13 +71,18 @@ async function main(): Promise<void> {
     return
   }
 
-  const only = (process.env.EVAL_CASES ?? "")
-    .split(",")
-    .map((name) => name.trim())
-    .filter((name) => name.length > 0)
-  const selected =
-    only.length === 0 ? CASES : CASES.filter((kase) => only.includes(kase.name))
+  // Doubles as the credentials check. `initializeLangfuse` answers false when
+  // the keys are absent, and unlike every other caller in this repo an eval
+  // cannot carry on without them — the scores would have nowhere to go.
+  if (!initializeLangfuse({ exportMode: "batched" })) {
+    console.error(
+      "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set. An eval records its scores in Langfuse; without them a run would produce nothing to read."
+    )
+    process.exitCode = 1
+    return
+  }
 
+  const selected = selectedCases()
   if (selected.length === 0) {
     console.error(
       `EVAL_CASES matched nothing. Known cases: ${CASES.map((c) => c.name).join(", ")}`
@@ -146,75 +94,72 @@ async function main(): Promise<void> {
   const repeats = Math.max(1, Number(process.env.EVAL_REPEATS ?? "1") || 1)
   const model = process.env.EVAL_MODEL ?? WHITEBOARD_MODEL
   const judgeModelName = process.env.EVAL_JUDGE_MODEL ?? WHITEBOARD_MODEL
-  const judgeModel = createModel({ model: judgeModelName })
+  const maxConcurrency = Math.max(
+    1,
+    Number(process.env.EVAL_CONCURRENCY ?? DEFAULT_CONCURRENCY) ||
+      DEFAULT_CONCURRENCY
+  )
 
   console.log(
-    `Running ${selected.length} case(s) × ${repeats} against ${model}, judged by ${judgeModelName}.\n`
+    `Running ${selected.length} case(s) × ${repeats} against ${model}, judged by ${judgeModelName}, ${maxConcurrency} at a time.\n`
   )
 
-  const results: CaseResult[] = []
-  for (const kase of selected) {
-    for (let repeat = 1; repeat <= repeats; repeat += 1) {
-      const result = await runCase(kase, repeat, judgeModel)
-      results.push(result)
-
-      const failed = result.scores.filter((score) => !score.passed)
-      const tag = result.error
-        ? "CRASH"
-        : failed.length === 0
-          ? "ok   "
-          : "fail "
-      console.log(
-        `  ${tag} ${kase.name}${repeats > 1 ? ` #${repeat}` : ""}  ${result.overall.toFixed(2)}  ${result.llmCalls} call(s)  ${(result.durationMs / 1000).toFixed(1)}s`
-      )
-      if (result.error) console.log(`        ${result.error}`)
-      for (const score of failed) {
-        console.log(`        ${score.grader}: ${score.detail}`)
-      }
-    }
-  }
-
-  // Stamped here rather than inside the pure report functions, which take the
-  // timestamp as an argument so they stay testable.
-  const recordedAt = new Date().toISOString()
-  const stamp = recordedAt.replace(/[:.]/g, "-")
-
-  // The raw results go to disk before anything reads them. Summarising,
-  // comparing against a baseline or rendering markdown can all throw, and a run
-  // that already cost minutes of real model calls should not be lost to one.
-  await mkdir(RESULTS_DIR, { recursive: true })
-  await writeFile(
-    join(RESULTS_DIR, `${stamp}.json`),
-    JSON.stringify({ recordedAt, model, judgeModelName, results }, null, 2)
+  // One item per case per repeat. The whole case is the input so the graders
+  // can read the expectations straight off it, and so the Langfuse UI shows the
+  // starting board beside the turn it produced.
+  const data = selected.flatMap((kase) =>
+    Array.from({ length: repeats }, (_, index) => ({
+      input: kase,
+      expectedOutput: kase.expect,
+      metadata: { case: kase.name, intent: kase.intent, repeat: index + 1 },
+    }))
   )
 
-  const summaries = summarise(results)
-  const comparisons = compare(summaries, await readBaseline())
-  const markdown = toMarkdown(summaries, comparisons, {
-    model,
-    judgeModel: judgeModelName,
-    recordedAt,
+  const client = new LangfuseClient()
+  // Spelled out rather than inferred: `data` is a positional field on the
+  // config object, so nothing pins `Input` before `task` and the evaluators are
+  // checked against it, and they would all see `unknown`.
+  const result = await client.experiment.run<EvalCase, EvalExpectation>({
+    name: "whiteboard",
+    description:
+      "One turn of the whiteboard agent per case, graded structurally and by a judge.",
+    metadata: { model, judgeModel: judgeModelName, repeats },
+    data,
+    // The callback is built inside the task, which is where the experiment's
+    // span is active — that is what nests the graph's model and tool calls
+    // under the item rather than leaving them at the root of the project.
+    //
+    // `item.input` is cast because `ExperimentItem` is a union with the SDK's
+    // hosted `DatasetItem`, whose `input` is untyped; the arm this run uses is
+    // the one built out of `CASES` a dozen lines above. The evaluators need no
+    // such cast — `EvaluatorParams.input` is the plain generic.
+    task: (item) => {
+      const kase = item.input as EvalCase
+      const callback = createLangfuseCallback({
+        tags: ["eval", "whiteboard", kase.name],
+      })
+      return runTurn(kase, callback ? { callbacks: [callback] } : {})
+    },
+    evaluators: [
+      structural,
+      createJudge(createModel({ model: judgeModelName })),
+    ],
+    runEvaluators: [meanScore],
+    maxConcurrency,
   })
 
-  await writeFile(join(RESULTS_DIR, `${stamp}.md`), markdown)
+  console.log(await result.format({ includeItemResults: true }))
+  if (result.datasetRunUrl) console.log(`\n${result.datasetRunUrl}`)
 
-  console.log(`\n${markdown}`)
-  console.log(`\nWritten to evals/results/${stamp}.{json,md}`)
+  await shutdownLangfuse()
 
-  if (process.env.EVAL_WRITE_BASELINE) {
-    await writeFile(
-      BASELINE_PATH,
-      `${JSON.stringify(toBaseline(summaries, { model, recordedAt }), null, 2)}\n`
-    )
-    console.log(
-      "Baseline updated. Commit it if these numbers are the new truth."
-    )
-  }
-
-  const crashed = results.filter((result) => result.error).length
-  if (crashed > 0) {
+  // `experiment.run` drops an item whose task threw, having logged it. That is
+  // the right call mid-run — one broken case must not cost the other eighteen
+  // their scores — but it is not something to exit 0 on.
+  const missing = data.length - result.itemResults.length
+  if (missing > 0) {
     console.error(
-      `\n${crashed} run(s) threw. That is a broken harness, not a low score.`
+      `\n${missing} run(s) threw before they could be graded. That is a broken harness, not a low score.`
     )
     process.exitCode = 1
   }

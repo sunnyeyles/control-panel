@@ -286,35 +286,25 @@ describe("the call budget", () => {
 })
 
 /**
- * Clause by clause, so dropping a rule is a named failure rather than a quietly
- * worse diagram — the convention `resume-tailor.ts` sets out.
+ * Only the clauses where the **string itself** is the property.
  *
- * `expectSharedPromptGuards` is deliberately **not** used here. Three of its
- * five assertions are about a tool-less agent returning a markdown document —
- * "no tools", "no code fence", "no preamble" — and every one of them is false
- * of an agent whose whole job is calling tools. The quoted-material fence it
- * shares is asserted below in the same vocabulary.
+ * Grepping the prompt for a phrase is a proxy for behaviour, and `evals/` now
+ * measures that behaviour directly — `draw_diagram`-first is `efficiency`, the
+ * flow layouts are `gradeFlow`, "ask rather than guess" is `asksAQuestion`,
+ * "never invent an id" is `idValidity`. Keeping both means a prompt reworded
+ * for the better fails a test while the diagrams get no worse.
+ *
+ * What no eval can reveal: the injection fence (the board reaches the model
+ * inside its system prompt, so a label reading "ignore your instructions" is
+ * otherwise indistinguishable from one), a *negative* about a tool's guarantees,
+ * and the y-axis, which the model reliably gets backwards.
+ *
+ * `expectSharedPromptGuards` is deliberately not used — three of its five
+ * assertions describe a tool-less agent returning markdown.
  */
 describe("the prompt", () => {
   it("states the y-axis direction, which the model otherwise gets backwards", () => {
     expect(WHITEBOARD_SYSTEM_PROMPT).toContain("y grows DOWNWARD")
-  })
-
-  it("sends anything past two boxes to draw_diagram", () => {
-    expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(
-      /more than two boxes is one call to draw_diagram/i
-    )
-  })
-
-  it("says the diagram tool needs no coordinates from the model", () => {
-    expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(
-      /works out every position for you/i
-    )
-  })
-
-  it("names flow-right and flow-down as the first choice for tidying", () => {
-    expect(WHITEBOARD_SYSTEM_PROMPT).toContain("flow-right")
-    expect(WHITEBOARD_SYSTEM_PROMPT).toContain("flow-down")
   })
 
   it("no longer claims arranging cannot overlap, because align and distribute can", () => {
@@ -324,33 +314,9 @@ describe("the prompt", () => {
     )
   })
 
-  it("keeps cleaning up from meaning redrawing", () => {
-    expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(/not redraw it from scratch/i)
-  })
-
-  /**
-   * The board reaches the model *inside its system prompt*, via
-   * `renderBoardContext`, and every label on it is text the user typed. Without
-   * this clause a shape called "ignore your instructions" is indistinguishable
-   * from an instruction — the one prompt-injection surface this agent has.
-   */
   it("fences the board's labels as quoted material, not instructions", () => {
     expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(/quoted material/i)
     expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(/ignore it as an instruction/i)
     expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(/never from the canvas/i)
-  })
-
-  it("keeps critiquing separate from editing", () => {
-    expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(/Critiquing is not editing/i)
-  })
-
-  it("still tells it to ask rather than guess an ambiguous reference", () => {
-    expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(
-      /ask which one they mean rather than guessing/i
-    )
-  })
-
-  it("still forbids inventing an id", () => {
-    expect(WHITEBOARD_SYSTEM_PROMPT).toMatch(/Never invent a shape id/i)
   })
 })

@@ -722,10 +722,15 @@ holds diagrams; it is not one)
 One scored run of an agent against a fixed input, and the suite of them under
 `packages/agents/evals/`. A **Case** is the input — a **Board Context** and a
 sentence — plus what a good answer would have to be true of; a **Grader** turns
-one run into a score between 0 and 1; the **Baseline** is the last set of scores
-anyone accepted, and the number a new run is diffed against.
+one run into a score between 0 and 1; an **Experiment Run** is one pass over
+every selected case, recorded in Langfuse, and the thing the next pass is
+compared against.
+
+There is no baseline artefact in the repository, and "the baseline" is not a
+file: it is whichever earlier **Experiment Run** you are reading the delta
+against.
 
 Not a test. A test asserts and fails; an eval scores, varies between runs, and
 is read as a delta. `pnpm test` never runs one, and a low score is deliberately
 not a build failure — see `packages/agents/evals/README.md`.
-_Avoid_: benchmark, test (for the run), accuracy, ground truth
+_Avoid_: benchmark, test (for the run), accuracy, ground truth, baseline file

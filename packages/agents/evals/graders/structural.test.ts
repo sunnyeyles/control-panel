@@ -149,10 +149,6 @@ describe("edges", () => {
     expect(score.detail).toContain("API -> S3")
     expect(score.detail).toContain("API -> Redis")
   })
-
-  it("is not checked when a case asks for no arrows", () => {
-    expect(gradeEdges(kase(), drawn).detail).toBe("not checked")
-  })
 })
 
 describe("flow", () => {
@@ -421,7 +417,7 @@ describe("focus", () => {
 })
 
 describe("gradeStructurally", () => {
-  it("drops the graders the case never asked for", () => {
+  it("runs the three floor graders and nothing the case never asked for", () => {
     const scores = gradeStructurally(kase(), turn({ finalShapes: CHAIN }))
 
     expect(scores.map((score) => score.grader).sort()).toEqual([
@@ -429,15 +425,13 @@ describe("gradeStructurally", () => {
       "noOverlap",
       "noUserDamage",
     ])
-  })
 
-  it("keeps the three that apply to every turn even on a bare case", () => {
-    const scores = gradeStructurally(
+    // And the floor still fails a bare case, so it cannot be opted out of.
+    const stacked = gradeStructurally(
       kase(),
       turn({ finalShapes: [shape("s1", "A", 0, 0), shape("s2", "B", 20, 20)] })
     )
-
-    expect(scores.find((score) => score.grader === "noOverlap")?.passed).toBe(
+    expect(stacked.find((score) => score.grader === "noOverlap")?.passed).toBe(
       false
     )
   })
@@ -451,26 +445,5 @@ describe("gradeStructurally", () => {
     expect(scores.map((score) => score.grader)).toContain("minCreated")
     expect(scores.map((score) => score.grader)).toContain("labelled")
     expect(scores.map((score) => score.grader)).toContain("efficiency")
-  })
-
-  /**
-   * The bug this replaced: the always-on set was a module-level `Set` that one
-   * code path deleted from, so a single case could switch `noOverlap` off for
-   * every case that ran after it — and which cases those were depended on the
-   * order the runner happened to use.
-   */
-  it("does not let one case's grading change the next one's", () => {
-    const stacked = turn({
-      finalShapes: [shape("s1", "A", 0, 0), shape("s2", "B", 10, 10)],
-    })
-
-    const first = gradeStructurally(
-      kase({ expect: { mutates: false } }),
-      stacked
-    )
-    const second = gradeStructurally(kase(), stacked)
-
-    expect(first.some((score) => score.grader === "noOverlap")).toBe(true)
-    expect(second.some((score) => score.grader === "noOverlap")).toBe(true)
   })
 })

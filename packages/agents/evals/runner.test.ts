@@ -87,16 +87,23 @@ describe("runTurn", () => {
     expect(result.finalConnections).toHaveLength(1)
   })
 
-  it("records the tool calls and their replies", async () => {
+  it("records the transcript each grader reads: calls, replies, reply, count", async () => {
     const result = await runTurn(KASE, {
       model: scriptedModel([
         callTurn(toolCall("read_board", { scope: "all" })),
-        new AIMessage({ content: "One box, labelled API." }),
+        callTurn(toolCall("focus_viewport", {})),
+        new AIMessage({ content: "There is one box on the board." }),
       ]),
     })
 
-    expect(result.toolCalls.map((call) => call.name)).toEqual(["read_board"])
+    expect(result.toolCalls.map((call) => call.name)).toEqual([
+      "read_board",
+      "focus_viewport",
+    ])
     expect(result.toolReplies[0]).toContain("API")
+    // The last prose message, not the empty tool-calling ones before it.
+    expect(result.reply).toBe("There is one box on the board.")
+    expect(result.llmCalls).toBe(3)
   })
 
   it("keeps the session's correction, which is how idValidity sees an invented id", async () => {
@@ -109,29 +116,6 @@ describe("runTurn", () => {
 
     expect(result.toolReplies.join("\n")).toContain("There is no shape with id")
     expect(result.ops).toEqual([])
-  })
-
-  it("takes the last prose message as the reply, not an empty tool-calling one", async () => {
-    const result = await runTurn(KASE, {
-      model: scriptedModel([
-        callTurn(toolCall("read_board", {})),
-        new AIMessage({ content: "There is one box on the board." }),
-      ]),
-    })
-
-    expect(result.reply).toBe("There is one box on the board.")
-  })
-
-  it("counts the model calls the turn actually spent", async () => {
-    const result = await runTurn(KASE, {
-      model: scriptedModel([
-        callTurn(toolCall("read_board", {})),
-        callTurn(toolCall("focus_viewport", {})),
-        new AIMessage({ content: "Looking at it." }),
-      ]),
-    })
-
-    expect(result.llmCalls).toBe(3)
   })
 
   it("returns a clean, gradeable result for a turn that drew nothing", async () => {

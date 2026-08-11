@@ -129,26 +129,40 @@ transpiles without typechecking. `typecheck` runs both. The dashboard and
 
 **Evals are a separate task, and `pnpm test` never runs one.** A test asserts
 and fails; an eval calls a real model, scores the result between 0 and 1, and is
-read as a delta against a committed baseline. Only `@workspace/agents` has one
+read as a delta against the previous run. Only `@workspace/agents` has one
 today, covering the whiteboard agent:
 
 ```bash
-pnpm turbo run eval --filter=@workspace/agents     # needs OPENAI_API_KEY
+# needs OPENAI_API_KEY *and* LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+pnpm turbo run eval --filter=@workspace/agents
 ```
+
+**The run is a Langfuse experiment** (`@langfuse/client`, a devDependency of
+`@workspace/agents` alone), which is why `evals/` holds cases and graders and
+almost no harness: scoring, aggregation, the printed summary and run-over-run
+comparison all belong to the SDK. There is no committed baseline file — the
+previous run is the baseline, and it lives in Langfuse with its traces attached.
+Unlike every other caller of `@workspace/langfuse`, an eval **refuses to start**
+without keys rather than tracing into the void; the scores would have nowhere to
+go.
 
 The task is `cache: false` — `OPENAI_API_KEY` is in `globalEnv`, so a cached hit
 would skip the run and print yesterday's scores as today's. It is not in CI on
 push or on an ordinary pull request, because a stochastic check behind a
 required gate is one people learn to re-run past; `.github/workflows/evals.yml`
-runs on `workflow_dispatch` or the `run-evals` label, and needs an
-`OPENAI_API_KEY` repository secret that does not exist yet.
+runs on `workflow_dispatch` or the `run-evals` label, and needs
+`OPENAI_API_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` repository
+secrets, none of which exist yet.
 
 **The graders are not part of that and do run in `pnpm test`.** They are pure
 functions under `packages/agents/evals/graders/`, and they are the measuring
 instrument: one that reported "no overlap" while two boxes were stacked would
-make every number downstream a lie. That is why `packages/agents` is the one
-workspace whose vitest `include` reaches outside `src/`, and why `evals` is named
-in its `tsconfig.test.json`. See `packages/agents/evals/README.md`.
+make every number downstream a lie. They know nothing about Langfuse —
+`evals/evaluators.ts` is the single seam that renames a `Score` into an
+`Evaluation` — which is what keeps them testable without a network. That is why
+`packages/agents` is the one workspace whose vitest `include` reaches outside
+`src/`, and why `evals` is named in its `tsconfig.test.json`. See
+`packages/agents/evals/README.md`.
 
 **`@workspace/ui` is tested only under `src/lib/`, and that boundary is the
 point.** Everything under `src/components/` is React over a DOM, which would

@@ -65,7 +65,7 @@
         "EVAL_JUDGE_MODEL",
         "EVAL_REPEATS",
         "EVAL_CASES",
-        "EVAL_WRITE_BASELINE"
+        "EVAL_CONCURRENCY"
       ]
     },
     "zip": {
