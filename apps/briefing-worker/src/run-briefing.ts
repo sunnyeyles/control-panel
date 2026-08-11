@@ -768,9 +768,7 @@ export async function runBriefing(
                 // closest thing to an explanation anybody gets, and it is
                 // otherwise only in the brief nobody opens when it is empty.
                 ...(kept.notes ? { notes: kept.notes } : {}),
-                ...(widerPassFailed
-                  ? { widerPassFailed: widerPassFailed }
-                  : {}),
+                ...(widerPassFailed ? { widerPassFailed } : {}),
               }
 
         // One object holding whichever of the four went wrong, so a run that
