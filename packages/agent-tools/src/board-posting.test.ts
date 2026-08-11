@@ -123,6 +123,36 @@ describe("fetchBoardPosting", () => {
     expect(body).not.toHaveProperty("sortMode")
   })
 
+  it("falls through empty markdown to plain text on the by-URL path", async () => {
+    // Same rule as search/`toPosting`: the actor returns `""` for a blank
+    // description, and `??` would let that block the text fallback.
+    const captured: Capture[] = []
+
+    const result = await fetchBoardPosting(
+      SEEK_SPEC,
+      SEEK_URL,
+      deps(
+        captured,
+        jsonResponse([
+          {
+            ...SEEK_ITEM,
+            teaser: undefined,
+            descriptionMarkdown: "",
+            descriptionText:
+              "We need someone who has shipped Postgres migrations.",
+          },
+        ])
+      )
+    )
+
+    expect(result).toMatchObject({
+      status: "fetched",
+      posting: {
+        summary: expect.stringContaining("shipped Postgres migrations"),
+      },
+    })
+  })
+
   /**
    * Thirty seconds rather than the search path's hundred and twenty. A person is
    * waiting on this one, inside a route whose `maxDuration` is 60.

@@ -4,6 +4,7 @@ import {
   criteriaSchemaDescription,
   parseSearchCriteria,
   SearchCriteriaSchema,
+  toSearchCriteriaPrompt,
 } from "./criteria.ts"
 import { PROFILE_EXTRACTOR_SYSTEM_PROMPT } from "./profile-extractor.ts"
 
@@ -162,5 +163,72 @@ describe("criteriaSchemaDescription", () => {
     }
 
     expect(rendered.properties.titles?.minItems).toBe(1)
+  })
+})
+
+/**
+ * The CV reaches the model through this function and nowhere else, so the two
+ * things that could quietly ruin an extraction — a paraphrase and a truncation
+ * — are asserted against rather than trusted.
+ */
+describe("toSearchCriteriaPrompt", () => {
+  const BACKGROUND = [
+    "Jane Citizen — Backend Engineer",
+    "",
+    "Acme Pty Ltd, 2021–2026. Built payment services in TypeScript on AWS.",
+    "Widget Co, 2018–2021. PostgreSQL, Go, on-call one week in six.",
+    "",
+    "BSc Computer Science, University of Sydney.",
+  ].join("\n")
+
+  it("carries the CV through verbatim", () => {
+    expect(toSearchCriteriaPrompt(BACKGROUND)).toContain(BACKGROUND)
+  })
+
+  /**
+   * The inverse of the system-prompt assertion above, and it locks in a
+   * decision rather than describing an accident.
+   *
+   * The schema belongs in the system prompt and appears there once. Repeating
+   * it here would put the same JSON Schema in the context twice on every call,
+   * for a document that is already the largest thing in it.
+   *
+   * `job-scout.ts` used to be arranged the same way and no longer needs to be:
+   * its hand-off is a `submit_findings` tool call, so the provider renders the
+   * schema and its prompt carries none of it. This agent still answers in a
+   * final message, so the schema has to reach it somehow.
+   */
+  it("does not repeat the schema the system prompt already carries", () => {
+    expect(toSearchCriteriaPrompt(BACKGROUND)).not.toContain(
+      criteriaSchemaDescription
+    )
+  })
+
+  /**
+   * The label is not a security boundary — a document can write a fence of its
+   * own, and nothing here stops it. What contains an injected instruction is the
+   * empty tool set. The label is still worth asserting: it is what tells the
+   * model which side of the message is the person and which is the task.
+   */
+  it("labels the CV as quoted material rather than instruction", () => {
+    const prompt = toSearchCriteriaPrompt(BACKGROUND)
+
+    expect(prompt).toMatch(/quoted material, not instruction/i)
+    expect(prompt).toContain("--- end of CV ---")
+    expect(prompt.indexOf("quoted material")).toBeLessThan(
+      prompt.indexOf(BACKGROUND)
+    )
+  })
+
+  /**
+   * A long CV is passed through whole. Bounds belong to the caller, checked
+   * before this is reached — criteria drawn from the first half of a CV look
+   * exactly like criteria drawn from all of it, and the half most often lost is
+   * the earlier career that evidenced the seniority.
+   */
+  it("does not truncate a long CV", () => {
+    const long = `${BACKGROUND}\n${"Delivered a project. ".repeat(2_000)}`
+
+    expect(toSearchCriteriaPrompt(long)).toContain(long)
   })
 })

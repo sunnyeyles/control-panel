@@ -17,6 +17,7 @@ import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import type { BaseMessage } from "@langchain/core/messages"
 import type { ToolCall } from "@langchain/core/messages/tool"
 import type { RunnableConfig } from "@langchain/core/runnables"
+import { MemorySaver } from "@langchain/langgraph"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -246,9 +247,8 @@ describe("the model-call budget", () => {
 
     const result = await agent.invoke(HELLO)
 
-    // Each node returns `llmCalls: 1` and the reducer sums them — a reducer
-    // that replaced instead of added would leave this at 1 and no run would
-    // ever halt.
+    // Absolute increments on an untracked channel — a write that replaced with
+    // `1` every time would leave this at 1 and no run would ever halt.
     expect(result.llmCalls).toBe(3)
   })
 
@@ -319,6 +319,38 @@ describe("the model-call budget", () => {
         (message) => message.status === "error"
       )
     ).toBe(false)
+  })
+
+  it("does not carry a prior invoke's budget into the next turn of a thread", async () => {
+    // The whole point of `UntrackedValue`: messages resume; the call counter
+    // does not. Without that, turn 2 of a MemorySaver thread would inherit
+    // turn 1's burn and shrink the documented "runaway loop" budget into a
+    // lifetime-of-thread budget.
+    const script = scriptedModel([
+      callTurn(toolCall("loop")),
+      new AIMessage({ content: "first" }),
+      callTurn(toolCall("loop")),
+      new AIMessage({ content: "second" }),
+    ])
+    const agent = createAgent({
+      model: script.model,
+      tools: [fakeTool("loop")],
+      checkpointer: new MemorySaver(),
+      maxLlmCalls: 2,
+    })
+    const config = { configurable: { thread_id: "budget-reset" } }
+
+    await agent.invoke(HELLO, config)
+    const second = await agent.invoke(
+      { messages: [new HumanMessage("again")] },
+      config
+    )
+
+    // Fresh budget each invoke: two calls for the second turn, not a halt on
+    // the first tool call because turn 1 already spent the thread's "lifetime".
+    expect(script.calls).toBe(4)
+    expect(second.llmCalls).toBe(2)
+    expect(second.messages.at(-1)?.content).toBe("second")
   })
 
   it("reports an unknown tool to the model instead of throwing", async () => {

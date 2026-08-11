@@ -12,11 +12,11 @@ import {
   assertDraftable,
   UndraftableError,
 } from "@workspace/agents/cover-letter"
-import { parseSearchCriteria } from "@workspace/agents/criteria"
 import {
-  createProfileExtractor as defaultProfileExtractor,
+  parseSearchCriteria,
   toSearchCriteriaPrompt,
-} from "@workspace/agents/profile-extractor"
+} from "@workspace/agents/criteria"
+import { createProfileExtractor as defaultProfileExtractor } from "@workspace/agents/profile-extractor"
 import {
   createRoleTitleSuggester as defaultRoleTitleSuggester,
   toRoleTitleSuggestionsPrompt,

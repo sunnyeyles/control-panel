@@ -1,12 +1,4 @@
 import {
-  createIndeedSearch,
-  INDEED_TOOL_NAME,
-} from "@workspace/agent-tools/indeed-search"
-import {
-  createLinkedinSearch,
-  LINKEDIN_TOOL_NAME,
-} from "@workspace/agent-tools/linkedin-search"
-import {
   createPostingCatalog,
   type PostingCatalog,
 } from "@workspace/agent-tools/posting-catalog"
@@ -15,16 +7,15 @@ import {
   createSearchLog,
   type SearchAttempt,
 } from "@workspace/agent-tools/search-log"
-import {
-  createSeekSearch,
-  SEEK_TOOL_NAME,
-} from "@workspace/agent-tools/seek-search"
 import { createAgent, type Agent } from "@workspace/agents-core"
 
 import type { ExtraToolsAgentOptions } from "./agent-options.ts"
 import type { ScoutFindings } from "./findings.ts"
+import { JOB_BOARDS, JOB_SCOUT_SEARCH_TOOL_NAMES } from "./job-boards.ts"
 import { postingId } from "./posting-id.ts"
 import { createSubmitFindings } from "./submit-findings.ts"
+
+export { JOB_SCOUT_SEARCH_TOOL_NAMES }
 
 /**
  * Enough turns to search a few times, read a shortlist, and report — the floor,
@@ -56,35 +47,6 @@ export const JOB_SCOUT_SYSTEM_PROMPT = [
   "",
   "You never see or handle a posting's URL — the id is how a posting is named, and the link is filled in from it afterwards. So never invent an id, and never report one a search did not return to you: it names nothing, and the posting is dropped along with everything you wrote about it.",
 ].join("\n")
-
-/**
- * The boards the scout searches, by tool name.
- *
- * Exported because the worker reports a run's search count per board and has to
- * name every board to report a zero for one that answered nothing — see
- * `countBySource`. A list maintained separately over there would drift the first
- * time a board is added here, and it would drift *silently*: the worker would
- * simply stop mentioning the new board.
- *
- * It is no longer what decides whether a search happened. That is
- * {@link JobScoutSession.searches}, because a tool result cannot be asked: a
- * failed board answers with a sentence, which is a perfectly successful message.
- *
- * Names rather than tools, because a board tool is now built per run against
- * that run's catalog and there is no instance to read a name off until one
- * exists. Each board module exports its own name for this to collect, so adding
- * a board is still one edit here.
- *
- * `get_posting_details` is deliberately not on this list, and neither is
- * `extraTools`. Reading a description back out of the catalog is not evidence
- * that anything was searched — the catalog is only ever filled by a real search —
- * and a caller appending a tool is not adding a job board.
- */
-export const JOB_SCOUT_SEARCH_TOOL_NAMES: readonly string[] = [
-  SEEK_TOOL_NAME,
-  INDEED_TOOL_NAME,
-  LINKEDIN_TOOL_NAME,
-]
 
 export type CreateJobScoutOptions = ExtraToolsAgentOptions
 
@@ -130,6 +92,11 @@ export interface JobScoutSession {
  * `posting-catalog.ts`. That is what makes an id in a search result the same id
  * the `postings` table has used all along.
  *
+ * Board search tools come from {@link JOB_BOARDS}: one `createSearch` per row,
+ * so adding a board is an edit to that table rather than a second list here.
+ * {@link JOB_SCOUT_SEARCH_TOOL_NAMES} is derived from the same table and
+ * re-exported for the worker's per-board breakdown.
+ *
  * A factory rather than a ready-made instance, like every agent here: building
  * one constructs a model, which reads `OPENAI_API_KEY` and throws without it.
  */
@@ -152,9 +119,7 @@ export function createJobScout(
     systemPrompt,
     maxLlmCalls,
     tools: [
-      createSeekSearch(catalog, log),
-      createIndeedSearch(catalog, log),
-      createLinkedinSearch(catalog, log),
+      ...JOB_BOARDS.map((board) => board.createSearch(catalog, log)),
       createPostingDetails(catalog),
       submit.tool,
       ...extraTools,

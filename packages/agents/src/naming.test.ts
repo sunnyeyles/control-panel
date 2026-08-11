@@ -26,17 +26,6 @@ import * as agents from "./index.ts"
 
 const SRC = fileURLToPath(new URL(".", import.meta.url))
 
-/**
- * The one agent with no prompt of its own, deliberately.
- *
- * `assistant.ts` used to declare an `ASSISTANT_SYSTEM_PROMPT` that was
- * byte-for-byte `DEFAULT_SYSTEM_PROMPT` in `@workspace/agents-core`. Two copies
- * of one string is two things to keep in step, so the copy went and the runtime
- * default is what an Assistant gets. Named here rather than skipped silently, so
- * the exception is a decision a reader can find.
- */
-const NO_PROMPT_OF_ITS_OWN = new Set(["createAssistant"])
-
 /** `createCoverLetterWriter` → `CoverLetterWriter`. */
 function agentOf(factory: string): string {
   return factory.slice("create".length)
@@ -86,8 +75,6 @@ describe("R3 — every agent module has one fixed surface", () => {
       barrel,
       `Create${agent}Options is not re-exported from index.ts`
     ).toContain(`Create${agent}Options`)
-
-    if (NO_PROMPT_OF_ITS_OWN.has(factory)) return
 
     const prompt = promptNameFor(agent)
 

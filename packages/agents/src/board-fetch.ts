@@ -1,13 +1,8 @@
-import {
-  fetchBoardPosting,
-  type BoardPostingDeps,
-} from "@workspace/agent-tools/board-posting"
-import { INDEED_SPEC } from "@workspace/agent-tools/indeed-search"
-import { SEEK_SPEC } from "@workspace/agent-tools/seek-search"
+import type { BoardPostingDeps } from "@workspace/agent-tools/board-posting"
 import * as z from "zod"
 
 import { findExperienceStatement } from "./experience.ts"
-import { boardForHost } from "./job-boards.ts"
+import { JOB_BOARDS, boardForHost } from "./job-boards.ts"
 import { postingId } from "./posting-id.ts"
 import { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
 
@@ -39,29 +34,24 @@ import { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
 /**
  * Which board answers a direct link, keyed by {@link JobBoard.name}.
  *
- * Thunks rather than a list of specs because each spec is generic in its own
- * actor's item type, and a heterogeneous array of them has no useful element
- * type. Keyed by the board's name rather than its host so that `JOB_BOARDS`
- * stays the one place a host is matched — `board-fetch.test.ts` asserts every
- * key here is a board that registry actually names, which is what stops a typo
- * silently disabling a board.
- *
- * LinkedIn's absence is deliberate and is not a gap to fill: its actor accepts
- * search-results URLs and has no input for a single job page. Adding a key for
- * it would route a LinkedIn link into a run that cannot answer it, where today
- * it falls straight through to the general fetcher.
+ * Derived from {@link JOB_BOARDS} so a board with `fetchByUrl` is fetchable
+ * here the moment it is listed there, and a typo in a second hand-maintained
+ * map cannot silently disable one. LinkedIn's absence is still deliberate: its
+ * row has no `fetchByUrl`, because its actor accepts search-results URLs only.
  */
 const BOARD_FETCHERS: Record<
   string,
-  (url: string, deps: BoardPostingDeps) => ReturnType<typeof fetchBoardPosting>
-> = {
-  SEEK: (url, deps) => fetchBoardPosting(SEEK_SPEC, url, deps),
-  Indeed: (url, deps) => fetchBoardPosting(INDEED_SPEC, url, deps),
-}
+  NonNullable<(typeof JOB_BOARDS)[number]["fetchByUrl"]>
+> = Object.fromEntries(
+  JOB_BOARDS.flatMap((board) =>
+    board.fetchByUrl ? [[board.name, board.fetchByUrl]] : []
+  )
+)
 
 /** Exported for the test that pairs it against `JOB_BOARDS`. */
-export const BOARDS_FETCHED_BY_URL: readonly string[] =
-  Object.keys(BOARD_FETCHERS)
+export const BOARDS_FETCHED_BY_URL: readonly string[] = JOB_BOARDS.flatMap(
+  (board) => (board.fetchByUrl ? [board.name] : [])
+)
 
 /**
  * Fetched from a board, not a board's to fetch, or a sentence saying why not.
@@ -108,11 +98,13 @@ export async function fetchPostingByUrl(
   const fetchFrom = board && BOARD_FETCHERS[board.name]
   if (!fetchFrom) return { status: "unsupported" }
 
-  const result = await fetchFrom(url, {
+  const boardDeps: BoardPostingDeps = {
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(deps.apiToken ? { apiToken: deps.apiToken } : {}),
     idFor: (candidate) => postingId({ url: candidate }),
-  })
+  }
+
+  const result = await fetchFrom(url, boardDeps)
 
   if (result.status !== "fetched") return result
 

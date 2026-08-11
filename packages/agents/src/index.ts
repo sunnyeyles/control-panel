@@ -4,7 +4,11 @@ export {
   type ToollessAgentOptions,
 } from "./agent-options.ts"
 
-export { createAssistant, type CreateAssistantOptions } from "./assistant.ts"
+export {
+  ASSISTANT_SYSTEM_PROMPT,
+  createAssistant,
+  type CreateAssistantOptions,
+} from "./assistant.ts"
 
 export {
   BRIEF_WRITER_SYSTEM_PROMPT,
@@ -14,11 +18,18 @@ export {
 
 export {
   assertDraftable,
+  CandidateProfileSchema,
+  MAX_BACKGROUND_CHARS,
+  MIN_BACKGROUND_CHARS,
+  UndraftableError,
+  type CandidateProfile,
+} from "./candidate-profile.ts"
+
+export {
   CoverLetterRequestSchema,
   MAX_EXAMPLE_LETTER_CHARS,
   MAX_INSTRUCTIONS_CHARS,
   toCoverLetterPrompt,
-  UndraftableError,
   type CoverLetterRequest,
   type LetterInstructions,
 } from "./cover-letter.ts"
@@ -37,7 +48,7 @@ export {
   type PostingFetchDeps,
 } from "./board-fetch.ts"
 
-export { parseSearchCriteria } from "./criteria.ts"
+export { parseSearchCriteria, toSearchCriteriaPrompt } from "./criteria.ts"
 
 export { findExperienceStatement } from "./experience.ts"
 
@@ -73,14 +84,18 @@ export { parsePostedAt } from "./posted-at.ts"
 export { postingId } from "./posting-id.ts"
 
 export {
-  createPostingExtractor,
   parsePostingExtraction,
-  POSTING_EXTRACTOR_SYSTEM_PROMPT,
+  postingExtractionSchemaDescription,
   PostingExtractionSchema,
   toPostingExtractionPrompt,
-  type CreatePostingExtractorOptions,
   type ExtractedPosting,
   type PostingExtraction,
+} from "./posting-extraction.ts"
+
+export {
+  createPostingExtractor,
+  POSTING_EXTRACTOR_SYSTEM_PROMPT,
+  type CreatePostingExtractorOptions,
 } from "./posting-extractor.ts"
 
 export { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
@@ -88,7 +103,6 @@ export { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
 export {
   createProfileExtractor,
   PROFILE_EXTRACTOR_SYSTEM_PROMPT,
-  toSearchCriteriaPrompt,
   type CreateProfileExtractorOptions,
 } from "./profile-extractor.ts"
 
