@@ -23,12 +23,19 @@ import { Badge } from "@workspace/ui/components/badge"
  * recognised board, and two adjacent columns of identically-styled badges is a
  * row that reads as one wide field. See `posting-table-body.tsx`.
  *
- * `satisfies` rather than a bare object, so a fourth `PostingStatus` fails to
+ * `not-interested` is `ghost` — the quietest of the six, and the only one left
+ * once `secondary` is spoken for. It is the one status the *reader* set to say
+ * they are done with a row, so it should recede rather than announce itself:
+ * `destructive` would read as the employer's rejection, which is the distinction
+ * {@link POSTING_STATUS_LABELS} exists to keep.
+ *
+ * `satisfies` rather than a bare object, so a fifth `PostingStatus` fails to
  * compile here as well as in {@link POSTING_STATUS_LABELS}.
  */
 const STATUS_VARIANTS = {
   new: "outline",
   applied: "default",
+  "not-interested": "ghost",
   rejected: "destructive",
 } satisfies Record<PostingStatus, ComponentProps<typeof Badge>["variant"]>
 
