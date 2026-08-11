@@ -734,3 +734,53 @@ Two independent mechanisms produce one, and they do not feed each other:
   it a no-op rather than an error, so this too is a thing a runtime opts into.
 
 _Avoid_: log, debug output, history
+
+**Whiteboard**:
+The shared infinite canvas at `/whiteboard`, one per **Account**, that the user
+and an agent draw on at the same time. The only feature in the product with no
+connection to the job search, and the only agent that writes to something the
+user is simultaneously editing.
+
+**"Board" alone is ambiguous in this repository and should not be used** — a
+**Job Board** is SEEK, Indeed or LinkedIn, and the two senses sit two hundred
+lines apart in this file. Say "whiteboard" for the canvas and "job board" for
+the other, always, including in a **Pull Request** body.
+
+Three nouns hang off it, and they are not interchangeable:
+
+- **Snapshot**: the whole tldraw store, serialised, in `boards.snapshot` — one
+  JSONB row per user, replaced wholesale on autosave. Opaque to the server,
+  which never reads inside it.
+- **Board Context**: what the browser sends _up_ with a turn
+  (`boardContextSchema`) — the shapes, the arrows, what is selected, what the
+  user just drew, and what is off screen. A summary built for a model, roughly a
+  tenth the size of the snapshot, and re-sent every turn rather than accumulated.
+- **Canvas Op**: one mutation travelling back _down_ — create, update, move,
+  delete, connect, focus. Ops ride a separate stream from the assistant's prose,
+  which is why shapes appear while the sentence describing them is still being
+  typed, and a turn's ops share a `turnId` so one undo takes the whole turn back.
+
+The **Shadow Board** is the server's copy of the canvas for the duration of one
+turn (`board-session.ts`), and lives only so the fourth tool call can name the
+shape the first one created. The browser remains the source of truth; drift is
+bounded to a turn and repaired by the next one's Board Context.
+
+_Avoid_: board (on its own), canvas state, drawing, diagram (a **Whiteboard**
+holds diagrams; it is not one)
+
+**Eval**:
+One scored run of an agent against a fixed input, and the suite of them under
+`packages/agents/evals/`. A **Case** is the input — a **Board Context** and a
+sentence — plus what a good answer would have to be true of; a **Grader** turns
+one run into a score between 0 and 1; an **Experiment Run** is one pass over
+every selected case, recorded in Langfuse, and the thing the next pass is
+compared against.
+
+There is no baseline artefact in the repository, and "the baseline" is not a
+file: it is whichever earlier **Experiment Run** you are reading the delta
+against.
+
+Not a test. A test asserts and fails; an eval scores, varies between runs, and
+is read as a delta. `pnpm test` never runs one, and a low score is deliberately
+not a build failure — see `packages/agents/evals/README.md`.
+_Avoid_: benchmark, test (for the run), accuracy, ground truth, baseline file
