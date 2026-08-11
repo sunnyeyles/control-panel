@@ -21,9 +21,9 @@ import {
   type BriefingActivity,
 } from "@/lib/briefing-runs/run-activity"
 import {
-  coverLetterRowsFor,
+  coverLetterViewsFor,
   listCoverLetters,
-} from "@/lib/cover-letters/cover-letter-rows"
+} from "@/lib/cover-letters/cover-letter-views"
 import { getPrisma } from "@/lib/db"
 import { listPostings, type PostingPage } from "@/lib/postings/list-postings"
 import {
@@ -33,7 +33,7 @@ import {
 } from "@/lib/postings/posting-query"
 import type { BriefingCounts } from "@/lib/postings/postings-empty-state"
 import { getCoverLetterStore, getTailoredResumeStore } from "@/lib/storage"
-import { loadTailoredResumeRows } from "@/lib/tailored-resumes/tailored-resume-rows"
+import { loadTailoredResumeViews } from "@/lib/tailored-resumes/tailored-resume-views"
 import { timed } from "@/lib/timed"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import type { StoredCoverLetter } from "@workspace/user-storage"
@@ -152,12 +152,12 @@ export default async function BriefingsPage({
 
   // ⚠️ **Started here rather than after the postings, and the reason is in the
   // signature.** `listCoverLetters` takes the user and nothing else — narrowing
-  // to the twenty-five ids on screen is `coverLetterRowsFor`, a filter over the
+  // to the twenty-five ids on screen is `coverLetterViewsFor`, a filter over the
   // result. So this depends on the postings query for nothing and used to wait
   // for it anyway, which on a function deployed away from its data is a round
   // trip to a second service paid in series for no reason.
   //
-  // The trade, stated in `cover-letter-rows.ts`: a user with no postings now
+  // The trade, stated in `cover-letter-views.ts`: a user with no postings now
   // pays one listing they will not read.
   //
   // `null` on failure, never an empty list. The two sources are Postgres and S3,
@@ -370,7 +370,7 @@ async function PostingsSection({
 
   // ⚠️ **Narrowed with `.then`, not with `await`, and that is still the fix.**
   // The listing is one S3 request for the whole user — see
-  // `lib/cover-letters/cover-letter-rows.ts` — and it is already in flight,
+  // `lib/cover-letters/cover-letter-views.ts` — and it is already in flight,
   // started alongside the postings query above. Awaiting it here to apply the
   // filter would put a second service back on the table's critical path, which
   // is the wait this shape exists to remove. The promise goes down to the cells
@@ -388,12 +388,12 @@ async function PostingsSection({
   const postingIds = postings.postings.map((posting) => posting.id)
 
   const lettersPromise: CoverLetterPromise = letters.then((listed) =>
-    listed === null ? null : coverLetterRowsFor(listed, postingIds)
+    listed === null ? null : coverLetterViewsFor(listed, postingIds)
   )
 
   // ⚠️ **A second storage read, alongside the letters rather than behind them.**
   // Also a single `ListObjectsV2` over one prefix — see
-  // `lib/tailored-resumes/tailored-resume-rows.ts` — and it takes no posting ids
+  // `lib/tailored-resumes/tailored-resume-views.ts` — and it takes no posting ids
   // for the same reason the letters now take theirs only to filter: what comes
   // back is everything this user has generated, not a page of it.
   //
@@ -405,7 +405,7 @@ async function PostingsSection({
   // is the likely one.
   const tailoredResumesPromise: TailoredResumePromise = timed(
     "briefings.tailored-resumes",
-    () => loadTailoredResumeRows(userId, getTailoredResumeStore())
+    () => loadTailoredResumeViews(userId, getTailoredResumeStore())
   ).catch((error) => {
     console.error("tailored-resumes: could not load", error)
     return null

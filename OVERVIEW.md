@@ -140,9 +140,20 @@ and `web_search` — neither the board tools nor any fetcher are in it.
   warning that names what was left out. A Run where _every_ reported posting is
   unaccounted for still fails: that is a scout reporting postings it never
   found.
-- **A run with no successful search fails.** Well-formed findings that never
-  touched a live search would produce a confident brief citing postings nobody
-  looked up — worse than no brief.
+- **A run with no successful search fails**, and a failed board search does not
+  count as one. Well-formed findings that never touched a live search would
+  produce a confident brief citing postings nobody looked up — worse than no
+  brief. What proves a search happened is the scout's own search log
+  (`search-log.ts`), not its transcript: a board that fails answers the _model_
+  with a sentence, so a run reading tool results counted a dead scraper as a live
+  search and every-board-down looked exactly like an honest empty result.
+- **A run that reports nothing tries once more, wider, then says why.** The
+  second pass is the same criteria read as preferences rather than requirements,
+  and it is skipped when the title filter is what emptied the run — a wider
+  search finds more of the same and the filter eats those too. Whatever the
+  outcome, a run that recorded no postings carries a `noPostings` warning naming
+  the reason, because `succeeded` with an unchanged table and no explanation is
+  the silence this exists to end.
 - **A run never overwrites a Posting's status.** `recordPostings` upserts on
   `(user_id, posting_id)` and its `DO UPDATE SET` list omits `status` — the only
   column in the schema a person writes. That omission is the tracker; see
@@ -322,7 +333,7 @@ flowchart TD
   redraft overwrites one object. The letter's key and the row's identity are the
   same `postingId()` value, which is what keeps a stored letter attached to the
   Posting it was written for. Listing and downloading (#85):
-  `cover-letter-rows.ts` issues one `ListObjectsV2` via `CoverLetterStore.list`
+  `cover-letter-views.ts` issues one `ListObjectsV2` via `CoverLetterStore.list`
   rather than a `HeadObject` per visible Posting, and
   `/api/cover-letters/{postingId}` hands the Markdown back as a file. **Letter
   Instructions** — a per-user row in

@@ -44,6 +44,7 @@ import type {
   PostingCatalog,
 } from "./posting-catalog.ts"
 import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
+import type { SearchLog } from "./search-log.ts"
 
 /** Caps every actor run server-side, in seconds. */
 const RUN_TIMEOUT_SECONDS = 120
@@ -151,6 +152,15 @@ export interface BoardUrlFetch<TItem> {
 export interface ApifyBoardSpec<TItem> {
   /** How prose spells the board — it appears in every message to the model. */
   board: string
+  /**
+   * The tool's name, e.g. `seek_search`.
+   *
+   * Here rather than in {@link BoardSearchToolOptions}, where it used to live,
+   * because it is no longer only the wrapper's business: every
+   * {@link SearchAttempt} is filed under it, and `apifyBoardSearch` records one
+   * whether it was called through the tool or directly.
+   */
+  toolName: string
   /** Apify's actor id, tilde-separated, e.g. `misceres~indeed-scraper`. */
   actorId: string
   defaultMaxResults: number
@@ -308,16 +318,43 @@ function formatSearchResults(
  * Separated from the tool wrapper so a test can drive it with a fake `fetch` —
  * a tool's schema describes what the *model* passes, and has nowhere to carry a
  * dependency.
+ *
+ * ⚠️ **`log` is where a failed search becomes visible.** What this returns is a
+ * string either way — results or a sentence explaining why there are none — and
+ * nothing about the returned string says which it is. Every exit records one
+ * {@link SearchAttempt}, so a caller can tell "the board answered with nothing"
+ * from "the board did not answer". Optional so a test can drive one search
+ * without one; every production path passes one.
  */
 export async function apifyBoardSearch<TItem>(
   spec: ApifyBoardSpec<TItem>,
   input: BoardSearchInput,
   catalog: PostingCatalog,
-  deps: BoardSearchDeps = {}
+  deps: BoardSearchDeps = {},
+  log?: SearchLog
 ): Promise<string> {
   const { query } = input
   const doFetch = deps.fetch ?? globalThis.fetch
   const apiToken = deps.apiToken ?? requireApifyToken(`search ${spec.board}`)
+
+  // Exactly one per call, at whichever exit the call takes. A missing or
+  // rejected token throws above this and records nothing, which is correct: a
+  // deployment fault is not a search that failed, and it fails the whole run.
+  const record = (
+    outcome: "ok" | "failed",
+    results: number,
+    message?: string
+  ): void => {
+    log?.record({
+      toolName: spec.toolName,
+      board: spec.board,
+      query,
+      ...(input.location ? { location: input.location } : {}),
+      outcome,
+      results,
+      ...(message ? { message } : {}),
+    })
+  }
 
   const requested = input.maxResults ?? spec.defaultMaxResults
   const maxResults = clampMaxResults(requested, spec.maxResultsLimit)
@@ -342,11 +379,16 @@ export async function apifyBoardSearch<TItem>(
     retryAdvice: "different criteria",
     auth: { service: "Apify", credential: "API token", envVar: "APIFY_TOKEN" },
   })
-  if (!result.ok) return result.message
+  if (!result.ok) {
+    record("failed", 0, result.message)
+    return result.message
+  }
 
   // The synchronous endpoint returns the dataset items as a bare array.
   if (!Array.isArray(result.body)) {
-    return `${subject} returned no result list. Continue with what you already have.`
+    const message = `${subject} returned no result list. Continue with what you already have.`
+    record("failed", 0, message)
+    return message
   }
 
   const items = result.body as TItem[]
@@ -378,6 +420,12 @@ export async function apifyBoardSearch<TItem>(
     entries.push(entry)
   }
 
+  // `ok` with no entries, and that is not a contradiction: the board answered,
+  // and what it answered was that nobody is advertising this. A caller that
+  // cannot tell that from a scraper being down cannot tell a quiet market from
+  // a broken one — see `search-log.ts`.
+  record("ok", entries.length)
+
   return formatSearchResults(spec.board, query, entries)
 }
 
@@ -386,8 +434,6 @@ export async function apifyBoardSearch<TItem>(
  * everything else is derived from its {@link ApifyBoardSpec}.
  */
 export interface BoardSearchToolOptions {
-  /** The tool's name, e.g. `seek_search`. */
-  name: string
   /** How the description names the inventory: `seek.com.au`, `LinkedIn`. */
   source: string
   /** How the board writes places, with examples in its own spelling. */
@@ -407,17 +453,21 @@ export interface BoardSearchToolOptions {
  * a describe() at a time.
  *
  * A factory rather than a ready-made tool, because every result it renders is
- * recorded in one run's catalog and named by it.
+ * recorded in one run's catalog and named by it — and every call it makes is
+ * recorded in the same run's {@link SearchLog}, which is required here rather
+ * than optional so wiring a new board cannot forget it.
  */
 export function createBoardSearchTool<TItem>(
   spec: ApifyBoardSpec<TItem>,
   catalog: PostingCatalog,
+  log: SearchLog,
   options: BoardSearchToolOptions
 ): StructuredToolInterface {
   return tool(
-    async (input: BoardSearchInput) => apifyBoardSearch(spec, input, catalog),
+    async (input: BoardSearchInput) =>
+      apifyBoardSearch(spec, input, catalog, {}, log),
     {
-      name: options.name,
+      name: spec.toolName,
       description: `Search ${options.source}'s live listings for currently-open job postings. Every result is an individual posting with an id, its listing date and a teaser — call get_posting_details with those ids to read the advertisements themselves. Make one focused search per role title and location.`,
       schema: z.object({
         query: z

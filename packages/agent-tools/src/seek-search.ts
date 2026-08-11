@@ -9,6 +9,7 @@ import {
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
 import type { PostingCatalog } from "./posting-catalog.ts"
+import type { SearchLog } from "./search-log.ts"
 
 /**
  * SEEK job search, via Apify's `unfenced-group/seek-com-au-scraper` actor.
@@ -111,6 +112,7 @@ export type SeekSearchDeps = BoardSearchDeps
 /** Everything SEEK-shaped in one place, exported for its test. */
 export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
   board: "SEEK",
+  toolName: SEEK_TOOL_NAME,
   actorId: ACTOR_ID,
   defaultMaxResults: DEFAULT_MAX_RESULTS,
   maxResultsLimit: MAX_RESULTS_LIMIT,
@@ -211,9 +213,10 @@ export const SEEK_SPEC: ApifyBoardSpec<SeekJob> = {
 export async function apifySeekSearch(
   input: SeekSearchInput,
   catalog: PostingCatalog,
-  deps: SeekSearchDeps = {}
+  deps: SeekSearchDeps = {},
+  log?: SearchLog
 ): Promise<string> {
-  return apifyBoardSearch(SEEK_SPEC, input, catalog, deps)
+  return apifyBoardSearch(SEEK_SPEC, input, catalog, deps, log)
 }
 
 /**
@@ -224,10 +227,10 @@ export async function apifySeekSearch(
  * search gate counts.
  */
 export function createSeekSearch(
-  catalog: PostingCatalog
+  catalog: PostingCatalog,
+  log: SearchLog
 ): StructuredToolInterface {
-  return createBoardSearchTool(SEEK_SPEC, catalog, {
-    name: SEEK_TOOL_NAME,
+  return createBoardSearchTool(SEEK_SPEC, catalog, log, {
     source: "seek.com.au",
     locationDescription:
       'Where, as SEEK writes it — "Sydney NSW", "Melbourne VIC", "All Australia". Defaults to all of Australia.',

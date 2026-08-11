@@ -5,10 +5,10 @@
  * which is not something the client router can navigate to.
  *
  * ⚠️ **The name and the filename are props rather than fields of a
- * `CoverLetterRow`.** They used to come from the letter's stored S3 provenance,
+ * `CoverLetterView`.** They used to come from the letter's stored S3 provenance,
  * which is metadata a `ListObjectsV2` does not return — and one listing is now
  * how the whole page learns which Postings have letters. See
- * `lib/cover-letters/cover-letter-rows.ts`. The caller derives both from the
+ * `lib/cover-letters/cover-letter-views.ts`. The caller derives both from the
  * Posting it is already rendering.
  */
 export function CoverLetterDownloadLink({

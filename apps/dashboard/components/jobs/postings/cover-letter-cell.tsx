@@ -2,7 +2,7 @@
 
 import { use } from "react"
 
-import type { CoverLetterRow } from "@/lib/cover-letters/cover-letter-rows"
+import type { CoverLetterView } from "@/lib/cover-letters/cover-letter-views"
 import { FileTextIcon, TriangleAlertIcon } from "lucide-react"
 
 /**
@@ -18,13 +18,13 @@ import { FileTextIcon, TriangleAlertIcon } from "lucide-react"
  * An array rather than a `Map` keyed by Posting, because this crosses the RSC
  * boundary and a `Map` is an awkward payload.
  */
-export type CoverLetterPromise = Promise<readonly CoverLetterRow[] | null>
+export type CoverLetterPromise = Promise<readonly CoverLetterView[] | null>
 
 /** What one row can say about its letter, with "unknown" kept separate. */
 export type CoverLetterLookup =
   | { state: "unavailable" }
   | { state: "none" }
-  | { state: "drafted"; letter: CoverLetterRow }
+  | { state: "drafted"; letter: CoverLetterView }
 
 /**
  * This row's letter, once the page's storage reads have resolved.
@@ -36,7 +36,7 @@ export type CoverLetterLookup =
  * CoverLetterCell} below, and the letter section of the expanded detail.
  *
  * A linear scan, not a lookup map. The array holds letters for the visible page
- * only — `coverLetterRowsFor` narrows the listing to exactly the ids being
+ * only — `coverLetterViewsFor` narrows the listing to exactly the ids being
  * rendered — so it is bounded by `PAGE_SIZE` and cannot grow with a user's
  * drafting history.
  */

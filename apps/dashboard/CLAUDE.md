@@ -2,7 +2,7 @@
 
 Guidance moved out of the root `CLAUDE.md` so it loads only when working in this app.
 
-Naming rules are in the repo root's `NAMING.md`, and `lib/naming.test.ts` enforces the ones that can be. The two that bite most often here: an agent seam in a `*Deps` interface takes the exact factory name `@workspace/agents` exports (R2), and `components/` mirrors the route tree while `lib/` names domain concepts (R8).
+Naming rules are in the repo root's `NAMING.md`, and `lib/naming.test.ts` enforces the ones that can be. The three that bite most often here: an agent seam in a `*Deps` interface takes the exact factory name `@workspace/agents` exports (R2); nothing under `components/` may import a `*Row` from `@/lib/` or `@workspace/db`, because a `Row` still carries `Date`s and a `View` is the projection that crossed the boundary (R5); and `components/` mirrors the route tree while `lib/` names domain concepts (R8).
 
 ## The auth gate
 

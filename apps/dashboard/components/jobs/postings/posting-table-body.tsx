@@ -13,6 +13,7 @@ import {
   type PostingDetailState,
 } from "@/components/jobs/postings/posting-detail"
 import { usePostingSelection } from "@/components/jobs/postings/posting-selection"
+import { PostingStatusBadge } from "@/components/jobs/postings/posting-status-badge"
 import type { TailoredResumePromise } from "@/components/jobs/postings/use-tailored-resume"
 import type { PostingView } from "@/lib/postings/list-postings"
 import {
@@ -206,11 +207,16 @@ const PENDING: PostingDetailState = { status: "loading" }
  * browser's locale and timezone, and React reports the disagreement as a
  * hydration mismatch rather than as the timezone bug it is.
  *
- * The compact row carries only what is worth scanning. Status, both sighting
- * times, the summary, the highlights, the match reason and all three cover
- * letter controls live in the detail row the chevron discloses. The whole
- * `PostingView` goes down as props — the page already holds every field, so
- * opening the detail costs no query.
+ * The compact row carries only what is worth scanning. Both sighting times, the
+ * summary, the highlights, the match reason and all three cover letter controls
+ * live in the detail row the chevron discloses. The whole `PostingView` goes
+ * down as props — the page already holds every field, so opening the detail
+ * costs no query.
+ *
+ * **Status is on the row and the control for it is not**, which is the one place
+ * those two come apart: the value is a scanning aid and belongs in a column,
+ * while the `Select` that sets it is a wide control nobody wants twenty-five of.
+ * See `posting-status-badge.tsx`.
  *
  * **The whole row is the target, and the controls inside it handle themselves.**
  * The `<tr>` toggles the detail, so aiming at the company or the date works as
@@ -534,6 +540,21 @@ const PostingRow = memo(function PostingRow({
               <span className="sr-only">Source not recognised</span>
             </span>
           )}
+        </TableCell>
+
+        {/*
+          ⚠️ **The value, not the control.** `PostingStatusSelect` stays in the
+          detail panel and is still the only way to change a status — see
+          `posting-status-badge.tsx` for why a `Select` repeated down the page
+          is the thing that was removed, and why showing the value is not the
+          same trade.
+
+          No `truncate` and no `title`: the cell holds a badge rather than text,
+          the three labels are all short, and the column is sized against the
+          longest of them. See the `status` entry in `POSTING_COLUMNS`.
+        */}
+        <TableCell className={POSTING_HIDE_BELOW_MD}>
+          <PostingStatusBadge status={posting.status} />
         </TableCell>
 
         {/*

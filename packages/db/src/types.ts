@@ -48,18 +48,30 @@ export type RunStatus = "running" | "succeeded" | "failed"
 export type PostingPayload = Record<string, unknown>
 
 /**
- * `new` on discovery, and the other two only ever set by a person.
+ * `new` on discovery, and the other three only ever set by a person.
+ *
+ * **Who acts is not uniform across them, and the names are only readable if you
+ * know that.** `applied` and `not-interested` are decisions the user takes
+ * about the *advertisement* — one to pursue it, one to pass on it. `rejected`
+ * is the *employer's* answer to an application already sent, so it can only
+ * follow `applied`. Nothing enforces that ordering, and nothing should: see
+ * below.
  *
  * Text plus a CHECK rather than a Postgres enum, mirroring {@link RunStatus}.
  * Nothing in the pipeline may move a Posting off the value a user chose: the
  * `DO UPDATE SET` list in `recordPostings` omits `status` for exactly that
  * reason, and no transition is enforced beyond the CHECK because every one of
- * them is legal.
+ * them is legal — a person may change their mind about a Posting in any
+ * direction, including back to `new`.
+ *
+ * `not-interested` is hyphenated rather than `not_interested` because that is
+ * how this schema already spells a multi-word CHECK value: see
+ * {@link DocumentType} and `documents_doc_type_check`.
  *
  * Type-only, and it erases. The runtime list is `POSTING_STATUSES` in
  * `postings.ts`; this file must stay importable without pulling in a value.
  */
-export type PostingStatus = "new" | "applied" | "rejected"
+export type PostingStatus = "new" | "applied" | "not-interested" | "rejected"
 
 /**
  * What the user says a Document is.

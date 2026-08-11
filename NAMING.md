@@ -13,7 +13,7 @@ get re-derived per feature, and the derivations disagree — which is exactly ho
 the same dependency came to be called `createWriter`, `createTailor`,
 `createAssessor`, `createExtractor` and `createAgent` in seven files.
 
-**Rules R1, R2, R3 and R8 are enforced by tests**, in
+**Rules R1, R2, R3, R5 and R8 are enforced by tests**, in
 `apps/dashboard/lib/naming.test.ts` and `packages/agents/src/naming.test.ts`.
 ESLint cannot do it: `eslint-plugin-only-warn` downgrades every rule, so
 `pnpm lint` exits 0 regardless. The rest are conventions a reviewer upholds.
@@ -43,6 +43,17 @@ async function scoreOne(prisma: PrismaClient, assessment: { postingId: string; �
 Enforced for `job`/`jobs` by an allowlist in `apps/dashboard/lib/naming.test.ts`.
 The allowlist is the documentation: a module that genuinely handles `jobs` rows
 is added to it deliberately, and the addition is visible in review.
+
+**Corollary — `job` and `briefing` are the same row seen from two sides, and
+which word you use is decided by where you are.** The schema owns `jobs`, and
+`CONTEXT.md` gives the user-facing word to **Briefing**. So: `job` inside
+`packages/db` and in the dashboard modules that read `jobs` rows, `briefing`
+everywhere a user can see it — a heading, a button, a message, a route's copy.
+That is what `JOBS_ALLOWLIST` has been encoding without saying so, and it is why
+`components/jobs/schedules/` holds `job-schedule-form.tsx` beside
+`create-briefing-form.tsx` and neither is a mistake. A file that reads the rows
+and renders the words carries both, and `briefing-section.tsx` is the one that
+does.
 
 ## R2 — an agent seam is named after the agent's exported factory
 
@@ -105,7 +116,7 @@ profile and was called `toProfilePrompt`, the only one named for its argument.
 | `<X>ActionsDeps`   | the injected seams of a Server Action factory                   |
 | `<X>Actions`       | what `create<X>Actions(deps)` returns                           |
 | `<X>Request`       | the input handed to an agent                                    |
-| `<X>Row`           | a database row shape                                            |
+| `<X>Row`           | a shape `@workspace/db` returns — `Date` fields and all         |
 | `<X>View`          | a client-safe server projection — every `Date` already a string |
 | `<X>Ref`           | an object-store address                                         |
 | `<X>Result`        | a returned discriminated union                                  |
@@ -114,7 +125,26 @@ profile and was called `toProfilePrompt`, the only one named for its argument.
 
 `View` versus `Row` is the one worth being strict about: it is the serialization
 boundary, and a `Row` that reaches a client component is a runtime error about
-`Date` rather than a type error.
+`Date` rather than a type error. **`naming.test.ts` fails a file under
+`components/` that imports a name ending in `Row` from `@/lib/…` or
+`@workspace/db`** — the specifier is checked first, so `TableRow` from
+`@workspace/ui` is untouched.
+
+Two consequences worth stating, because both were got wrong before the rule was
+written down:
+
+- **`Row` is about where the shape came from, not about what renders it.** The
+  cover letters and tailored resumes are projections of an **S3 listing** and
+  there is no `cover_letters` table for them to be rows of, so they are
+  `CoverLetterView` and `TailoredResumeView` — they were `…Row` until this rule
+  had a test, which is exactly how long a convention survives without one.
+- **Where a column's word differs from the glossary's, the translation happens
+  once, at the `packages/db` boundary.** `documents.doc_type` is Prisma's
+  `docType` and becomes `documentType` in `lib/documents/list-documents.ts`;
+  `postings.match_resume_id` is Prisma's `matchResumeId` and becomes
+  `documentId` on `PostingMatchRow` and `PostingMatchWrite`. The column keeps
+  its name — renaming it is a migration nobody needs — and exactly one line each
+  way knows both spellings.
 
 ## R6 — two outcomes use `ok`, three or more use `status`
 
@@ -195,5 +225,14 @@ await deps.getResumes().put({ resumeId: documentId, … })
 
 — ours is `documentId` everywhere; `resumeId` appears only where it is
 `ResumeStore`'s field name and not our word.
+
+**`postings.match_resume_id` was the second source of `resumeId` and is no
+longer one.** `@workspace/db` used to carry the column's word out through
+`PostingMatchRow`, `PostingMatchWrite`, `listUnmatchedPostingIds` and
+`countUnmatchedPostings`, which made a dashboard module declare
+`const resumeId = background.documentId` to feed it. It is `documentId` on all
+four now, translated at the boundary per R5. The **column** is untouched and
+stays `match_resume_id`; only `packages/db/src/postings.ts` and the Prisma-shaped
+test fakes may spell it that way.
 
 **`assistant.ts` exports no system prompt.** See R3.

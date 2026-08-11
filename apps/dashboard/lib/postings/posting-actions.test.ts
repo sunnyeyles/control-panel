@@ -1,5 +1,5 @@
 import type { CurrentUser } from "@/lib/auth/current-user"
-import type { PrismaClient } from "@workspace/db"
+import { POSTING_STATUSES, type PrismaClient } from "@workspace/db"
 import {
   ObjectNotFoundError,
   StorageUnavailableError,
@@ -364,10 +364,12 @@ describe("what is accepted", () => {
     expect(store.updates).toHaveLength(0)
   })
 
-  it("refuses a fourth status before anything is queried", async () => {
+  it("refuses a fifth status before anything is queried", async () => {
     const actions = actionsFor(SIGNED_IN)
 
-    for (const status of ["", "offered", "NEW", "new "]) {
+    // `not_interested` is the near-miss worth naming: the underscore spelling
+    // is the one somebody reaches for, and `not-interested` is the value.
+    for (const status of ["", "offered", "NEW", "new ", "not_interested"]) {
       const result = await actions.setPostingStatus(
         IDLE,
         statusForm({ status })
@@ -381,10 +383,12 @@ describe("what is accepted", () => {
     expect(store.find(POSTING_ID)?.status).toBe("new")
   })
 
-  it("accepts each of the three", async () => {
+  // Over `POSTING_STATUSES` rather than a hand-written list, so a status added
+  // to the schema cannot slip past this without someone deciding it should.
+  it("accepts each of them", async () => {
     const actions = actionsFor(SIGNED_IN)
 
-    for (const status of ["new", "applied", "rejected"]) {
+    for (const status of POSTING_STATUSES) {
       const result = await actions.setPostingStatus(
         IDLE,
         statusForm({ status })

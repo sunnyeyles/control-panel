@@ -5,6 +5,7 @@ import {
   type NewJob,
   type PrismaClient,
 } from "@workspace/db"
+import { MAX_POSTINGS_PER_BRIEF } from "@workspace/job-search"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
@@ -514,6 +515,78 @@ describe("createJob", () => {
       "Add at least one role title and one location."
     )
     expect(store.creates).toHaveLength(0)
+  })
+
+  /**
+   * The field that existed in the worker's schema and that nothing collected, so
+   * every briefing in production ran on the default with no way to ask for more.
+   */
+  describe("how many postings to ask for", () => {
+    it("stores the number when the user asked for one", async () => {
+      const result = await actionsFor(SIGNED_IN).createJob(
+        IDLE,
+        createForm({ maxPostings: "12" })
+      )
+
+      expect(result.status).toBe("success")
+      expect(store.creates[0]?.config).toMatchObject({ maxPostings: 12 })
+    })
+
+    it("omits it entirely when the field was left blank", async () => {
+      // Not the same as storing the default: an absent field follows the
+      // platform default whenever it changes, where a stored number pins this
+      // briefing to today's for ever.
+      await actionsFor(SIGNED_IN).createJob(
+        IDLE,
+        createForm({ maxPostings: "  " })
+      )
+
+      expect("maxPostings" in (store.creates[0]?.config ?? {})).toBe(false)
+    })
+
+    it("omits it when the field was never posted at all", async () => {
+      // A caller older than the field, which is every existing form post.
+      await actionsFor(SIGNED_IN).createJob(IDLE, createForm())
+
+      expect("maxPostings" in (store.creates[0]?.config ?? {})).toBe(false)
+    })
+
+    it("names the field when the number is out of range", async () => {
+      const result = await actionsFor(SIGNED_IN).createJob(
+        IDLE,
+        createForm({ maxPostings: "500" })
+      )
+
+      expect(result.status).toBe("error")
+      expect(result.status === "error" && result.message).toContain(
+        String(MAX_POSTINGS_PER_BRIEF)
+      )
+      expect(store.creates).toHaveLength(0)
+    })
+
+    it("refuses something that is not a number", async () => {
+      const result = await actionsFor(SIGNED_IN).createJob(
+        IDLE,
+        createForm({ maxPostings: "lots" })
+      )
+
+      expect(result.status).toBe("error")
+      expect(store.creates).toHaveLength(0)
+    })
+
+    it("names the blocking field instead when both are wrong", async () => {
+      // Same rule as keywords next door: naming the postings count would have
+      // the user fix it, submit again, and only then meet the empty title that
+      // was blocking them the whole time.
+      const result = await actionsFor(SIGNED_IN).createJob(
+        IDLE,
+        createForm({ titles: "  ", maxPostings: "500" })
+      )
+
+      expect(result.status === "error" && result.message).toBe(
+        "Add at least one role title and one location."
+      )
+    })
   })
 
   it("derives the cron from the interval and always stores UTC", async () => {

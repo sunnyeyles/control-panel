@@ -183,6 +183,13 @@ export function PostingDetail({
         wide control to repeat twenty-five times down a page, and Radix sets
         `aria-expanded` on its trigger while open, which tripped the row
         highlight meant for the disclosure chevron.
+
+        ⚠️ **The row shows the value now, and this is still where it is
+        changed.** The Status column renders a read-only badge — see
+        `posting-status-badge.tsx` — so this section is no longer the only way to
+        find out where an application stands, only the only way to move it. That
+        is also why the heading stays: below `md` the column is not rendered and
+        this is the whole of it.
       */}
       <Section title="Status">
         <PostingStatusSelect
@@ -516,10 +523,10 @@ function CoverLetterControls({
 
   /*
     Derived from the Posting rather than read off the letter. Both used to be
-    fields of `CoverLetterRow`, taken from the letter's stored S3 provenance —
+    fields of `CoverLetterView`, taken from the letter's stored S3 provenance —
     but the page now learns which Postings have letters from one
     `ListObjectsV2`, and a listing carries no object metadata. See
-    `lib/cover-letters/cover-letter-rows.ts`.
+    `lib/cover-letters/cover-letter-views.ts`.
 
     The visible difference is the right way round: a letter drafted when the
     advertisement had a different title downloads under the title on screen,
@@ -603,7 +610,7 @@ function CoverLetterControls({
  *
  * ⚠️ **Every name shown here comes from `posting`, not from storage.** The
  * lookup carries a Posting id and a date and nothing else, because
- * `loadTailoredResumeRows` reads the whole set with one `ListObjectsV2` and a
+ * `loadTailoredResumeViews` reads the whole set with one `ListObjectsV2` and a
  * listing carries no user metadata. The title and company the download link and
  * the PDF button need are already on this component's props — the same values,
  * out of Postgres rather than S3.

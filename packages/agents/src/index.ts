@@ -135,3 +135,10 @@ export {
 } from "./whiteboard.ts"
 
 export type { Agent } from "@workspace/agents-core"
+
+/**
+ * Re-exported so a caller of {@link JobScoutSession.searches} can name what it
+ * gets back without importing `@workspace/agent-tools` for a type — the same
+ * courtesy `Agent` gets above.
+ */
+export type { SearchAttempt } from "@workspace/agent-tools/search-log"

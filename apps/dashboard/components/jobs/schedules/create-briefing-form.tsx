@@ -23,6 +23,10 @@ import {
   type RoleTitleSuggestionState,
   type SuggestedCriteria,
 } from "@/lib/jobs/criteria-suggestion"
+import {
+  DEFAULT_MAX_POSTINGS,
+  MAX_POSTINGS_PER_BRIEF,
+} from "@workspace/job-search"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 
@@ -276,6 +280,8 @@ function CreateFields({
           idPrefix="briefing-new"
         />
 
+        <MaxPostingsField pending={pending} />
+
         <IntervalField idPrefix="briefing-new" pending={creating} />
 
         <div>
@@ -308,6 +314,46 @@ function NameField({ pending }: { pending: boolean }) {
       />
       <p className="text-sm text-muted-foreground">
         Just a label, and it has to be unique among your briefings.
+      </p>
+    </div>
+  )
+}
+
+/**
+ * How many postings to ask for, or nothing at all.
+ *
+ * **Create-only.** The three required-and-optional criteria fields above come
+ * from the shared `CriteriaFields` component, used by both this form and
+ * `EditCriteriaForm` on each briefing card — but this field is not part of
+ * that share. The edit form never posts it, and `readCriteria` treats an
+ * absent post the same as a blank one, so an existing briefing's stored
+ * `maxPostings` is left untouched by a criteria edit rather than reset to the
+ * default.
+ *
+ * Blank is the useful default and is not the same as a number: an empty field
+ * leaves `maxPostings` out of the config entirely, so the briefing follows the
+ * platform default whenever that changes, where a saved 20 would pin this
+ * briefing to today's number for ever. The bound is the scout's — every
+ * posting reported has to be read first — which is why the input states it
+ * rather than accepting anything and failing on submit.
+ */
+function MaxPostingsField({ pending }: { pending: boolean }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="briefing-max-postings">Postings per briefing</Label>
+      <Input
+        id="briefing-max-postings"
+        name="maxPostings"
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={MAX_POSTINGS_PER_BRIEF}
+        placeholder={String(DEFAULT_MAX_POSTINGS)}
+        disabled={pending}
+      />
+      <p className="text-sm text-muted-foreground">
+        Optional, 1 to {MAX_POSTINGS_PER_BRIEF}. Leave it blank for{" "}
+        {DEFAULT_MAX_POSTINGS}.
       </p>
     </div>
   )

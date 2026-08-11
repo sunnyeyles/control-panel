@@ -221,9 +221,14 @@ model Posting {
   // `runs.findings` and `jobs.config` are. The five columns above are the
   // projection this table sorts and displays on.
   payload         Json
-  // text + CHECK in migration SQL rather than a Postgres enum, as `runs.status`
-  // is. The only column in this schema a person writes, which is why
-  // `recordPostings` leaves it out of its `DO UPDATE SET` list.
+  // `new`, `applied`, `not-interested` or `rejected` — text + CHECK in
+  // migration SQL rather than a Postgres enum, as `runs.status` is. The only
+  // column in this schema a person writes, which is why `recordPostings`
+  // leaves it out of its `DO UPDATE SET` list.
+  //
+  // The first three are the user's own; `rejected` is the employer's answer,
+  // so it can only follow `applied`. Nothing enforces that ordering and
+  // nothing should — see `PostingStatus` in `src/types.ts`.
   status          String    @default("new")
   // NULL means nobody has ever moved it off `new`.
   statusChangedAt DateTime? @map("status_changed_at") @db.Timestamptz(6)

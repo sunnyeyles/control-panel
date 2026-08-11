@@ -402,13 +402,17 @@ function briefingName(briefing: string | null): string | undefined {
 }
 
 /**
- * The stored status, narrowed to the three the app knows.
+ * The stored status, narrowed to the four the app knows.
  *
- * `postings_status_check` makes a fourth value impossible, so this is not a
+ * `postings_status_check` makes a fifth value impossible, so this is not a
  * defensive branch against the database — it is the branch that fires if a
- * fourth status is ever added to the schema and this app is deployed before the
+ * fifth status is ever added to the schema and this app is deployed before the
  * label map catches up. `new` is the honest fallback: it is what a Posting
  * nobody has touched is, and the alternative is an empty cell.
+ *
+ * The window it covers is real and was widened by `not-interested`: a
+ * migration reaches production on merge to `main`, and the deployment that
+ * knows the new word lands separately.
  */
 function toStatus(status: string): PostingStatus {
   const known = POSTING_STATUSES.find((candidate) => candidate === status)

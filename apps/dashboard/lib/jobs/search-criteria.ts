@@ -18,12 +18,19 @@ import { MAX_ROLE_TITLES, splitCriteria } from "./criteria-text"
  * adds is the form's own concerns: the comma-split, the null-tolerant
  * optional field, and a paste bound.
  *
- * **`keywords` is the one optional field the form collects, deliberately.**
+ * **`keywords` is the one optional *list* the form collects, deliberately.**
  * It is the field a CV yields most clearly — a resume states technologies
  * plainly and states a desired location almost never — so the "suggest
  * criteria from my resume" flow has a list of technologies in hand and
- * nowhere to put it unless this schema accepts one. `exclude`, `sources` and
- * `maxPostings` stay out: nothing in the app collects them.
+ * nowhere to put it unless this schema accepts one. `exclude` and `sources`
+ * stay out: nothing in the app collects them.
+ *
+ * **`maxPostings` is collected because not collecting it was a bug.** The field
+ * has always existed in the worker's schema and nothing ever wrote it, so every
+ * briefing in production ran on the default and there was no way to ask for more
+ * — which is what made "some runs come back with almost nothing" partly a
+ * question about this form. It is a number rather than a list, so it gets its own
+ * input shape below.
  *
  * The check at the foot of this file is what the old duplication could never
  * give: if the worker's required set grows, this module stops compiling
@@ -100,10 +107,31 @@ const optionalCriteriaList = z
   .transform((value) => splitCriteria(value ?? ""))
   .pipe(JobSearchConfigSchema.shape.keywords.unwrap().max(MAX_CRITERIA_ITEMS))
 
+/**
+ * How many postings to ask for, or nothing at all.
+ *
+ * A `FormData` field is a string however numeric the input is, and the three
+ * ways of saying "I did not choose" — never posted (`null`), left blank (`""`),
+ * and whitespace — all have to become `undefined` rather than `0` or `NaN`.
+ * `Number("")` is `0`, which the worker's schema would reject with a message
+ * about a minimum, so the blank case is answered before a number is read at all.
+ *
+ * Piped into the worker's own field, so the bounds cannot drift from the
+ * authority — `"40"` fails here because the *scout* cannot honestly report forty
+ * postings, and that is a fact about the pipeline rather than about this input.
+ */
+const optionalPostingCount = z
+  .string()
+  .nullish()
+  .transform((value) => value?.trim() ?? "")
+  .transform((value) => (value === "" ? undefined : Number(value)))
+  .pipe(JobSearchConfigSchema.shape.maxPostings)
+
 export const searchCriteriaSchema = z.object({
   titles: titleList,
   locations: criteriaList,
   keywords: optionalCriteriaList,
+  maxPostings: optionalPostingCount,
 })
 
 /**

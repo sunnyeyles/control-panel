@@ -6,13 +6,16 @@ import type {
 import { formatUtcDateTime } from "@/lib/format-dates"
 import {
   listPostingDocuments,
-  postingDocumentRowsFor,
-} from "@/lib/posting-documents/posting-document-rows"
+  postingDocumentViewsFor,
+} from "@/lib/posting-documents/posting-document-views"
 
 /**
  * The cover-letter facts rendered for one visible Posting.
  *
- * This crosses into the table's client boundary, so it contains only strings.
+ * A `View` and not a `Row` (`NAMING.md` R5): it crosses into the table's client
+ * boundary, so every `Date` is already a string — and there is no
+ * `cover_letters` table for it to be a row of. What it projects is an **S3
+ * listing**.
  *
  * ⚠️ **Two fields, and the ones that are gone left deliberately.** This used to
  * carry `displayName` and `filename` as well, both derived from the letter's
@@ -23,7 +26,7 @@ import {
  * the point of use in `components/jobs/postings/posting-detail.tsx` rather than
  * fetched.
  */
-export interface CoverLetterRow {
+export interface CoverLetterView {
   postingId: string
   draftedAt: string
 }
@@ -43,15 +46,15 @@ export async function listCoverLetters(
 }
 
 /**
- * The rows for one page of Postings, out of everything {@link listCoverLetters}
- * found. The bounded-filter shape is `postingDocumentRowsFor`'s; what belongs
+ * The views for one page of Postings, out of everything {@link listCoverLetters}
+ * found. The bounded-filter shape is `postingDocumentViewsFor`'s; what belongs
  * here is the field mapping.
  */
-export function coverLetterRowsFor(
+export function coverLetterViewsFor(
   listed: readonly StoredCoverLetter[],
   postingIds: readonly string[]
-): CoverLetterRow[] {
-  return postingDocumentRowsFor(listed, postingIds, (letter) => ({
+): CoverLetterView[] {
+  return postingDocumentViewsFor(listed, postingIds, (letter) => ({
     postingId: letter.postingId,
     // From the object's write time rather than the `drafted-at` metadata,
     // because a listing carries no metadata — `toStoredCoverLetter` in

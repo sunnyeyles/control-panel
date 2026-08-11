@@ -70,6 +70,18 @@ const DEV_RUN_ACTIVE_ID = "3f8d1b2a-0000-4000-8000-0000000000b1"
 const DEV_RUN_PAUSED_ID = "3f8d1b2a-0000-4000-8000-0000000000b2"
 
 /**
+ * The paused briefing's *latest* run, which found nothing.
+ *
+ * A third run rather than a change to the two above, because it has to be the
+ * newest one for that briefing and the earlier one has a Posting pointing at it
+ * (`firstSeenRunId`). Together they are the state this whole warning exists for:
+ * a briefing that found a role last week, found nothing today, and — until the
+ * `noPostings` warning — said "Last ran …" either way with an unchanged table
+ * underneath.
+ */
+const DEV_RUN_EMPTY_ID = "3f8d1b2a-0000-4000-8000-0000000000b3"
+
+/**
  * Typed as `Posting`, not inferred: it checks these against the scout's schema,
  * and an `as const` would make the arrays `readonly` — which Prisma's
  * `JsonValue` rejects.
@@ -215,6 +227,32 @@ export function devRuns(): Run[] {
       failure: null,
       findings: { postings: [CORVUS] },
     },
+    {
+      id: DEV_RUN_EMPTY_ID,
+      jobId: DEV_JOB_PAUSED_ID,
+      // A day later than the other two, so this is the run the briefing strip
+      // reads — `latestRunPerJob` takes the newest per briefing.
+      scheduledFor: new Date(RAN_AT.getTime() + 86_400_000),
+      status: "succeeded",
+      startedAt: new Date(RAN_AT.getTime() + 86_400_000),
+      claimedAt: null,
+      finishedAt: new Date(RAN_AT.getTime() + 86_400_000 + 60_000),
+      // `succeeded` with a non-empty `failure`, which is what this column is for
+      // — see `RunStatus` in `@workspace/db`. The worker writes exactly this
+      // shape; `run-activity.ts` reads the message out of it.
+      failure: {
+        noPostings: {
+          message:
+            "Searched the boards 6 times, the second pass with the criteria widened, and nothing is currently listed for these criteria. Try a broader role title or another location.",
+          reason: "no-matches",
+          searched: 6,
+          results: 0,
+          excluded: 0,
+          passes: 2,
+        },
+      },
+      findings: { postings: [], notes: "Nothing open in Melbourne this week." },
+    },
   ]
 }
 
@@ -241,8 +279,9 @@ export function devRuns(): Run[] {
  * - **A third of the rows have no posting date**, which is what makes the
  *   Posted column's NULLS-LAST order checkable: they must sit at the bottom
  *   under *both* directions, not float to the top when it is reversed.
- * - **One row per status**, on the three hand-written Postings, so the status
- *   column is not thirty copies of `new`.
+ * - **One row per status**, on the four hand-written Postings, so the status
+ *   column is not thirty copies of `new`. Exactly one each, which is why
+ *   changing one of these four means finding the status it gave up.
  * - **Both Briefings are represented, on both pages.** The Run a row names is
  *   what the detail dialog resolves into a Briefing name, so rows alternate
  *   between the two — see the loop below.
@@ -278,10 +317,12 @@ export function devPostings(): PostingRow[] {
       runId: DEV_RUN_PAUSED_ID,
       postedOn: new Date("2026-07-30T00:00:00.000Z"),
     },
-    // No Run at all: the user added this one by pasting its link.
+    // No Run at all: the user added this one by pasting its link. Its status
+    // is the fourth of four and carries no further meaning — a link-added
+    // Posting is an ordinary one, and `new` is already on NORTHWIND.
     {
       posting: HOLLOWAY,
-      status: "new",
+      status: "not-interested",
       runId: null,
       postedOn: new Date("2026-08-04T00:00:00.000Z"),
     },

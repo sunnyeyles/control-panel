@@ -218,8 +218,7 @@ new here.
 What made this possible is a two-line change in `run-briefing.ts`: the agents
 are driven with `.stream()` instead of `.invoke()`. `.invoke()` runs the graph
 to completion and returns the final state, discarding the queries, the results
-and the turns it took to get there — which is why `successfulSearches` has to
-re-derive a search count by filtering the finished message array. `.stream()`
+and the turns it took to get there. `.stream()`
 yields the same run one superstep at a time and returns the same final state.
 `@workspace/agents-core` and the agents themselves are untouched.
 
@@ -322,10 +321,21 @@ schedule that is failing, or the button".
 
 A healthy hour with nothing scheduled is one `tick` line with `"due":0` and no
 `briefing-run` line at all — which is why the tick line exists. When a job does
-run, good looks like `"outcome":"success"` with `"searches"` above zero and an
-`objectKey`. The search count is the number that matters: a run that reached the
-model but made no successful search would be reporting postings it did not look
-up, so the run fails rather than producing one.
+run, good looks like `"outcome":"success"` with `"searches"` above zero,
+`"scoutPasses":1` and an `objectKey`. The search count is the number that
+matters: a run that reached the model but made no successful search would be
+reporting postings it did not look up, so the run fails rather than producing
+one. It counts a board that _answered_, empty answers included, and is read off
+the scout's search log rather than its transcript — a failed actor run comes back
+to the model as a sentence, which used to count as a search and made
+every-board-down indistinguishable from a quiet market.
+
+`"scoutPasses":2` means the first pass reported nothing and the scout was sent
+out again with the criteria widened. It is not an error, and a `2` on the same
+briefing every day is the signal that its criteria are too narrow for the market.
+`"postings":0` with a `noPostings` warning is the other end of that: the run
+worked and there was nothing to record, and the warning's `reason` says whether
+nothing matched or the title filter took everything.
 
 `"skipped"` above zero is not an error. It means another party already held the
 slot — an overlapping tick, or a manual invoke landing mid-tick — and the job
@@ -372,6 +382,16 @@ nothing went wrong, because `finishRun` reads an empty `failure` as a run with
 warnings. The rule this does _not_ inherit is "a run with no successful search
 fails": that one guards against silent fabrication, and a run that produced a
 briefing succeeded whatever happened to the accessory records.
+
+**`noPostings` is the one warning on that object that is not about something
+going wrong.** The other three are faults — a lost write, an id that resolves to
+nothing — and this is a run that worked and came back empty, carrying the sentence
+the dashboard shows beside "last ran …". It is here because the alternative is
+the silence it replaced: `succeeded`, a brief in S3, `recordPostings`
+early-returning zero without touching the database, and nothing anywhere a user
+could reach saying why the table did not change. `excludedPostings` stays a plain
+count beside it and is deliberately not a warning — the filter doing what it was
+asked is not a fault — but `noPostings.reason` names it as the cause when it is.
 
 The two are not one record written twice. The findings are what _this_ run
 reported and the next run's findings are its own; `postings` is the cumulative
