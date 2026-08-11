@@ -64,13 +64,11 @@ export function gate(signals) {
         pinnedRegions: regionList,
         findingsCount: singleRegionFindings.length,
         routeCount: routes.length,
-        sampleFiles: singleRegionFindings
-          .slice(0, 3)
-          .map((f) => ({
-            file: f.file,
-            regions: f.regions,
-            subtype: f.subtype,
-          })),
+        sampleFiles: singleRegionFindings.slice(0, 3).map((f) => ({
+          file: f.file,
+          regions: f.regions,
+          subtype: f.subtype,
+        })),
         dataGap: "region-grouped-TTFB-unavailable",
       },
     },

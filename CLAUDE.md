@@ -127,6 +127,43 @@ In the six that emit `dist/` the same arrangement repeats and is deliberate:
 transpiles without typechecking. `typecheck` runs both. The dashboard and
 `@workspace/ui` need neither half — both are `noEmit` already.
 
+**Evals are a separate task, and `pnpm test` never runs one.** A test asserts
+and fails; an eval calls a real model, scores the result between 0 and 1, and is
+read as a delta against the previous run. Only `@workspace/agents` has one
+today, covering the whiteboard agent:
+
+```bash
+# needs OPENAI_API_KEY *and* LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+pnpm turbo run eval --filter=@workspace/agents
+```
+
+**The run is a Langfuse experiment** (`@langfuse/client`, a devDependency of
+`@workspace/agents` alone), which is why `evals/` holds cases and graders and
+almost no harness: scoring, aggregation, the printed summary and run-over-run
+comparison all belong to the SDK. There is no committed baseline file — the
+previous run is the baseline, and it lives in Langfuse with its traces attached.
+Unlike every other caller of `@workspace/langfuse`, an eval **refuses to start**
+without keys rather than tracing into the void; the scores would have nowhere to
+go.
+
+The task is `cache: false` — `OPENAI_API_KEY` is in `globalEnv`, so a cached hit
+would skip the run and print yesterday's scores as today's. It is not in CI on
+push or on an ordinary pull request, because a stochastic check behind a
+required gate is one people learn to re-run past; `.github/workflows/evals.yml`
+runs on `workflow_dispatch` or the `run-evals` label, and needs
+`OPENAI_API_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` repository
+secrets, none of which exist yet.
+
+**The graders are not part of that and do run in `pnpm test`.** They are pure
+functions under `packages/agents/evals/graders/`, and they are the measuring
+instrument: one that reported "no overlap" while two boxes were stacked would
+make every number downstream a lie. They know nothing about Langfuse —
+`evals/evaluators.ts` is the single seam that renames a `Score` into an
+`Evaluation` — which is what keeps them testable without a network. That is why
+`packages/agents` is the one workspace whose vitest `include` reaches outside
+`src/`, and why `evals` is named in its `tsconfig.test.json`. See
+`packages/agents/evals/README.md`.
+
 **`@workspace/ui` is tested only under `src/lib/`, and that boundary is the
 point.** Everything under `src/components/` is React over a DOM, which would
 mean a browser environment and — for the editor — ProseMirror. What is covered
@@ -175,7 +212,7 @@ partial unique index were exercised — only CI, with a database, exercises thos
 
 `docs/agent-architecture.md` draws all of this — the layering above, the compiled graph inside `createAgent`, which agent carries which tools and why that is containment rather than tuning, the three entry points, and how a run is traced.
 
-**Tracing is a fourth package, deliberately outside that stack.** `@workspace/langfuse` owns the Langfuse OpenTelemetry adapter — `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse` — and the entry points are what import it: `apps/dashboard/instrumentation-node.ts` and `apps/briefing-worker/src/index.ts`. Nothing in the agent stack depends on it, and it depends on nothing in the agent stack, so `@langfuse/*` and `@opentelemetry/*` stay out of the runtime and a consumer that wants untraced agents simply never calls it. Its only tie to LangChain is the `CallbackHandler` type from `@langfuse/langchain`, which every caller passes through `config.callbacks`. Missing keys make all four functions no-ops rather than errors — see `packages/langfuse/README.md`.
+**Tracing is a fourth package, deliberately outside that stack.** `@workspace/langfuse` owns the Langfuse OpenTelemetry adapter — `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse` — and the entry points are what import it: `apps/dashboard/instrumentation-node.ts` and `apps/briefing-worker/src/index.ts`. Nothing the agent stack _ships_ depends on it — `@workspace/agents` devDepends on it for its eval CLI, which is an entry point too — and it depends on nothing in the agent stack, so `@langfuse/*` and `@opentelemetry/*` stay out of the runtime and a consumer that wants untraced agents simply never calls it. Its only tie to LangChain is the `CallbackHandler` type from `@langfuse/langchain`, which every caller passes through `config.callbacks`. Missing keys make all four functions no-ops rather than errors — see `packages/langfuse/README.md`.
 
 **Two packages carry their own `CLAUDE.md`, and it loads only when you work under them** — `apps/dashboard/CLAUDE.md` (the auth gate, Server Action shape, app shell) and `packages/user-storage/CLAUDE.md` (the AWS SDK boundary, key shape, retention tags). Read the relevant one before changing either.
 
