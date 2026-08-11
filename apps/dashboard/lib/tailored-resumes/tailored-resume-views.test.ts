@@ -4,11 +4,11 @@ import type {
 } from "@workspace/user-storage/tailored-resume-store"
 import { describe, expect, it } from "vitest"
 
-import { loadTailoredResumeRows } from "./tailored-resume-rows"
+import { loadTailoredResumeViews } from "./tailored-resume-views"
 
 /**
  * The listing contract — one request per user, missing prefix reads as none,
- * an unreachable store rejects — is `posting-document-rows.test.ts`'s. What
+ * an unreachable store rejects — is `posting-document-views.test.ts`'s. What
  * this suite owns is the resumes' field mapping.
  */
 
@@ -33,7 +33,7 @@ function storeOf(resumes: StoredTailoredResume[]): TailoredResumeStore {
   } as unknown as TailoredResumeStore
 }
 
-describe("loadTailoredResumeRows", () => {
+describe("loadTailoredResumeViews", () => {
   /**
    * Formatted on the server, like every other date crossing into the table:
    * a `Date` formatted in the browser uses the browser's locale and zone, and
@@ -41,12 +41,12 @@ describe("loadTailoredResumeRows", () => {
    * timezone bug it is.
    */
   it("maps each resume to its Posting id and a formatted instant", async () => {
-    const rows = await loadTailoredResumeRows(
+    const views = await loadTailoredResumeViews(
       USER_ID,
       storeOf([stored(POSTING_ID, new Date("2026-08-06T04:15:00.000Z"))])
     )
 
-    expect(rows).toEqual([
+    expect(views).toEqual([
       {
         postingId: POSTING_ID,
         generatedAt: expect.stringContaining("6 Aug 2026"),

@@ -329,10 +329,28 @@ gap is always a requirement that was actually asked for.
 _Avoid_: scorer, matcher, ranker
 
 **Posting Status**:
-Where the user has got to with one **Posting**: `new`, `applied` or `rejected`,
-held in `postings.status` behind a CHECK that admits nothing else. **`new` is
-the only one discovery writes** — it is the column's default, and `status` is
-the one column in this schema a _person_ writes.
+Where the user has got to with one **Posting**: `new`, `applied`,
+`not-interested` or `rejected`, held in `postings.status` behind a CHECK that
+admits nothing else. **`new` is the only one discovery writes** — it is the
+column's default, and `status` is the one column in this schema a _person_
+writes.
+
+**Who acts is not the same across the four, and the words only read correctly
+if you know that.** `applied` and `not-interested` are decisions the user takes
+about the advertisement — one to pursue it, one to pass on it. `rejected` is
+the **employer's** answer to an application already sent, so it can only
+sensibly follow `applied`. Nothing enforces that ordering and nothing should: a
+person may revise any of these in any direction, including back to `new`, and
+the CHECK says which words exist rather than which move to which.
+
+`not-interested` is the one that stops a decision being lost. Without it,
+passing on an advertisement leaves the row at `new` — indistinguishable from
+one nobody has opened — and deleting it does not settle the question either,
+because the next Run to re-find the advertisement inserts it again at `new`.
+
+Spelled with a hyphen, not `not_interested`: that is how this schema already
+spells a multi-word CHECK value, as `documents.doc_type` does with
+`cover-letter`.
 
 **A Run must never overwrite the other two**, and that is the whole feature. It
 lives in one place: the `DO UPDATE SET` list of `recordPostings`, which omits

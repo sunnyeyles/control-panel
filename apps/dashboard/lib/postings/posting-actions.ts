@@ -41,10 +41,10 @@ import { z } from "zod"
 
 /**
  * Only reachable by posting to the action directly — the select offers the
- * three statuses and cannot produce a fourth — so the copy points at the control
+ * four statuses and cannot produce a fifth — so the copy points at the control
  * rather than explaining a value the user never saw.
  */
-const INVALID_STATUS = "Choose New, Applied or Rejected."
+const INVALID_STATUS = "Choose New, Applied, Not interested or Rejected."
 
 /**
  * Only reachable by posting to the action directly — the table selects within
@@ -60,7 +60,7 @@ const TOO_MANY_POSTINGS = `Delete at most ${PAGE_SIZE} postings at a time.`
 /**
  * How many **Postings'** deletes may be in flight at once.
  *
- * The same bound `list-documents.ts` and `cover-letter-rows.ts` use, through the
+ * The same bound `list-documents.ts` and `cover-letter-views.ts` use, through the
  * same helper, and matched to them on purpose: `S3UserObjectStore.delete()` is a
  * `HeadObject` followed by a `DeleteObject`, so a full-page selection run one at
  * a time is a hundred sequential round trips inside one Server Action — and most
@@ -213,7 +213,7 @@ export function createPostingActions(deps: PostingActionsDeps) {
 
     // Both parsed before anything is queried, and separately so the two failures
     // can say different things: an id that cannot address a Posting gets the
-    // not-found message, a fourth status gets the one that names the control.
+    // not-found message, a fifth status gets the one that names the control.
     const postingId = postingIdSchema.safeParse(formData.get("postingId"))
     const status = statusSchema.safeParse(formData.get("status"))
 

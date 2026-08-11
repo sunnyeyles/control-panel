@@ -4,18 +4,24 @@ import type { PostingPayload, PostingStatus } from "./types.ts"
 type DbClient = PrismaClient | Prisma.TransactionClient
 
 /**
- * The three statuses, as a value.
+ * The four statuses, as a value, in the order the interface offers them —
+ * which is the order a person moves through them.
  *
  * Lives here rather than in `types.ts`, which is type-only and erases: a
  * runtime array there would make that module emit, and every consumer that
  * imports a type from it would start pulling in a value.
  *
- * `satisfies` rather than a hand-kept copy, so adding a status to
- * {@link PostingStatus} without adding it here fails to compile.
+ * `satisfies` catches a value here that is *not* a {@link PostingStatus}, and
+ * that is the only direction it catches: a short array still satisfies
+ * `readonly PostingStatus[]`, so adding a member to the union and forgetting
+ * this list compiles cleanly. **The exhaustiveness gate is
+ * `POSTING_STATUS_LABELS`** in `apps/dashboard/lib/postings/`, which is
+ * `satisfies Record<PostingStatus, string>` and does fail on a missing member.
  */
 export const POSTING_STATUSES = [
   "new",
   "applied",
+  "not-interested",
   "rejected",
 ] as const satisfies readonly PostingStatus[]
 
@@ -382,8 +388,15 @@ export interface PostingMatchRow {
    * a document they have replaced. Nothing here decides that — this package
    * does not know which document is current — which is why the field is carried
    * out rather than turned into a boolean.
+   *
+   * **`documentId`, although the column is `match_resume_id`.** The column
+   * predates `documents` and cannot be renamed cheaply; `CONTEXT.md` gives the
+   * word to Document, so the translation happens here — `toMatchRow` and
+   * {@link recordPostingMatch} are the only two places the two spellings meet.
+   * Same shape as `docType` → `documentType` in the dashboard's
+   * `lib/documents/list-documents.ts`.
    */
-  resumeId: string
+  documentId: string
   matchedAt: Date
 }
 
@@ -763,7 +776,7 @@ function toMatchRow(row: {
     score: row.matchScore,
     reason: row.matchReason ?? "",
     gaps: row.matchGaps ?? [],
-    resumeId: row.matchResumeId ?? "",
+    documentId: row.matchResumeId ?? "",
     matchedAt: row.matchedAt ?? new Date(0),
   }
 }
@@ -781,8 +794,12 @@ export interface PostingMatchWrite {
    * {@link PostingMatchRow.gaps}.
    */
   gaps: unknown
-  /** The `documents.id` scored against. Deliberately not an FK; see `0011`. */
-  resumeId: string
+  /**
+   * The `documents.id` scored against. Deliberately not an FK; see `0011`, and
+   * spelled `documentId` rather than after its column for the reason
+   * {@link PostingMatchRow.documentId} gives.
+   */
+  documentId: string
   /**
    * When it was scored. The caller's clock, for the reason
    * {@link SeenPostings.seenAt} gives — and here it is also what a reader dates
@@ -820,7 +837,7 @@ export async function recordPostingMatch(
       matchScore: match.score,
       matchReason: match.reason,
       matchGaps: match.gaps as Prisma.InputJsonValue,
-      matchResumeId: match.resumeId,
+      matchResumeId: match.documentId,
       matchedAt: match.matchedAt,
     },
   })
@@ -844,14 +861,14 @@ export async function recordPostingMatch(
  * exactly: a loop that stops when the count says zero, over a list built from a
  * different predicate, either never terminates or terminates early.
  */
-function unmatchedAgainst(resumeId: string) {
+function unmatchedAgainst(documentId: string) {
   return {
-    OR: [{ matchResumeId: null }, { matchResumeId: { not: resumeId } }],
+    OR: [{ matchResumeId: null }, { matchResumeId: { not: documentId } }],
   }
 }
 
 /**
- * The Postings this user has that are not scored against `resumeId`, newest
+ * The Postings this user has that are not scored against `documentId`, newest
  * sighting first, at most `limit` of them.
  *
  * **Bounded, and the caller has to say by how much.** Scoring is one model call
@@ -866,13 +883,13 @@ function unmatchedAgainst(resumeId: string) {
 export async function listUnmatchedPostingIds(
   prisma: DbClient,
   userId: string,
-  resumeId: string,
+  documentId: string,
   limit: number
 ): Promise<string[]> {
   if (limit <= 0) return []
 
   const rows = await prisma.posting.findMany({
-    where: { userId, ...unmatchedAgainst(resumeId) },
+    where: { userId, ...unmatchedAgainst(documentId) },
     orderBy: [{ lastSeenAt: "desc" }, { postingId: "desc" }],
     take: limit,
     select: { postingId: true },
@@ -882,7 +899,7 @@ export async function listUnmatchedPostingIds(
 }
 
 /**
- * How many of this user's Postings are not scored against `resumeId`.
+ * How many of this user's Postings are not scored against `documentId`.
  *
  * The same predicate as {@link listUnmatchedPostingIds} and deliberately beside
  * it: what drives the scoring loop is "is there more", and a caller inferring
@@ -892,10 +909,10 @@ export async function listUnmatchedPostingIds(
 export async function countUnmatchedPostings(
   prisma: DbClient,
   userId: string,
-  resumeId: string
+  documentId: string
 ): Promise<number> {
   return prisma.posting.count({
-    where: { userId, ...unmatchedAgainst(resumeId) },
+    where: { userId, ...unmatchedAgainst(documentId) },
   })
 }
 

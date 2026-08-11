@@ -61,6 +61,14 @@ export const MAX_PAGE = 10_000
  * left two entries no control could ever produce — so they went. A URL still
  * naming one is not an error: `SortSchema` catches it back to the default, the
  * same as `?sort=salary` always did.
+ *
+ * ⚠️ **Status has a heading again and still does not sort, which is a different
+ * decision from the one above.** It came back as a read-only column so the value
+ * is visible without expanding a row; ordering by it would mean a sixth
+ * `PostingOrder` in `@workspace/db`, and that enum is closed on purpose —
+ * "adding one is a decision about the index, not a convenience". Putting the
+ * entry back here without that is a heading that links to a sort the query
+ * cannot perform.
  */
 export const POSTING_SORTS = [
   "lastSeen",

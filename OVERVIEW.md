@@ -331,7 +331,7 @@ flowchart TD
   redraft overwrites one object. The letter's key and the row's identity are the
   same `postingId()` value, which is what keeps a stored letter attached to the
   Posting it was written for. Listing and downloading (#85):
-  `cover-letter-rows.ts` issues one `ListObjectsV2` via `CoverLetterStore.list`
+  `cover-letter-views.ts` issues one `ListObjectsV2` via `CoverLetterStore.list`
   rather than a `HeadObject` per visible Posting, and
   `/api/cover-letters/{postingId}` hands the Markdown back as a file. **Letter
   Instructions** — a per-user row in

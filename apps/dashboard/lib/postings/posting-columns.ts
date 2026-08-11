@@ -65,9 +65,9 @@ export interface PostingColumn {
    *
    * ⚠️ **Below `md` a second set of percentages applies, and they have to add
    * up on their own.** Only Title, Match and the letter column are still
-   * rendered there, and their `lg` shares — 24%, 11% and 8% — describe a table
-   * with four more columns in it. Left at those, 43% of the width would be
-   * claimed and the other 57% would be slack the browser spreads across every
+   * rendered there, and their `lg` shares — 21%, 10% and 8% — describe a table
+   * with five more columns in it. Left at those, 39% of the width would be
+   * claimed and the other 61% would be slack the browser spreads across every
    * column including the three control cells; measured on a 390px viewport an
    * earlier version of exactly that produced a 97px Title, a letter column too
    * narrow for its own heading, and half the table spent on a checkbox, a
@@ -85,6 +85,11 @@ export interface PostingColumn {
    * a column narrower than the words in it spills rather than wrapping. "Cover
    * letter" is the longest and is why that column carries a `shortLabel` rather
    * than a wider share; "Match" is short enough to need neither.
+   *
+   * ⚠️ **Status is the exception, and it is the *cell* that sets its floor.** It
+   * renders a `Badge` rather than text, and "Rejected" inside one is wider than
+   * the word "Status" above it — so sizing that column against its heading
+   * clips its own values. See its entry in {@link POSTING_COLUMNS}.
    */
   width: string
   /**
@@ -110,7 +115,7 @@ export interface PostingColumn {
    * When this column is rendered, as a Tailwind class on its `<th>` and on the
    * matching `<td>`. Absent means always.
    *
-   * ⚠️ **Ten cells do not fit on a phone.** At 375px each of them is under
+   * ⚠️ **Eleven cells do not fit on a phone.** At 375px each of them is under
    * 40px, and `TableHead` is `whitespace-nowrap`, so every heading spills its
    * own column. The `overflow-x-auto` the shared `Table` puts around itself
    * does not save this table: it is `w-full` and `table-fixed`, so it shrinks
@@ -131,10 +136,10 @@ export interface PostingColumn {
    *   Title stays the widest thing on screen. A per-breakpoint width would be
    *   three more numbers to keep in step with the skeleton for no visible
    *   gain.
-   * - **{@link POSTING_COLSPAN} stays 10.** CSS cannot vary an attribute, and
+   * - **{@link POSTING_COLSPAN} stays 11.** CSS cannot vary an attribute, and
    *   under `table-fixed` the column count is fixed by the first row — so a
    *   `colSpan` wider than the visible columns is clamped to the row rather
-   *   than inventing a phantom eleventh one. Computing a smaller number from a
+   *   than inventing a phantom twelfth one. Computing a smaller number from a
    *   media query would put the breakpoint into JavaScript, and the header is a
    *   server component.
    */
@@ -170,6 +175,18 @@ export const POSTING_HIDE_BELOW_LG = "hidden lg:table-cell"
  * and Source answer questions about one posting, which is what expanding it is
  * for.
  *
+ * ⚠️ **Status hides below `md`, and the rule about unreachability is already
+ * satisfied there.** It is per-row state and by that measure belongs beside the
+ * letter column at every width — but the mobile percentages below already add up
+ * against the three control cells, so a fourth column on a phone comes out of
+ * Title, and 26% of a 356px table is the 92px that made the first attempt at
+ * this unreadable. What decides it is that Status is the one column whose value
+ * is in the detail panel *by construction*: `PostingStatusSelect` is the control
+ * that sets it, it is rendered there and only there, and it shows the current
+ * value as its own trigger text. So below `md` the fact is one tap away without
+ * anything being added to `posting-detail.tsx` — unlike Location, Posted and
+ * Source, each of which needed a section written for it.
+ *
  * ⚠️ **Company hides but does not go to the detail panel — it moves into the
  * title cell.** A column and a stacked line are not the same trade. The other
  * three are facts somebody looks up about one posting; the company is half of
@@ -186,38 +203,61 @@ export const POSTING_HIDE_BELOW_LG = "hidden lg:table-cell"
  * begin with stays narrow, and no amount of hiding fixes it.
  */
 export const POSTING_COLUMNS: readonly PostingColumn[] = [
-  { key: "title", label: "Title", width: "w-[40%] md:w-[24%]", sort: "title" },
+  { key: "title", label: "Title", width: "w-[40%] md:w-[21%]", sort: "title" },
   {
     key: "company",
     label: "Company",
-    width: "w-[15%]",
+    width: "w-[13%]",
     sort: "company",
     visibility: POSTING_HIDE_BELOW_MD,
   },
   {
     key: "location",
     label: "Location",
-    width: "w-[13%]",
+    width: "w-[11%]",
     visibility: POSTING_HIDE_BELOW_MD,
   },
   {
     key: "match",
     label: "Match",
-    width: "w-[12%] md:w-[11%]",
+    width: "w-[12%] md:w-[10%]",
     sort: "match",
   },
   {
     key: "postedAt",
     label: "Posted",
-    width: "w-[10%]",
+    width: "w-[9%]",
     sort: "posted",
     visibility: POSTING_HIDE_BELOW_MD,
   },
   {
     key: "source",
     label: "Source",
-    width: "w-[9%]",
+    width: "w-[8%]",
     visibility: POSTING_HIDE_BELOW_LG,
+  },
+  /**
+   * ⚠️ **10% and not 8%, because the badge sets the floor rather than the
+   * heading.** Every other column here is bounded by its own `<th>` — see
+   * {@link PostingColumn.shortLabel} — but this one renders a `Badge`, whose
+   * `text-xs` "Rejected" plus its `px-2` is about 69px, against about 46px for
+   * the word "Status". With the cell's own `p-2` that is an 85px floor, and 8%
+   * of a `max-w-6xl` table is 92px before the sidebar is open. `Badge` is
+   * `whitespace-nowrap` and `overflow-hidden`, so being under it clips the word
+   * rather than wrapping it.
+   *
+   * Display-only, and unlike Location and Source that is not a statement about
+   * whether the order would be useful. `PostingOrder` in `@workspace/db` is
+   * closed on purpose — "adding one is a decision about the index, not a
+   * convenience" — so a sortable heading here is a migration, not a `sort` key.
+   * See `posting-query.ts`, which used to carry a `status` sort for exactly this
+   * column.
+   */
+  {
+    key: "status",
+    label: "Status",
+    width: "w-[10%]",
+    visibility: POSTING_HIDE_BELOW_MD,
   },
   {
     key: "letter",

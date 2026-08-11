@@ -205,14 +205,14 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
     // The document id, not the display name: it is what a score is attributed
     // to, and what makes "scored against a CV you have since replaced" a single
     // comparison rather than a state anybody has to track.
-    const resumeId = background.documentId
+    const { documentId } = background
 
     let pending: string[]
     try {
       pending = await listUnmatchedPostingIds(
         prisma,
         caller.userId,
-        resumeId,
+        documentId,
         MATCH_BATCH
       )
     } catch (error) {
@@ -234,7 +234,7 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
           postingId,
           resumeText: background.background,
           userId: caller.userId,
-          resumeId,
+          documentId,
         })
       )
     )
@@ -261,7 +261,11 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
 
     let remaining: number
     try {
-      remaining = await countUnmatchedPostings(prisma, caller.userId, resumeId)
+      remaining = await countUnmatchedPostings(
+        prisma,
+        caller.userId,
+        documentId
+      )
     } catch (error) {
       console.error("postings: could not count unscored postings", error)
       // The writes above happened. Reporting zero left is the honest answer for
@@ -293,7 +297,7 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
       postingId: string
       resumeText: string
       userId: string
-      resumeId: string
+      documentId: string
     }
   ): Promise<boolean> {
     const { postingId, userId } = assessment
@@ -327,7 +331,7 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
       score: match.score,
       reason: match.reason,
       gaps: match.gaps,
-      resumeId: assessment.resumeId,
+      documentId: assessment.documentId,
       matchedAt: now(),
     })
   }

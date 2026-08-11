@@ -491,7 +491,7 @@ describeWithDatabase("against a real database", () => {
       return prisma.posting.findFirst({ where: { userId, postingId } })
     }
 
-    it("accepts each of the three statuses and refuses a fourth", async () => {
+    it("accepts each of the four statuses and refuses a fifth", async () => {
       const runId = await aRun()
       const posting = aPosting()
       await recordPostings(prisma, {
@@ -507,12 +507,14 @@ describeWithDatabase("against a real database", () => {
         ).toBe(true)
       }
 
-      // The compiler forbids a fourth, so the cast is what makes this a test of
-      // the CHECK rather than of the type.
-      const fourth = "archived" as string as PostingStatus
+      // The compiler forbids a fifth, so the cast is what makes this a test of
+      // the CHECK rather than of the type. `not_interested` rather than some
+      // unrelated word: the underscore spelling is the plausible near-miss for
+      // `not-interested`, and the CHECK is the only thing that catches one.
+      const fifth = "not_interested" as string as PostingStatus
 
       await expect(
-        setPostingStatus(prisma, userId, posting.postingId, fourth)
+        setPostingStatus(prisma, userId, posting.postingId, fifth)
       ).rejects.toThrow()
 
       expect((await readBack(posting.postingId))?.status).toBe("rejected")
@@ -768,11 +770,11 @@ describeWithDatabase("against a real database", () => {
     })
 
     describe("the match against a resume", () => {
-      const RESUME_ID = "3f8d1b2a-0000-4000-8000-0000000000c1"
-      const OTHER_RESUME_ID = "3f8d1b2a-0000-4000-8000-0000000000c2"
+      const DOCUMENT_ID = "3f8d1b2a-0000-4000-8000-0000000000c1"
+      const OTHER_DOCUMENT_ID = "3f8d1b2a-0000-4000-8000-0000000000c2"
       const MATCHED_AT = new Date("2026-08-03T09:00:00.000Z")
 
-      async function aScoredPosting(resumeId = RESUME_ID) {
+      async function aScoredPosting(documentId = DOCUMENT_ID) {
         const posting = aPosting()
 
         await recordPostings(prisma, {
@@ -789,7 +791,7 @@ describeWithDatabase("against a real database", () => {
             score: 82,
             reason: "The CV evidences the stack this role names.",
             gaps: ["Kubernetes in production"],
-            resumeId,
+            documentId,
             matchedAt: MATCHED_AT,
           })
         ).toBe(true)
@@ -807,7 +809,7 @@ describeWithDatabase("against a real database", () => {
             score: 82,
             reason: "The CV evidences the stack this role names.",
             gaps: ["Kubernetes in production"],
-            resumeId: RESUME_ID,
+            documentId: DOCUMENT_ID,
             matchedAt: MATCHED_AT,
           },
         })
@@ -834,7 +836,7 @@ describeWithDatabase("against a real database", () => {
 
         const row = await readBack(posting.postingId)
         expect(row?.matchScore).toBe(82)
-        expect(row?.matchResumeId).toBe(RESUME_ID)
+        expect(row?.matchResumeId).toBe(DOCUMENT_ID)
         expect(row?.matchedAt?.toISOString()).toBe(MATCHED_AT.toISOString())
         // …and the sighting was still recorded, so this is not a no-op upsert.
         expect(row?.lastSeenRunId).toBe(refound)
@@ -856,7 +858,7 @@ describeWithDatabase("against a real database", () => {
             score: 101,
             reason: "Out of range.",
             gaps: [],
-            resumeId: RESUME_ID,
+            documentId: DOCUMENT_ID,
             matchedAt: MATCHED_AT,
           })
         ).rejects.toThrow()
@@ -892,7 +894,7 @@ describeWithDatabase("against a real database", () => {
             score: 50,
             reason: "Nothing to attach this to.",
             gaps: [],
-            resumeId: RESUME_ID,
+            documentId: DOCUMENT_ID,
             matchedAt: MATCHED_AT,
           })
         ).toBe(false)
@@ -914,20 +916,20 @@ describeWithDatabase("against a real database", () => {
           postings: [unscored],
         })
 
-        const stale = await aScoredPosting(OTHER_RESUME_ID)
-        const current = await aScoredPosting(RESUME_ID)
+        const stale = await aScoredPosting(OTHER_DOCUMENT_ID)
+        const current = await aScoredPosting(DOCUMENT_ID)
 
         const pending = await listUnmatchedPostingIds(
           prisma,
           userId,
-          RESUME_ID,
+          DOCUMENT_ID,
           100
         )
 
         expect(pending).toContain(unscored.postingId)
         expect(pending).toContain(stale.postingId)
         expect(pending).not.toContain(current.postingId)
-        expect(await countUnmatchedPostings(prisma, userId, RESUME_ID)).toBe(
+        expect(await countUnmatchedPostings(prisma, userId, DOCUMENT_ID)).toBe(
           pending.length
         )
       })
@@ -943,12 +945,12 @@ describeWithDatabase("against a real database", () => {
         }
 
         expect(
-          await listUnmatchedPostingIds(prisma, userId, RESUME_ID, 2)
+          await listUnmatchedPostingIds(prisma, userId, DOCUMENT_ID, 2)
         ).toHaveLength(2)
         // A caller that asked for nothing is asking no question, and must not
         // be answered with the whole table.
         expect(
-          await listUnmatchedPostingIds(prisma, userId, RESUME_ID, 0)
+          await listUnmatchedPostingIds(prisma, userId, DOCUMENT_ID, 0)
         ).toEqual([])
       })
 
@@ -963,7 +965,7 @@ describeWithDatabase("against a real database", () => {
             score: 5,
             reason: "Somebody else's row.",
             gaps: [],
-            resumeId: RESUME_ID,
+            documentId: DOCUMENT_ID,
             matchedAt: MATCHED_AT,
           })
         ).toBe(false)

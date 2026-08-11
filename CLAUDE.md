@@ -193,7 +193,7 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 ## Conventions
 
-**`NAMING.md` says how an identifier is formed, and four of its rules are tested.** `CONTEXT.md` owns what the words mean; `NAMING.md` owns where they go — the agent-seam rule (a `*Deps` field takes the exact factory name `@workspace/agents` exports), the fixed surface of an agent module, the type-suffix vocabulary, and the rule that `components/` mirrors the route tree. `apps/dashboard/lib/naming.test.ts` and `packages/agents/src/naming.test.ts` fail on a violation, because ESLint cannot: see the `only-warn` note below. Read it before adding a feature — the rules exist so a new one does not have to re-derive a name and get a different answer.
+**`NAMING.md` says how an identifier is formed, and five of its rules are tested.** `CONTEXT.md` owns what the words mean; `NAMING.md` owns where they go — the glossary's hold on identifiers (`job` is a row in `jobs`, never a Posting), the agent-seam rule (a `*Deps` field takes the exact factory name `@workspace/agents` exports), the fixed surface of an agent module, the type-suffix vocabulary (a `Row` is what `@workspace/db` returns and must not reach a client component), and the rule that `components/` mirrors the route tree. `apps/dashboard/lib/naming.test.ts` and `packages/agents/src/naming.test.ts` fail on a violation, because ESLint cannot: see the `only-warn` note below. Read it before adding a feature — the rules exist so a new one does not have to re-derive a name and get a different answer.
 
 **Prettier owns formatting** (`.prettierrc`). Match this style when editing — some checked-in files predate it and are not formatted.
 
