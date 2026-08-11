@@ -31,8 +31,15 @@ import {
  * A shortlist, not a re-read of the search. The bound is what keeps the split
  * worth having: a model that asked for sixty descriptions in one call would have
  * rebuilt exactly the context this avoids, and would have spent a turn doing it.
+ *
+ * Was 12, which had quietly become the *real* cap on how many postings a brief
+ * could carry: a scout must read an advertisement before it may report one, so a
+ * brief asking for twenty could never be filled from a single read call. This
+ * matches the ceiling `maxPostings` allows a briefing to ask for rather than the
+ * default it gets, deliberately — a scout shortlists more roles than it reports.
+ * {@link MAX_DESCRIPTION_CHARS} came down to pay for it.
  */
-export const MAX_DETAIL_IDS = 12
+export const MAX_DETAIL_IDS = 25
 
 /**
  * How much of a posting's description to carry, in characters.
@@ -40,8 +47,14 @@ export const MAX_DETAIL_IDS = 12
  * The whole description is fetched — the cost is in the request, not in the
  * bytes — and this bounds only what reaches the model. Measured over 60 live
  * SEEK postings the description runs 1,796–7,871 characters, median 3,274, and
- * Indeed's run 3,500–8,100, so this keeps the large majority whole and trims
- * the tail of the longest.
+ * Indeed's run 3,500–8,100.
+ *
+ * Was 6,000, and it came down because {@link MAX_DETAIL_IDS} went up: a read
+ * pass is re-sent to the model on every subsequent turn of the run, so 25
+ * descriptions at 6,000 characters would put ~40k tokens in front of it every
+ * turn for the rest of the scout's transcript. 4,000 characters is still ~600
+ * words, which is a whole job advertisement, and above the median either board
+ * publishes.
  *
  * Trimming from the end is safe *for this data*, which is the only reason it is
  * done at all. Job advertisements put the substance first — "About the role",
@@ -50,7 +63,7 @@ export const MAX_DETAIL_IDS = 12
  * excerpt says so, so the model never reads a cut as the end of the
  * advertisement.
  */
-const MAX_DESCRIPTION_CHARS = 6000
+const MAX_DESCRIPTION_CHARS = 4000
 
 /**
  * The advertisement's own description, bounded and labelled.

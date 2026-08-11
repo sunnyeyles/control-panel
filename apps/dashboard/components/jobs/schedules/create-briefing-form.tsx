@@ -17,6 +17,10 @@ import {
   SUGGESTION_IDLE,
   type SuggestedCriteria,
 } from "@/lib/jobs/criteria-suggestion"
+import {
+  DEFAULT_MAX_POSTINGS,
+  MAX_POSTINGS_PER_BRIEF,
+} from "@workspace/job-search"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 
@@ -287,6 +291,32 @@ function CriteriaFields({
         <p className="text-sm text-muted-foreground">
           Comma separated, and optional. Technologies or specialisms that make a
           role a better match.
+        </p>
+      </div>
+
+      {/*
+        Blank is the useful default and is not the same as a number: an empty
+        field leaves `maxPostings` out of the config entirely, so the briefing
+        follows the platform default whenever that changes, where a saved 20
+        would pin this briefing to today's number for ever. The bound is the
+        scout's — every posting reported has to be read first — which is why the
+        input states it rather than accepting anything and failing on submit.
+      */}
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="briefing-max-postings">Postings per briefing</Label>
+        <Input
+          id="briefing-max-postings"
+          name="maxPostings"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={MAX_POSTINGS_PER_BRIEF}
+          placeholder={String(DEFAULT_MAX_POSTINGS)}
+          disabled={pending}
+        />
+        <p className="text-sm text-muted-foreground">
+          Optional, 1 to {MAX_POSTINGS_PER_BRIEF}. Leave it blank for{" "}
+          {DEFAULT_MAX_POSTINGS}.
         </p>
       </div>
     </>

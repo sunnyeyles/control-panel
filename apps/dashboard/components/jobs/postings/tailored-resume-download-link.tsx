@@ -7,7 +7,7 @@ import { tailoredResumeFilename } from "@/lib/tailored-resumes/tailored-resume-r
  * which is not something the client router can navigate to.
  *
  * ⚠️ **The filename is built here from the Posting, not read off storage.**
- * `loadTailoredResumeRows` uses one `ListObjectsV2`, which carries no user
+ * `loadTailoredResumeViews` uses one `ListObjectsV2`, which carries no user
  * metadata, so there is no title or company on the row to name the file by. The
  * detail panel holds both on the `PostingView` it already renders — the same
  * values, from Postgres rather than from S3. The download route builds its own

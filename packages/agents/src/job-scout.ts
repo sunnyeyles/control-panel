@@ -12,6 +12,10 @@ import {
 } from "@workspace/agent-tools/posting-catalog"
 import { createPostingDetails } from "@workspace/agent-tools/posting-details"
 import {
+  createSearchLog,
+  type SearchAttempt,
+} from "@workspace/agent-tools/search-log"
+import {
   createSeekSearch,
   SEEK_TOOL_NAME,
 } from "@workspace/agent-tools/seek-search"
@@ -46,7 +50,7 @@ export const JOB_SCOUT_SYSTEM_PROMPT = [
   "",
   "Searching: each board tool reaches one board's inventory and no other, so a role listed on one and not another is invisible until you call that tool. Run each board's tool for each role title before you decide anything about what you have found, even when an early search already looks like enough. It is not enough — it is one board. Make one focused search per role title, location and board rather than one broad one, and write each location the way the tool you are calling asks for it; the boards spell places differently and each tool's schema says which. Only SEEK returns its results newest first, so read each posting's listing date rather than trusting its position, and keep daysOld tight when recency matters.",
   "",
-  "Reading: a search result gives you an id in brackets, a listing date and a teaser. That is deliberately not enough to judge a role on. Collect the ids that look plausible across every board and pass them to get_posting_details in one call — it returns the advertisements themselves, and it is the only place you can read one or copy a line from one. The experience an advertisement asks for is read there too, off the advertisement's own words and never off a teaser: copy the phrase as it is written, and where a description states none, leave the field out rather than reading one off the title's seniority.",
+  "Reading: a search result gives you an id in brackets, a listing date and a teaser. That is deliberately not enough to judge a role on. Collect the ids that look plausible across every board and pass them to get_posting_details in as few calls as you can — it returns the advertisements themselves, and it is the only place you can read one or copy a line from one. It takes a bounded number of ids per call, so a longer shortlist is a second call rather than a shorter shortlist. The experience an advertisement asks for is read there too, off the advertisement's own words and never off a teaser: copy the phrase as it is written, and where a description states none, leave the field out rather than reading one off the title's seniority.",
   "",
   "Reporting: call submit_findings once, naming each posting by its id. What counts as a finding is a posting whose title, location and description genuinely fit the criteria — filter rather than pad, because sharing a keyword is not a match. A criterion your searches cannot express belongs in `notes` rather than in guesswork, but never write that a board was unavailable when you hold a tool for it and did not call it. If you found nothing worth reporting, submit an empty list and say why in `notes`. An empty, honest result is a success; a padded one is not.",
   "",
@@ -56,11 +60,15 @@ export const JOB_SCOUT_SYSTEM_PROMPT = [
 /**
  * The boards the scout searches, by tool name.
  *
- * Exported because the worker has to know which tool results count as evidence
- * that a live search happened. A list maintained separately over there would
- * drift the first time a board is added here, and it would drift *silently* —
- * the worker would under-count rather than fail, which is the failure mode the
- * search count exists to catch in the first place.
+ * Exported because the worker reports a run's search count per board and has to
+ * name every board to report a zero for one that answered nothing — see
+ * `countBySource`. A list maintained separately over there would drift the first
+ * time a board is added here, and it would drift *silently*: the worker would
+ * simply stop mentioning the new board.
+ *
+ * It is no longer what decides whether a search happened. That is
+ * {@link JobScoutSession.searches}, because a tool result cannot be asked: a
+ * failed board answers with a sentence, which is a perfectly successful message.
  *
  * Names rather than tools, because a board tool is now built per run against
  * that run's catalog and there is no instance to read a name off until one
@@ -81,12 +89,13 @@ export const JOB_SCOUT_SEARCH_TOOL_NAMES: readonly string[] = [
 export type CreateJobScoutOptions = ExtraToolsAgentOptions
 
 /**
- * One scout, and the two pieces of per-run state its tools write into.
+ * One scout, and the three pieces of per-run state its tools write into.
  *
  * The agent alone is no longer enough to drive a run: what it reports are ids,
- * and resolving them needs the catalog those ids came from. Returning both
- * together is what keeps a caller from having to build a catalog, remember to
- * pass the same one to every tool, and hold it for afterwards.
+ * and resolving them needs the catalog those ids came from; whether to believe
+ * any of it needs the log of what was searched. Returning them together is what
+ * keeps a caller from having to build each one, remember to pass the same
+ * instance to every tool, and hold it for afterwards.
  */
 export interface JobScoutSession {
   agent: Agent
@@ -94,6 +103,15 @@ export interface JobScoutSession {
   catalog: PostingCatalog
   /** What the scout reported, or `undefined` if it never called `submit_findings`. */
   findings(): ScoutFindings | undefined
+  /**
+   * Every search this session attempted, and whether the board answered.
+   *
+   * The transcript cannot answer that — a board that failed returns a sentence,
+   * which is a successful ToolMessage carrying bad news — so a caller that reads
+   * "did anything actually get searched" off the messages counts a dead scraper
+   * as a search. See `search-log.ts`.
+   */
+  searches(): readonly SearchAttempt[]
 }
 
 /**
@@ -126,6 +144,7 @@ export function createJobScout(
   } = options
 
   const catalog = createPostingCatalog({ idFor: (url) => postingId({ url }) })
+  const log = createSearchLog()
   const submit = createSubmitFindings()
 
   const agent = createAgent({
@@ -133,14 +152,14 @@ export function createJobScout(
     systemPrompt,
     maxLlmCalls,
     tools: [
-      createSeekSearch(catalog),
-      createIndeedSearch(catalog),
-      createLinkedinSearch(catalog),
+      createSeekSearch(catalog, log),
+      createIndeedSearch(catalog, log),
+      createLinkedinSearch(catalog, log),
       createPostingDetails(catalog),
       submit.tool,
       ...extraTools,
     ],
   })
 
-  return { agent, catalog, findings: submit.submitted }
+  return { agent, catalog, findings: submit.submitted, searches: log.attempts }
 }

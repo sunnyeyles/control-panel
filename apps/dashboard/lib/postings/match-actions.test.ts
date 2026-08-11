@@ -34,8 +34,8 @@ import { createMatchActions, MATCH_BATCH } from "./match-actions"
 const NOW = new Date("2026-08-05T04:15:00.000Z")
 const SCORED_AT = new Date("2026-08-06T00:00:00.000Z")
 
-const RESUME_ID = "11111111-1111-4111-8111-111111111111"
-const OLDER_RESUME_ID = "22222222-2222-4222-8222-222222222222"
+const DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
+const OLDER_DOCUMENT_ID = "22222222-2222-4222-8222-222222222222"
 
 /** Comfortably over `MIN_BACKGROUND_CHARS`, so `assertDraftable` passes. */
 const CV = [
@@ -232,7 +232,7 @@ function harness(
   const resumes =
     options.resumes ??
     new FakeResumes(CV, NOW).add({
-      resumeId: RESUME_ID,
+      resumeId: DOCUMENT_ID,
       extension: ".md",
       documentType: "resume",
       originalFilename: "alice-cv.md",
@@ -299,7 +299,7 @@ describe("scorePendingMatches", () => {
     it("says so when nothing is labelled a resume, and builds no assessor", async () => {
       subject = harness({
         resumes: new FakeResumes(CV, NOW).add({
-          resumeId: OLDER_RESUME_ID,
+          resumeId: OLDER_DOCUMENT_ID,
           extension: ".md",
           documentType: "cover-letter",
         }),
@@ -315,7 +315,7 @@ describe("scorePendingMatches", () => {
     it("says so when the resume is too thin to judge anything against", async () => {
       subject = harness({
         resumes: new FakeResumes("Alice.", NOW).add({
-          resumeId: RESUME_ID,
+          resumeId: DOCUMENT_ID,
           extension: ".md",
           documentType: "resume",
           originalFilename: "alice-cv.md",
@@ -346,7 +346,7 @@ describe("scorePendingMatches", () => {
         // name and not a guess. It is the whole of how a score goes stale: a
         // value other than the user's current resume means the score describes
         // a CV they have replaced.
-        matchResumeId: RESUME_ID,
+        matchResumeId: DOCUMENT_ID,
         matchedAt: SCORED_AT,
       })
     })
@@ -367,7 +367,7 @@ describe("scorePendingMatches", () => {
             matchScore: 40,
             matchReason: "Scored earlier.",
             matchGaps: [],
-            matchResumeId: RESUME_ID,
+            matchResumeId: DOCUMENT_ID,
             matchedAt: NOW,
           }),
           aPosting(derivedId(2)),
@@ -395,7 +395,7 @@ describe("scorePendingMatches", () => {
             matchScore: 40,
             matchReason: "Scored against the old CV.",
             matchGaps: [],
-            matchResumeId: OLDER_RESUME_ID,
+            matchResumeId: OLDER_DOCUMENT_ID,
             matchedAt: NOW,
           }),
         ],
@@ -404,7 +404,7 @@ describe("scorePendingMatches", () => {
       expect(await subject.score()).toMatchObject({ scored: 1 })
       expect(subject.postings.writes[0]?.data).toMatchObject({
         matchScore: 76,
-        matchResumeId: RESUME_ID,
+        matchResumeId: DOCUMENT_ID,
       })
     })
 
@@ -466,7 +466,7 @@ describe("scorePendingMatches", () => {
           matchScore: 80,
           matchReason: "Scored.",
           matchGaps: [],
-          matchResumeId: RESUME_ID,
+          matchResumeId: DOCUMENT_ID,
           matchedAt: NOW,
         }),
       ],

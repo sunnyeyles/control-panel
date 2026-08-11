@@ -23,6 +23,20 @@ import * as z from "zod"
 
 const nonEmpty = z.string().trim().min(1)
 
+/**
+ * The most postings a briefing may ask for.
+ *
+ * Not a guess at what a person can read: it is the point past which a scout
+ * cannot honestly fill the brief in one run. Every posting reported has to be
+ * read first, and `MAX_DETAIL_IDS` in `@workspace/agent-tools` bounds a read call
+ * — so a ceiling above that would let a briefing ask for a shortlist the scout
+ * has no way to have looked at.
+ *
+ * Exported because the form that collects the field needs to state the bound,
+ * and a second copy of the number over there is a second thing to change.
+ */
+export const MAX_POSTINGS_PER_BRIEF = 25
+
 export const JobSearchConfigSchema = z.object({
   titles: z
     .array(nonEmpty)
@@ -50,15 +64,40 @@ export const JobSearchConfigSchema = z.object({
     .number()
     .int()
     .min(1)
-    .max(25)
+    .max(MAX_POSTINGS_PER_BRIEF)
     .optional()
     .describe("How many postings the brief should carry at most."),
 })
 
 export type JobSearchConfig = z.infer<typeof JobSearchConfigSchema>
 
-/** How many postings to ask for when the job does not say. */
-const DEFAULT_MAX_POSTINGS = 8
+/**
+ * Which attempt at one set of criteria a brief is for.
+ *
+ * A run gets a second pass when the first reported nothing and the boards were
+ * genuinely answering — the money is already spent, and an empty briefing is
+ * worth less than a wider one. Named rather than a boolean because it appears in
+ * the run report, where `wider` says what happened and `true` would not.
+ */
+export type SearchPass = "first" | "wider"
+
+/**
+ * How many postings to ask for when the job does not say.
+ *
+ * Was 8, and it was the binding constraint on every briefing in production:
+ * nothing has ever written `maxPostings` into a job's config, so every run asked
+ * for eight however many the boards had. One SEEK search alone returns up to 40
+ * candidates, so the shortage was this line rather than the market.
+ *
+ * The schema's ceiling stays at 25, which is what a briefing can raise itself to
+ * from the form. `MAX_DETAIL_IDS` in `@workspace/agent-tools` moved with this —
+ * a scout has to read an advertisement before it may report one, so a cap on
+ * reading is a cap on reporting.
+ *
+ * Exported so the form collecting the field can say what leaving it blank means
+ * rather than restating the number.
+ */
+export const DEFAULT_MAX_POSTINGS = 20
 
 /**
  * The hard ceiling on a scout's model calls, whatever the config asks for.
@@ -79,8 +118,13 @@ const MAX_SCOUT_LLM_CALLS = 40
  * ends on. Was three, when a run was searches-then-answer; reading is its own
  * pass now, and a scout that runs out of turns before it can submit loses
  * everything it found rather than reporting less.
+ *
+ * Eight rather than six since the brief started asking for twenty postings: a
+ * shortlist longer than `MAX_DETAIL_IDS` is a second read call, and a scout that
+ * cannot afford one would read fewer advertisements instead — which is a shorter
+ * brief arrived at silently.
  */
-const NON_SEARCH_TURNS = 6
+const NON_SEARCH_TURNS = 8
 
 /**
  * How many model calls to give the scout for one config.
@@ -151,11 +195,19 @@ export function parseJobSearchConfig(
  * `title-exclusions.ts`. This line exists so the scout does not spend searches
  * and read-backs on roles that are going to be thrown away, which is a cost
  * argument and not a correctness one.
+ *
+ * `pass` is which attempt at these criteria this is. A `"wider"` brief is the
+ * same criteria read as preferences rather than as requirements, and it exists
+ * because a run that reports nothing has spent its money and produced no
+ * briefing — see the second pass in the worker's `run-briefing.ts`. It is
+ * composed here, in the one place a brief is composed, so the two passes cannot
+ * disagree about what the criteria say.
  */
 export function toSearchBrief(
   config: JobSearchConfig,
   occurrence: Date,
-  titleExclusions: readonly string[] = []
+  titleExclusions: readonly string[] = [],
+  pass: SearchPass = "first"
 ): string {
   const lines = [
     `Today is ${occurrence.toISOString().slice(0, 10)}. Find open job postings matching this candidate's criteria.`,
@@ -191,6 +243,25 @@ export function toSearchBrief(
     // candidate already looks is worth something when ranking.
     lines.push(
       `Job boards the candidate follows: ${config.sources.join("; ")}. Search every board your tools reach — this list is context, not a restriction.`
+    )
+  }
+
+  if (pass === "wider") {
+    // Stated as instructions about *these* criteria rather than as new criteria:
+    // the scout is being asked to relax how it reads what the candidate said,
+    // not to search for something the candidate never asked for. A brief that
+    // invented a role title would return postings and answer the wrong question.
+    //
+    // The title-exclusion line above is deliberately untouched — it is enforced
+    // after the scout reports either way, so relaxing it here would only buy
+    // postings that are about to be thrown away.
+    lines.push(
+      "",
+      "A first pass over exactly these criteria found nothing worth reporting, so search wider this time:",
+      "- Treat the preferred skills and the things to rule out as preferences rather than requirements. A role that fits the title and the location is worth reporting even when it matches none of them.",
+      "- Where a location returned nothing, search the wider region it sits in and remote roles in the same country as well.",
+      "- Leave the freshness bound at each board's default rather than tightening it, and raise it if a search still comes back empty.",
+      "- Widen the title itself only as far as an adjacent way of writing the same role — a broader seniority or a synonym the boards use. Do not search for a different job."
     )
   }
 

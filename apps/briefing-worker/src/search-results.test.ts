@@ -1,37 +1,41 @@
-import { AIMessage, ToolMessage } from "@langchain/core/messages"
 import { describe, expect, it } from "vitest"
 
 import {
   countBySource,
+  failureSummary,
   SEARCH_TOOL_NAMES,
   successfulSearches,
+  totalResults,
+  type SearchAttemptLike,
 } from "./search-results.ts"
 
 /**
- * The multi-source behaviour is tested here rather than through `runBriefing`,
- * because only one board exists today: passing the tool names in is the only
- * way to prove the gate works for two before the second one is written. The
- * run-level tests cover the wiring; these cover the rule.
+ * The rule rather than the wiring, which is `run-briefing.test.ts`'s subject.
+ *
+ * These used to be assertions about ToolMessages, and the cases they proved were
+ * the wrong cases: they showed that a `status: "error"` result was not counted,
+ * which was true and irrelevant, because a failed board search never produces
+ * one. It returns a sentence and a successful message. What is asserted now is
+ * the distinction that actually decides whether a run is believable — the board
+ * answered, or it did not.
  */
 
 const BOARDS = ["seek_search", "indeed_search"]
 
-function result(name: string, text = "a posting", id = "call_1"): ToolMessage {
-  return new ToolMessage({
-    content: text,
-    tool_call_id: id,
-    name,
-    status: "success",
-  })
+function ok(
+  toolName: string,
+  results = 1,
+  board = toolName === "seek_search" ? "SEEK" : "Indeed"
+): SearchAttemptLike {
+  return { toolName, board, outcome: "ok", results }
 }
 
-function failed(name: string, id = "call_1"): ToolMessage {
-  return new ToolMessage({
-    content: "search failed",
-    tool_call_id: id,
-    name,
-    status: "error",
-  })
+function failed(
+  toolName: string,
+  message = "The search failed with HTTP 500.",
+  board = toolName === "seek_search" ? "SEEK" : "Indeed"
+): SearchAttemptLike {
+  return { toolName, board, outcome: "failed", results: 0, message }
 }
 
 describe("SEARCH_TOOL_NAMES", () => {
@@ -51,53 +55,71 @@ describe("SEARCH_TOOL_NAMES", () => {
 })
 
 describe("successfulSearches", () => {
-  it("counts a result from any of the scout's search tools", () => {
-    const searches = successfulSearches(
-      [result("indeed_search", "an Indeed posting")],
-      BOARDS
-    )
-
-    expect(searches).toEqual(["indeed_search"])
+  it("keeps every board that answered", () => {
+    expect(
+      successfulSearches([ok("seek_search"), ok("indeed_search")])
+    ).toEqual(["seek_search", "indeed_search"])
   })
 
-  it("keeps results from every source that answered", () => {
-    const searches = successfulSearches(
-      [
-        result("seek_search", "seek posting", "call_1"),
-        result("indeed_search", "indeed posting", "call_2"),
-      ],
-      BOARDS
-    )
-
-    expect(searches).toEqual(["seek_search", "indeed_search"])
+  it("counts a board that answered with nothing", () => {
+    // The distinction the whole log exists for. Nobody advertising the role is a
+    // search that happened, and a run made of these is a quiet market — which
+    // must not fail, and must not pass silently either.
+    expect(successfulSearches([ok("seek_search", 0)])).toEqual(["seek_search"])
   })
 
-  it("skips a search that errored, and keeps one that did not", () => {
-    // One board down, the other working. This is what the run's "something
-    // actually searched" gate reads, so a dead board must not erase a live one.
-    const searches = successfulSearches(
-      [
-        failed("indeed_search", "call_1"),
-        result("seek_search", "ok", "call_2"),
-      ],
-      BOARDS
-    )
-
-    expect(searches).toEqual(["seek_search"])
+  it("drops a board that did not answer", () => {
+    // One board down, the other working: a dead board must not erase a live one,
+    // and must not be counted as a live one either. Counting it is what let a
+    // run whose every actor failed look like an honest empty result.
+    expect(
+      successfulSearches([failed("indeed_search"), ok("seek_search")])
+    ).toEqual(["seek_search"])
   })
 
-  it("ignores a tool that is not a search tool", () => {
-    // A clock answering successfully is not evidence that anyone searched.
-    const searches = successfulSearches(
-      [result("get_current_time", "12:00")],
-      BOARDS
-    )
+  it("finds nothing successful when every search failed", () => {
+    expect(
+      successfulSearches([failed("seek_search"), failed("indeed_search")])
+    ).toEqual([])
+  })
+})
 
-    expect(searches).toEqual([])
+describe("totalResults", () => {
+  it("adds up what the boards returned", () => {
+    expect(totalResults([ok("seek_search", 12), ok("indeed_search", 3)])).toBe(
+      15
+    )
   })
 
-  it("ignores messages that are not tool results", () => {
-    expect(successfulSearches([new AIMessage("thinking")], BOARDS)).toEqual([])
+  it("is zero when every board answered empty", () => {
+    expect(totalResults([ok("seek_search", 0), ok("indeed_search", 0)])).toBe(0)
+  })
+})
+
+describe("failureSummary", () => {
+  it("says nothing when nothing failed", () => {
+    expect(failureSummary([ok("seek_search")])).toBeUndefined()
+  })
+
+  it("names the boards and quotes the first failure", () => {
+    const summary = failureSummary([
+      failed("seek_search", 'The SEEK search for "a" failed with HTTP 500.'),
+      failed("indeed_search", 'The Indeed search for "a" could not be sent.'),
+    ])
+
+    expect(summary).toContain("SEEK, Indeed")
+    expect(summary).toContain("HTTP 500")
+    // One message, not all of them: three actors behind one outage say the same
+    // sentence three times.
+    expect(summary).not.toContain("could not be sent")
+  })
+
+  it("names a board that failed without a message", () => {
+    const summary = failureSummary([
+      { toolName: "seek_search", board: "SEEK", outcome: "failed", results: 0 },
+    ])
+
+    expect(summary).toContain("SEEK")
   })
 })
 
@@ -106,7 +128,7 @@ describe("countBySource", () => {
     // The key has to be present to be read. An absent entry cannot be told
     // apart from a board nobody asked about.
     const counts = countBySource(
-      successfulSearches([result("seek_search")], BOARDS),
+      successfulSearches([ok("seek_search")]),
       BOARDS
     )
 

@@ -60,7 +60,7 @@ const TOO_MANY_POSTINGS = `Delete at most ${PAGE_SIZE} postings at a time.`
 /**
  * How many **Postings'** deletes may be in flight at once.
  *
- * The same bound `list-documents.ts` and `cover-letter-rows.ts` use, through the
+ * The same bound `list-documents.ts` and `cover-letter-views.ts` use, through the
  * same helper, and matched to them on purpose: `S3UserObjectStore.delete()` is a
  * `HeadObject` followed by a `DeleteObject`, so a full-page selection run one at
  * a time is a hundred sequential round trips inside one Server Action — and most

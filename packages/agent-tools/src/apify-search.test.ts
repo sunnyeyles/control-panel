@@ -8,6 +8,7 @@ import {
   type ResolvedBoardSearch,
 } from "./apify-search.ts"
 import { createPostingCatalog, type PostingCatalog } from "./posting-catalog.ts"
+import { createSearchLog, type SearchLog } from "./search-log.ts"
 import {
   API_TOKEN,
   fakeFetch,
@@ -39,6 +40,7 @@ interface FakeItem {
 /** A board with no floor and no post-fetch filter — the ordinary case. */
 const SPEC: ApifyBoardSpec<FakeItem> = {
   board: "Testboard",
+  toolName: "testboard_search",
   actorId: "acme~test-scraper",
   defaultMaxResults: 20,
   maxResultsLimit: 50,
@@ -79,19 +81,27 @@ const ONE_ITEM: FakeItem[] = [
  */
 let catalog: PostingCatalog
 
+/**
+ * The run's search log, real for the same reason the catalog is: what a search
+ * records about itself is part of what the search does, and the whole point of
+ * the log is that it says what the returned string cannot.
+ */
+let log: SearchLog
+
 beforeEach(() => {
   catalog = createPostingCatalog({
     idFor: (url) => new URL(url).pathname.split("/").pop() ?? url,
   })
+  log = createSearchLog()
 })
 
-/** `apifyBoardSearch` against the catalog this test is holding. */
+/** `apifyBoardSearch` against the catalog and log this test is holding. */
 function search<TItem>(
   spec: ApifyBoardSpec<TItem>,
   input: BoardSearchInput,
   deps: BoardSearchDeps = {}
 ): Promise<string> {
-  return apifyBoardSearch(spec, input, catalog, deps)
+  return apifyBoardSearch(spec, input, catalog, deps, log)
 }
 
 afterEach(() => {
@@ -411,6 +421,94 @@ describe("apifyBoardSearch", () => {
 
       expect(output).toContain("could not be sent")
       expect(output).toContain("ENOTFOUND")
+    })
+  })
+
+  /**
+   * The distinction the log exists for. Every case below returns a *string* to
+   * the model, and the strings are indistinguishable from the outside — which is
+   * how a run whose every actor was down looked exactly like a run that had
+   * honestly found nothing. See `search-log.ts`.
+   */
+  describe("the search log", () => {
+    it("records a search that returned postings", async () => {
+      await search(
+        SPEC,
+        { query: "software engineer", location: "Sydney" },
+        { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse(ONE_ITEM), []) }
+      )
+
+      expect(log.attempts()).toEqual([
+        {
+          toolName: "testboard_search",
+          board: "Testboard",
+          query: "software engineer",
+          location: "Sydney",
+          outcome: "ok",
+          results: 1,
+        },
+      ])
+    })
+
+    it("records an empty result as ok, because the board answered", async () => {
+      await search(
+        SPEC,
+        { query: "zeppelin wrangler" },
+        { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse([]), []) }
+      )
+
+      // Nobody is advertising the role. That is a search, and a run made of
+      // these is a quiet market rather than a broken pipeline.
+      expect(log.attempts()[0]).toMatchObject({ outcome: "ok", results: 0 })
+    })
+
+    it("records a failed actor run as failed, with what the model was told", async () => {
+      await search(
+        SPEC,
+        { query: "a" },
+        {
+          apiToken: API_TOKEN,
+          fetch: fakeFetch(jsonResponse({ error: "run failed" }, 500), []),
+        }
+      )
+
+      const attempt = log.attempts()[0]
+      expect(attempt).toMatchObject({ outcome: "failed", results: 0 })
+      expect(attempt?.message).toContain("500")
+    })
+
+    it("records a body that is not an item array as failed", async () => {
+      await search(
+        SPEC,
+        { query: "a" },
+        { apiToken: API_TOKEN, fetch: fakeFetch(jsonResponse({ data: 1 }), []) }
+      )
+
+      expect(log.attempts()[0]).toMatchObject({ outcome: "failed" })
+      expect(log.attempts()[0]?.message).toContain("no result list")
+    })
+
+    it("records exactly one attempt per call", async () => {
+      const fetch = fakeFetch(jsonResponse(ONE_ITEM), [])
+
+      await search(SPEC, { query: "a" }, { apiToken: API_TOKEN, fetch })
+      await search(SPEC, { query: "b" }, { apiToken: API_TOKEN, fetch })
+
+      expect(log.attempts().map((attempt) => attempt.query)).toEqual(["a", "b"])
+    })
+
+    it("records nothing when the token is rejected", async () => {
+      // A deployment fault is not a search that failed: it throws, the run dies
+      // loudly, and counting it as an attempt would say a board was reached.
+      await expect(
+        search(
+          SPEC,
+          { query: "a" },
+          { apiToken: "bad", fetch: fakeFetch(jsonResponse({}, 401), []) }
+        )
+      ).rejects.toThrow(/rejected the API token/)
+
+      expect(log.attempts()).toEqual([])
     })
   })
 

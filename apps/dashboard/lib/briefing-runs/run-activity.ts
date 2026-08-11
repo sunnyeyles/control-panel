@@ -28,12 +28,20 @@ import { isStale } from "./staleness"
  * never wrote a terminal status, so the run may have finished, may have died,
  * and nothing will ever say which. Reporting that as a failure would assert
  * something untrue, and reporting it as running would spin forever.
+ *
+ * `note` on the succeeded arm is how a run that worked and found nothing stops
+ * being silent. A `succeeded` row used to say "Last ran 5 minutes ago" and
+ * nothing else, whether the run had added twenty postings or none — the table
+ * was simply unchanged, with no reason for it anywhere a user could reach. The
+ * worker writes the sentence into `runs.failure` on a succeeded row, which is
+ * exactly what that column is for ("succeeded with warnings is `succeeded` with
+ * a non-empty `failure`" — `@workspace/db`'s `types.ts`).
  */
 export type RunActivity =
   | { state: "never-run" }
   | { state: "running"; startedAt: string; startedAtIso: string }
   | { state: "stale"; startedAt: string }
-  | { state: "succeeded"; ranAt: string }
+  | { state: "succeeded"; ranAt: string; note?: string }
   | { state: "failed"; ranAt: string; reason?: string }
 
 export interface BriefingActivity {
@@ -96,7 +104,7 @@ function toActivity(run: LatestRun, now: Date): RunActivity {
     return { state: "failed", ranAt, ...reasonOf(run.failure) }
   }
 
-  return { state: "succeeded", ranAt }
+  return { state: "succeeded", ranAt, ...noteOf(run.failure) }
 }
 
 /**
@@ -107,11 +115,38 @@ function toActivity(run: LatestRun, now: Date): RunActivity {
  * the shape is not what the worker writes.
  */
 function reasonOf(failure: unknown): { reason?: string } {
-  if (typeof failure !== "object" || failure === null) return {}
+  return { ...rename(messageAt(failure, []), "reason") }
+}
 
-  const message = (failure as { message?: unknown }).message
+/**
+ * Why a successful run added nothing, when that is what happened.
+ *
+ * The same defensive read as {@link reasonOf} one level down: the warning bag on
+ * a succeeded row holds a key per thing that went wrong, and only `noPostings`
+ * is about the run having produced nothing. The other keys are lost writes and
+ * dropped ids — real, and not what somebody is asking when they look at a
+ * briefing whose table did not change.
+ */
+function noteOf(failure: unknown): { note?: string } {
+  return { ...rename(messageAt(failure, ["noPostings"]), "note") }
+}
 
-  return typeof message === "string" && message.trim() !== ""
-    ? { reason: message }
-    : {}
+/** `bag.a.b.message`, if every step of that is what it needs to be. */
+function messageAt(bag: unknown, path: string[]): string | undefined {
+  let cursor = bag
+
+  for (const key of [...path, "message"]) {
+    if (typeof cursor !== "object" || cursor === null) return undefined
+    cursor = (cursor as Record<string, unknown>)[key]
+  }
+
+  return typeof cursor === "string" && cursor.trim() !== "" ? cursor : undefined
+}
+
+/** The message under the key its arm of {@link RunActivity} calls it by. */
+function rename<K extends string>(
+  message: string | undefined,
+  key: K
+): Partial<Record<K, string>> {
+  return message === undefined ? {} : ({ [key]: message } as Record<K, string>)
 }

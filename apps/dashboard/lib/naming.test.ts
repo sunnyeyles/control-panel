@@ -6,7 +6,7 @@ import * as agents from "@workspace/agents"
 import { describe, expect, it } from "vitest"
 
 /**
- * `NAMING.md` R1, R2 and R8, asserted against the source tree.
+ * `NAMING.md` R1, R2, R5 and R8, asserted against the source tree.
  *
  * **This has to be a test rather than a lint rule**, and not because a lint rule
  * would be harder to write. `eslint-plugin-only-warn` is in
@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest"
  * be silently skipped — green, and never run.
  *
  * Every assertion here reads the tree with `node:fs` and matches on text. That
- * is coarse, deliberately: it costs nothing, needs no parser, and the three
+ * is coarse, deliberately: it costs nothing, needs no parser, and the four
  * properties it pins are all lexical. What it cannot see — whether a name is
  * *good* — is the reviewer's job and always was.
  */
@@ -207,6 +207,85 @@ describe("R1 — `job` names a row in `jobs`, never a Posting", () => {
     ].join("\n")
 
     expect(IDENTIFIER.test(code(fine))).toBe(false)
+  })
+})
+
+describe("R5 — a `Row` does not cross into a client component", () => {
+  /**
+   * The half of R5 that is a runtime property rather than taste.
+   *
+   * A `<X>Row` is a shape `@workspace/db` returns, `Date` fields and all; a
+   * `<X>View` is what has already been projected to strings for the client. A
+   * `Row` handed to a component is the failure the suffix vocabulary exists to
+   * name — and TypeScript will not stop it, because a `Date` is a perfectly
+   * good `Date` right up until React serializes it across the RSC boundary or
+   * a browser formats it in the visitor's own locale.
+   *
+   * ⚠️ **The module specifier is matched first, and that filter is
+   * load-bearing.** `components/documents/document-list.tsx` and
+   * `components/jobs/postings/posting-table.tsx` both import `TableRow` from
+   * `@workspace/ui/components/table`, which is a `<tr>` and not a row of
+   * anything. What the rule is about is our own data crossing the boundary, so
+   * it looks only at `@/lib/…` and `@workspace/db`.
+   */
+  const DATA_MODULE = /^(@\/lib\/|@workspace\/db$)/
+
+  /** Named imports as `[imported, local]`, per module specifier. */
+  function namedImports(source: string): { from: string; names: string[] }[] {
+    return [
+      ...source.matchAll(
+        /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g
+      ),
+    ].map((match) => ({
+      from: match[2] as string,
+      names: (match[1] as string)
+        .split(",")
+        // Both halves of `X as Y`: an alias is how a `Row` would arrive under
+        // a name that does not say so, and the original is what it really is.
+        .flatMap((binding) => binding.split(/\bas\b/))
+        .map((name) => name.replace(/^\s*type\s+/, "").trim())
+        .filter((name) => name.length > 0),
+    }))
+  }
+
+  const sources = walk("components", [".tsx", ".ts"])
+
+  it("sees the imports it is meant to police", () => {
+    const fromData = sources
+      .flatMap((path) => namedImports(read(path)))
+      .filter((statement) => DATA_MODULE.test(statement.from))
+
+    // A parse that stopped matching would otherwise pass by finding nothing.
+    expect(fromData.length).toBeGreaterThan(20)
+  })
+
+  it.each(sources)("%s", (path) => {
+    const offenders = namedImports(read(path))
+      .filter((statement) => DATA_MODULE.test(statement.from))
+      .flatMap((statement) =>
+        statement.names
+          .filter((name) => name.endsWith("Row"))
+          .map((name) => `${name} from ${statement.from}`)
+      )
+
+    expect(
+      offenders,
+      "project it to a `View` on the server — a `Row` carries `Date`s"
+    ).toEqual([])
+  })
+
+  it("still catches a Row reaching a component", () => {
+    const offending = `import type { CoverLetterRow } from "@/lib/cover-letters/cover-letter-views"`
+
+    expect(
+      namedImports(offending)[0]?.names.some((name) => name.endsWith("Row"))
+    ).toBe(true)
+  })
+
+  it("does not catch the table primitive every list imports", () => {
+    const fine = `import { TableBody, TableRow } from "@workspace/ui/components/table"`
+
+    expect(DATA_MODULE.test(namedImports(fine)[0]?.from ?? "")).toBe(false)
   })
 })
 
