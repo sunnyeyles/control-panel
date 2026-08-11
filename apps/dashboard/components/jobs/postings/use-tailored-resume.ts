@@ -2,7 +2,7 @@
 
 import { use } from "react"
 
-import type { TailoredResumeRow } from "@/lib/tailored-resumes/tailored-resume-rows"
+import type { TailoredResumeView } from "@/lib/tailored-resumes/tailored-resume-views"
 
 /**
  * The types and the hook the tailored-resume controls read, and nothing else.
@@ -25,19 +25,21 @@ import type { TailoredResumeRow } from "@/lib/tailored-resumes/tailored-resume-r
  * replacing a document nothing could see.
  *
  * ⚠️ **This one is not bounded by the page, unlike `CoverLetterPromise`.**
- * `loadTailoredResumeRows` makes a single `ListObjectsV2` call rather than a
+ * `loadTailoredResumeViews` makes a single `ListObjectsV2` call rather than a
  * `HeadObject` per visible row, so what arrives is every tailored resume the
  * user has. That is deliberate — see the function's own comment — and it is why
  * the scan below is described as bounded by a job search rather than by
  * `PAGE_SIZE`.
  */
-export type TailoredResumePromise = Promise<readonly TailoredResumeRow[] | null>
+export type TailoredResumePromise = Promise<
+  readonly TailoredResumeView[] | null
+>
 
 /** What one Posting can say about its resume, with "unknown" kept separate. */
 export type TailoredResumeLookup =
   | { state: "unavailable" }
   | { state: "none" }
-  | { state: "generated"; resume: TailoredResumeRow }
+  | { state: "generated"; resume: TailoredResumeView }
 
 /**
  * This Posting's tailored resume, once the page's storage read has resolved.

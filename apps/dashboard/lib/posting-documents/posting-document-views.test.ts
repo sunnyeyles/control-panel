@@ -6,11 +6,11 @@ import { describe, expect, it } from "vitest"
 
 import {
   listPostingDocuments,
-  postingDocumentRowsFor,
-} from "./posting-document-rows"
+  postingDocumentViewsFor,
+} from "./posting-document-views"
 
 /**
- * The shared listing contract both row modules lean on. Each feature suite
+ * The shared listing contract both view modules lean on. Each feature suite
  * keeps only its field mapping; the request shape and the error policy are
  * proven here, once.
  */
@@ -73,8 +73,8 @@ describe("listPostingDocuments", () => {
   })
 })
 
-describe("postingDocumentRowsFor", () => {
-  const toRow = (item: { postingId: string }) => ({
+describe("postingDocumentViewsFor", () => {
+  const toView = (item: { postingId: string }) => ({
     postingId: item.postingId,
   })
 
@@ -82,26 +82,26 @@ describe("postingDocumentRowsFor", () => {
     const visible = "0f1e2d3c4b5a6978"
     const elsewhere = "aaaaaaaaaaaaaaaa"
 
-    const rows = postingDocumentRowsFor(
+    const views = postingDocumentViewsFor(
       [{ postingId: visible }, { postingId: elsewhere }],
       [visible],
-      toRow
+      toView
     )
 
-    expect(rows.map((row) => row.postingId)).toEqual([visible])
+    expect(views.map((view) => view.postingId)).toEqual([visible])
   })
 
   it("omits a Posting with no document", () => {
     const drafted = "0f1e2d3c4b5a6978"
     const undrafted = "aaaaaaaaaaaaaaaa"
 
-    const rows = postingDocumentRowsFor(
+    const views = postingDocumentViewsFor(
       [{ postingId: drafted }],
       [drafted, undrafted],
-      toRow
+      toView
     )
 
-    expect(rows.map((row) => row.postingId)).toEqual([drafted])
+    expect(views.map((view) => view.postingId)).toEqual([drafted])
   })
 
   it("is empty for an empty page, however much has been generated", () => {
@@ -109,7 +109,7 @@ describe("postingDocumentRowsFor", () => {
     // What must not happen is a document for some other page crossing the
     // RSC boundary.
     expect(
-      postingDocumentRowsFor([{ postingId: "0f1e2d3c4b5a6978" }], [], toRow)
+      postingDocumentViewsFor([{ postingId: "0f1e2d3c4b5a6978" }], [], toView)
     ).toEqual([])
   })
 })

@@ -1,12 +1,12 @@
 import type { StoredCoverLetter } from "@workspace/user-storage"
 import { describe, expect, it } from "vitest"
 
-import { coverLetterRowsFor, listCoverLetters } from "./cover-letter-rows"
+import { coverLetterViewsFor, listCoverLetters } from "./cover-letter-views"
 
 /**
  * The listing contract — one request per user, missing prefix reads as none,
  * an unreachable store rejects — and the filter-to-page mechanics are
- * `posting-document-rows.test.ts`'s. What this suite owns is the letters'
+ * `posting-document-views.test.ts`'s. What this suite owns is the letters'
  * field mapping and the start-early signature the page depends on.
  */
 
@@ -39,15 +39,15 @@ describe("listCoverLetters", () => {
   })
 })
 
-describe("coverLetterRowsFor", () => {
+describe("coverLetterViewsFor", () => {
   it("returns only the two fields the table renders", () => {
     const postingId = "0f1e2d3c4b5a6978"
 
-    const rows = coverLetterRowsFor([listed(postingId)], [postingId])
+    const views = coverLetterViewsFor([listed(postingId)], [postingId])
 
     // Not `displayName` and not `filename`: a listing carries no object
     // metadata, so both are derived from the Posting in `posting-detail.tsx`.
-    expect(rows).toEqual([
+    expect(views).toEqual([
       { postingId, draftedAt: expect.stringContaining("1 Aug 2026") },
     ])
   })
