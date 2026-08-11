@@ -81,9 +81,8 @@ export type NavItem = NavLink | NavGroup
  * ⚠️ **A second briefing kind arrives as a sibling group, not as a fourth child
  * here.** Briefings are going to divide by kind — a topic or news watcher
  * alongside the job search — and that one is not "Jobs" by any reading. It gets
- * its own group with its own tab bar, and nothing in this section moves. See
- * `docs/job-kind-registry-plan.md`, which also names the point at which
- * `config.kind` has to stop being JSONB: the moment a page filters on it. None
+ * its own group with its own tab bar, and nothing in this section moves.
+ * `config.kind` has to stop being JSONB the moment a page filters on it; none
  * of these three do.
  */
 export const navMain: readonly NavItem[] = [

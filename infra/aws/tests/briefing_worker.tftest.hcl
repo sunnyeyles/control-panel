@@ -77,6 +77,19 @@ run "on_duty" {
     error_message = "Alarms must publish to the root's shared topic."
   }
 
+  # Hourly, not daily. A 86400s period latches ALARM for a full day after one
+  # failure and cannot signal the next; 3600 lets a clean tick clear it.
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.errors.period == 3600
+    error_message = "The Errors alarm period must be 3600 so it can return to OK within about an hour."
+  }
+
+  # The missed-run alarm stays daily on purpose — see monitoring.tf.
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.not_invoked[0].period == 86400
+    error_message = "The not-invoked alarm must stay on a 24-hour period."
+  }
+
   # Breaching, not notBreaching. No datapoint here means no invocation, which is
   # precisely the condition being watched for.
   assert {
