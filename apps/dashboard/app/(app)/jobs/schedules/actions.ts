@@ -3,7 +3,10 @@
 import type { ActionState } from "@/lib/actions/action-state"
 import { getCurrentUser } from "@/lib/auth/current-user"
 import { getPrisma } from "@/lib/db"
-import type { CriteriaSuggestionState } from "@/lib/jobs/criteria-suggestion"
+import type {
+  CriteriaSuggestionState,
+  RoleTitleSuggestionState,
+} from "@/lib/jobs/criteria-suggestion"
 import { createJobActions } from "@/lib/jobs/job-actions"
 import { createSuggestCriteriaActions } from "@/lib/jobs/suggest-criteria-actions"
 import { createTitleFilterActions } from "@/lib/postings/title-filter-actions"
@@ -66,6 +69,27 @@ export async function createJobAction(
   formData: FormData
 ): Promise<ActionState> {
   const result = await actions.createJob(state, formData)
+
+  if (result.status === "success") refresh()
+
+  return result
+}
+
+/**
+ * Changing what an existing briefing searches for.
+ *
+ * `refresh()` for the reason `saveTitleFiltersAction` gives, which applies here
+ * more sharply than to the switch above: the edit form renders the stored
+ * criteria as `defaultValue`s off a server render, so without it
+ * `staleTimes.dynamic` serves the pre-save titles back on the next visit — a
+ * save that looks like it silently did not happen. It also re-queries `/jobs`,
+ * which is where the consequence of the change is eventually visible.
+ */
+export async function updateJobCriteriaAction(
+  state: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const result = await actions.updateJobCriteria(state, formData)
 
   if (result.status === "success") refresh()
 
@@ -140,4 +164,23 @@ export async function suggestCriteriaAction(
   formData: FormData
 ): Promise<CriteriaSuggestionState> {
   return suggestCriteria.suggestCriteria(state, formData)
+}
+
+/**
+ * Proposing the role titles adjacent to the ones already chosen.
+ *
+ * **No `refresh()`, for the reason above** — it writes nothing, and calling it
+ * would re-render the segment the answer is meant to be offered into, throwing
+ * away the half-filled form around it. The same absence, and the same warning
+ * against restoring it for consistency.
+ *
+ * The suggester, like the extractor, is deliberately not supplied here: the
+ * factory defaults it, and the default reads `OPENAI_API_KEY` when it
+ * constructs a model.
+ */
+export async function suggestRoleTitlesAction(
+  state: RoleTitleSuggestionState,
+  formData: FormData
+): Promise<RoleTitleSuggestionState> {
+  return suggestCriteria.suggestRoleTitles(state, formData)
 }

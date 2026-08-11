@@ -93,6 +93,19 @@ export {
 } from "./profile-extractor.ts"
 
 export {
+  parseRoleTitleSuggestions,
+  RoleTitleSuggestionsSchema,
+  type RoleTitleSuggestions,
+} from "./role-titles.ts"
+
+export {
+  createRoleTitleSuggester,
+  ROLE_TITLE_SUGGESTER_SYSTEM_PROMPT,
+  toRoleTitleSuggestionsPrompt,
+  type CreateRoleTitleSuggesterOptions,
+} from "./role-title-suggester.ts"
+
+export {
   createResumeTailor,
   RESUME_TAILOR_SYSTEM_PROMPT,
   type CreateResumeTailorOptions,

@@ -1,6 +1,7 @@
 import { MAX_POSTINGS_PER_BRIEF } from "@workspace/job-search"
 import { describe, expect, it } from "vitest"
 
+import { MAX_ROLE_TITLES } from "./criteria-text"
 import { MAX_CRITERIA_ITEMS, searchCriteriaSchema } from "./search-criteria"
 
 /**
@@ -89,16 +90,40 @@ describe("titles and locations", () => {
     expect(rejects({ ...REQUIRED, locations: null })).toBe(true)
   })
 
-  it("accepts exactly the cap and rejects one more", () => {
+  it("accepts exactly the locations cap and rejects one more", () => {
     expect(
-      parse({ ...REQUIRED, titles: list(MAX_CRITERIA_ITEMS) }).titles
+      parse({ ...REQUIRED, locations: list(MAX_CRITERIA_ITEMS) }).locations
     ).toHaveLength(MAX_CRITERIA_ITEMS)
 
     // Not validation for its own sake: the cap is what stops one paste from
     // writing an unbounded row.
-    expect(rejects({ ...REQUIRED, titles: list(MAX_CRITERIA_ITEMS + 1) })).toBe(
+    expect(
+      rejects({ ...REQUIRED, locations: list(MAX_CRITERIA_ITEMS + 1) })
+    ).toBe(true)
+  })
+
+  /**
+   * ⚠️ **Titles is capped far lower than everything else, and not for paste
+   * safety.** A run fans out to `titles × locations × boards` searches against
+   * a hard model budget; past it the scout is cut off mid-sweep and still
+   * answers with a well-formed brief covering less than it was asked to. See
+   * `MAX_ROLE_TITLES`.
+   *
+   * The form disables its own submit before this is reached. This is the half
+   * that a direct POST still has to get past.
+   */
+  it("accepts exactly the title cap and rejects one more", () => {
+    expect(
+      parse({ ...REQUIRED, titles: list(MAX_ROLE_TITLES) }).titles
+    ).toHaveLength(MAX_ROLE_TITLES)
+
+    expect(rejects({ ...REQUIRED, titles: list(MAX_ROLE_TITLES + 1) })).toBe(
       true
     )
+  })
+
+  it("caps titles well below the paste bound the other fields carry", () => {
+    expect(MAX_ROLE_TITLES).toBeLessThan(MAX_CRITERIA_ITEMS)
   })
 })
 

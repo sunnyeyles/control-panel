@@ -50,6 +50,7 @@ export {
   findJob,
   pauseJob,
   resumeJob,
+  updateJobConfig,
   updateJobSchedule,
   type ClaimedSlot,
   type DueJob,
