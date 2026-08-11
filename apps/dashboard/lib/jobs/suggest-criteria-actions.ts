@@ -17,9 +17,19 @@ import {
   createProfileExtractor as defaultProfileExtractor,
   toSearchCriteriaPrompt,
 } from "@workspace/agents/profile-extractor"
+import {
+  createRoleTitleSuggester as defaultRoleTitleSuggester,
+  toRoleTitleSuggestionsPrompt,
+} from "@workspace/agents/role-title-suggester"
+import { parseRoleTitleSuggestions } from "@workspace/agents/role-titles"
 import { type ResumeStore } from "@workspace/user-storage"
 
-import type { CriteriaSuggestionState } from "./criteria-suggestion"
+import { splitCriteria } from "./criteria-text"
+import type {
+  CriteriaSuggestionState,
+  RoleTitleSuggestionState,
+} from "./criteria-suggestion"
+import { canonicalRoleTitle } from "./role-titles"
 
 /**
  * Proposing what to search for, read out of the CV the user already uploaded.
@@ -77,6 +87,17 @@ import type { CriteriaSuggestionState } from "./criteria-suggestion"
 export const EXTRACTION_FAILED =
   "Your resume could not be turned into search criteria. Try again in a moment."
 
+/**
+ * The same three causes, for the adjacent-titles suggestion.
+ *
+ * A separate sentence rather than a reuse of {@link EXTRACTION_FAILED}, for the
+ * reason the two `describe…` switches below are separate: what failed is worth
+ * naming, and "search criteria" is not what this button was asked for. The
+ * remedy is identical and the message says so.
+ */
+export const SUGGESTION_FAILED =
+  "No role titles could be suggested from your resume. Try again in a moment."
+
 export interface SuggestCriteriaActionsDeps {
   /** Who is asking. The seam that makes the auth branches testable. */
   getUser: () => Promise<CurrentUser>
@@ -103,6 +124,17 @@ export interface SuggestCriteriaActionsDeps {
    * canned reply.
    */
   createProfileExtractor?: () => Agent
+  /**
+   * The adjacent-titles suggester, defaulted and constructed inside the action
+   * for the reasons above.
+   *
+   * ⚠️ **The field name is `NAMING.md` R2 and is checked by
+   * `lib/naming.test.ts`** — it must be the exact factory name
+   * `@workspace/agents` exports, which is why the import at the top of this
+   * file aliases the real one to `defaultRoleTitleSuggester`: the seam would
+   * otherwise shadow it.
+   */
+  createRoleTitleSuggester?: () => Agent
   /** Overridden in tests, so an assertion can name the reset key. */
   newResetKey?: () => string
 }
@@ -128,6 +160,18 @@ export interface SuggestCriteriaActions {
     state: CriteriaSuggestionState,
     formData: FormData
   ) => Promise<CriteriaSuggestionState>
+  /**
+   * ⚠️ **This one does read a form field**, unlike its neighbour, and the
+   * asymmetry is deliberate rather than an inconsistency. The whole question it
+   * answers is "what *else* should this person search for", so the titles
+   * already chosen have to reach the prompt — they are the exclusion set. They
+   * are still not an identity and not a document selector: nothing about which
+   * CV is read comes from the request.
+   */
+  suggestRoleTitles: (
+    state: RoleTitleSuggestionState,
+    formData: FormData
+  ) => Promise<RoleTitleSuggestionState>
 }
 
 export function createSuggestCriteriaActions(
@@ -135,6 +179,8 @@ export function createSuggestCriteriaActions(
 ): SuggestCriteriaActions {
   const createProfileExtractor =
     deps.createProfileExtractor ?? (() => defaultProfileExtractor())
+  const createRoleTitleSuggester =
+    deps.createRoleTitleSuggester ?? (() => defaultRoleTitleSuggester())
   const newResetKey = deps.newResetKey ?? (() => crypto.randomUUID())
 
   async function suggestCriteria(): Promise<CriteriaSuggestionState> {
@@ -241,7 +287,14 @@ export function createSuggestCriteriaActions(
       // missing one: a CV that states no location genuinely says nothing about
       // where to search, and `notes` is where the extractor explains that.
       criteria: {
-        titles: criteria.titles.join(", "),
+        // ⚠️ **A list, where its neighbours are joined strings.** These are
+        // rendered as one button per title rather than written into the field,
+        // so joining them here would only mean splitting them again in the
+        // component. `SuggestedCriteria` sets out why the field stopped being
+        // filled in bulk. Snapped to the checked-in spelling for the reason
+        // `canonicalRoleTitle` gives — two agents propose titles here, and one
+        // role wearing two spellings is two buttons and two searches.
+        titles: criteria.titles.map((title) => canonicalRoleTitle(title)),
         locations: criteria.locations.join(", "),
         keywords: criteria.keywords.join(", "),
       },
@@ -251,6 +304,121 @@ export function createSuggestCriteriaActions(
       // identical.
       resetKey: newResetKey(),
     }
+  }
+
+  /**
+   * Propose the adjacent role titles, given the CV and the ones already chosen.
+   *
+   * Every property `suggestCriteria` holds, this holds too — it persists
+   * nothing and so calls no `refresh()`, and a user with no readable CV costs
+   * no model call — and it sits in the same file because the two share every
+   * refusal below the model. A sibling module would have meant four duplicated
+   * exhaustive switches, or an extraction with one caller apiece.
+   *
+   * The one difference is the form field, and its docblock on
+   * {@link SuggestCriteriaActions} says why it is not the exception it looks
+   * like.
+   */
+  async function suggestRoleTitles(
+    _state: RoleTitleSuggestionState,
+    formData: FormData
+  ): Promise<RoleTitleSuggestionState> {
+    // No reset key here either, and for a stronger reason than on the criteria
+    // path: nothing this action returns is ever written into a field.
+    const fail = (message: string): RoleTitleSuggestionState => ({
+      status: "error",
+      message,
+    })
+
+    const caller = await requireUser(deps.getUser, "briefings")
+    if (!caller.ok) return fail(caller.message)
+
+    // The titles the user has already picked, read through the same split the
+    // create action parses them with — so what the model is told not to repeat
+    // is exactly what the form will submit. Untrusted text, and treated as
+    // such: it is fenced as quoted material in the prompt and reaches nothing
+    // else.
+    const chosen = splitCriteria(String(formData.get("titles") ?? ""))
+
+    let background
+    try {
+      background = await loadCandidateBackground(
+        caller.userId,
+        deps.getPrisma(),
+        deps.getResumes()
+      )
+    } catch (error) {
+      return fail(storageMessage("briefings: read failed", error))
+    }
+
+    if (!background.ok)
+      return fail(describeMissingBackground(background.reason))
+
+    try {
+      assertDraftable({ background: background.background })
+    } catch (error) {
+      if (error instanceof UndraftableError) {
+        return fail(describeUnextractable(error, background.displayName))
+      }
+
+      console.error("briefings: the CV could not be checked", error)
+      return fail(SUGGESTION_FAILED)
+    }
+
+    let suggestions
+    try {
+      suggestions = await suggest(background.background, chosen, caller.userId)
+    } catch (error) {
+      console.error("briefings: the role-title suggester failed", error)
+      return fail(SUGGESTION_FAILED)
+    }
+
+    const notes = suggestions.notes?.trim() ?? ""
+
+    /*
+      Snapped to the checked-in list, then deduplicated against itself and
+      against what the user already has.
+
+      The model is asked not to repeat a chosen title and mostly does not, but
+      "mostly" is the wrong standard for something whose cost is a wasted third
+      of a briefing's search budget. `canonicalRoleTitle` collapses the
+      punctuation-and-case variants first, so the comparison that follows is
+      between titles rather than between spellings.
+    */
+    const chosenKeys = new Set(chosen.map((title) => canonicalRoleTitle(title)))
+    const titles: string[] = []
+
+    for (const raw of suggestions.titles) {
+      const title = canonicalRoleTitle(raw)
+
+      if (title.length === 0) continue
+      if (chosenKeys.has(title)) continue
+
+      chosenKeys.add(title)
+      titles.push(title)
+    }
+
+    return {
+      status: "success",
+      titles,
+      ...(notes.length > 0 ? { notes } : {}),
+    }
+  }
+
+  /** The suggester's one model call, traced and validated. */
+  async function suggest(
+    background: string,
+    chosen: readonly string[],
+    userId: string
+  ) {
+    const text = await invokeTracedAgent(createRoleTitleSuggester(), {
+      name: "role-titles",
+      route: "/jobs/schedules",
+      userId,
+      prompt: toRoleTitleSuggestionsPrompt(background, chosen),
+    })
+
+    return parseRoleTitleSuggestions(text)
   }
 
   /**
@@ -294,7 +462,7 @@ export function createSuggestCriteriaActions(
     return parseSearchCriteria(text)
   }
 
-  return { suggestCriteria }
+  return { suggestCriteria, suggestRoleTitles }
 }
 
 /**

@@ -132,6 +132,7 @@ flowchart LR
         CLW["createCoverLetterWriter<br/>the Letter Writer"]
         RT["createResumeTailor<br/>the Resume Tailor"]
         PE["createProfileExtractor<br/>the Profile Extractor"]
+        RTS["createRoleTitleSuggester<br/>the Role Title Suggester"]
         PX["createPostingExtractor<br/>the Posting Extractor"]
         ASST["createAssistant"]
         WB["createWhiteboardAgent<br/>the Whiteboard"]
@@ -161,6 +162,7 @@ flowchart LR
     CLW --> NONE
     RT --> NONE
     PE --> NONE
+    RTS --> NONE
     PX --> NONE
 
     SEEK --> RUN["apify-search.ts<br/>shared runner — APIFY_TOKEN"]
@@ -270,7 +272,7 @@ form. And a board that fails is **not** followed by the general fetchers: the
 board path has already spent its clock, and a general crawler is the path least
 likely to get past the board that just refused.
 
-### Why the Letter Writer, the Resume Tailor and the Profile Extractor have no tools
+### Why the Letter Writer, the Resume Tailor, the Profile Extractor and the Role Title Suggester have no tools
 
 The strongest case in the stack, and it is one argument covering three agents.
 All three hold the candidate's CV in their context, and **an agent that can both
@@ -303,12 +305,24 @@ handed a document as easily as they can write one. So the document with the most
 to leak is read by the agent with no way to leak it, and what comes back is a
 JSON object the user reviews in a form before anything is saved.
 
-Both prompts also tell the model to treat the outside text as quoted material,
-and `toSearchCriteriaPrompt()` fences the CV in the same idiom — but a fence is a label,
-not a boundary, and nothing stops a document from writing one of its own. The
-containment is the empty tool list, and both are asserted structurally, in
-`cover-letter-writer.test.ts`, `resume-tailor.test.ts` and
-`profile-extractor.test.ts`, rather than left to a comment.
+**The Role Title Suggester** is the Profile Extractor's case with one more
+untrusted input. It reads the same CV, whole and verbatim, and alongside it the
+role titles the user typed into a form moments earlier. Those are fenced
+_separately_ from the document, and the separation is doing two jobs at once:
+it is the exclusion set the agent is told not to propose back, which a
+paragraph folded into the CV's fence would not be, and it keeps a second piece
+of outside text visibly outside. Being tool-less is what makes reading either
+verbatim acceptable — injected text can shape a row of buttons the user then
+reads, and can reach nothing else.
+
+Every prompt here also tells the model to treat the outside text as quoted
+material, and `toSearchCriteriaPrompt()` and `toRoleTitleSuggestionsPrompt()`
+fence the CV in the same idiom — but a fence is a label, not a boundary, and
+nothing stops a document from writing one of its own. The containment is the
+empty tool list, and each is asserted structurally, in
+`cover-letter-writer.test.ts`, `resume-tailor.test.ts`,
+`profile-extractor.test.ts` and `role-title-suggester.test.ts`, rather than left
+to a comment.
 
 That agent now exists, and is the **Posting Extractor** above: a page fetcher on
 a separate agent that never sees the profile, handing validated data on. The
@@ -424,9 +438,21 @@ anywhere. It reuses `loadCandidateBackground()` and `assertDraftable` from the
 cover-letter path rather than growing a document picker, so "which document is my
 resume" answers the same in both places.
 
+**Suggest related titles** sits beside it and holds every one of those
+properties, over `createRoleTitleSuggester`: nothing persisted, no `refresh()`,
+the same CV through the same loader. It differs in one place — it reads a form
+field, the titles chosen so far, because "what _else_ should this person search
+for" has no answer without them. That field is the user's own text and reaches
+the prompt as fenced quoted material; no part of it selects a document or names
+a user, which is the property both suggest actions keep. What comes back is
+snapped to the checked-in completion list in
+`apps/dashboard/lib/jobs/role-titles.ts`, so two agents proposing one role under
+two spellings do not become two buttons and two searches.
+
 Import style differs by app and both are correct: the dashboard uses wildcard
 subpaths (`@workspace/agents/cover-letter-writer`,
-`@workspace/agents/profile-extractor`), the worker uses the root barrel.
+`@workspace/agents/profile-extractor`, `@workspace/agents/role-title-suggester`),
+the worker uses the root barrel.
 
 Two invariants the worker enforces, both of which exist because a plausible
 fabrication is worse than an empty result:
@@ -518,9 +544,9 @@ down with it.
 
 ## Where things live
 
-| Package                | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `posting-extractor`, `whiteboard`, plus the schema contracts — `findings` (Scout → Brief Writer), `criteria` (Profile Extractor → whoever stores them) and `stored-posting` (what a `postings.payload` may hold) — and `cover-letter`, `tailored-resume`, `posting-id`, `posted-at`, `job-boards` and `board-fetch` (host → board → actor, the one place the registry meets the tool catalog) |
-| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `page-extract.ts`, `page-extract-apify.ts` and `board-posting.ts` (the fetchers, and none a tool); `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                                                                                                                      |
-| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Package                | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `role-title-suggester`, `posting-extractor`, `whiteboard`, plus the schema contracts — `findings` (Scout → Brief Writer), `criteria` (Profile Extractor → whoever stores them), `role-titles` (Role Title Suggester → the form that renders its buttons) and `stored-posting` (what a `postings.payload` may hold) — and `cover-letter`, `tailored-resume`, `posting-id`, `posted-at`, `job-boards` and `board-fetch` (host → board → actor, the one place the registry meets the tool catalog) |
+| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `page-extract.ts`, `page-extract-apify.ts` and `board-posting.ts` (the fetchers, and none a tool); `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts`; and `index.ts` with `allTools`                                                                                                                                                                                                                                        |
+| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |

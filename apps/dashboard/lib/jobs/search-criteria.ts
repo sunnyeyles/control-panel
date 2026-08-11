@@ -4,6 +4,8 @@ import {
 } from "@workspace/job-search"
 import { z } from "zod"
 
+import { MAX_ROLE_TITLES, splitCriteria } from "./criteria-text"
+
 /**
  * The minimum `jobs.config` a briefing needs in order to run at all.
  *
@@ -32,32 +34,49 @@ import { z } from "zod"
 export const MAX_CRITERIA_ITEMS = 20
 
 /**
- * The split itself, shared by the required and optional lists so the two cannot
- * come to disagree about what "comma separated" means — a field that trimmed
- * differently from its neighbour would be a bug nobody would think to look for.
- *
- * Dropping the empty entries here is what makes `""`, `"   "` and `",,"` all
- * arrive as `[]` rather than as a list of blanks.
- */
-function splitCriteria(value: string): string[] {
-  return value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-}
-
-/**
  * A comma-separated field as the array the worker expects — piped into the
  * *worker's own* field schema, so its bounds cannot drift from the authority.
  *
- * Comma-separated rather than a repeated input because these are short phrases
- * a person types in one go — "senior backend engineer, staff engineer" — and a
- * tag editor is a lot of component for a field that is read once a day.
+ * **Still comma-separated text, now with a completion behind it.** The field
+ * used to be plain: short phrases a person types in one go, and the note here
+ * said a tag editor was a lot of component for something read once a day. That
+ * was right while typing was the only way to fill it. It is no longer the only
+ * way — `components/jobs/schedules/role-title-field.tsx` completes the last
+ * entry against a checked-in list of role titles and offers two rows of
+ * one-click suggestions beside it — and the reason the *storage* shape did not
+ * change with it is worth stating: everything above is a way of producing the
+ * same string, so the posted field, this schema and the Server Action are
+ * untouched by any of it.
+ *
+ * `splitCriteria` moved to `criteria-text.ts` when that happened, because the
+ * client now needs it too and this module cannot be reached from a browser
+ * bundle — it imports `@workspace/job-search`, whose barrel pulls in LangChain.
  */
 const criteriaList = z
   .string()
   .transform(splitCriteria)
   .pipe(JobSearchConfigSchema.shape.titles.max(MAX_CRITERIA_ITEMS))
+
+/**
+ * Role titles, which are capped far lower than everything else.
+ *
+ * The reason is the fan-out, and it is set out on {@link MAX_ROLE_TITLES}: a
+ * run is `titles × locations × boards` searches against a hard model budget,
+ * and a briefing over that budget is cut off mid-sweep and reports what it
+ * managed — successfully, with no error. Locations multiply the same way and
+ * are bounded here only by the paste guard, because the *combination* is what
+ * the form checks: `fitsSearchBudget` gates the submit button, and this is the
+ * half of the rule a direct POST still has to get past.
+ *
+ * ⚠️ **`JobSearchConfigSchema` is deliberately not narrowed to match.** An
+ * existing briefing with five titles keeps running exactly as it did; what it
+ * cannot do is be re-saved from the form without being trimmed first, which the
+ * edit form says out loud.
+ */
+const titleList = z
+  .string()
+  .transform(splitCriteria)
+  .pipe(JobSearchConfigSchema.shape.titles.max(MAX_ROLE_TITLES))
 
 /**
  * The same field where having nothing to say is a legitimate answer.
@@ -82,7 +101,7 @@ const optionalCriteriaList = z
   .pipe(JobSearchConfigSchema.shape.keywords.unwrap().max(MAX_CRITERIA_ITEMS))
 
 export const searchCriteriaSchema = z.object({
-  titles: criteriaList,
+  titles: titleList,
   locations: criteriaList,
   keywords: optionalCriteriaList,
 })

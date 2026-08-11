@@ -1,4 +1,5 @@
 import { CreateBriefingForm } from "@/components/jobs/schedules/create-briefing-form"
+import { EditCriteriaForm } from "@/components/jobs/schedules/edit-criteria-form"
 import { JobEnabledSwitch } from "@/components/jobs/schedules/job-enabled-switch"
 import { JobScheduleForm } from "@/components/jobs/schedules/job-schedule-form"
 import { getPrisma } from "@/lib/db"
@@ -112,6 +113,21 @@ function BriefingCard({ briefing }: { briefing: BriefingSummary }) {
       </div>
 
       <JobScheduleForm briefing={briefing} />
+
+      {/*
+        Absent when `jobs.config` is not a job-search config at all — a row
+        written by hand, or a second kind of briefing arriving later with a
+        config this app has never seen. `toBriefingCriteria` explains why that
+        is a legitimate thing to find rather than a fault, and showing no form
+        is the honest answer: a config this page cannot read is one it must not
+        offer to replace with three text boxes.
+      */}
+      {briefing.criteria ? (
+        <EditCriteriaForm
+          briefingId={briefing.id}
+          criteria={briefing.criteria}
+        />
+      ) : null}
     </div>
   )
 }

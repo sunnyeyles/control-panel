@@ -388,6 +388,25 @@ belongs to the user rather than to the job. Naming no keywords leaves
 the field _absent_ from `config` rather than present and empty, so "never said"
 stays distinguishable from "said none".
 
+**A briefing searches for at most three titles, and the number is arithmetic
+rather than taste.** A run fans out to `titles × locations × boards` searches
+against the **Scout**'s hard model budget, and a config wider than that budget
+does not fail — the scout is routed to `halt` mid-sweep and answers with a
+well-formed **Brief** drawn from part of the search, which is indistinguishable
+from a quiet market. The cap belongs to the form (`MAX_ROLE_TITLES`), not to
+`JobSearchConfigSchema`: a row written before it existed keeps running exactly
+as it did, and simply cannot be re-saved from the form until it is trimmed. The
+form states the search count as it is typed and refuses a combination that would
+be cut short, because the failure it is preventing is invisible afterwards.
+
+Both are **editable after creation** — `updateJobConfig` replaces the whole
+`config`, leaving the name and the cadence alone. Until that existed the
+criteria were write-once and changing a title meant deleting the briefing.
+
+**Say "role title", never "job title".** The word `job` is the schema's and
+means a row in `jobs`; a **Posting**'s title is a role title everywhere in this
+system, including in the UI copy and in identifiers.
+
 The **Profile Extractor** proposes all three, and proposes them **into the
 form**. It writes nothing: a suggestion is a value the fields render, and the row
 is still written by the user pressing Create. That is what makes "the user saw
@@ -489,6 +508,37 @@ the newest **Document** labelled Resume — the same `loadCandidateBackground` a
 persists nothing; see **Search Criteria**.
 _Avoid_: resume parser (which is the text extraction that happens before this
 agent is built), CV reader, profile agent
+
+**Role Title Suggester**:
+The agent that proposes the role titles _adjacent_ to the ones a candidate has
+already chosen — a lateral move into a neighbouring specialism, the same work
+under a different name, the title a **Job Board** uses where the candidate used
+an internal one. Run from **Suggest related titles** on the new-briefing form and
+on a briefing's criteria editor, over the same CV `loadCandidateBackground`
+gives every other agent that reads one.
+
+**Distinct from the Profile Extractor, and neither replaces the other.** The
+extractor answers "what should this person search for" from a blank start and
+proposes whole **Search Criteria**; this answers "what else, given these", and
+its entire value is in the titles the first list does not contain. Its schema
+has one field where the extractor's has three, deliberately — a shared shape
+would let a set of adjacent titles be handed to something expecting complete
+criteria, with the locations it never proposed silently empty.
+
+Tool-less, for the **Profile Extractor**'s reason: it holds one uploaded
+document verbatim, and the upload is itself the injection surface. It has a
+second untrusted input the extractor does not — the titles the user typed — and
+they are fenced separately from the CV, because folding them into the document's
+fence makes them read as text _about_ the candidate rather than as the set the
+answer must avoid, and the agent proposes them straight back.
+
+Its answers are **snapped to the checked-in completion list** where a normalised
+match exists (`canonicalRoleTitle`), so that one role proposed by two agents
+under two spellings does not become two buttons and two searches out of a budget
+of three. An empty list is a legitimate answer, and the form says so in words
+rather than rendering no buttons.
+_Avoid_: title generator, role recommender, job-title agent (see **Search
+Criteria** on why "job title" is never the phrase)
 
 **Job**:
 A thing to run on a cadence, and a row in `jobs` — the Prisma model is `Job`.

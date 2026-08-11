@@ -16,12 +16,15 @@ import { StorageUnavailableError } from "@workspace/user-storage"
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
+  ROLE_TITLES_IDLE,
   SUGGESTION_IDLE,
   type CriteriaSuggestionState,
+  type RoleTitleSuggestionState,
 } from "./criteria-suggestion"
 import {
   createSuggestCriteriaActions,
   EXTRACTION_FAILED,
+  SUGGESTION_FAILED,
 } from "./suggest-criteria-actions"
 
 /**
@@ -120,10 +123,18 @@ interface Harness {
     state: CriteriaSuggestionState,
     formData: FormData
   ) => Promise<CriteriaSuggestionState>
+  suggestTitles: (
+    state: RoleTitleSuggestionState,
+    formData: FormData
+  ) => Promise<RoleTitleSuggestionState>
   resumes: FakeResumes
   extractor: FakeExtractor
+  /** The adjacent-titles suggester, faked the same way. */
+  suggester: FakeExtractor
   /** How many times the factory was called. The spend assertion. */
   extractorBuilds: () => number
+  /** The same assertion for the second agent. */
+  suggesterBuilds: () => number
 }
 
 function harness(
@@ -138,7 +149,10 @@ function harness(
       originalFilename: "alice-cv.md",
     })
   const extractor = new FakeExtractor()
+  const suggester = new FakeExtractor()
+  suggester.reply = JSON.stringify(ADJACENT)
   let builds = 0
+  let suggesterCount = 0
 
   const actions = createSuggestCriteriaActions({
     getUser: async () => options.user ?? SIGNED_IN,
@@ -148,15 +162,35 @@ function harness(
       builds += 1
       return extractor.asAgent()
     },
+    createRoleTitleSuggester: () => {
+      suggesterCount += 1
+      return suggester.asAgent()
+    },
     newResetKey: () => RESET_KEY,
   })
 
   return {
     suggest: actions.suggestCriteria,
+    suggestTitles: actions.suggestRoleTitles,
     resumes,
     extractor,
+    suggester,
     extractorBuilds: () => builds,
+    suggesterBuilds: () => suggesterCount,
   }
+}
+
+/** What a well-behaved adjacent-titles suggester answers with. */
+const ADJACENT = {
+  titles: ["Site Reliability Engineer", "Platform Engineer"],
+  notes: "Both are evidenced by the infrastructure work on the CV.",
+}
+
+/** The titles-so-far field the second action reads, and nothing else. */
+function titlesForm(titles: string): FormData {
+  const data = new FormData()
+  data.append("titles", titles)
+  return data
 }
 
 /**
@@ -171,8 +205,15 @@ function form(): FormData {
   return data
 }
 
-/** Narrowing helper — `message` only exists on the error branch. */
-function messageOf(state: CriteriaSuggestionState): string {
+/**
+ * Narrowing helper — `message` only exists on the error branch.
+ *
+ * Takes either union: the two differ in what a *success* carries and agree
+ * exactly on what a failure does, which is the whole of what this reads.
+ */
+function messageOf(
+  state: CriteriaSuggestionState | RoleTitleSuggestionState
+): string {
   return state.status === "error" ? state.message : ""
 }
 
@@ -299,15 +340,19 @@ describe("suggestCriteria", () => {
   })
 
   describe("a well-formed extraction", () => {
-    it("returns the criteria comma-joined, with the notes alongside", async () => {
+    it("returns locations and keywords comma-joined, and titles as a list", async () => {
       const result = await subject.suggest(SUGGESTION_IDLE, form())
 
       expect(result).toEqual({
         status: "success",
         criteria: {
-          // Comma-joined because that is what the form fields take, and what
+          // ⚠️ A list, where its neighbours are joined. These are rendered as
+          // one button per title rather than written into the field — see
+          // `SuggestedCriteria` — so joining here would only mean splitting
+          // again in the component.
+          titles: ["Senior Backend Engineer", "Staff Engineer"],
+          // Comma-joined because that is what those fields take, and what
           // `searchCriteriaSchema` parses on the way back in.
-          titles: "Senior Backend Engineer, Staff Engineer",
           locations: "Sydney",
           keywords: "TypeScript, Go, Terraform, AWS",
         },
@@ -340,7 +385,7 @@ describe("suggestCriteria", () => {
 
       expect(result).toEqual({
         status: "success",
-        criteria: { titles: "Backend Engineer", locations: "", keywords: "" },
+        criteria: { titles: ["Backend Engineer"], locations: "", keywords: "" },
         resetKey: RESET_KEY,
       })
       // Absent rather than empty: the form branches on the field being there,
@@ -472,7 +517,7 @@ describe("suggestCriteria", () => {
       // moment they are being told to try again.
       const previous: CriteriaSuggestionState = {
         status: "success",
-        criteria: { titles: "Backend Engineer", locations: "", keywords: "" },
+        criteria: { titles: ["Backend Engineer"], locations: "", keywords: "" },
         resetKey: RESET_KEY,
       }
 
@@ -481,6 +526,225 @@ describe("suggestCriteria", () => {
       const result = await subject.suggest(previous, form())
 
       expect(result).toEqual({ status: "error", message: EXTRACTION_FAILED })
+      expect("resetKey" in result).toBe(false)
+    })
+  })
+})
+
+/**
+ * The adjacent-titles suggestion, which shares every refusal with its neighbour
+ * above and differs in exactly three places worth testing: it reads a form
+ * field, it snaps what comes back to the checked-in list, and it will not
+ * propose a title the user already has.
+ *
+ * The refusal ladder is not re-tested exhaustively here — it is the same code
+ * path, asserted above — but the two that would be *silently* expensive to get
+ * wrong are: an anonymous caller, and a caller with no CV. Both must cost no
+ * model call.
+ */
+describe("suggestRoleTitles", () => {
+  describe("who is asking", () => {
+    it("refuses an anonymous caller and builds no suggester", async () => {
+      subject = harness({ user: ANONYMOUS })
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("Backend Engineer")
+      )
+
+      expect(result).toEqual({ status: "error", message: NOT_AUTHORIZED })
+      expect(subject.suggesterBuilds()).toBe(0)
+    })
+
+    it("costs no model call when there is no resume to read", async () => {
+      subject = harness({ resumes: new FakeResumes(CV, NOW) })
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("")
+      )
+
+      expect(messageOf(result)).toContain("No resume")
+      expect(subject.suggesterBuilds()).toBe(0)
+    })
+  })
+
+  describe("what reaches the model", () => {
+    it("carries the CV verbatim and the titles already chosen", async () => {
+      await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("Backend Engineer, Data Engineer")
+      )
+
+      const prompt = subject.suggester.prompts[0] ?? ""
+
+      expect(prompt).toContain(CV)
+      expect(prompt).toContain("Backend Engineer")
+      expect(prompt).toContain("Data Engineer")
+    })
+
+    /**
+     * The one place this action reads a field, and it is split by the same
+     * function the create action parses it with — so what the model is told not
+     * to repeat is exactly what the form will submit.
+     */
+    it("splits the chosen titles the way the create action will", async () => {
+      await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm(" Backend Engineer ,, Data Engineer , ")
+      )
+
+      const prompt = subject.suggester.prompts[0] ?? ""
+
+      expect(prompt).toContain("Backend Engineer\nData Engineer")
+    })
+
+    it("says so in words when no title has been chosen yet", async () => {
+      await subject.suggestTitles(ROLE_TITLES_IDLE, titlesForm(""))
+
+      expect(subject.suggester.prompts[0] ?? "").toMatch(/none yet/i)
+    })
+
+    it("names the run and carries the Langfuse identifiers", async () => {
+      await subject.suggestTitles(ROLE_TITLES_IDLE, titlesForm(""))
+
+      const config = subject.suggester.configs[0] as {
+        runName?: string
+        metadata?: Record<string, unknown>
+      }
+
+      expect(config.runName).toBe("role-titles")
+      expect(config.metadata?.langfuseUserId).toBe(USER_ID)
+    })
+  })
+
+  describe("what comes back", () => {
+    it("returns the titles with the notes alongside", async () => {
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("Backend Engineer")
+      )
+
+      expect(result).toEqual({
+        status: "success",
+        titles: ["Site Reliability Engineer", "Platform Engineer"],
+        notes: ADJACENT.notes,
+      })
+    })
+
+    /**
+     * ⚠️ **The dedupe that pays for itself.** A briefing may hold three role
+     * titles; a suggestion the user already has, offered as a button, spends
+     * one of those three on a second search for the same advertisements. The
+     * model is asked not to do it and mostly does not — "mostly" being the
+     * wrong standard for something whose cost is a third of the search.
+     */
+    it("drops a title the user already has, however it is spelled", async () => {
+      subject.suggester.reply = JSON.stringify({
+        titles: ["backend engineer", "Full-Stack Developer", "Data Engineer"],
+      })
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("Backend Engineer, Full Stack Developer")
+      )
+
+      expect(result).toEqual({
+        status: "success",
+        titles: ["Data Engineer"],
+      })
+    })
+
+    /**
+     * Two agents propose role titles into this form and nothing constrains them
+     * to one vocabulary. Snapping to the checked-in list is what stops one role
+     * arriving as two buttons.
+     */
+    it("snaps a suggestion to the spelling the completion list uses", async () => {
+      subject.suggester.reply = JSON.stringify({
+        titles: ["full-stack developer", "SITE RELIABILITY ENGINEER"],
+      })
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("")
+      )
+
+      expect(result).toEqual({
+        status: "success",
+        titles: ["Full Stack Developer", "Site Reliability Engineer"],
+      })
+    })
+
+    /** A title no family covers is the list being incomplete, not an error. */
+    it("keeps a title the list has never heard of", async () => {
+      subject.suggester.reply = JSON.stringify({
+        titles: ["Staff Platform Engineer (Payments)"],
+      })
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("")
+      )
+
+      expect(result).toEqual({
+        status: "success",
+        titles: ["Staff Platform Engineer (Payments)"],
+      })
+    })
+
+    /**
+     * An empty list is a real answer — a candidate with the right title already
+     * chosen has no adjacent role worth a third of their search budget. It must
+     * not be turned into an error, and the form says so in words beside it.
+     */
+    it("accepts an empty list as a success", async () => {
+      subject.suggester.reply = JSON.stringify({
+        titles: [],
+        notes: "Nothing adjacent that the CV supports.",
+      })
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("Backend Engineer")
+      )
+
+      expect(result).toEqual({
+        status: "success",
+        titles: [],
+        notes: "Nothing adjacent that the CV supports.",
+      })
+    })
+
+    it("omits absent notes rather than sending an empty string", async () => {
+      subject.suggester.reply = JSON.stringify({ titles: ["Data Engineer"] })
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("")
+      )
+
+      expect("notes" in result).toBe(false)
+    })
+
+    it("reports its own failure sentence when the reply is not JSON", async () => {
+      subject.suggester.reply = "Here are some ideas:"
+
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("")
+      )
+
+      expect(result).toEqual({ status: "error", message: SUGGESTION_FAILED })
+    })
+
+    /** No reset key on any branch — nothing here is written into a field. */
+    it("never carries a reset key", async () => {
+      const result = await subject.suggestTitles(
+        ROLE_TITLES_IDLE,
+        titlesForm("")
+      )
+
       expect("resetKey" in result).toBe(false)
     })
   })

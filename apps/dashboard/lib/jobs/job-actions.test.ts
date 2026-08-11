@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { IDLE, type ActionState } from "@/lib/actions/action-state"
 import { NOT_AUTHORIZED } from "@/lib/actions/require-user"
+import { MAX_ROLE_TITLES } from "./criteria-text"
 import { createJobActions } from "./job-actions"
 import { MAX_CRITERIA_ITEMS } from "./search-criteria"
 
@@ -38,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   createJob: vi.fn(),
   pauseJob: vi.fn(),
   resumeJob: vi.fn(),
+  updateJobConfig: vi.fn(),
   updateJobSchedule: vi.fn(),
 }))
 
@@ -48,6 +50,7 @@ vi.mock("@workspace/db", async (importOriginal) => {
     createJob: mocks.createJob,
     pauseJob: mocks.pauseJob,
     resumeJob: mocks.resumeJob,
+    updateJobConfig: mocks.updateJobConfig,
     updateJobSchedule: mocks.updateJobSchedule,
   }
 })
@@ -78,11 +81,13 @@ class SpyDb {
     timezone?: string | undefined
   }[] = []
   readonly creates: NewJob[] = []
+  readonly configUpdates: { id: string; config: unknown }[] = []
 
   pauseError: unknown
   resumeError: unknown
   updateError: unknown
   createError: unknown
+  configError: unknown
 
   seed(row: Job): this {
     this.rows.set(row.id, row)
@@ -94,7 +99,8 @@ class SpyDb {
       this.pauses.length +
       this.resumes.length +
       this.scheduleUpdates.length +
-      this.creates.length
+      this.creates.length +
+      this.configUpdates.length
     )
   }
 
@@ -135,6 +141,16 @@ class SpyDb {
         if (!row) return undefined
         this.scheduleUpdates.push({ id, ...schedule })
         return { ...row, scheduleCron: schedule.cron }
+      }
+    )
+
+    mocks.updateJobConfig.mockImplementation(
+      async (_prisma, id: string, config: unknown) => {
+        if (this.configError) throw this.configError
+        const row = this.rows.get(id)
+        if (!row) return undefined
+        this.configUpdates.push({ id, config })
+        return { ...row, config: config as Job["config"] }
       }
     )
 
@@ -192,12 +208,25 @@ const createForm = (overrides: Record<string, string> = {}) =>
     ...overrides,
   })
 
+const criteriaForm = (overrides: Record<string, string> = {}) =>
+  form({
+    jobId: JOB_ID,
+    titles: "senior backend engineer, staff engineer",
+    locations: "Sydney, Remote (Australia)",
+    ...overrides,
+  })
+
+/** `n` distinct entries as one comma-separated field. */
+const list = (n: number) =>
+  Array.from({ length: n }, (_, index) => `entry ${index}`).join(", ")
+
 describe("the gate", () => {
   it("refuses an anonymous caller without touching the store", async () => {
     const actions = actionsFor(ANONYMOUS)
 
     await actions.setJobEnabled(IDLE, enableForm(false))
     await actions.updateJobSchedule(IDLE, scheduleForm())
+    await actions.updateJobCriteria(IDLE, criteriaForm())
     await actions.createJob(IDLE, createForm())
 
     expect(store.mutations).toBe(0)
@@ -549,6 +578,214 @@ describe("createJob", () => {
     const result = await actionsFor(SIGNED_IN).createJob(IDLE, createForm())
 
     expect(result.status === "success" && result.resetKey).toBe(JOB_ID)
+  })
+})
+
+/**
+ * Changing what an existing briefing searches for.
+ *
+ * The refusals it shares with `createJob` — the caps, the budget — live in
+ * `readCriteria` and are asserted once over there and once here, because the
+ * property worth defending is that the two forms refuse the *same* things: a
+ * config the edit form accepted and the create form did not would be a briefing
+ * a user can reach one way and not the other, for no reason they could
+ * discover.
+ */
+describe("updateJobCriteria", () => {
+  it("replaces the config and leaves the cadence alone", async () => {
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm()
+    )
+
+    expect(result.status).toBe("success")
+    expect(store.configUpdates).toEqual([
+      {
+        id: JOB_ID,
+        config: {
+          titles: ["senior backend engineer", "staff engineer"],
+          locations: ["Sydney", "Remote (Australia)"],
+        },
+      },
+    ])
+    // Editing what a briefing searches for is not a reason to move when it next
+    // runs, and `updateJobConfig` touches no schedule column.
+    expect(store.scheduleUpdates).toHaveLength(0)
+  })
+
+  it("refuses a briefing owned by someone else", async () => {
+    store.seed(job({ userId: OTHER_USER_ID }))
+
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm()
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.configUpdates).toHaveLength(0)
+  })
+
+  it("rejects a jobId that is not a uuid before querying", async () => {
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm({ jobId: "../../etc/passwd" })
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.configUpdates).toHaveLength(0)
+  })
+
+  /**
+   * Ownership is checked *before* the criteria are validated in neither
+   * direction on purpose — what matters is that a caller who fails either check
+   * writes nothing. This is the case where the criteria are fine and the owner
+   * is not.
+   */
+  it("writes nothing when the criteria are valid but the briefing is not the caller's", async () => {
+    store.rows.clear()
+
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm()
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.mutations).toBe(0)
+  })
+
+  it("omits keywords from the config rather than writing an empty list", async () => {
+    await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm({ keywords: "  ,  " })
+    )
+
+    expect(store.configUpdates[0]?.config).not.toHaveProperty("keywords")
+  })
+
+  it("writes keywords when there are some", async () => {
+    await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm({ keywords: "TypeScript, AWS" })
+    )
+
+    expect(store.configUpdates[0]?.config).toMatchObject({
+      keywords: ["TypeScript", "AWS"],
+    })
+  })
+
+  /**
+   * ⚠️ **The half a disabled button cannot cover.** Every client-side guard in
+   * this feature is reachable around by posting the form directly, and the
+   * failure it prevents is silent — a briefing over the scout's budget still
+   * runs and still produces a well-formed brief, drawn from part of the search.
+   */
+  it("refuses more titles than the cap, and names the reason", async () => {
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm({ titles: list(MAX_ROLE_TITLES + 1) })
+    )
+
+    expect(result.status).toBe("error")
+    expect(result).toMatchObject({
+      message: expect.stringContaining(String(MAX_ROLE_TITLES)),
+    })
+    expect(store.configUpdates).toHaveLength(0)
+  })
+
+  it("refuses a combination that is within both caps and still too wide", async () => {
+    // Three titles is fine and four locations is fine; together they are a
+    // sweep the scout is routed to `halt` partway through.
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm({ titles: list(3), locations: list(4) })
+    )
+
+    expect(result.status).toBe("error")
+    expect(result).toMatchObject({
+      message: expect.stringContaining("too wide"),
+    })
+    expect(store.configUpdates).toHaveLength(0)
+  })
+
+  it("accepts the widest combination that does fit", async () => {
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm({ titles: list(3), locations: list(3) })
+    )
+
+    expect(result.status).toBe("success")
+  })
+
+  it("still requires a title and a location", async () => {
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm({ titles: " , " })
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.configUpdates).toHaveLength(0)
+  })
+
+  it("turns a store failure into a message rather than a throw", async () => {
+    store.configError = new Error("neon is asleep")
+
+    const result = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm()
+    )
+
+    expect(result.status).toBe("error")
+  })
+
+  /**
+   * The key is the briefing's own id and therefore never changes. A form that
+   * keys on it does not remount on save — which is what it must not do, since
+   * remounting would blank the fields that were just saved and rebuild them
+   * from a server render that has not landed yet.
+   */
+  it("answers with a constant reset key", async () => {
+    const first = await actionsFor(SIGNED_IN).updateJobCriteria(
+      IDLE,
+      criteriaForm()
+    )
+    const second = await actionsFor(SIGNED_IN).updateJobCriteria(
+      first,
+      criteriaForm({ locations: "Melbourne" })
+    )
+
+    expect(first).toMatchObject({ status: "success", resetKey: JOB_ID })
+    expect(second).toMatchObject({ status: "success", resetKey: JOB_ID })
+  })
+})
+
+/**
+ * The create side of the shared `readCriteria`. Asserted here as well as under
+ * `updateJobCriteria`, because "the two forms refuse the same things" is the
+ * property, and a test that only ever exercised one of them would not see it
+ * break.
+ */
+describe("createJob and the shared criteria rules", () => {
+  it("refuses more titles than the cap", async () => {
+    const result = await actionsFor(SIGNED_IN).createJob(
+      IDLE,
+      createForm({ titles: list(MAX_ROLE_TITLES + 1) })
+    )
+
+    expect(result.status).toBe("error")
+    expect(store.creates).toHaveLength(0)
+  })
+
+  it("refuses a combination too wide for the scout to finish", async () => {
+    const result = await actionsFor(SIGNED_IN).createJob(
+      IDLE,
+      createForm({ titles: list(3), locations: list(4) })
+    )
+
+    expect(result).toMatchObject({
+      status: "error",
+      message: expect.stringContaining("too wide"),
+    })
+    expect(store.creates).toHaveLength(0)
   })
 })
 

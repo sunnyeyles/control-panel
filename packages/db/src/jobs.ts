@@ -185,6 +185,46 @@ export async function updateJobSchedule(
   return findJob(prisma, id)
 }
 
+/**
+ * Replace a job's `config`, leaving its cadence and its name alone.
+ *
+ * **A replacement rather than a patch**, in the same spirit as
+ * `savePostingFilters`: what arrives is the config, not a change to it. A merge
+ * would make removing a field impossible to express through this function,
+ * which is the operation an edit form performs most often — dropping the third
+ * role title is exactly a config with one fewer entry.
+ *
+ * ⚠️ **`config` is opaque here and must stay that way.** `@workspace/db` stores
+ * the column and never reads inside it, so the interpretation belongs to
+ * whatever runs the job — `JobSearchConfigSchema` in `@workspace/job-search`
+ * today, and something else entirely for a second kind of job later. Validating
+ * against a job-search shape in this function would be the migration that
+ * package exists to avoid.
+ *
+ * Ownership is the caller's, as it is for every helper in this file: a
+ * `jobs.id` addresses any row in the table, and {@link findJob}'s docblock sets
+ * out why the check lives in the dashboard's `requireOwnedJob` instead.
+ *
+ * `next_run_at` is untouched, so a paused briefing stays paused and a scheduled
+ * one keeps the occurrence it was already waiting for — editing what a briefing
+ * searches for is not a reason to move when it next runs.
+ */
+export async function updateJobConfig(
+  prisma: DbClient,
+  id: string,
+  config: JobConfig
+): Promise<Job | undefined> {
+  try {
+    return await prisma.job.update({
+      where: { id },
+      data: { config: config as Prisma.InputJsonValue },
+    })
+  } catch (error) {
+    if (isNotFound(error)) return undefined
+    throw error
+  }
+}
+
 /** Take a job off duty — `next_run_at = NULL`. */
 export async function pauseJob(
   prisma: DbClient,

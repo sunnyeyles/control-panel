@@ -8,12 +8,15 @@ import {
   isUniqueViolation,
   pauseJob,
   resumeJob,
+  updateJobConfig,
   updateJobSchedule,
   type Job,
   type PrismaClient,
 } from "@workspace/db"
+import type { JobSearchConfig } from "@workspace/job-search"
 import { z } from "zod"
 
+import { fitsSearchBudget, MAX_ROLE_TITLES } from "./criteria-text"
 import {
   isIntervalHours,
   SCHEDULE_TIMEZONE,
@@ -102,6 +105,122 @@ function readIntervalHours(
   const hours = Number(raw.trim())
 
   return isIntervalHours(hours) ? hours : undefined
+}
+
+/** The three criteria fields as a `jobs.config`, or the sentence to show. */
+type CriteriaRead =
+  { ok: true; config: JobSearchConfig } | { ok: false; message: string }
+
+/**
+ * The three criteria fields, parsed once for both the create and the edit form.
+ *
+ * Shared because the two post an identical set of fields and must refuse an
+ * identical set of things: a config the edit form would accept and the create
+ * form would not is a briefing a user can reach one way and not the other, for
+ * no reason they could discover.
+ */
+function readCriteria(formData: FormData): CriteriaRead {
+  const criteria = searchCriteriaSchema.safeParse({
+    titles: formData.get("titles"),
+    locations: formData.get("locations"),
+    // Posted by the form as `""` when the user typed nothing, and absent
+    // entirely — so `null` — when this action is called by something older than
+    // the field. Both mean "none"; neither is a failure. See
+    // `optionalCriteriaList` in ./search-criteria.
+    keywords: formData.get("keywords"),
+  })
+
+  // Titles and locations are not optional: the worker's `JobSearchConfigSchema`
+  // requires both, so a job created without them would claim its first slot and
+  // then fail to read its own config.
+  //
+  // ⚠️ **Two of the three optional-ish fields can reach here too**, and
+  // answering either with the generic sentence would name the wrong field.
+  // Optional means "may be empty", not "unbounded" — and the title cap is not
+  // about paste size at all.
+  if (!criteria.success) {
+    // ⚠️ **A field is named only when it is the *only* thing wrong.** Asking
+    // whether it merely appears among the issues gets the common case right and
+    // the overlapping one backwards: a submit that fails on an empty `titles`
+    // *and* an over-cap `keywords` would be answered with the keyword sentence,
+    // so the user trims the list, submits again, and only then learns about the
+    // field that was blocking them all along. One failure, two round trips, and
+    // the first message named a field that was not the obstacle.
+    const failed = new Set(criteria.error.issues.map((issue) => issue.path[0]))
+    const only = (field: string) => failed.size === 1 && failed.has(field)
+
+    // The case that hits the keyword cap is not a typist — it is **Suggest from
+    // my resume** on a CV naming more technologies than the cap allows, which
+    // fills the box and then fails on a submit the user has no reason to
+    // connect to it.
+    if (only("keywords")) {
+      return {
+        ok: false,
+        message: `That is more than ${MAX_CRITERIA_ITEMS} keywords. Keep the list to the technologies that matter most for the roles you want — a longer one does not search harder.`,
+      }
+    }
+
+    // Reachable only by posting the form directly — the field disables its own
+    // submit at the cap — so the sentence explains the *reason* rather than
+    // pointing at a control. See `MAX_ROLE_TITLES`.
+    if (only("titles")) {
+      return {
+        ok: false,
+        message: `A briefing searches for at most ${MAX_ROLE_TITLES} role titles. Every title is a separate search of every board, and a wider sweep than that is cut short rather than run. Split the rest into a second briefing.`,
+      }
+    }
+
+    return {
+      ok: false,
+      message: "Add at least one role title and one location.",
+    }
+  }
+
+  // ⚠️ **The combination, not either field alone.** Three titles is fine and
+  // four locations is fine; together they are a sweep the scout is routed to
+  // `halt` partway through, which still produces a well-formed brief covering
+  // less than it was asked to. That failure is invisible from the outside,
+  // which is why it is refused here rather than warned about.
+  if (
+    !fitsSearchBudget(
+      criteria.data.titles.length,
+      criteria.data.locations.length
+    )
+  ) {
+    return {
+      ok: false,
+      message:
+        "That is too wide to search in one briefing — every role title is searched in every location, on every board. Remove a title or a location, or split this into two briefings.",
+    }
+  }
+
+  /**
+   * No keywords means the field is *absent* from `config`, not present and
+   * empty.
+   *
+   * The worker accepts `keywords: []` happily, so this is not about validation.
+   * It is about what the row says: an absent field and an empty one should not
+   * both have to mean "none", and a stored `[]` reads as a choice the user made
+   * — someone (or something) having decided this briefing should match on no
+   * technologies in particular. Leaving the key out keeps "never said"
+   * distinguishable from "said none", which is the only form the question can
+   * be asked in later.
+   */
+  const { keywords, ...requiredCriteria } = criteria.data
+
+  // `optionalCriteriaList` pipes to a plain `z.array(...)`, so this is always a
+  // `string[]` — an unfilled field arrives as `[]`, never as `undefined`.
+  // Spelling the test `.length > 0` rather than `?.length` says that: an
+  // optional chain here would imply an absent case the type forbids, and would
+  // keep working if the schema ever grew one, which is precisely the change
+  // that should fail loudly instead.
+  return {
+    ok: true,
+    config:
+      keywords.length > 0
+        ? { ...requiredCriteria, keywords }
+        : requiredCriteria,
+  }
 }
 
 export function createJobActions(deps: JobActionsDeps) {
@@ -214,75 +333,13 @@ export function createJobActions(deps: JobActionsDeps) {
 
     if (!parsed.success) return fail("Give the briefing a name.")
 
-    const criteria = searchCriteriaSchema.safeParse({
-      titles: formData.get("titles"),
-      locations: formData.get("locations"),
-      // Posted by the form as `""` when the user typed nothing, and absent
-      // entirely — so `null` — when this action is called by something older
-      // than the field. Both mean "none"; neither is a failure. See
-      // `optionalCriteriaList` in ./search-criteria.
-      keywords: formData.get("keywords"),
-    })
-
-    // Not optional: the worker's `JobSearchConfigSchema` requires both, so a
-    // job created without them would claim its first slot and then fail to read
-    // its own config.
-    //
-    // ⚠️ **Keywords can reach here too, despite being optional**, and answering
-    // that with the sentence below would be a message about the wrong field.
-    // Optional means "may be empty", not "unbounded": `optionalCriteriaList`
-    // still caps the list, and the case that hits the cap is not a typist — it
-    // is **Suggest from my resume** on a CV that names more technologies than
-    // the cap allows, which fills the box and then fails on a submit the user
-    // has no reason to connect to it. So the failing field is named, and the
-    // two sentences say different things to do.
-    if (!criteria.success) {
-      // ⚠️ **Keywords is named only when it is the *only* thing wrong.** Asking
-      // whether keywords merely appears among the issues gets the common case
-      // right and the overlapping one backwards: a submit that fails on an
-      // empty `titles` *and* an over-cap `keywords` would be answered with the
-      // keyword sentence, so the user trims the list, submits again, and only
-      // then learns about the field that was blocking them all along. One
-      // failure, two round trips, and the first message named a field that was
-      // not the obstacle.
-      const failed = new Set(
-        criteria.error.issues.map((issue) => issue.path[0])
-      )
-      const keywordsAlone = failed.size === 1 && failed.has("keywords")
-
-      return fail(
-        keywordsAlone
-          ? `That is more than ${MAX_CRITERIA_ITEMS} keywords. Keep the list to the technologies that matter most for the roles you want — a longer one does not search harder.`
-          : "Add at least one role title and one location."
-      )
-    }
+    const criteria = readCriteria(formData)
+    if (!criteria.ok) return fail(criteria.message)
 
     if (!hours) return fail(INVALID_INTERVAL)
 
     const { name } = parsed.data
-
-    /**
-     * No keywords means the field is *absent* from `config`, not present and
-     * empty.
-     *
-     * The worker accepts `keywords: []` happily, so this is not about
-     * validation. It is about what the row says: an absent field and an empty
-     * one should not both have to mean "none", and a stored `[]` reads as a
-     * choice the user made — someone (or something) having decided this
-     * briefing should match on no technologies in particular. Leaving the key
-     * out keeps "never said" distinguishable from "said none", which is the
-     * only form the question can be asked in later.
-     */
-    const { keywords, ...requiredCriteria } = criteria.data
-
-    // `optionalCriteriaList` pipes to a plain `z.array(...)`, so this is always
-    // a `string[]` — an unfilled field arrives as `[]`, never as `undefined`.
-    // Spelling the test `.length > 0` rather than `?.length` says that: an
-    // optional chain here would imply an absent case the type forbids, and
-    // would keep working if the schema ever grew one, which is precisely the
-    // change that should fail loudly instead.
-    const config =
-      keywords.length > 0 ? { ...requiredCriteria, keywords } : requiredCriteria
+    const { config } = criteria
 
     let job: Job
 
@@ -310,9 +367,70 @@ export function createJobActions(deps: JobActionsDeps) {
     }
   }
 
+  /**
+   * Change what an existing briefing searches for.
+   *
+   * The criteria were write-once until this existed: the card showed a name, a
+   * switch and a cadence, and changing a role title meant deleting the briefing
+   * and building another — losing its name, its schedule and the fact that it
+   * had been running. That was tolerable while the fields were three text boxes
+   * typed once; it stopped being tolerable the moment the point of the feature
+   * became *tuning* them after reading a thin brief.
+   *
+   * ⚠️ **Its `resetKey` is the job's id, and is therefore constant.** The
+   * shared union requires the field on success, and every other action here
+   * mints a fresh uuid because theirs is a form that should return to a blank
+   * state. This one is an edit form over stored values: a changing key would
+   * remount it and discard the very fields that were just saved, rebuilding
+   * them from a server render that has not landed yet — the row flickering back
+   * to its old titles for as long as the `refresh()` in the wrapper takes. A
+   * constant makes that impossible whether the form keys on it or not.
+   * `carryResetKey` still holds the previous key through a failure, so a
+   * rejected save leaves what the user typed alone.
+   */
+  async function updateJobCriteriaAction(
+    state: ActionState,
+    formData: FormData
+  ): Promise<ActionState> {
+    const fail = (message: string) => carryResetKey(state, message)
+
+    const caller = await requireCaller()
+    if (!caller.ok) return fail(caller.message)
+
+    const parsed = scheduleSchema.safeParse({ jobId: formData.get("jobId") })
+    if (!parsed.success) return fail(NOT_FOUND)
+
+    const criteria = readCriteria(formData)
+    if (!criteria.ok) return fail(criteria.message)
+
+    const prisma = deps.getPrisma()
+
+    // Ownership before the write, and from the session rather than the form.
+    // `updateJobConfig` addresses any row in the table by id, exactly as every
+    // other helper in `@workspace/db` does — this is the check that makes a
+    // uuid in a form harmless.
+    const job = await requireOwnedJob(prisma, parsed.data.jobId, caller.userId)
+    if (!job) return fail(NOT_FOUND)
+
+    try {
+      const updated = await updateJobConfig(prisma, job.id, criteria.config)
+
+      if (!updated) return fail(NOT_FOUND)
+    } catch (error) {
+      return fail(storeMessage("update", error))
+    }
+
+    return {
+      status: "success",
+      message: "Search criteria saved.",
+      resetKey: job.id,
+    }
+  }
+
   return {
     setJobEnabled,
     updateJobSchedule: updateJobScheduleAction,
+    updateJobCriteria: updateJobCriteriaAction,
     createJob: createJobAction,
   }
 }
