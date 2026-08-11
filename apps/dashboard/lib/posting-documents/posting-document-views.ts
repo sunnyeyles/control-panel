@@ -1,7 +1,7 @@
 import { isUserStorageError } from "@workspace/user-storage"
 
 /**
- * The read both Posting-Document row modules are built on: everything this
+ * The read both Posting-Document view modules are built on: everything this
  * user has of one kind, in one request, with one error policy.
  *
  * ⚠️ **One `ListObjectsV2`, not one `HeadObject` per visible Posting.** The
@@ -48,7 +48,7 @@ export async function listPostingDocuments<T>(
 }
 
 /**
- * The rows for one page of Postings, out of everything the listing found.
+ * The views for one page of Postings, out of everything the listing found.
  *
  * ⚠️ **Filtered to the ids being rendered**, so the array crossing the RSC
  * boundary stays bounded by the page size however much someone has generated,
@@ -58,12 +58,12 @@ export async function listPostingDocuments<T>(
  * network, and separating it from the listing is what lets the listing start
  * without waiting for the postings query.
  */
-export function postingDocumentRowsFor<T extends { postingId: string }, Row>(
+export function postingDocumentViewsFor<T extends { postingId: string }, View>(
   listed: readonly T[],
   postingIds: readonly string[],
-  toRow: (item: T) => Row
-): Row[] {
+  toView: (item: T) => View
+): View[] {
   const visible = new Set(postingIds)
 
-  return listed.filter((item) => visible.has(item.postingId)).map(toRow)
+  return listed.filter((item) => visible.has(item.postingId)).map(toView)
 }
