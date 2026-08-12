@@ -85,17 +85,12 @@ export function PostingAdvertisementDetail({
 }) {
   if (detail.status === "loading") {
     /*
-      ⚠️ **The real section scaffolding, not three bars in a box.** What lands
-      here is two or three headed sections separated by the parent's `gap-5`;
-      three bare `gap-2` bars were roughly half that height, so the panel grew
-      under the reader's cursor every time a row was expanded. Only the two
-      sections that always render are reserved — "From the advertisement" is
-      conditional on the advertisement having highlights, so reserving it would
-      be wrong whenever it did not.
-
-      The headings are the real words rather than placeholders: they are static,
-      they are what arrives, and a grey bar where a heading goes is a second
-      thing to move.
+      ⚠️ **The real section scaffolding, not three bars in a box.** Three bare
+      `gap-2` bars were roughly half the height of the headed sections that
+      land, so the panel grew under the reader's cursor on every expand. Only
+      the two sections that always render are reserved; "From the
+      advertisement" is conditional on highlights. The headings are the real
+      words — a grey bar where a heading goes is a second thing to move.
     */
     return (
       <>
@@ -147,11 +142,9 @@ export function PostingAdvertisementDetail({
       </PostingDetailSection>
 
       {/*
-        ⚠️ **The advertisement's own words, and absent is the ordinary case.**
-        Whoever produced this Posting was instructed to copy the phrase or leave
-        the field out — never to read a number of years off the seniority in the
-        title — so most advertisements have none, and a row showing nothing here
-        is a row whose advertisement said nothing. See `findings.ts`, and
+        ⚠️ The advertisement's own words, and absent is the ordinary case: the
+        producer copies the phrase or leaves the field out, never inferring
+        years from the seniority in the title. See `findings.ts`, and
         `experience.ts` for the one path with no model behind it.
       */}
       {view.experience ? (
@@ -166,10 +159,9 @@ export function PostingAdvertisementDetail({
         <PostingDetailSection title="From the advertisement">
           <ul className="list-disc pl-5 text-sm whitespace-normal text-muted-foreground">
             {/*
-              Keyed by position, not by the line itself: highlights are copied
-              from an advertisement and two identical bullets are a thing an
-              advertisement does. The list is never reordered or filtered, so an
-              index is a stable key here.
+              Keyed by position, not by the line: two identical bullets are a
+              thing an advertisement does, and the list is never reordered or
+              filtered, so an index is stable here.
             */}
             {view.highlights.map((highlight, index) => (
               <li key={`${postingId}-${index}`}>{highlight}</li>
@@ -179,10 +171,9 @@ export function PostingAdvertisementDetail({
       ) : null}
 
       {/*
-        Absent for a Posting the user added by pasting its link: it was matched
-        against no criteria, so there is nothing for this section to say. Left
-        out entirely rather than filled with a sentence somebody would have had
-        to invent — see `StoredPostingSchema`.
+        Absent for a Posting added by pasting a link: it was matched against no
+        criteria, so the section is left out rather than filled with an invented
+        sentence. See `StoredPostingSchema`.
       */}
       {view.matchReason ? (
         <PostingDetailSection title="Why it matched">

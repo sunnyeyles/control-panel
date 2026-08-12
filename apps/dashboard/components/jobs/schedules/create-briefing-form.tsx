@@ -40,20 +40,15 @@ const NOTHING_SUGGESTED: SuggestedCriteria = {
 /**
  * Create a briefing, optionally starting from what a resume says.
  *
- * **Only the create action lives here; the draft below it owns the
- * suggestions.** The split is what makes one `key` do all the resetting. A
- * successful create remounts {@link BriefingDraft} wholesale, which discards
- * both suggestions along with every field — because after a briefing has been
- * created the previous CV reading is spent, and leaving it in the boxes would
- * offer the criteria that were *just* saved as the starting point for the next
- * briefing. Keeping `createState` out here is what lets that remount happen
- * without also throwing away the success message that says the briefing was
- * created.
+ * **Only the create action lives here; the draft below owns the suggestions.**
+ * That split is what makes one `key` do all the resetting: a successful create
+ * remounts {@link BriefingDraft} wholesale, discarding the spent CV reading
+ * along with every field, while `createState` stays out here so the success
+ * message survives the remount.
  *
- * An error state carries the previous key forward — see `carryResetKey` — so
- * this key holds still through a failure. Keying on `status === "success"`
- * instead would remount everything and discard what the user typed, at the exact
- * moment they are being told to fix one field of it.
+ * ⚠️ An error state carries the previous key forward — see `carryResetKey` — so
+ * the key holds still through a failure. Keying on `status === "success"` would
+ * discard what the user typed at the moment they are told to fix one field.
  */
 export function CreateBriefingForm() {
   const [createState, createAction, creating] = useActionState(
@@ -80,21 +75,15 @@ export function CreateBriefingForm() {
 /**
  * One unsaved briefing: the two suggest buttons, and the fields they fill.
  *
- * **The suggestion hooks live here rather than in the parent, and that
- * placement is the whole reset story.** Everything this component holds — the
- * suggested criteria, the suggested titles, the name, the interval — is exactly
- * what a successful create should clear, so being remounted by the parent's
- * `key` clears all of it at once, with no effect and no third piece of state
- * tracking whether a suggestion has been spent.
+ * The suggestion hooks live here, not in the parent: everything this component
+ * holds is exactly what a successful create should clear, so the parent's `key`
+ * clears all of it at once with no effect and no "suggestion spent" flag.
  *
- * **A suggestion is a value the fields are rendered *from*, not something that
- * happens *to* them.** So it has to be readable during the render that produces
- * them, which is why the buttons are not pushed further down into a child: the
- * suggested values would then arrive in that child and have to be handed
- * upwards, and the only way to do that is a `setState` inside an effect — which
- * this repo's `react-hooks/set-state-in-effect` rule flags, and which
- * `lib/actions/action-state.ts` explains at length. A reset is derived from an
- * action's own result, never re-applied from an effect.
+ * ⚠️ **A suggestion is a value the fields are rendered *from*, not something
+ * that happens *to* them**, so it must be readable during their render. Pushing
+ * the buttons into a child would mean handing values back upwards via
+ * `setState` in an effect — flagged by `react-hooks/set-state-in-effect`, and
+ * explained in `lib/actions/action-state.ts`.
  */
 function BriefingDraft({
   createAction,
@@ -119,17 +108,13 @@ function BriefingDraft({
       : NOTHING_SUGGESTED
 
   /*
-    The criteria fields are keyed and the name field is not, and that asymmetry
-    is the point. A suggestion replaces locations and keywords — that is what it
-    is for — but the name is the user's, typed before they pressed the button
-    and not derivable from a CV. Keying the name on the suggestion too would
-    throw that name away the instant one landed, which reads as the form having
-    cleared itself for no reason.
+    The criteria fields are keyed and the name field is not: a suggestion
+    replaces locations and keywords, but the name is the user's and not
+    derivable from a CV, so keying it would clear it for no visible reason.
 
-    ⚠️ **Titles is no longer among what a suggestion replaces**, and so is no
-    longer among what this key resets. The extractor's titles arrive as buttons
-    now rather than as text — `SuggestedCriteria` says why — so a suggestion
-    landing must leave a half-typed title exactly where it was.
+    ⚠️ Titles is no longer among what a suggestion replaces, nor what this key
+    resets — the extractor's titles arrive as buttons rather than text (see
+    `SuggestedCriteria`), so a half-typed title must survive.
   */
   const suggestKey =
     suggestState.status === "success" ? suggestState.resetKey : "none"
@@ -140,14 +125,9 @@ function BriefingDraft({
     <>
       {/*
         Its own <form>, and it has to be: a form cannot contain a form, so the
-        suggest button could not sit among the fields it fills even if that were
-        the tidiest place for it. `example-letter-import.tsx` is a separate form
-        for the same pair of reasons — suggesting is not saving, and two submit
-        buttons in one form make the Enter key ambiguous.
-
-        It posts no fields at all. The document is chosen server-side (the newest
-        one labelled Resume), so there is nothing to pick and nothing to smuggle
-        across in a hidden input.
+        suggest button cannot sit among the fields it fills. It posts no fields
+        at all — the document is chosen server-side (newest labelled Resume), so
+        there is nothing to smuggle across in a hidden input.
       */}
       <form action={suggestAction} className="flex flex-col gap-2">
         <div>
@@ -167,29 +147,22 @@ function BriefingDraft({
         </p>
 
         {/*
-          The extractor's own remarks about the extraction — most often "your CV
-          does not state a location". Without them, a blank Locations box after a
-          successful suggestion looks identical to a suggestion that failed
-          halfway through.
+          The extractor's own remarks — most often "your CV does not state a
+          location". Without them a blank Locations box after a successful
+          suggestion looks identical to one that failed halfway through.
         */}
         {suggestState.status === "success" && suggestState.notes ? (
           <p className="text-sm text-muted-foreground">{suggestState.notes}</p>
         ) : null}
 
         {/*
-          Narrowed first, then handed to the shared component — and the
-          narrowing is what makes that possible at all. Neither `ActionAlert`
-          nor `ActionError` can take a `CriteriaSuggestionState`: their prop is
-          an `ActionState`, and this union's success case carries criteria
-          rather than a `message` (a separate union on purpose — see
-          `lib/jobs/criteria-suggestion.ts`). Its *error* case, however, is
-          exactly an `ActionState` error, so testing for it here reuses
-          `ActionError` without widening anybody's prop type, and without a
-          hand-written <p> that would be free to lose the `aria-live` pairing
-          the way the two copies `ActionError` replaced did.
-
-          Errors only. A successful suggestion announces itself as filled fields,
-          a row of title buttons and, when it has one, the note above.
+          Narrowed before it reaches `ActionError`, whose prop is an
+          `ActionState`: this union's success case carries criteria rather than
+          a `message` (deliberately separate — see
+          `lib/jobs/criteria-suggestion.ts`), but its error case matches
+          exactly. So the narrowing reuses the component without widening
+          anybody's prop type or hand-rolling a <p> that could lose the
+          `aria-live` pairing.
         */}
         {suggestState.status === "error" ? (
           <ActionError state={suggestState} />
@@ -247,11 +220,10 @@ function CreateFields({
   return (
     <>
       {/*
-        A third form, for the same reason the second one exists: it submits the
-        titles chosen so far so the suggester knows what *not* to propose, and a
-        nested form is not a thing. The hidden input is how that value crosses —
-        it is the one field either suggest action reads, and it is the user's own
-        text rather than an identity or a document selector.
+        A third form for the same reason as the second. It submits the titles
+        chosen so far so the suggester knows what *not* to propose — the one
+        field either suggest action reads, and the user's own text rather than
+        an identity or a document selector.
       */}
       <RoleTitleSuggestForm
         action={titlesAction}
@@ -322,20 +294,14 @@ function NameField({ pending }: { pending: boolean }) {
 /**
  * How many postings to ask for, or nothing at all.
  *
- * **Create-only.** The three required-and-optional criteria fields above come
- * from the shared `CriteriaFields` component, used by both this form and
- * `EditCriteriaForm` on each briefing card — but this field is not part of
- * that share. The edit form never posts it, and `readCriteria` treats an
- * absent post the same as a blank one, so an existing briefing's stored
- * `maxPostings` is left untouched by a criteria edit rather than reset to the
- * default.
+ * **Create-only**, unlike the shared `CriteriaFields` above. `EditCriteriaForm`
+ * never posts it, and `readCriteria` treats absent as blank, so a criteria edit
+ * leaves a briefing's stored `maxPostings` untouched rather than resetting it.
  *
- * Blank is the useful default and is not the same as a number: an empty field
- * leaves `maxPostings` out of the config entirely, so the briefing follows the
- * platform default whenever that changes, where a saved 20 would pin this
- * briefing to today's number for ever. The bound is the scout's — every
- * posting reported has to be read first — which is why the input states it
- * rather than accepting anything and failing on submit.
+ * ⚠️ Blank is not the same as a number: an empty field leaves `maxPostings` out
+ * of the config, so the briefing follows the platform default as it changes,
+ * where a saved 20 pins it to today's number for ever. The bound is the
+ * scout's, stated on the input rather than failing on submit.
  */
 function MaxPostingsField({ pending }: { pending: boolean }) {
   return (

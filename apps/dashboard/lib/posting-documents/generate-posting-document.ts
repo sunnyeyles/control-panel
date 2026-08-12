@@ -8,27 +8,17 @@ import {
 } from "./prepare-posting-document"
 
 /**
- * Generating one **Posting Document** (prepare → produce → put), in one call.
+ * Generating one **Posting Document** (prepare → produce → put), in one call —
+ * the twin of preparation and editing, which already live in this folder.
  *
- * ## Why this exists
- *
- * Drafting a Cover Letter and generating a Tailored Resume performed the same
- * three steps after preparation in the same order, and the second was written
- * by copying the first. Preparation and editing already live in this folder;
- * generation was the remaining twin.
- *
- * ⚠️ **It returns a reason, never a sentence** — except where the sentence
- * already has exactly one owner elsewhere (`requireUser`, `storageMessage`,
- * {@link BAD_REQUEST} via prepare, or a feature's own `produce` failure). The
- * two reasons a *feature* has to word (`no-background`, `undraftable`) stay
- * bare so each feature keeps its own refusal table — CONTEXT forbids collapsing
- * those into one vague helper.
+ * ⚠️ **It returns a reason, never a sentence**, except where the sentence has one
+ * owner elsewhere. The two a *feature* must word (`no-background`,
+ * `undraftable`) stay bare so each keeps its own refusal table.
  *
  * ⚠️ **`produce` owns everything kind-specific:** request parse, letter
- * instructions (letters only), the model call, and the store-shaped payload
- * (`draftedAt` vs `generatedAt`, provenance fields). Failures that already have
- * a user sentence come back as `{ ok: false, message }` and surface as
- * `reason: "refused"`.
+ * instructions (letters only), the model call, and the store-shaped payload.
+ * Failures that already have a user sentence come back as
+ * `{ ok: false, message }` and surface as `reason: "refused"`.
  *
  * **Nothing here imports Next**, which is the rule the whole of `lib/` follows.
  */

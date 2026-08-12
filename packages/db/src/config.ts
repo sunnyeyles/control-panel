@@ -12,11 +12,8 @@ export interface DatabaseConfig {
 }
 
 /**
- * The variables this package reads, and what each one is for.
- *
- * Vercel's Neon integration owns these strings and this package does not
- * re-provision them; it consumes what the integration sets. Both point at the
- * same database and differ only in which endpoint they terminate on.
+ * Vercel's Neon integration owns these; this package only consumes them. Both
+ * point at the same database and differ only in the endpoint they terminate on.
  */
 const DATABASE_URL = "DATABASE_URL"
 const DATABASE_URL_UNPOOLED = "DATABASE_URL_UNPOOLED"
@@ -48,17 +45,14 @@ export function readDatabaseConfig(
 /**
  * The prefix Vercel's Neon integration writes its variables under.
  *
- * The integration provisions `storage_DATABASE_URL` rather than the bare name,
- * and the value is an `integration-store-secret` reference that Vercel resolves
- * per deployment — which is what lets a preview deployment reach *its own* Neon
- * branch instead of main's. A hand-added plain `DATABASE_URL` shadows it and
- * pins every preview to whichever branch that value names, which is the state
- * this repo was in: CI applied each pull request's migrations to
- * `preview/<branch>` (`.github/workflows/migrate.yml`) while the deployed app
- * connected to main and never saw them.
+ * The integration provisions `storage_DATABASE_URL` as an
+ * `integration-store-secret` reference Vercel resolves per deployment, which is
+ * what lets a preview reach *its own* Neon branch. ⚠️ **A hand-added plain
+ * `DATABASE_URL` shadows it** and pins every preview to whichever branch that
+ * value names — CI then applies a PR's migrations to `preview/<branch>` while
+ * the deployed app connects to main and never sees them.
  *
- * Read as a fallback rather than as the primary name so nothing changes for an
- * environment that sets the bare name, and so a local `.env.local` — which the
+ * Read as a fallback, not the primary name, so a local `.env.local` — which the
  * integration knows nothing about — keeps working.
  */
 const INTEGRATION_PREFIX = "storage_"

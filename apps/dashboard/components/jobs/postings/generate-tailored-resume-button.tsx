@@ -11,21 +11,16 @@ import { SubmitButton } from "@workspace/ui/components/submit-button"
 /**
  * Rewrite the user's CV for one Posting.
  *
- * The form carries **one identifier** — the Posting's derived id — and never the
- * Posting itself. That is the security property, not a payload optimisation: a
- * Posting body accepted from form data would let a caller put text of their
- * choosing into a document that makes factual claims in the user's name. The
- * action re-reads the Posting out of its stored row's payload, and a test
- * submits a `posting` field to prove it is ignored.
- *
- * The one field left is untrusted on the way in and cannot name a *user*: the
- * row is addressed by `(session user, posting id)` and the storage key is built
- * from the session's own id, so a Posting belonging to somebody else cannot be
- * spelled from here at all.
+ * ⚠️ **The form carries one identifier and never the Posting itself.** That is
+ * the security property: a Posting body from form data would let a caller put
+ * text of their choosing into a document making factual claims in the user's
+ * name. The action re-reads it from the stored row's payload, and a test
+ * submits a `posting` field to prove it is ignored. The one field left cannot
+ * name a *user* — the row is addressed by `(session user, posting id)`.
  *
  * Deliberately shaped like `draft-cover-letter-button.tsx` down to the pending
- * label, because the two sit beside each other and a difference in how they
- * behave under a slow model call would read as one of them being broken.
+ * label: the two sit beside each other, and a difference under a slow model
+ * call would read as one of them being broken.
  */
 export function GenerateTailoredResumeButton({
   postingId,
@@ -38,11 +33,10 @@ export function GenerateTailoredResumeButton({
   /**
    * Whether a tailored resume for this Posting already exists.
    *
-   * The label only — it changes nothing the action does, which already
-   * supersedes the stored document on every generation because the key holds no
-   * time. A button that says "Generate tailored resume" beside one generated
-   * last week offers a first attempt at something already done, and the user
-   * would have to click it, and spend a model call, to discover otherwise.
+   * The label only — the action supersedes the stored document on every
+   * generation regardless, since the key holds no time. Without it the button
+   * offers a first attempt at something already done, discoverable only by
+   * spending a model call.
    */
   generated?: boolean
 }) {

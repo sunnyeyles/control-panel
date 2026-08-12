@@ -23,10 +23,8 @@ import { BotIcon } from "lucide-react"
  * read here.
  *
  * This is a client component and the session lives on the server, so the layout
- * — which is `force-dynamic` for exactly this reason — resolves it once and
- * hands it over. Once, and not once per page: a layout does not re-render on
- * navigation, so this no longer costs a session lookup every time the user
- * switches tabs.
+ * — `force-dynamic` for exactly this reason — resolves it once and hands it
+ * over. Once, not once per page: a layout does not re-render on navigation.
  */
 export interface SidebarUser {
   name: string

@@ -12,25 +12,17 @@ import Link from "next/link"
 /**
  * One sortable column heading.
  *
- * ⚠️ **`aria-sort` is not decoration.** Visually a sorted column is announced
- * by an arrow, and a screen reader cannot see one — without this attribute a
- * sorted table is indistinguishable from an unsorted one, and the user is told
- * neither which column the rows are in nor which way. The arrow beside it is
- * `aria-hidden`, because it says the same thing a second time and would read
- * out as a stray character.
+ * ⚠️ **`aria-sort` is not decoration.** A screen reader cannot see the arrow,
+ * so without it a sorted table is indistinguishable from an unsorted one. The
+ * arrow is `aria-hidden` because it says the same thing a second time.
  *
  * **A `<Link>` in a `Button`, and no client state anywhere.** The sort lives in
- * the URL, so it survives a reload and can be shared, and the page re-renders on
- * the server with the new order. Next's own docs note that `<Link>` maintains
- * scroll position by default (`02-components/link.md:232`), so clicking a
- * header does not throw the reader back to the top of a table they had scrolled
- * into. `asChild` is what keeps that a real anchor: the button supplies the
- * styling and the anchor stays the element, so middle-click and "open in new
- * tab" still work on a heading.
+ * the URL, so it survives a reload and is shareable, and `<Link>` maintains
+ * scroll position by default (`02-components/link.md:232`). `asChild` keeps the
+ * anchor real, so middle-click and "open in new tab" still work on a heading.
  *
- * The inactive state shows a faded double arrow rather than nothing, because a
- * heading that only reveals itself as sortable once it has been clicked is a
- * control nobody finds.
+ * Inactive shows a faded double arrow rather than nothing: a heading that only
+ * reveals itself as sortable once clicked is a control nobody finds.
  */
 export function PostingSortHeader({
   column,
@@ -47,22 +39,17 @@ export function PostingSortHeader({
    */
   label: React.ReactNode
   /**
-   * This column's width class, from `POSTING_COLUMNS`.
-   *
-   * Passed in rather than looked up, because this component renders its own
-   * `<TableHead>` — so it is the only place the class can land, and the table is
-   * `table-fixed`. A sortable heading that dropped it would size itself from
-   * its content and take the column with it.
+   * This column's width class, from `POSTING_COLUMNS`. Passed in because this
+   * component renders its own `<TableHead>`, the only place the class can land;
+   * under `table-fixed` a heading that dropped it would size itself from its
+   * content and take the column with it.
    */
   width: string
   /**
-   * This column's visibility class, from `POSTING_COLUMNS`, or `undefined` for
-   * a column that renders at every width.
-   *
-   * Here for the same reason `width` is — this component renders its own
-   * `<TableHead>`, so it is the only place the class can land. **Posted** is a
-   * sortable column that hides below `md`, so without this the table would drop
-   * that column's cells and keep its heading.
+   * This column's visibility class, or `undefined` for a column rendered at
+   * every width. Here for the same reason `width` is — **Posted** is sortable
+   * and hides below `md`, so without it the table drops that column's cells and
+   * keeps its heading.
    */
   visibility?: string
   /** The view currently rendered, which decides both arrow and destination. */

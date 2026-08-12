@@ -18,15 +18,12 @@ import { SubmitButton } from "@workspace/ui/components/submit-button"
  * filters" instead of "this form did not mention them".
  *
  * ⚠️ **Keyed on the stored value, not on the reset key.** The action tidies what
- * was typed — lowercasing it, dropping duplicates that only collide once
- * normalised — so the box has to be replaced by what was actually stored or the
- * user is left looking at a list that differs from the one in force. Keying on
- * the reset key instead would blank the field on every success, which reads as
- * the save having thrown their filters away.
+ * was typed, so the box must be replaced by what was actually stored or the
+ * user sees a list differing from the one in force. Keying on the reset key
+ * would blank the field on every success, reading as the save discarding them.
  *
- * `defaultValue` and an uncontrolled input, like the criteria fields: this is a
- * starting point to be edited by hand, and React never fights the user for the
- * caret.
+ * `defaultValue` and uncontrolled, like the criteria fields: a starting point
+ * edited by hand, with React never fighting the user for the caret.
  */
 export function TitleFilterForm({
   titleExclusions,
@@ -54,11 +51,9 @@ export function TitleFilterForm({
           disabled={pending}
         />
         {/*
-          Both halves said out loud. Somebody setting this to stop seeing senior
-          roles will not otherwise expect the postings they have already
-          collected to disappear — and the sentence about whole words is what
-          stops "ml" being typed in the reasonable belief that it will only ever
-          match a machine-learning role.
+          Both halves said out loud: nobody expects already-collected postings
+          to disappear, and the whole-words sentence is what stops "ml" being
+          typed in the belief it only matches a machine-learning role.
         */}
         <p className="text-sm text-muted-foreground">
           Comma separated, and optional. A posting whose title contains one of

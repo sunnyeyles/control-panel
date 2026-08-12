@@ -2,12 +2,10 @@
  * The five gates a **Posting Document** passes before a model is asked for one.
  *
  * These assertions were made twice — once in the letters' suite and once in the
- * resumes' — and each copy tested the same five branches through a different
- * action, which meant "does a refused caller reach the database" had two answers
- * that could disagree. They are about preparation rather than about either
- * document, so they belong here, and each feature's suite is left asserting what
- * it actually owns: the sentence it says, the prompt it composes, and what it
- * writes.
+ * resumes' — so "does a refused caller reach the database" had two answers that
+ * could disagree. They are about preparation rather than either document, and
+ * each feature's suite is left asserting what it owns: the sentence it says, the
+ * prompt it composes, and what it writes.
  *
  * ⚠️ **The order is what most of this file is about.** Nothing here would fail
  * if the steps ran in a different sequence and all still ran — so the assertions

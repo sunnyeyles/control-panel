@@ -24,13 +24,12 @@ import { SubmitButton } from "@workspace/ui/components/submit-button"
  * The one confirmation, for both the row's trash icon and the bulk bar.
  *
  * A Posting is a projection of what a Run found, and both documents saved
- * against one — the **Cover Letter** and the **Tailored Resume** — are
- * versioned in S3, so the worst case here is a redraft rather than a loss.
+ * against one are versioned in S3, so the worst case is a redraft not a loss.
  *
- * One component and not two, because the two entry points differ only in how
- * many ids they carry. Splitting them would put the copy that has to be right —
- * what happens to the documents, and that a run can bring the advertisement
- * back — in two places for someone to update one of.
+ * One component and not two: the entry points differ only in how many ids they
+ * carry, and splitting them would put the copy that has to be right — what
+ * happens to the documents, and that a run can bring the advertisement back —
+ * in two places for someone to update one of.
  */
 export function DeletePostingsDialog({
   postingIds,
@@ -123,11 +122,9 @@ export function DeletePostingsDialog({
 
         <form action={formAction}>
           {/*
-            One field per id, repeated — the action reads them with `getAll`.
-            Untrusted, and validated server-side against the shape a Posting id
-            has; what they cannot do is name another user, because the rows are
-            addressed by `(session user, posting id)` and the storage key is
-            built from the session's own id.
+            One field per id, read with `getAll`. Untrusted and validated
+            server-side; what they cannot do is name another user, since rows
+            are addressed by `(session user, posting id)`.
           */}
           {postingIds.map((postingId) => (
             <input
@@ -157,20 +154,16 @@ export function DeletePostingsDialog({
 /**
  * What happens to the documents, as a sentence — or nothing at all.
  *
- * Both stores are counted, because the action deletes both: a cover letter
- * *and* a tailored resume go with each Posting, and a warning that named only
- * the letter would say nothing at all to someone deleting a Posting whose only
+ * Both stores are counted because the action deletes both — a warning naming
+ * only the letter says nothing to someone deleting a Posting whose only
  * document is a tailored resume.
  *
- * `null` from either promise means that store could not be read, **not** that
- * it is empty, and guessing either way is worse than staying quiet about it:
- * promising that nothing will be lost is the more damaging guess, and
- * promising a loss that does not happen is merely confusing. The readable
- * store still gets its sentence.
+ * ⚠️ `null` from either promise means that store could not be read, **not** that
+ * it is empty, so the unreadable half stays quiet while the readable one still
+ * gets its sentence.
  *
- * A linear scan per store — the letters bounded by `PAGE_SIZE` exactly as
- * `useCoverLetter` is, the resumes by a job search's worth of generations, as
- * `use-tailored-resume.ts` explains.
+ * A linear scan per store, bounded as `useCoverLetter` and
+ * `use-tailored-resume.ts` describe.
  */
 function DocumentsWarning({
   postingIds,

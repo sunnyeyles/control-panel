@@ -8,26 +8,19 @@ import { scorePendingMatchesAction } from "@/app/(app)/jobs/actions"
  * The thing that actually scores Postings, and the line that says it is
  * happening.
  *
- * ⚠️ **This exists because nothing else can do it.** Scoring reads the
- * candidate's CV, and the briefing worker holds the `prod:briefs` S3 grant and
- * nothing more — `infra/aws/tests/vercel_dashboard.tftest.hcl` asserts the two
- * roles' grants stay disjoint. So the process that finds an advertisement is
- * structurally unable to score it, and the backlog is worked through here, on
- * the page where the scores are read. A briefing that runs overnight leaves its
- * Postings unscored until somebody opens `/jobs`, which is the honest cost of
- * that boundary rather than an oversight.
+ * ⚠️ **This exists because nothing else can do it.** Scoring reads the CV, and
+ * the briefing worker holds only the `prod:briefs` grant — the two roles' grants
+ * stay disjoint, asserted in `infra/aws/tests/vercel_dashboard.tftest.hcl`. So
+ * the backlog is worked through here, and an overnight briefing leaves its
+ * Postings unscored until somebody opens `/jobs`.
  *
  * ⚠️ **The loop terminates on "the last round scored nothing", not on
- * `remaining === 0`.** A Posting that fails scoring stays unscored and is
- * therefore picked again by the very next round — so a permanently failing
- * advertisement, or a provider that is refusing every call, would spin here
- * forever on a count that never reaches zero. A round that wrote nothing is the
- * signal to stop, whatever the count says, and the next page view tries again
- * from scratch.
+ * `remaining === 0`.** A Posting that fails scoring stays unscored and is picked
+ * again next round, so a permanently failing advertisement would spin forever on
+ * a count that never reaches zero.
  *
- * Mounted only when the table has rows — see `page.tsx`. It renders nothing at
- * all once there is nothing left to do, so a page whose Postings are all scored
- * shows one cheap request and no chrome.
+ * Mounted only when the table has rows, and renders nothing once there is
+ * nothing left to do.
  */
 export function ScorePendingMatches() {
   const [state, setState] = useState<State>({ phase: "starting" })

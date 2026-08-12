@@ -4,30 +4,19 @@ import { JobTabs } from "@/components/jobs/job-tabs"
 /**
  * ⚠️ **This file exists to override an inherited skeleton, not to add one.**
  *
- * Next resolves the nearest *ancestor* boundary, and for this segment that is
- * `app/(app)/jobs/loading.tsx` — a posting-table skeleton with postings prose
- * baked into it. Without this file, opening the schedules page flashes a wide
- * table of postings and then collapses to a narrow column of forms. The
- * group-level `app/(app)/loading.tsx` is already the right shape and never gets
- * a look in, because it is one segment further up.
+ * Next resolves the nearest *ancestor* boundary, which for this segment is
+ * `app/(app)/jobs/loading.tsx` — a posting-table skeleton. Without this file the
+ * schedules page flashes a wide table and collapses to a narrow column of
+ * forms; the group-level `loading.tsx` is the right shape but one segment too
+ * far up to get a look in.
  *
- * **The container has to match `page.tsx` exactly** — the same `max-w-6xl`
- * outer, the same `max-w-2xl` inner, the same padding and gaps. This element is
- * replaced by the page's shell mid navigation, and any difference between the
- * two is a jump the user sees. Same rule `jobs/loading.tsx` states for the page
- * below it, and the reason the outer width is the section's rather than the
- * form's is given there: the tab bar must not move.
+ * **The container has to match `page.tsx` exactly** — same `max-w-6xl` outer,
+ * `max-w-2xl` inner, padding and gaps — because this element is swapped for the
+ * page's shell mid navigation, and the tab bar must not move. `<JobTabs />` is
+ * the real component, static markup off `usePathname`.
  *
- * `<JobTabs />` is the real component, not a skeleton of it — static markup off
- * `usePathname`, so the tabs stay live while the forms load.
- *
- * Shape only, no prose: unlike the postings skeleton this one duplicates no
- * sentences, so there is nothing here to keep in step with the page.
- *
- * The skeleton beneath the bar is the page's own `<Suspense>` fallback, drawn
- * from the same component — so the transition from this file to the page is,
- * for the section itself, no transition at all. Same arrangement as
- * `jobs/letters/loading.tsx`.
+ * The skeleton beneath the bar is the page's own `<Suspense>` fallback, so for
+ * the section itself there is no transition at all.
  */
 export default function Loading() {
   return (

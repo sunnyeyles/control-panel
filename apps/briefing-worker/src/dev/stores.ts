@@ -116,15 +116,12 @@ export async function dryRunRecordArtifact(
 /**
  * A `recordPostings` callback that records nothing at all.
  *
- * Two reasons, and the second is the interesting one. A dry run has no `runs`
- * row for `postings.first_seen_run_id` to reference, exactly as
- * {@link dryRunRecordArtifact} has none for `artifacts.run_id`. And the
- * findings JSON this harness already writes *is* the postings — the same
- * validated objects, before the projection `toNewPostings` applies — so a
- * second copy beside it would be the same data under a different name.
+ * A dry run has no `runs` row for `postings.first_seen_run_id` to reference, as
+ * {@link dryRunRecordArtifact} has none for `artifacts.run_id`. And the findings
+ * JSON this harness writes *is* the postings, before `toNewPostings` projects
+ * them, so a second copy beside it would be the same data renamed.
  *
- * Takes no arguments on purpose: it drives nothing, so it asks for nothing, and
- * it still satisfies the seam structurally.
+ * Takes no arguments on purpose, and still satisfies the seam structurally.
  */
 export async function dryRunRecordPostings(): Promise<void> {}
 
@@ -150,19 +147,13 @@ export interface FindingsFileOptions {
  * A `recordFindings` callback that writes the validated findings to disk,
  * beside the brief they produced.
  *
- * Production keeps them on the `runs` row; a dry run has no row — `runs` is
- * what `recordFindings` writes to and the harness deliberately creates none —
- * so the choice is between discarding them and putting them somewhere a person
- * can open. They are worth keeping: the findings are exactly the input the
- * `letter` CLI reads, so a `watch` run is what produces real input for it,
- * with no S3 and no database anywhere in the loop.
+ * Production keeps them on the `runs` row; a dry run creates no row, and they
+ * are worth keeping because they are exactly the input the `letter` CLI reads.
  *
- * A plain file, not an object. The key is the brief's own — derived through
- * `buildObjectKey`, so the same segment validation applies — with `.json` in
- * place of `.md`, which puts the findings literally beside the markdown. It is
- * *not* an object key that S3 would accept, because there is no `findings`
- * kind: adding one means adding a lifecycle entry and an IAM grant in
- * Terraform, which is infrastructure this harness has none of.
+ * A plain file, not an object. The key is the brief's own — through
+ * `buildObjectKey`, so the same segment validation applies — with `.json` for
+ * `.md`. It is *not* a key S3 would accept: there is no `findings` kind, and
+ * adding one means a lifecycle entry and an IAM grant in Terraform.
  */
 export function createFindingsFileRecorder(
   options: FindingsFileOptions

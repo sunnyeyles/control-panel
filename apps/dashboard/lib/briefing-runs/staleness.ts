@@ -1,22 +1,17 @@
 /**
  * When a run that still says `running` has stopped being believable.
  *
- * Nothing reaps a run. A `runs` row moves to a terminal status because the
- * worker wrote one, so a worker that died — an out-of-memory kill, a hard
- * timeout, a deployment mid-run — leaves the row saying `running` forever.
- * Without a bound, the trigger's one-run-at-a-time guard would refuse that
- * briefing for good, and the UI would show a spinner nobody can clear.
+ * Nothing reaps a run, so a worker that died mid-run leaves the row saying
+ * `running` forever. Without a bound the one-run-at-a-time guard would refuse
+ * that briefing for good, behind a spinner nobody can clear.
  *
- * Fifteen minutes, against a Lambda timeout of 600s (`infra/aws/modules/
- * briefing-worker/variables.tf`). Comfortably past the longest run the platform
- * permits, so a live run is never called stale; comfortably short of a person's
- * patience. **If that timeout is raised, raise this with it** — the ordering is
- * the whole point, and a stale threshold below the timeout would let a second
- * run start while the first was still going, which is a paid duplicate.
+ * ⚠️ Fifteen minutes, against a Lambda timeout of 600s. **If that timeout is
+ * raised, raise this with it** — a stale threshold below the timeout would let a
+ * second run start while the first was still going, which is a paid duplicate.
  *
- * Deliberately a read-time judgement rather than a background sweep: a reaper
- * is a second thing that can fail, and nothing here needs the row corrected —
- * only interpreted.
+ * A read-time judgement rather than a background sweep: a reaper is a second
+ * thing that can fail, and nothing here needs the row corrected, only
+ * interpreted.
  */
 export const RUN_STALE_AFTER_MS = 15 * 60 * 1000
 

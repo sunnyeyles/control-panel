@@ -18,13 +18,10 @@ import { SubmitButton } from "@workspace/ui/components/submit-button"
  * is decided in `lib/postings/add-by-link-actions.ts` — this component
  * validates nothing on its own account.
  *
- * `ActionAlert` rather than `ActionError`, unlike `RunNowButton` beside it, and
- * the difference is which signal the page already carries. A started run turns
- * its own strip row to "Running…"; an added Posting appears somewhere in a
- * sorted, paginated table of every advertisement the user has ever seen, which
- * on any page but the first is no signal at all. So the success is said out
- * loud, and it names the role so that "added" is checkable rather than merely
- * claimed.
+ * `ActionAlert` rather than `ActionError`, unlike `RunNowButton` beside it: a
+ * started run turns its own strip row to "Running…", but an added Posting lands
+ * somewhere in a sorted, paginated table and is no signal at all beyond page
+ * one. So the success is said out loud, naming the role to be checkable.
  *
  * ⚠️ **Keyed on `resetKey`, which is what clears the field.** A success mints
  * the Posting's id; remounting on it empties the input, so the next paste does
@@ -51,20 +48,16 @@ export function AddPostingByLink() {
 /**
  * The same block, inert, for `app/(app)/jobs/loading.tsx`.
  *
- * Co-located with the real thing for the reason `BriefingStripSkeleton` is: the
- * two are swapped for each other mid navigation, so anything that differs
- * between them is a jump the user sees, and keeping them in one file is what
- * makes a change to one obviously a change to both.
+ * Co-located with the real thing: the two are swapped mid-navigation, so any
+ * difference is a jump the user sees.
  *
  * ⚠️ **A skeleton rather than the real component, unlike `<JobTabs />` in that
- * same file.** The tabs are static markup off `usePathname` and can simply be
- * drawn. This one owns `useActionState` and an input: rendering it in the
- * fallback would mount a live field that is then thrown away and remounted when
- * the page arrives, taking anything typed into it with it.
+ * same file.** This one owns `useActionState` and an input, so rendering it in
+ * the fallback would mount a live field that is thrown away and remounted when
+ * the page arrives, taking anything typed into it along.
  *
- * It is the same elements with the same classes, disabled — not a grey bar —
- * because the height has to match exactly and the surest way to match a form's
- * height is to be that form.
+ * The same elements and classes, disabled — not a grey bar — because the surest
+ * way to match a form's height is to be that form.
  */
 export function AddPostingByLinkSkeleton() {
   return (

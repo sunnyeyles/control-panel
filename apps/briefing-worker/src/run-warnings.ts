@@ -107,21 +107,13 @@ export function buildRunWarnings(
   /**
    * A run that recorded nothing, said plainly.
    *
-   * ⚠️ **The one warning here that is not about something going wrong.**
-   * The other three are faults — a lost write, an id that resolves to
-   * nothing — and this is a run that worked and came back empty. It is a
-   * warning all the same because the alternative is what this change
-   * exists to end: a `succeeded` row, an unchanged table, and "last ran 5
-   * minutes ago" as the only thing anybody is told.
+   * ⚠️ **The one warning here that is not about something going wrong.** The
+   * other three are faults; this is a run that worked and came back empty. It
+   * warns anyway, because the alternative is a `succeeded` row, an unchanged
+   * table and "last ran 5 minutes ago" as the only thing anybody is told.
    *
-   * `excludedPostings` stays a count and not a warning, as its docblock on
-   * the success report argues — the filter doing its job is not a fault. What
-   * is reported here is the *run producing nothing*, which sometimes has
-   * the filter as its cause and says so.
-   *
-   * Two reasons rather than three: a run whose every posting was
-   * unresolvable already threw at the hand-off, so "the ids were all
-   * fabricated" is a failed run and never a quiet one.
+   * Two reasons rather than three: a run whose every posting was unresolvable
+   * already threw at the hand-off, so that is a failed run, never a quiet one.
    */
   const noPostings =
     kept.postings.length > 0

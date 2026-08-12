@@ -13,20 +13,17 @@ import {
  * The parsers, against files a real program actually wrote.
  *
  * ⚠️ **`__fixtures__/` holds genuine binaries, and that is the entire point of
- * this file.** `alice-cv.pdf` and `thin-cv.pdf` came out of `cupsfilter`, the
- * CUPS PDF pipeline on macOS — a real PDF with embedded font subsets, an xref
- * table and a compressed content stream, not a hand-written string that happens
- * to start `%PDF-`. `alice-cv.docx` came out of `textutil -convert docx`,
- * Apple's own converter, so it is real OOXML in a real zip.
+ * this file.** `alice-cv.pdf` and `thin-cv.pdf` came out of `cupsfilter` — a
+ * real PDF with embedded font subsets, an xref table and a compressed content
+ * stream, not a hand-written string that happens to start `%PDF-`.
+ * `alice-cv.docx` came out of `textutil -convert docx`, so it is real OOXML in a
+ * real zip.
  *
  * A mocked `unpdf` or `mammoth` would assert that this module passes bytes to a
- * function and returns what it gets back, which is not the claim #86 makes. The
- * claim is that a PDF CV can be drafted from, and only a real PDF can support
- * it.
+ * function and returns what it gets back. The claim #86 makes is that a PDF CV
+ * can be drafted from, and only a real PDF supports it.
  *
- * The fixtures are deliberately small and boring — one page, one paragraph — so
- * that a diff to them is legible and the repository does not carry a megabyte
- * of document to prove a parser is wired up.
+ * The fixtures are small and boring on purpose, so a diff to them is legible.
  */
 
 /** What both CV fixtures say, in the words they say it. */

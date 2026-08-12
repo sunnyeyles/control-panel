@@ -143,15 +143,13 @@ describe("matchRoleTitles", () => {
   /**
    * ⚠️ **Shortest-first is doing real work on an ambiguous fragment, and the
    * answer is not the most common role.** `sof` puts "Software Tester" above
-   * "Software Engineer" purely because it is two characters shorter. That is
-   * the rule behaving as specified rather than a bug, and it is asserted so
-   * that changing it is a decision rather than a side effect.
+   * "Software Engineer" purely because it is two characters shorter — the rule
+   * behaving as specified, asserted so that changing it is a decision.
    *
-   * Ranking by how often a title appears on a board would be the obvious fix
-   * and is deliberately not done: there is no frequency data in this repo, a
-   * hand-assigned weight per title is a tuning knob eight hundred entries wide,
-   * and the property this list is *for* is that the same fragment always gives
-   * the same answer. One more character of typing disambiguates.
+   * Ranking by how often a title appears on a board is deliberately not done:
+   * there is no frequency data in this repo, a hand-assigned weight per title is
+   * a tuning knob eight hundred entries wide, and the property this list is
+   * *for* is that the same fragment always gives the same answer.
    */
   it("breaks a tie on length, not on how common the role is", () => {
     const matches = matchRoleTitles("sof")

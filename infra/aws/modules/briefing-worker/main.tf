@@ -1,20 +1,17 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  # Every environment variable the function gets, in one place. Adding one is a
-  # line here rather than an edit inside the resource block, which keeps the
-  # diff of "the worker learned about a new thing" small and obvious.
+  # Every environment variable the function gets, in one place.
   #
-  # OPENAI_API_KEY, DATABASE_URL, APIFY_TOKEN and the Langfuse keys are
-  # deliberately absent: all values are fetched from Secrets Manager at cold
-  # start. Putting any of
-  # them here would place a secret in plan output, in state, and in the
+  # ⚠️ OPENAI_API_KEY, DATABASE_URL, APIFY_TOKEN and the Langfuse keys are
+  # deliberately absent — all are fetched from Secrets Manager at cold start.
+  # Putting one here would place a secret in plan output, in state, and on the
   # console's function configuration page.
   #
-  # The two USER_STORAGE_ variables are not secrets and so are passed directly.
-  # They are what `createS3UserObjectStore()` reads; AWS_REGION needs no entry
-  # because the Lambda runtime sets it, which keeps the region the function runs
-  # in and the region it writes to from being two facts that can disagree.
+  # The two USER_STORAGE_ variables are not secrets, and are what
+  # `createS3UserObjectStore()` reads. AWS_REGION needs no entry: the Lambda
+  # runtime sets it, so the region the function runs in and the region it writes
+  # to cannot disagree.
   environment = {
     OPENAI_SECRET_ID              = aws_secretsmanager_secret.openai.arn
     DATABASE_SECRET_ID            = aws_secretsmanager_secret.database.arn

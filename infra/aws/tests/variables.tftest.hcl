@@ -4,27 +4,21 @@
 # than at a resource — which is what makes the file runnable with no AWS
 # credentials, no network and no state. `mock_provider` covers the rest.
 #
-# Note the `module` blocks. `expect_failures` can only name checkable objects in
-# the module under test, and these validations live on the modules' own
-# variables rather than on the root's object wrappers — so each run points
-# directly at the module whose interface it is testing. That is the right
-# surface anyway: the rule belongs to the module, so the test should be able to
-# survive the root being rearranged around it.
+# ⚠️ Note the `module` blocks: `expect_failures` can only name checkable objects
+# in the module under test, and these validations live on the modules' own
+# variables rather than the root's object wrappers.
 #
-# Only rules that encode a real invariant are covered. A validation that merely
-# restates a type is not worth a test.
+# Only rules encoding a real invariant are covered; a validation that restates a
+# type is not worth a test.
 
-# `aws_iam_policy_document` is a data source, so under a mock provider its `json`
-# attribute is a generated placeholder string — and the provider validates that
-# string as JSON at plan time, on every role and policy that consumes one. Left
-# alone, every plan here fails with "not a JSON object" alongside the failure the
-# run is actually asserting, and `expect_failures` treats the extra error as a
-# failed test.
+# ⚠️ Under a mock provider, `aws_iam_policy_document.json` is a placeholder
+# string that the provider still validates as JSON at plan time. Left alone,
+# every plan fails with "not a JSON object" alongside the failure the run is
+# asserting, and `expect_failures` counts the extra error as a failed test.
 #
-# So the mock returns a structurally valid, empty policy. That is enough for the
-# plan-time check and no more: these runs assert on validation rules, never on
-# what a policy document contains. Asserting on rendered policy JSON needs
-# `override_data` per address, which is worth doing and is not what this file is.
+# So the mock returns a structurally valid empty policy — enough for the
+# plan-time check and no more. Asserting on rendered policy JSON would need
+# `override_data` per address, which is not what this file is.
 mock_provider "aws" {
   mock_data "aws_iam_policy_document" {
     defaults = {

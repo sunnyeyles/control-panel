@@ -6,23 +6,19 @@ import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider"
 /**
  * Asking the worker to run a briefing now.
  *
- * ⚠️ **This is the only file in the repository that imports
- * `@aws-sdk/client-lambda`**, and it exists for the same reason
- * `lib/storage.ts` is the only one outside `@workspace/user-storage` importing
- * the S3 SDK: credentials. The decision of which identity to assume belongs at
- * the composition root that already owns configuration, not inside a shared
- * package — and the two files must therefore make that decision identically.
- * **Read `lib/storage.ts` before changing anything below**; every warning it
- * carries about `AWS_ROLE_ARN`, `VERCEL_OIDC_TOKEN` and what to memoize applies
- * here unchanged, and it is the file where those mistakes were actually made.
+ * ⚠️ **The only file in the repository that imports `@aws-sdk/client-lambda`**,
+ * for the reason `lib/storage.ts` is the only one outside
+ * `@workspace/user-storage` importing the S3 SDK: which identity to assume
+ * belongs at the composition root, so the two must decide it identically. **Read
+ * `lib/storage.ts` before changing anything below** — every warning it carries
+ * about `AWS_ROLE_ARN`, `VERCEL_OIDC_TOKEN` and what to memoize applies here, and
+ * it is where those mistakes were actually made.
  *
- * Why an invoke at all, rather than the dashboard running the briefing itself:
- * the app holds no `prod:briefs` grant and must not — `infra/aws/tests/
- * vercel_dashboard.tftest.hcl` asserts that the app's and the worker's storage
- * grants stay disjoint, so that the surface which *renders* a briefing cannot
- * *author* one. The new grant this path needs is `lambda:InvokeFunction`, which
- * is not a storage grant and leaves that property untouched. A run also needs
- * the OpenAI and Apify secrets, and takes minutes.
+ * An invoke rather than running the briefing in-process: the app holds no
+ * `prod:briefs` grant and must not — `infra/aws/tests/vercel_dashboard.tftest.hcl`
+ * asserts the app's and worker's storage grants stay disjoint, so the surface
+ * that *renders* a briefing cannot *author* one. `lambda:InvokeFunction` is not a
+ * storage grant and leaves that untouched.
  */
 
 /**
@@ -89,10 +85,9 @@ function functionName(): string {
  *
  * ⚠️ **Branch on `AWS_ROLE_ARN` and on nothing else** — not `VERCEL`, which is
  * set during builds too, and above all not `VERCEL_OIDC_TOKEN`, which is never
- * set on a deployment at all because the token arrives as the per-request
- * header `x-vercel-oidc-token`. `lib/storage.ts` documents at length how that
- * mistake presents: STS is never called, so there is no CloudTrail event and it
- * looks like a missing IAM attachment rather than a branch never taken.
+ * set on a deployment because the token arrives as the per-request header
+ * `x-vercel-oidc-token`. That mistake presents as a missing IAM attachment: STS
+ * is never called, so there is no CloudTrail event.
  */
 function oidcRoleArn(): string | undefined {
   return process.env.AWS_ROLE_ARN
@@ -124,16 +119,11 @@ function createLambdaInvoker(
         new InvokeCommand({
           FunctionName: name,
           // ⚠️ **`Event`, not `RequestResponse`.** A briefing takes minutes
-          // against a Lambda timeout of 600s, and this call is made inside a
-          // Server Action whose own budget is a small fraction of that. A
-          // synchronous invoke would hold the request open until the platform
-          // cut it, and the user would see a timeout for a run that is in fact
-          // proceeding.
-          //
-          // The cost of asynchrony is that AWS delivers an `Event` invocation
-          // *at least* once. That is why the worker claims the run before doing
-          // anything — see `claimAdHocRun` — and why this file needs no
-          // deduplication of its own.
+          // against a Server Action budget that is a small fraction of that; a
+          // synchronous invoke would time out on a run that is in fact
+          // proceeding. The cost is that AWS delivers an `Event` invocation *at
+          // least* once — which is why the worker claims the run first (see
+          // `claimAdHocRun`) and this file needs no deduplication.
           InvocationType: "Event",
           Payload: Buffer.from(
             JSON.stringify({

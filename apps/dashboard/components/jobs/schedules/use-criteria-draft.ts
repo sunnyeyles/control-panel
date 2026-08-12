@@ -12,21 +12,16 @@ import {
  * The criteria a form is holding, and whether the scout could search them.
  *
  * **A hook rather than state inside `CriteriaFields`, because the answer is
- * needed above the fields.** Whether the combination fits the scout's budget
- * decides whether the form's submit button is disabled, and that button is not
- * a child of the fields — it sits below an interval picker on one form and
- * beside a Cancel on the other. A child reporting upward through a callback
- * would have to call it during render, which React forbids, or from an effect,
- * which `react-hooks/set-state-in-effect` forbids here for the reasons
- * `lib/actions/action-state.ts` sets out. Owning the state where both readers
- * can see it avoids needing either.
+ * needed above the fields**: whether the combination fits the scout's budget
+ * decides whether the submit button is disabled, and that button is not a child
+ * of the fields. A child reporting upward would have to do so during render,
+ * which React forbids, or from an effect, which
+ * `react-hooks/set-state-in-effect` forbids here.
  *
- * ⚠️ **Titles is a value; locations is only a count.** The titles field is
- * controlled because a suggestion button appends to it programmatically, and an
- * uncontrolled input cannot be written from outside without a ref React knows
- * nothing about. Nothing writes to locations, so it stays uncontrolled with a
- * `defaultValue` — this holds the one thing the meter needs from it, and the
- * browser keeps the text.
+ * ⚠️ **Titles is a value; locations is only a count.** Titles is controlled
+ * because a suggestion button appends to it programmatically. Nothing writes to
+ * locations, so it stays uncontrolled with a `defaultValue` and the browser
+ * keeps the text.
  */
 export interface CriteriaDraft {
   titles: string

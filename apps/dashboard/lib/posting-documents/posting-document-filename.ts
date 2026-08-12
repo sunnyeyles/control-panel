@@ -9,21 +9,13 @@ export interface PostingDocumentNameParts {
  * The filename a download of a Posting-addressed document is offered under.
  *
  * The Posting id is a hex digest, so a download named after it is a file nobody
- * can identify a week later in their downloads folder. Title and company come
- * from object metadata, which the store already stripped to printable ASCII on
- * the way in (`packages/user-storage/src/metadata.ts`) — but this still
- * restricts them further, because a filename is a filename: path separators
- * would suggest a directory to whatever unpacks it, and a download route's own
- * `contentDisposition()` escaping is the header's concern rather than this one's.
- *
- * Falls back to the id when nothing usable survives, which is what a document
- * written before provenance existed, or one whose `head()` failed, will hit.
+ * can identify a week later. Title and company come from object metadata, already
+ * stripped to printable ASCII on the way in, but are restricted further here
+ * because a filename is a filename — path separators would suggest a directory to
+ * whatever unpacks it. Falls back to the id when nothing usable survives.
  *
  * **`label` is the only thing the two callers differ by**, which is why this is
- * one function rather than two. `cleanNamePart` below is the part worth not
- * copying: it is the second-narrowest rule a Posting's title passes through on
- * its way out of the system, and a second copy is how one of them gets relaxed
- * alone. Same argument as `POSTING_ID_PATTERN` having exactly one copy.
+ * one function rather than two; `cleanNamePart` is the part worth not copying.
  */
 export function postingDocumentFilename(
   label: string,

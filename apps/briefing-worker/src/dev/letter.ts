@@ -19,20 +19,15 @@ import {
 /**
  * Draft one cover letter, from real data, onto disk.
  *
- * This exists to answer one question before anything is built around it: is a
- * letter written from a search-result teaser plus the candidate's own CV worth
- * the surface it would need? Nothing here is a step toward that surface — no
- * S3, no database, no migration, no dashboard. A Findings file, a document the
- * candidate wrote, one model call, one file out.
+ * This answers one question before anything is built around it: is a letter
+ * written from a search-result teaser plus the candidate's own CV worth the
+ * surface it would need? No S3, no database, no migration, no dashboard — a
+ * Findings file, a document the candidate wrote, one model call, one file out.
  *
  * The Findings file is the one `watch` writes beside the brief, so the input is
- * a real scout's real output rather than a fixture. `fixtures/` holds one
- * transcribed from a live SEEK advertisement for when re-running a search is
- * not worth it.
- *
- * Lives under `dev/` with the rest of the harness, which is what keeps it out
- * of the deployed bundle: `build.mjs` takes `src/index.ts` as its only entry
- * point, so nothing here can ship even by accident.
+ * a real scout's output; `fixtures/` holds one transcribed from a live SEEK
+ * advertisement. Under `dev/`, so `build.mjs` (entry `src/index.ts`) cannot
+ * ship it.
  */
 
 const USAGE = `

@@ -9,35 +9,21 @@ import {
 } from "./profile-text"
 
 /**
- * Finding the candidate's own words to write from.
+ * Finding the candidate's own words to write from — which of a user's
+ * **Documents** speaks for them, and what it says. Three callers with nothing
+ * else in common: a Cover Letter, a Tailored Resume, and proposing Search
+ * Criteria. **Nothing under `lib/candidate/` imports Next.**
  *
- * ## What `lib/candidate/` is
- *
- * The candidate as an input — which of a user's **Documents** speaks for them,
- * and what it says. It answers that once, for everyone who needs it, and it has
- * three callers with nothing else in common: a **Cover Letter**, a **Tailored
- * Resume**, and proposing **Search Criteria**. It lived under `lib/cover-letters/`
- * until the second of those arrived, and the third made the directory name a
- * lie rather than merely an accident.
- *
- * ⚠️ **It knows nothing about what is written from it.** No Posting, no agent,
- * no message a user reads. That is what lets a fourth caller appear without
+ * ⚠️ **It knows nothing about what is written from it.** No Posting, no agent, no
+ * message a user reads — which is what lets a fourth caller appear without
  * touching anything here.
  *
- * **Nothing under this directory imports Next**, which is the rule the whole of
- * `lib/` follows — see the Server Action section of `apps/dashboard/CLAUDE.md`.
- *
- * ## This file
- *
- * The whole of the "which document is the CV" decision lives here rather than
- * in the action, because it is the part with branches worth naming: a user with
- * no Resume-labelled document, a user whose only Resume is a `.rtf`, and a user
- * whose PDF turned out to be a scan are told three different things, and only
- * some of them have anything to do.
+ * The whole "which document is the CV" decision lives here rather than in the
+ * action, because it is the part with branches worth naming: no Resume-labelled
+ * document, a Resume that is a `.rtf`, and a PDF that turned out to be a scan are
+ * told three different things.
  *
  * **Which formats can be read is `profile-text.ts`'s answer, not this file's.**
- * #86 widened that answer from `.md` and `.txt` to PDF and DOCX as well, and
- * nothing here changed shape to allow it — which was the point of the ticket.
  */
 
 /** Why there is nothing to write a letter from. Each is a distinct thing to say. */
@@ -54,12 +40,10 @@ export type NoBackgroundReason =
    * file, or a file whose name lies about its format.
    *
    * ⚠️ **Not the scanned-PDF case, however much it sounds like one.** A scan
-   * parses perfectly and yields an empty string, so it never arrives here. It
-   * travels on as `background: ""` and `assertDraftable` refuses it as
-   * `absent` — the branch whose message names the scan, and which can name the
-   * document too because by then we know which one it was. Routing an empty
-   * extraction here instead would trade that sentence for a vaguer one; see
-   * "What this deliberately does not do" in `profile-text.ts`.
+   * parses perfectly and yields an empty string, so it travels on as
+   * `background: ""` and `assertDraftable` refuses it as `absent` — the branch
+   * whose message names the scan, and the document. Routing an empty extraction
+   * here would trade that sentence for a vaguer one.
    */
   | "extraction-failed"
 
@@ -76,10 +60,8 @@ export type CandidateBackground =
        *
        * ⚠️ **Carried because a match has to be attributable to a document, and
        * that is the whole of how a score goes stale.** `postings.match_resume_id`
-       * stores it; a value other than this one means the score describes a CV the
-       * user has since replaced. Every other caller ignores the field — a letter
-       * is written once and read immediately, so nothing about it needs to be
-       * re-derivable later.
+       * stores it; any other value means the score describes a CV since replaced.
+       * Every other caller ignores the field.
        */
       documentId: string
     }
@@ -88,17 +70,13 @@ export type CandidateBackground =
 /**
  * The most recent document the user labelled as a resume, if it is readable.
  *
- * **Most recent, and labelled.** The label is the user's own statement about
- * which document is their CV — guessing from a filename would mean a letter
- * written from a cover letter they uploaded last month. Recency breaks the tie
- * when there are several, which is the answer that needs no explanation.
+ * **Most recent, and labelled.** The label is the user's own statement about which
+ * document is their CV — guessing from a filename would mean a letter written
+ * from a cover letter they uploaded last month. Recency breaks the tie.
  *
- * Both stores are needed and they answer different questions: Postgres says
- * which document the user called their resume, and only the bucket has the
- * bytes. Built on {@link listDocuments} rather than querying directly so that
- * "newest labelled resume" is decided in one place — this used to be the second
- * caller of a `head()`-per-document fan-out, and is now a second caller of one
- * indexed query.
+ * Both stores answer different questions: Postgres says which document the user
+ * called their resume, only the bucket has the bytes. Built on
+ * {@link listDocuments} so "newest labelled resume" is decided in one place.
  */
 export async function loadCandidateBackground(
   userId: string,
@@ -110,13 +88,10 @@ export async function loadCandidateBackground(
     (document) => document.documentType === "resume"
   )
 
-  // `listDocuments` sorts newest first, so `labelled[0]` is the document the
-  // user most recently called their resume — and it is the only candidate.
-  // ⚠️ **Deliberately not a `find()` for the newest *readable* one.** The same
-  // rule as the extraction failure below: the user labelled this document, so
-  // skipping past it to an older CV would write from one they did not choose,
-  // with nothing saying so. An unreadable newest resume is reported as
-  // exactly that instead.
+  // `listDocuments` sorts newest first, so `labelled[0]` is the only candidate.
+  // ⚠️ **Deliberately not a `find()` for the newest *readable* one.** The user
+  // labelled this document, so skipping past it to an older CV would write from
+  // one they did not choose, with nothing saying so.
   const newest = labelled[0]
   if (newest === undefined) return { ok: false, reason: "no-resume" }
 
@@ -145,10 +120,8 @@ export async function loadCandidateBackground(
     )
   } catch (error) {
     if (error instanceof ProfileTextError) {
-      // ⚠️ **Not a fallback to the next-newest document.** The user labelled
-      // this one, so a letter written from an older CV would be written from a
-      // document they did not choose, with nothing saying so. Refusing here is
-      // the same rule `assertDraftable` follows one step later.
+      // ⚠️ **Not a fallback to the next-newest document**, for the reason above.
+      // Refusing here is the rule `assertDraftable` follows one step later.
       console.error(
         "candidate: could not extract text from",
         newest.file,

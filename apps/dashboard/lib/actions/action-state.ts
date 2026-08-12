@@ -3,19 +3,15 @@
  *
  * **This module has no imports, and that is the point.** A client component
  * needs the initial state, while the action modules import `@workspace/db` and
- * `@workspace/user-storage` — so importing the state from beside an action
- * would pull `pg`, `cron-parser` or the AWS SDK into the browser bundle for the
- * sake of one object literal.
+ * `@workspace/user-storage` — importing it from beside an action would pull
+ * `pg`, `cron-parser` or the AWS SDK into the browser bundle for one literal.
  *
- * Serializable by construction: a Server Action's return value crosses the RSC
- * boundary, so an `Error`, a `Date` or a class instance here would fail at
- * runtime rather than at compile time. In particular a `Job` must never be
- * returned — `nextRunAt` is a `Date`.
+ * ⚠️ Serializable by construction: the value crosses the RSC boundary, so an
+ * `Error`, a `Date` or a class instance fails at runtime rather than at compile
+ * time. In particular a `Job` must never be returned — `nextRunAt` is a `Date`.
  *
- * One union for every feature rather than one per feature. The documents and
- * briefings copies were byte-identical apart from their names, which is not
- * surprising: nothing in the shape is domain-specific, and two copies only
- * created somewhere for them to drift apart.
+ * One union for every feature: the documents and briefings copies were
+ * byte-identical apart from their names.
  */
 export type ActionState =
   | { status: "idle" }
@@ -35,20 +31,18 @@ export type ActionState =
       status: "success"
       message: string
       /**
-       * Distinct per successful action, and used by a form as a React `key` to
+       * Distinct per successful action, used by a form as a React `key` to
        * remount and clear its fields.
        *
-       * That is what resets a form **without an effect** — resetting from a
-       * `useEffect` means calling `setState` inside it, which cascades a render
-       * and which the repo's own `react-hooks/set-state-in-effect` rule flags.
-       * Deriving the reset from the action's own result instead is correct by
-       * construction: exactly one reset per success, never one per re-render.
+       * That resets a form **without an effect** — resetting from a `useEffect`
+       * means `setState` inside it, which cascades a render and which the repo's
+       * `react-hooks/set-state-in-effect` rule flags. Deriving it from the
+       * action's own result is correct by construction: one reset per success,
+       * never one per re-render.
        *
-       * It is not an identifier and not a cryptographic value, which is why it
-       * is no longer called a nonce. What it has to be is *different after every
-       * success and stable across everything else* — an id the action just
-       * minted (a new row's uuid) satisfies that, and so does a fresh
-       * `crypto.randomUUID()`.
+       * Not an identifier and not cryptographic. It has to be *different after
+       * every success and stable across everything else* — a new row's uuid or a
+       * fresh `crypto.randomUUID()` both qualify.
        */
       resetKey: string
     }
@@ -58,15 +52,11 @@ export const IDLE: ActionState = { status: "idle" }
 /**
  * An error state that preserves whatever reset key the previous state held.
  *
- * Not decoration. A form keys its fields on `resetKey`, so a value that
- * disappeared here would be a value that *changed* — and the fields would
- * remount, throwing away what the user typed, at the exact moment they are
- * being told to try again. Carrying it forward makes the key stable across a
- * failure, which is what "one reset per success" was always supposed to mean.
- *
- * Takes the whole previous state rather than a key so that a caller cannot pass
- * the wrong one, and so the `idle` case — nothing to carry — is handled here
- * once instead of at every failure branch.
+ * Not decoration: a form keys its fields on `resetKey`, so a value that
+ * disappeared here would be a value that *changed*, remounting the fields and
+ * throwing away what the user typed at the exact moment they are told to try
+ * again. Takes the whole previous state rather than a key so a caller cannot
+ * pass the wrong one, and so the `idle` case is handled here once.
  */
 export function carryResetKey(
   previous: ActionState,

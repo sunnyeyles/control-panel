@@ -139,19 +139,14 @@ resource "aws_s3_bucket_policy" "user_storage" {
   depends_on = [aws_s3_bucket_public_access_block.user_storage]
 }
 
-# Retention differs per kind, and the mechanism is worth explaining because it
-# is not the obvious one.
+# ⚠️ Retention is driven by an object *tag*, not a key prefix. S3 lifecycle
+# filters match a literal prefix with no wildcards, and the layout is
+# `environment/userId/kind/…`, so no prefix means "every user's briefs". Putting
+# kind above userId would fix lifecycle but make erasing a user N deletes.
 #
-# S3 lifecycle filters match a *literal* prefix — no wildcards. The key layout
-# is `environment/userId/kind/…`, so there is no prefix that means "every
-# user's briefs": userId sits between the two fixed parts. Putting kind above
-# userId would fix lifecycle but scatter a user's data across kinds, making
-# erasure N deletes instead of one.
-#
-# So the store tags every object with `kind=<kind>` at write time and these
-# rules filter on the tag instead. That is the only reason briefs and resumes
-# can be retained differently at all — and it is why a kind added to
-# `kinds.ts` without a matching entry here silently gets no retention policy.
+# So the store tags every object `kind=<kind>` at write time and these rules
+# filter on the tag — which is why a kind added to `kinds.ts` without a matching
+# entry here silently gets no retention policy at all.
 resource "aws_s3_bucket_lifecycle_configuration" "user_storage" {
   bucket = aws_s3_bucket.user_storage.id
 

@@ -21,18 +21,16 @@ import {
 /**
  * Watch one briefing run happen.
  *
- * The point of this file is what it does *not* do. The hourly tick claims a
- * slot, and a claim is at-most-once by design — so running the real handler to
- * see what a job does consumes that job's occurrence, writes a real object, and
- * spends real money. Debugging should not cost the thing being debugged.
+ * The point of this file is what it does *not* do. A claim is at-most-once, so
+ * running the real handler to see what a job does consumes that job's
+ * occurrence, writes a real object, and spends real money.
  *
- * So this drives `runBriefing` directly: no claim, no `runs` row, no `next_run_at`
- * advance, no S3, no AWS credentials. The model and the search API are real,
- * because they are the parts worth watching; everything else is local.
+ * So this drives `runBriefing` directly: no claim, no `runs` row, no
+ * `next_run_at` advance, no S3, no AWS credentials. The model and the search API
+ * are real, because they are the parts worth watching.
  *
- * Run it with `tsx`, which is why there is no build step and no bundle. Nothing
- * here reaches `dist/` — the esbuild entry point is `src/index.ts` alone, so
- * the deployed zip cannot contain this file even by accident.
+ * Run with `tsx`; nothing here reaches `dist/`, since the esbuild entry point is
+ * `src/index.ts` alone.
  */
 
 /** Stable, so repeated runs land in the same directory rather than scattering. */
@@ -237,14 +235,12 @@ function readSlot(at: string | undefined): Date {
  * Two sinks in one: what a person watches, and what stays on disk.
  *
  * The file is written whatever happens, including on a failed run — a failure's
- * transcript is the one most worth keeping, and it is exactly what the
- * production report reduces to a single sentence.
+ * transcript is the one most worth keeping.
  *
- * A stream rather than repeated `appendFile` calls, and that is not a
- * performance choice. A sink is synchronous by contract, so an appended write
- * can only be fired and not awaited — and concurrent appends to one file land
- * in whatever order the syscalls complete, which shuffles the transcript. A
- * write stream preserves order, which is the one property a transcript has.
+ * A stream rather than repeated `appendFile`, and not for performance: a sink is
+ * synchronous by contract, so an appended write can only be fired, and
+ * concurrent appends land in whatever order the syscalls complete — which
+ * shuffles the transcript. A write stream preserves order.
  */
 function createSink(options: Options, traceFile: WriteStream): TraceSink {
   const rendered = createTerminalRenderer({

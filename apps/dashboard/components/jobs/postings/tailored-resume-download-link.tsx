@@ -8,13 +8,11 @@ import { tailoredResumeFilename } from "@/lib/tailored-resumes/tailored-resume-r
  *
  * ⚠️ **The filename is built here from the Posting, not read off storage.**
  * `listTailoredResumes` uses one `ListObjectsV2`, which carries no user
- * metadata, so there is no title or company on the row to name the file by. The
- * detail panel holds both on the `PostingView` it already renders — the same
- * values, from Postgres rather than from S3. The download route builds its own
- * `Content-Disposition` off the object's metadata, so the two can differ only if
- * a Posting was re-found under a new title since the resume was generated, in
- * which case the browser honours this one and the newer name is the better
- * answer anyway.
+ * metadata, so the row has no title or company to name the file by; the detail
+ * panel already holds both from Postgres. The route's own `Content-Disposition`
+ * comes from object metadata, so the two differ only when a Posting was
+ * re-found under a new title — in which case the browser honours this one, and
+ * the newer name is the better answer anyway.
  */
 export function TailoredResumeDownloadLink({
   postingId,

@@ -60,24 +60,19 @@ function payload(overrides: Record<string, unknown> = {}) {
  * answers with its seeded rows, filtered by the `where`'s `userId`.
  *
  * That one filter is real rather than canned because the claim under test is
- * that a second user's Postings are unreachable, and a fake that returned
- * whatever it was seeded with would assert nothing about it.
+ * that a second user's Postings are unreachable.
  *
  * **Ordering, `skip` and `take` are deliberately not applied.** `listPostings`
- * delegates the page read to `listPostingPage` in `@workspace/db`, and the
- * ordering and paging behaviour — NULLS LAST in both directions, the
- * `postingId` tie-break, the clamp against the real page count — is proven
- * against a real Postgres in `packages/db/src/stores.test.ts`. This suite used
- * to re-sort with JavaScript written to match what Postgres was believed to
- * do, which checked the belief rather than the database. Rows come back in the
- * order they were seeded.
+ * delegates the page read to `listPostingPage` in `@workspace/db`, and that
+ * behaviour — NULLS LAST both ways, the `postingId` tie-break, the clamp against
+ * the real page count — is proven against a real Postgres in
+ * `packages/db/src/stores.test.ts`. This suite used to re-sort in JavaScript
+ * written to match what Postgres was believed to do, which checked the belief
+ * rather than the database. Rows come back in seeded order.
  *
- * `select` is not applied either — the rows are seeded with the relation
- * already on them, which is what a database honouring the projection would
- * answer. That the projection was *asked for* is asserted against the recorded
- * query instead, since a fake answering more than it was asked cannot
- * otherwise tell a `select` that stopped naming the relation from one that
- * still does.
+ * `select` is not applied either — rows are seeded with the relation already on
+ * them. That the projection was *asked for* is asserted against the recorded
+ * query instead.
  */
 class FakeDb {
   readonly rows: PostingRow[] = []

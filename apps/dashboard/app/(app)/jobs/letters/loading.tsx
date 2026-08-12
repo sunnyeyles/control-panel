@@ -4,22 +4,17 @@ import { CoverLetterSectionSkeleton } from "@/components/jobs/letters/cover-lett
 /**
  * ⚠️ **This file exists to override an inherited skeleton, not to add one.**
  *
- * Next resolves the nearest *ancestor* boundary, and for this segment that is
- * `app/(app)/jobs/loading.tsx` — a posting-table skeleton with postings prose
- * baked into it. Without this file, opening the cover-letter settings flashes a
- * wide table of postings and then collapses to a narrow column of forms. Same
- * reason `jobs/schedules/loading.tsx` exists.
+ * Next resolves the nearest *ancestor* boundary, which for this segment is
+ * `app/(app)/jobs/loading.tsx` — a posting-table skeleton. Without this file,
+ * opening the cover-letter settings flashes a wide table and collapses to a
+ * narrow column of forms. Same reason `jobs/schedules/loading.tsx` exists.
  *
- * **The container has to match `page.tsx` exactly** — the same `max-w-6xl`
- * outer, the same `max-w-2xl` inner, the same padding and gaps. This element is
- * replaced by the page's shell mid navigation, and any difference between the
- * two is a jump the user sees. The outer width belongs to the section rather
- * than to the forms so the tab bar cannot move between tabs; `jobs/page.tsx`
- * says why.
+ * **The container has to match `page.tsx` exactly** — same `max-w-6xl` outer,
+ * `max-w-2xl` inner, padding and gaps — because this element is swapped for the
+ * page's shell mid navigation, and the tab bar must not move between tabs.
  *
- * The skeleton beneath the bar is the page's own `<Suspense>` fallback, drawn
- * from the same component — so the transition from this file to the page is,
- * for the section itself, no transition at all.
+ * The skeleton beneath the bar is the page's own `<Suspense>` fallback, so for
+ * the section itself there is no transition at all.
  */
 export default function Loading() {
   return (

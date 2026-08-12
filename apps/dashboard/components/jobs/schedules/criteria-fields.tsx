@@ -67,13 +67,10 @@ export function CriteriaFields({
       </div>
 
       {/*
-        Optional, unlike the two above, and the missing `required` is the whole
-        difference. The worker treats keywords as a hint about what makes a role
-        a better match, so a briefing without them is a briefing that matches on
-        title and location alone — a worse search, never a broken one.
-
-        No count listener: keywords sharpen a search rather than multiply it, so
-        they cost nothing in the meter below.
+        Optional, unlike the two above: keywords are a hint about what makes a
+        role a better match, so a briefing without them matches on title and
+        location alone — a worse search, never a broken one. No count listener,
+        because keywords sharpen a search rather than multiply it.
       */}
       <div className="flex flex-col gap-2">
         <Label htmlFor={`${idPrefix}-keywords`}>Keywords</Label>
@@ -99,16 +96,13 @@ export function CriteriaFields({
  * What this combination costs the scout, said before it is saved.
  *
  * ⚠️ **This exists because the failure it describes is silent.** A run is
- * `titles × locations × boards` searches against a hard model budget; past that
- * the scout is routed to `halt` mid-sweep and still answers with a well-formed
- * brief — one drawn from part of the search, indistinguishable from a quiet
- * market. Nothing downstream can tell the difference, and no run report says
- * "this covered less than you asked for".
+ * `titles × locations × boards` searches against a hard model budget; past it
+ * the scout halts mid-sweep and still answers with a well-formed brief drawn
+ * from part of the search, indistinguishable from a quiet market. Nothing
+ * downstream can tell the difference.
  *
- * A briefing used to be three text boxes, and was self-limiting: nobody typed
- * six role titles by hand. A field with a completion and two rows of one-click
- * suggestions is not, which is what turned a theoretical cliff into one a user
- * would walk off on their second visit.
+ * Three text boxes were self-limiting — nobody typed six role titles by hand. A
+ * completion plus two rows of one-click suggestions is not.
  */
 function SearchBudget({ draft }: { draft: CriteriaDraft }) {
   if (draft.titleCount === 0 || draft.locationCount === 0) return null

@@ -8,31 +8,21 @@
  * small and named in {@link ApifyBoardSpec}: an actor id, the request body that
  * actor wants, and which of its fields carry the title, the company and the URL.
  *
- * Written by extracting `seek-search.ts` rather than by designing ahead of the
- * boards — SEEK, Indeed and LinkedIn had all been run live before a line of
- * this moved, so the seams are where three real actors differ and not where a
- * fourth might.
+ * ⚠️ **A search renders two lines per posting, not the advertisement.** Enough
+ * to rank on — title, company, when it was listed, where, and a teaser —
+ * against an id from the {@link PostingCatalog}. The advertisement is fetched
+ * by id through `posting-details.ts`, for the shortlist only. It costs no extra
+ * scrape (the descriptions arrive either way) and saves context, since the
+ * transcript is re-sent on every turn.
  *
- * ⚠️ **A search renders two lines per posting, not the advertisement.** What
- * comes back is enough to rank on — the title, the company, when it was listed,
- * where it is, and a teaser — against an id from the {@link PostingCatalog}. The
- * advertisement itself is fetched by id through `posting-details.ts`, for the
- * shortlist only. The descriptions were already arriving in the same actor call
- * either way, so this costs no extra scrape; what it saves is context, and a
- * transcript is re-sent to the model on every turn. It also stops a search
- * putting sixty advertisements' worth of boilerplate between the model and the
- * handful of facts it ranks on.
+ * No URL is rendered at either stage: a posting is referred to by catalog id
+ * and resolved back to the board's URL by whoever reads the findings — see
+ * `posting-catalog.ts` and the worker's `resolve-postings.ts`.
  *
- * No URL is rendered at either stage. A posting is referred to by its catalog
- * id and resolved back to the URL the board issued by whoever reads the
- * findings — see `posting-catalog.ts`, and the transcription failures recorded
- * in the worker's `resolve-postings.ts`.
- *
- * The failure posture is inherited wholesale and is the point of keeping it in
- * one place: a missing or rejected token is a deployment fault no rephrasing
- * fixes, so it throws and the run fails loudly, while a failed actor run, a
- * rate limit or a body that will not parse comes back as a helpful string so
- * one bad search does not sink a run that has other searches to make.
+ * Failure posture, kept in one place: a missing or rejected token is a
+ * deployment fault no rephrasing fixes, so it throws; a failed actor run, a
+ * rate limit or an unparseable body comes back as a sentence, so one bad search
+ * does not sink a run with other searches to make.
  */
 
 import { tool, type StructuredToolInterface } from "@langchain/core/tools"

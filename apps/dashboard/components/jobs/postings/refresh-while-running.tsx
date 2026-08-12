@@ -6,24 +6,17 @@ import { useEffect } from "react"
 /**
  * Re-render the page while a Run is in flight, and stop when none is.
  *
- * ⚠️ **The only polling in this app.** Everything else is request/response:
- * mutate, `refresh()`, server re-render. A Run is the one thing that changes
- * without anyone doing anything, and it does so minutes after the click that
- * started it, so there is nothing for a Server Action to invalidate at the
- * moment the state actually changes.
+ * ⚠️ **The only polling in this app.** A Run is the one thing that changes with
+ * nobody doing anything, minutes after the click that started it, so no Server
+ * Action is in scope to invalidate at the moment the state changes.
  *
- * **`router.refresh()` rather than a fetch loop**, because the thing that must
- * change is the server render. The page is `force-dynamic` and
- * `staleTimes.dynamic` in `next.config.ts` lets the client router reuse the
- * segment for 30 seconds; `refresh()` is what clears that, and it is the same
- * mechanism the document and briefing actions already rely on. A fetch loop
- * would need a JSON route, a second copy of the read model, and a way to push
- * the result into a server component — three new things to buy what one call
- * already does.
+ * **`router.refresh()` rather than a fetch loop**, because what must change is
+ * the server render: the page is `force-dynamic` and `staleTimes.dynamic` lets
+ * the client router reuse the segment for 30s, which `refresh()` clears. A
+ * fetch loop would need a JSON route and a second copy of the read model.
  *
- * It renders nothing. Mounting it is the whole effect, and the page mounts it
- * **only when something is actually running** — see `anyRunning`. A poller left
- * armed on a quiet page is a request every few seconds for the life of the tab.
+ * It renders nothing — mounting it is the whole effect, and the page mounts it
+ * only when something is running (see `anyRunning`).
  */
 
 /** Slow enough not to hammer the database, fast enough to feel live. */

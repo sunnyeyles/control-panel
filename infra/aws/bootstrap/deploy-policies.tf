@@ -1,21 +1,19 @@
 # What the deploy role can do, as five attached managed policies rather than one
 # inline blob.
 #
-# The split is for growth, not tidiness. An inline role policy is capped at
-# 10,240 characters and every service a new stack introduces enlarges the same
-# document; a managed policy per domain means a new stack adds a file, and the
-# review question becomes "should the pipeline be able to do this?" rather than
-# "what changed in this 200-line JSON diff?".
+# The split is for growth: an inline role policy is capped at 10,240 characters
+# and every new stack enlarges the same document, whereas a managed policy per
+# domain means a new stack adds a file.
 #
-# The property that makes splitting safe is worth stating: an explicit `Deny` in
-# any attached policy overrides an `Allow` in every other one. So the two Denies
-# below — never read a secret's value, never remove a permissions boundary —
-# hold across the whole set and cannot be undone by widening a different file.
+# ⚠️ What makes splitting safe: an explicit `Deny` in any attached policy
+# overrides an `Allow` in every other. The two Denies below — never read a
+# secret's value, never remove a permissions boundary — hold across the whole
+# set and cannot be undone by widening a different file.
 #
-# Deliberately coarse where it is coarse. A genuinely least-privilege Terraform
-# deployer is discovered by collecting apply failures rather than predicted, and
-# a half-guessed one fails during a deployment instead of here. The parts that
-# are *not* coarse are the IAM conditions in deploy-iam.tf and the two Denies.
+# Deliberately coarse where it is coarse. A least-privilege Terraform deployer
+# is discovered by collecting apply failures, and a half-guessed one fails
+# during a deployment instead of here. The parts that are *not* coarse are the
+# IAM conditions in deploy-iam.tf and the two Denies.
 
 locals {
   deploy_policies = {
@@ -42,9 +40,7 @@ resource "aws_iam_role_policy_attachment" "deploy" {
   policy_arn = each.value.arn
 }
 
-# ---------------------------------------------------------------------------
-# state — Terraform's own bookkeeping
-# ---------------------------------------------------------------------------
+# state — Terraform's own bookkeeping.
 
 data "aws_iam_policy_document" "deploy_state" {
   statement {

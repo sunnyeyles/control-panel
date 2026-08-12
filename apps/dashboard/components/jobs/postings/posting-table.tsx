@@ -31,19 +31,16 @@ import { cn } from "@workspace/ui/lib/utils"
 /**
  * Every Posting this user's briefings have ever found, one row each.
  *
- * A server component for the shell: sorting and paging are `<Link>`s, so there
- * is no table state on the client for those and nothing to keep in step with
- * the URL. The body is a client boundary only so one posting can expand
- * without turning every open/close into a navigation.
+ * A server component for the shell: sorting and paging are `<Link>`s, so no
+ * table state lives on the client. The body is a client boundary only so one
+ * posting can expand without turning every open/close into a navigation.
  *
- * "Ever found" is the change this whole feature is for. The cards this replaced
- * rendered one Run's findings, so an advertisement the next Run did not re-find
- * simply vanished — taking any status the user had set with it.
+ * "Ever found" is the point: the cards this replaced rendered one Run's
+ * findings, so an advertisement the next Run missed vanished — taking any
+ * status the user had set with it.
  *
- * **The headings come from `POSTING_COLUMNS` rather than being written out
- * here.** They used to be seven literal `<TableHead>`s, with the detail row's
- * `colSpan` kept in step by hand from a constant in a different file. See
- * `lib/postings/posting-columns.ts`.
+ * Headings come from `POSTING_COLUMNS`, which also keeps the detail row's
+ * `colSpan` in step — see `lib/postings/posting-columns.ts`.
  */
 export function PostingTable({
   page,
@@ -99,9 +96,8 @@ export function PostingTable({
     /*
       The one client boundary this shell needs, and it wraps rather than
       replaces the server-rendered table: the bulk bar sits above the `<Table>`
-      and the checkboxes sit inside it, so the selection they share cannot live
-      in either. Everything below is still rendered on the server and passed
-      through as children.
+      and the checkboxes inside it, so the shared selection can live in neither.
+      Everything below is still server-rendered and passed through as children.
     */
     <PostingSelectionProvider ids={page.postings.map((posting) => posting.id)}>
       <div className="flex flex-col gap-4">
@@ -109,12 +105,9 @@ export function PostingTable({
 
         <div className="rounded-lg border">
           {/*
-            ⚠️ **`table-fixed`, and `posting-table-skeleton.tsx` says it too.**
-            Column widths come from `POSTING_COLUMNS` rather than from the rows,
-            which is what lets a fallback occupy the same geometry as the data it
-            stands in for — see the `width` docblock in
-            `lib/postings/posting-columns.ts`. Dropping it here reverts to
-            content-measured columns and the skeleton silently stops matching.
+            ⚠️ `table-fixed`, and `posting-table-skeleton.tsx` says it too.
+            Dropping it reverts to content-measured columns, and the skeleton
+            silently stops matching.
           */}
           <Table className="table-fixed">
             <TableHeader>
@@ -122,21 +115,18 @@ export function PostingTable({
                 <PostingSelectAll />
 
                 {/*
-                  The disclosure column. It has no heading worth reading aloud
-                  twenty-five times, but an empty `<th>` leaves a screen reader
-                  with an unnamed column — so it is named once here, and the
-                  per-row chevrons carry each posting's own title.
+                  An empty `<th>` leaves a screen reader with an unnamed column,
+                  so the disclosure column is named once here; the per-row
+                  chevrons carry each posting's own title.
                 */}
                 <TableHead className={POSTING_EXPAND_WIDTH}>
                   <span className="sr-only">Expand</span>
                 </TableHead>
 
                 {/*
-                  ⚠️ **`column.visibility` is half of a pair.** The matching
-                  `<td>` in `posting-table-body.tsx` carries the same class, and
-                  a heading hidden without its cells — or the reverse — leaves
-                  the row one column out of step with its own header. See
-                  `PostingColumn.visibility`.
+                  ⚠️ `column.visibility` is half of a pair: the matching `<td>`
+                  in `posting-table-body.tsx` carries the same class, and hiding
+                  one without the other leaves the row a column out of step.
                 */}
                 {POSTING_COLUMNS.map((column) =>
                   column.sort === undefined ? (

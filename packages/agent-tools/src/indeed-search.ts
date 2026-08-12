@@ -14,42 +14,20 @@ import type { SearchLog } from "./search-log.ts"
 /**
  * Indeed job search, via Apify's `misceres/indeed-scraper` actor.
  *
- * The second board the scout can reach, and it exists because one board is one
- * board: a criterion that returns four SEEK postings is not evidence that four
- * postings exist, only that four of them are on SEEK. Every result here is an
- * individual posting at its canonical `au.indeed.com/viewjob?jk=…` URL, listed
- * at the moment the search returned it — the same guarantee `seek-search.ts`
- * makes, from a different inventory.
- *
  * Everything that is not about Indeed lives in `apify-search.ts` — the token,
- * the run timeout, the clamp, the failure split, the description bound and the
- * rendering. What is left here is the actor id, the request body it wants,
- * which of its fields carry what, and the two bounds its input schema cannot
- * take.
+ * run timeout, clamp, failure split, description bound and rendering. What is
+ * left here is the actor id, its request body, its field mapping, and the two
+ * bounds its input schema cannot take.
  *
- * The tool's external shape is deliberately identical to `seek_search`'s:
- * `query`, `location`, `maxResults`, `daysOld`, `workType`. A scout sweeping a
- * title across two boards should be writing the same call twice, not learning
- * two vocabularies — so where the actor's input differs from that shape, the
- * difference is absorbed below rather than pushed into the schema the model
- * reads.
+ * The tool's external shape is deliberately identical to `seek_search`'s, so a
+ * scout sweeping a title across two boards writes the same call twice; where
+ * the actor's input differs, the difference is absorbed below rather than
+ * pushed into the schema the model reads.
  *
- * Measured against the live actor on 2026-08-05, on a six-result Sydney search:
- * ~15–20s per run, $0.036 for six items (~$6/1000 — the listing advertises ~$3,
- * and small batches evidently cost more per item; irrelevant at a scout's
- * volume), and 77 KB of JSON. That number used to shape this file: Indeed's
- * descriptions run roughly 4× SEEK's per posting, so its defaults were set to a
- * third of SEEK's to keep a sweep inside one context. Descriptions no longer
- * reach the model from a search — they go to the catalog and are read back by id
- * — so what is left of that asymmetry is the JSON this process parses, which is
- * not the scarce resource. The defaults below are set on how many postings are
- * worth ranking, and are still under SEEK's because Indeed's inventory in
- * Australia is thinner.
- *
- * The same two caveats as SEEK apply and are worth restating rather than
- * inheriting silently: the actor is a community scraper and not an Indeed
- * product, and this tool sends the actor a fixed, minimal input — it returns
- * data and performs no side effect.
+ * Measured live 2026-08-05 on a six-result Sydney search: ~15–20s per run,
+ * $0.036 for six items, 77 KB of JSON. Caveats, same as SEEK: the actor is a
+ * community scraper, not an Indeed product, and this tool sends a fixed,
+ * minimal input — it returns data and performs no side effect.
  */
 
 /** Apify spells actor ids with a tilde in a URL: `misceres/indeed-scraper`. */
@@ -59,13 +37,10 @@ const ACTOR_ID = "misceres~indeed-scraper"
 export const INDEED_TOOL_NAME = "indeed_search"
 
 /**
- * Twenty, where SEEK defaults to forty.
- *
- * Was six, when six results meant 77 KB of JSON and every byte of the
- * descriptions in it went to the model. They no longer do, so the ceiling is no
- * longer context — but the actor still charges per item and Indeed's Australian
- * inventory is thinner than SEEK's, so this stays the smaller number rather than
- * being levelled up to match.
+ * Twenty, where SEEK defaults to forty. Descriptions no longer reach the model
+ * from a search, so context is not the ceiling — but the actor charges per item
+ * and Indeed's Australian inventory is thinner, so this stays the smaller
+ * number.
  */
 const DEFAULT_MAX_RESULTS = 20
 
@@ -104,14 +79,12 @@ const WORK_TYPES = [
  * purpose: the actor is community-maintained, so a missing field is rendered
  * around rather than treated as malformed.
  *
- * `externalApplyLink` is absent from this interface on purpose, and its absence
- * is load-bearing rather than an oversight. The actor returns it for some
- * postings and it is where Indeed's `from`/`tk`/`vjk` tracking parameters live;
- * `url` is the clean canonical `viewjob?jk=…` form. Posting identity downstream
- * is derived from the URL, and two links to the same advertisement that differ
- * only in tracking junk are two postings as far as that scheme is concerned.
- * Reading only `url` is what keeps that from happening — it was verified over a
- * repeated search, where all four overlapping postings hashed identically.
+ * `externalApplyLink` is absent on purpose, not by oversight: it carries
+ * Indeed's `from`/`tk`/`vjk` tracking parameters, where `url` is the clean
+ * canonical `viewjob?jk=…` form. Posting identity is derived from the URL, so
+ * two tracking-laden links to one advertisement would become two postings.
+ * Verified over a repeated search — all four overlapping postings hashed
+ * identically.
  */
 interface IndeedJob {
   url?: string
@@ -151,15 +124,11 @@ function listedAtMillis(job: IndeedJob): number | undefined {
 /**
  * Whether a posting is inside the requested freshness window.
  *
- * A posting with no readable listing date is **kept**. The reasoning: the actor
- * only returns live listings, so `daysOld` is a preference for recency rather
- * than a correctness gate, and a missing timestamp is a defect in a community
- * scraper rather than evidence that the advertisement is old. Dropping on
- * absence would let one upstream field change silently empty every search,
- * which is a far worse failure than a stale result — and it fails quietly,
- * which is worse still. The cost of keeping is bounded and visible: such a
- * posting renders with no `listed:` line at all, so the model can see for
- * itself that the freshness evidence is missing.
+ * A posting with no readable listing date is **kept**: the actor returns only
+ * live listings, so `daysOld` is a recency preference, not a correctness gate,
+ * and dropping on absence would let one upstream field change silently empty
+ * every search. Such a posting renders with no `listed:` line, so the missing
+ * evidence is visible to the model.
  */
 function isFreshEnough(job: IndeedJob, daysOld: number, now: number): boolean {
   const listedAt = listedAtMillis(job)
@@ -191,30 +160,17 @@ export const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
   maxResultsLimit: MAX_RESULTS_LIMIT,
   defaultDaysOld: DEFAULT_DAYS_OLD,
 
-  // Every key here was confirmed against a live run on 2026-08-05; nothing is
-  // sent that was not observed to be accepted. Three of them are off, and each
-  // is off for a reason rather than by default:
+  // Every key was confirmed against a live run on 2026-08-05; nothing is sent
+  // that was not observed to be accepted. `parseCompanyDetails` is off — the
+  // scout never reads an employer profile. `followApplyRedirects` is off — it
+  // produces the tracking-laden links this tool exists to avoid.
+  // `saveOnlyUniqueItems` is on: Indeed lists one advertisement under several
+  // facets.
   //
-  // `parseCompanyDetails` would add an employer profile to every item, on top
-  // of a payload already measured at 77 KB for six results. The scout ranks
-  // advertisements, and nothing it produces reads a company profile.
-  //
-  // `followApplyRedirects` would have the actor chase each posting out to
-  // whatever applicant-tracking system sits behind it — slower, and it is the
-  // path that produces the tracking-laden links this tool exists to avoid.
-  //
-  // `saveOnlyUniqueItems` is the one that is on: Indeed lists the same
-  // advertisement under several search facets, and a duplicate would spend one
-  // of a default six places saying nothing new.
-  //
-  // Two fields the model can set are missing from this body, and both are
-  // deliberate. `daysOld` has no counterpart in the actor's input schema at
-  // all, and `workType` has none either — the run below takes `position`,
-  // `country`, `location` and item bounds, and nothing about recency or
-  // employment type. Inventing a plausible key name for either would be worse
-  // than useless: the actor ignores what it does not recognise, so the bound
-  // would appear to be enforced and would not be. Both are applied to the
-  // returned items instead, in `keepItem`.
+  // `daysOld` and `workType` have no counterpart in the actor's input schema,
+  // and inventing a plausible key would be worse than useless — the actor
+  // ignores what it does not recognise, so the bound would look enforced and
+  // would not be. Both are applied to returned items in `keepItem`.
   buildRequestBody(search: ResolvedBoardSearch): Record<string, unknown> {
     return {
       position: search.query,

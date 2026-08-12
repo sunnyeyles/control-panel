@@ -6,19 +6,15 @@
  * shadow board, does any arithmetic, and records ops. That containment is the
  * point: the surface a bad model call can reach is exactly these nine verbs.
  *
- * **`draw_diagram` is the one that carries the weight**, and the others are
- * increasingly the editing verbs around it. It takes boxes and arrows with no
- * coordinates at all and lays them out by rank, which turns eighteen round
- * trips of coordinate arithmetic into one call whose positions are computed
- * rather than guessed. `create_shape` remains for adding a single box to
- * something that already exists.
+ * **`draw_diagram` carries the weight**; the others are the editing verbs
+ * around it. It takes boxes and arrows with no coordinates and lays them out by
+ * rank, turning eighteen round trips of coordinate arithmetic into one call.
  *
- * **Two channels leave every tool, and they carry different things.** The
- * return value is prose for the model — what happened, or what to do instead.
- * The ops go to the tool runtime's `writer`, which is LangGraph's custom
- * stream, and travel straight to the browser without passing through the model
- * at all. So the canvas updates while the sentence describing it is still being
- * typed, and the coordinates of twelve shapes never cost a token of context.
+ * **Two channels leave every tool.** The return value is prose for the model.
+ * The ops go to the tool runtime's `writer` — LangGraph's custom stream — and
+ * reach the browser without passing through the model, so the canvas updates
+ * while the sentence describing it is still being typed and twelve shapes'
+ * coordinates never cost a token of context.
  *
  * That writer is only populated because `@workspace/agents-core` forwards its
  * node config into `ToolRegistry.dispatch`, and because the run streams in

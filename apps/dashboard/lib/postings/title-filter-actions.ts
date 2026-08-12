@@ -10,28 +10,22 @@ import {
 /**
  * Saving the words that rule a Posting out by its title.
  *
- * **Nothing in this file imports Next**, for the reason
- * `lib/cover-letters/letter-instructions-actions.ts` gives about itself: every
- * authorization branch turns on who is asking, and a session is exactly what a
- * unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/jobs/schedules/actions.ts`, which is `"use server"`, supplies the
- * real dependencies, and calls `refresh()`.
+ * **Nothing in this file imports Next**: every authorization branch turns on who
+ * is asking, and a session is exactly what a unit test cannot produce. The
+ * Next-aware wrapper is `app/(app)/jobs/schedules/actions.ts`.
  *
- * Two properties hold and neither is visible from the happy path:
+ * Two properties, neither visible from the happy path:
  *
  * 1. **The row is addressed by the session's user id and by nothing else.** No
- *    form field reaches the `where` clause, so there is no way to name another
- *    user's filters from here.
- * 2. **An over-long list is refused, never trimmed.** A silent trim would drop
- *    terms off the end of a list and say nothing — and the postings those terms
- *    were meant to hide would simply reappear, which reads as the filter being
- *    broken rather than as a list that was too long.
+ *    form field reaches the `where` clause.
+ * 2. **An over-long list is refused, never trimmed.** A silent trim drops terms
+ *    off the end and says nothing, and the postings they were meant to hide
+ *    reappear — which reads as the filter being broken.
  *
  * ⚠️ **The parse is `parseTitleExclusions` and is not restated here.** It is the
  * same module the *matching* rule comes from, so what is stored and what is
- * matched cannot come to disagree about what a term is — which is the one bug in
- * this feature that would be invisible from both ends: a filter that saves
- * cleanly and then quietly matches nothing.
+ * matched cannot disagree about what a term is — the one bug in this feature
+ * invisible from both ends: a filter that saves cleanly and matches nothing.
  */
 
 /**

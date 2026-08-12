@@ -20,17 +20,15 @@ import { refresh } from "next/cache"
 /**
  * The briefings segment's Server Actions.
  *
- * Follows the convention `app/(app)/documents/actions.ts` sets, point for
- * point: `"use server"` at the top of a dedicated file rather than inline,
- * because every export here is a POST endpoint reachable without going through
- * the UI and the set of them is a security surface; a thin wrapper over a
- * `createXActions(deps)` factory in `lib/`, because the injectable seam is what
- * lets the authorization branches be tested without a live session; and
- * `refresh()` here rather than in the core, because it needs Next's request
- * store.
+ * Follows the convention `app/(app)/documents/actions.ts` sets: a dedicated
+ * `"use server"` file, because every export is a POST endpoint reachable
+ * without the UI and the set of them is a security surface; a thin wrapper over
+ * a `createXActions(deps)` factory in `lib/`, because that seam is what lets
+ * the authorization branches be tested without a live session; and `refresh()`
+ * here rather than in the core, because it needs Next's request store.
  *
- * A `"use server"` file may only export async functions, which is why the state
- * type crosses as a type-only import.
+ * ⚠️ A `"use server"` file may only export async functions, which is why the
+ * state type crosses as a type-only import.
  */
 
 const actions = createCoverLetterActions({
@@ -84,15 +82,10 @@ export async function createCoverLetterAction(
 }
 
 /**
- * `refresh()` after a success, for the same reason the document actions call
- * it: `/jobs` is `force-dynamic` and `staleTimes.dynamic` lets the client
- * router reuse the segment for 30 seconds, so without this the page would keep
- * showing a state that predates the draft.
- *
- * The page does render a letter — the Drafted column and the controls in an
- * expanded posting's detail — so this is load-bearing rather than
- * belt-and-braces: without it a first draft leaves the row still offering a
- * first draft.
+ * ⚠️ `refresh()` is load-bearing, not belt-and-braces: `/jobs` is
+ * `force-dynamic` and `staleTimes.dynamic` lets the client router reuse the
+ * segment for 30 seconds, so without it a first draft leaves the Drafted column
+ * still offering a first draft.
  */
 export async function draftCoverLetterAction(
   state: ActionState,
@@ -108,11 +101,9 @@ export async function draftCoverLetterAction(
 /**
  * Start a briefing now.
  *
- * `refresh()` on success is what puts the new `running` row on the page: the
- * action writes it, and without this the client router would keep serving the
- * segment it cached up to 30 seconds ago and the run would appear not to have
- * started. From there `RefreshWhileRunning` takes over until the run is
- * terminal.
+ * `refresh()` is what puts the new `running` row on the page — without it the
+ * cached segment makes the run appear not to have started. `RefreshWhileRunning`
+ * takes over from there until the run is terminal.
  */
 export async function triggerBriefingRunAction(
   state: ActionState,
@@ -128,11 +119,9 @@ export async function triggerBriefingRunAction(
 /**
  * Save an edited letter.
  *
- * `refresh()` for a narrower reason than the draft above: the letter's bytes
- * are fetched by the editor rather than rendered by the page, so what goes
- * stale here is only metadata the expanded detail shows (drafted-on, size).
- * Cheap, and the alternative is the one thing on this page that silently
- * disagrees with storage.
+ * `refresh()` for a narrower reason than the draft above: the bytes are fetched
+ * by the editor, so what goes stale is only the metadata the expanded detail
+ * shows (drafted-on, size).
  */
 export async function saveCoverLetterAction(
   state: ActionState,
@@ -148,10 +137,9 @@ export async function saveCoverLetterAction(
 /**
  * Rewrite the user's CV for one Posting.
  *
- * `refresh()` on success for the reason the draft above gives, and it is
- * load-bearing here in the same way: the expanded detail renders "Generated
- * <date>" plus a download, a PDF button and an editor, and without this a first
- * generation would leave the panel still offering a first one.
+ * `refresh()` is load-bearing as it is for the draft above: the expanded detail
+ * renders "Generated <date>" plus a download, a PDF button and an editor, so
+ * without it a first generation leaves the panel offering a first one.
  */
 export async function generateTailoredResumeAction(
   state: ActionState,
@@ -170,10 +158,8 @@ export async function generateTailoredResumeAction(
 /**
  * Save an edited tailored resume.
  *
- * `refresh()` for the narrower reason `saveCoverLetterAction` gives: the bytes
- * are fetched by the editor rather than rendered by the page, so what goes stale
- * is only the metadata the panel shows. Cheap, and the alternative is a panel
- * that silently disagrees with storage.
+ * `refresh()` for the narrower reason `saveCoverLetterAction` gives: only the
+ * metadata the panel shows goes stale.
  */
 export async function saveTailoredResumeAction(
   state: ActionState,
@@ -189,14 +175,13 @@ export async function saveTailoredResumeAction(
 /**
  * Add a Posting the user found themselves, from its link.
  *
- * `refresh()` on success is the whole of what puts the new row on the page —
- * `/jobs` is `force-dynamic` and `staleTimes.dynamic` lets the client router
- * reuse the segment for 30 seconds, so without it somebody would paste a link,
- * be told it was added, and look at a table that does not contain it.
+ * `refresh()` is the whole of what puts the new row on the page — without it
+ * somebody pastes a link, is told it was added, and looks at a table that does
+ * not contain it.
  *
- * It is the slowest action in this file by a wide margin: a page fetch and then
- * a model call, in sequence, both on the request. `maxDuration` on `page.tsx`
- * is sized for it.
+ * ⚠️ The slowest action in this file by a wide margin: a page fetch then a
+ * model call, in sequence, both on the request. `maxDuration` on `page.tsx` is
+ * sized for it.
  */
 export async function addPostingByLinkAction(
   state: ActionState,
@@ -212,15 +197,11 @@ export async function addPostingByLinkAction(
 /**
  * Set where one application stands.
  *
- * `refresh()` on success for the reason the draft above gives, with one extra
- * consequence worth naming: `/jobs` is `force-dynamic` and
- * `staleTimes.dynamic` lets the client router reuse the segment for 30 seconds,
- * so a status set in *another* tab can look stale there for that long. This call
- * covers the tab that made the change, which is the one whose user is watching.
+ * ⚠️ `refresh()` covers the tab that made the change only — a status set in
+ * *another* tab can look stale there for `staleTimes.dynamic`.
  *
- * The select is optimistic, so what this refresh actually settles is everything
- * the new status feeds that the control does not hold itself — the `status`
- * sort order, and any later reader of the row.
+ * The select is optimistic, so what this settles is what the control does not
+ * hold itself: the `status` sort order, and any later reader of the row.
  */
 export async function setPostingStatusAction(
   state: ActionState,
@@ -240,11 +221,10 @@ export async function setPostingStatusAction(
  * repeats, so a row submits a list of one. See `lib/postings/posting-actions.ts`
  * for why the cover letter and the tailored resume are deleted before the row.
  *
- * `refresh()` is the whole of what puts the page back in step here, and unlike
- * the status action there is no optimistic control holding the new state in the
- * meantime: without it the client router would keep serving rows that no longer
- * exist for up to `staleTimes.dynamic`, and clicking one would open a detail
- * for an advertisement the user just removed.
+ * ⚠️ `refresh()` is the whole of what puts the page back in step — unlike the
+ * status action there is no optimistic control meanwhile, so without it the
+ * router serves deleted rows for up to `staleTimes.dynamic` and clicking one
+ * opens a detail for an advertisement the user just removed.
  */
 export async function deletePostingsAction(
   state: ActionState,
@@ -260,22 +240,16 @@ export async function deletePostingsAction(
 /**
  * Score a batch of this user's unscored Postings against their resume.
  *
- * ⚠️ **Takes neither `state` nor `FormData`, like `loadPostingDetailAction`
- * below and for the same reason**: `ActionState` exists to carry a message back
- * into the form that submitted it, and there is no form here — the caller is a
- * component that mounted. It is still a `"use server"` export and therefore
- * still a POST endpoint reachable without the UI, which is why every
- * authorization branch lives in `lib/postings/match-actions.ts`.
+ * ⚠️ **Takes neither `state` nor `FormData`, like `loadPostingDetailAction`**:
+ * `ActionState` carries a message back into a form, and there is no form — the
+ * caller is a component that mounted. Still a POST endpoint reachable without
+ * the UI, which is why every authorization branch is in `match-actions.ts`.
  *
- * `refresh()` **only when something was written**, which is the difference
- * between this and every other action in this file. The scoring component calls
- * it in a loop until a round writes nothing, and a refresh on the round that
- * wrote nothing would be a full re-render of `/jobs` for no change at all — on
- * every page view, since the last round of every run is that round.
- *
- * It is load-bearing on the rounds that do write: the Match column and the
- * order it sorts by are server-rendered, so without this a page would finish
- * scoring and go on showing em-dashes until something else invalidated it.
+ * ⚠️ **`refresh()` only when something was written**, unlike every other action
+ * here. The component loops until a round writes nothing, and the last round of
+ * every run is that round — so an unconditional refresh would re-render `/jobs`
+ * for no change on every page view. On the rounds that do write it is
+ * load-bearing: the Match column is server-rendered.
  */
 export async function scorePendingMatchesAction() {
   const result = await matchActions.scorePendingMatches()
@@ -288,20 +262,13 @@ export async function scorePendingMatchesAction() {
 /**
  * What an expanded row shows, fetched when the row is expanded.
  *
- * ⚠️ **The one export here that reads rather than writes, and the only one that
- * takes neither `state` nor `FormData`.** That departure from the convention
- * this file otherwise follows is deliberate: `ActionState` exists to carry a
- * message back into the form that submitted it, and there is no form here — the
- * caller is a chevron. It is still a `"use server"` export, so it is still a
- * POST endpoint reachable without the UI, which is why the authorization and
- * the id validation live in `lib/postings/posting-actions.ts` with everything
- * else rather than in the component that calls it.
+ * ⚠️ **The one export here that reads rather than writes.** No `state` or
+ * `FormData` — the caller is a chevron, not a form — and no `refresh()`, since
+ * nothing was mutated. Still a POST endpoint reachable without the UI, so
+ * authorization and id validation live in `lib/postings/posting-actions.ts`.
  *
- * **No `refresh()`**, for the obvious reason: nothing was mutated.
- *
- * It exists because the summary, the match reason and the copied highlights
- * used to ship with all twenty-five rows of every page render for the sake of
- * the one row that might be opened. See `lib/postings/load-posting-detail.ts`.
+ * It exists because the summary, match reason and highlights used to ship with
+ * all twenty-five rows for the sake of the one that might be opened.
  */
 export async function loadPostingDetailAction(postingId: string) {
   return postingActions.loadPostingDetail(postingId)

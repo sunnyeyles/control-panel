@@ -27,15 +27,13 @@ const SAVE_FAILED =
  * only overwrite an existing object, while this path creates the first object
  * after the server has re-checked the Posting belongs to the current user.
  *
- * ⚠️ **This button waits on the editor chunk explicitly, and its two siblings
- * do not need to.** `EditCoverLetterButton` and `EditTailoredResumeButton`
- * fetch a stored document before they open, and that request is far slower than
- * the chunk it hides — so their "Opening…" already covers the download. There
- * is nothing to fetch here: the letter starts empty. Without the wait below,
- * deferring TipTap would turn an instant open into a button that looks dead for
- * as long as the download takes. The `import()` is the same specifier the
- * {@link FileEditorDialog} above is built from, so it resolves from the module
- * registry rather than downloading anything twice.
+ * ⚠️ **This button waits on the editor chunk explicitly; its two siblings do
+ * not need to.** They fetch a stored document first, and that request already
+ * hides the chunk download behind "Opening…". Nothing is fetched here — the
+ * letter starts empty — so without the wait, deferring TipTap turns an instant
+ * open into a button that looks dead. The `import()` is the same specifier
+ * {@link FileEditorDialog} is built from, so it resolves from the module
+ * registry rather than downloading twice.
  */
 export function CreateCoverLetterButton({
   postingId,

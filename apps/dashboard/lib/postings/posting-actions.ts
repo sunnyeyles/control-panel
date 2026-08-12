@@ -28,15 +28,14 @@ import { z } from "zod"
  * The Posting actions, as plain functions over injected dependencies.
  *
  * **Nothing in this file imports Next**, which is what lets the authorization
- * branches be tested at all — every one of them turns on who is asking, and a
- * session is exactly what a unit test cannot produce. The Next-aware wrapper is
+ * branches be tested at all — every one turns on who is asking, and a session is
+ * exactly what a unit test cannot produce. The Next-aware wrapper is
  * `app/(app)/jobs/actions.ts`, and `refresh()` lives there because it needs
  * Next's request store.
  *
- * `status` is the only column in `postings` a person writes; everything else on
- * the row is whatever the last Run that saw the advertisement reported. That
- * asymmetry is why this file exists at all, and why `recordPostings` in
- * `@workspace/db` leaves the column alone on conflict.
+ * `status` is the only column in `postings` a person writes; everything else is
+ * whatever the last Run reported. That asymmetry is why this file exists, and why
+ * `recordPostings` leaves the column alone on conflict.
  */
 
 /**
@@ -47,31 +46,28 @@ import { z } from "zod"
 const INVALID_STATUS = "Choose New, Applied, Not interested or Rejected."
 
 /**
- * Only reachable by posting to the action directly — the table selects within
- * one page, so the control cannot offer more than {@link PAGE_SIZE} — which is
- * why the copy names the limit rather than apologising for it.
+ * Only reachable by posting to the action directly — the table selects within one
+ * page, so the control cannot offer more than {@link PAGE_SIZE} — which is why
+ * the copy names the limit rather than apologising for it.
  *
- * The bound is the point of the message, not the message the point of the
- * bound: an unbounded list becomes an unbounded `IN (…)`, and that is a query
- * anyone with a session can make arbitrarily large.
+ * The bound is the point: an unbounded list becomes an unbounded `IN (…)`, a
+ * query anyone with a session can make arbitrarily large.
  */
 const TOO_MANY_POSTINGS = `Delete at most ${PAGE_SIZE} postings at a time.`
 
 /**
  * How many **Postings'** deletes may be in flight at once.
  *
- * The same bound `list-documents.ts` and `cover-letter-views.ts` use, through the
- * same helper, and matched to them on purpose: `S3UserObjectStore.delete()` is a
- * `HeadObject` followed by a `DeleteObject`, so a full-page selection run one at
- * a time is a hundred sequential round trips inside one Server Action — and most
- * of those heads miss, because most Postings have neither document.
+ * The same bound `list-documents.ts` and `cover-letter-views.ts` use, on purpose:
+ * `S3UserObjectStore.delete()` is a `HeadObject` followed by a `DeleteObject`, so
+ * a full-page selection run serially is a hundred sequential round trips inside
+ * one Server Action — and most of those heads miss.
  *
- * ⚠️ Each unit of work is now *two* deletes rather than one — the cover letter
- * and the tailored resume, issued together — so this bounds sixteen concurrent
- * requests rather than eight. Left as it was rather than halved: the pair is
- * what has to succeed or fail together for a Posting to be removable, so
- * splitting them across two slots would let a page-worth of Postings interleave
- * and make "which Posting is safe to delete" a question about scheduling.
+ * ⚠️ Each unit of work is *two* deletes — the letter and the tailored resume —
+ * so this bounds sixteen concurrent requests rather than eight. Not halved: the
+ * pair has to succeed or fail together for a Posting to be removable, and
+ * splitting them across two slots would make "which Posting is safe to delete" a
+ * question about scheduling.
  */
 const DELETE_CONCURRENCY = 8
 
@@ -79,12 +75,11 @@ const DELETE_CONCURRENCY = 8
  * Every Posting's documents failed, so nothing was deleted.
  *
  * Distinct from {@link POSTING_NOT_FOUND}: the Postings are there and are the
- * caller's, and what refused was S3. Saying "could not be found" here would
- * send someone looking for a row that is still on the page.
+ * caller's, and what refused was S3. "Could not be found" would send someone
+ * looking for a row that is still on the page.
  *
- * "documents" rather than "cover letters" since a Posting carries two — the
- * message cannot name which one refused without being wrong half the time, and
- * the user's next move is the same either way.
+ * "documents" rather than "cover letters" since a Posting carries two, and the
+ * user's next move is the same either way.
  */
 const DOCUMENTS_UNAVAILABLE =
   "Those postings were left alone — the documents saved against them could not be deleted. Try again in a moment."
@@ -93,10 +88,9 @@ const DOCUMENTS_UNAVAILABLE =
  * One document delete, as "is this Posting safe to remove".
  *
  * ⚠️ **A miss is the ordinary case and not a failure.** Most Postings have
- * neither a cover letter nor a tailored resume, so `object_not_found` is the
- * path this takes most of the time. Branching on `code` rather than
- * `instanceof`, per `errors.ts`: an error crossing a bundler boundary can fail a
- * prototype check while carrying a perfectly good discriminant.
+ * neither document, so `object_not_found` is the usual path. Branching on `code`
+ * rather than `instanceof`, per `errors.ts`: an error crossing a bundler boundary
+ * can fail a prototype check while carrying a good discriminant.
  *
  * `object_ownership` deliberately does *not* land here. At a key built from the
  * caller's own id it should be unreachable, and treating it as "nothing to
@@ -119,18 +113,16 @@ function deleted(result: PromiseSettledResult<void>, what: string): boolean {
  * The documents went and the rows did not — the one failure this action cannot
  * undo, so it is the one it must not describe as "something went wrong".
  *
- * ⚠️ **Deleting the documents first is what makes an S3 failure safe, and it is
- * also what makes *this* failure lossy.** By the time the `deleteMany` runs,
- * every cover letter and tailored resume the selection carried is already gone;
- * a Postgres failure here therefore leaves Postings on the page that no longer
- * have the documents the table will now report they never had. A generic message
- * would read as "no harm done" and send the user looking for files that are not
- * coming back from the UI.
+ * ⚠️ **Deleting the documents first is what makes an S3 failure safe, and what
+ * makes *this* failure lossy.** By the `deleteMany`, every document the selection
+ * carried is already gone, so a Postgres failure leaves Postings on the page
+ * without the documents the table will now report they never had. A generic
+ * message would read as "no harm done".
  *
- * Retrying is safe and is the way out: the objects are already absent, so the
- * second attempt takes the `object_not_found` path and removes the rows. What is
- * lost is the document *bodies*, recoverable only from the bucket's noncurrent
- * versions, which both `cover-letters` and `tailored-resumes` retain for a year.
+ * Retrying is safe and is the way out: the objects are absent, so the second
+ * attempt takes `object_not_found` and removes the rows. What is lost is the
+ * document *bodies*, recoverable only from the buckets' noncurrent versions,
+ * which both retain for a year.
  */
 const POSTINGS_NOT_REMOVED =
   "Those postings could not be removed, and any cover letters or tailored resumes saved against them have already been deleted. Try again in a moment to remove the postings."
@@ -142,10 +134,9 @@ export interface PostingActionsDeps {
    * The client, resolved per call rather than held.
    *
    * Called inside the action body, never in the factory, so
-   * `createPostingActions(...)` at module scope in the wrapper constructs
-   * nothing and cannot throw at import time on a missing `DATABASE_URL`. It is
-   * also called *after* validation, which is what lets a test prove nothing was
-   * queried by asserting this was never reached.
+   * `createPostingActions(...)` at module scope constructs nothing and cannot
+   * throw at import time on a missing `DATABASE_URL`. Called *after* validation,
+   * so a test can prove nothing was queried by asserting this was never reached.
    */
   getPrisma: () => PrismaClient
   /**
@@ -159,11 +150,9 @@ export interface PostingActionsDeps {
    * The tailored-resume store, for the same reason and on the same key.
    *
    * ⚠️ **A second store here is not optional tidying.** A tailored resume is
-   * addressed by `(user, Posting)` exactly as a letter is, so a delete that
-   * removed only the letter would leave an object in the bucket that nothing in
-   * the app can any longer address, list or delete — the Posting whose id was
-   * its key is gone. It would sit there until someone went looking with the AWS
-   * console.
+   * addressed by `(user, Posting)` exactly as a letter is, so a delete removing
+   * only the letter leaves an object nothing in the app can address, list or
+   * delete — the Posting whose id was its key is gone.
    */
   getTailoredResumes: () => TailoredResumeStore
   /** Overridden in tests, so an assertion can name the occurrence. */
@@ -177,9 +166,8 @@ export interface PostingActionsDeps {
  * shape `postingId()` produces before it reaches a query — and is never trusted
  * to name an *owner*, which the session supplies.
  *
- * **The pattern is imported, not restated.** `posting-document-ref.ts` keeps
- * the one copy and says why: it gates storage-key construction as well as this
- * query, and two copies of such a rule is how one of them gets relaxed alone.
+ * **The pattern is imported, not restated.** `posting-document-ref.ts` keeps the
+ * one copy and says why; two copies of such a rule is how one gets relaxed alone.
  */
 const postingIdSchema = z.string().regex(POSTING_ID_PATTERN)
 
@@ -202,12 +190,11 @@ export function createPostingActions(deps: PostingActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    // Before the body is touched at all. For a Server Action this is not a
-    // second layer: `proxy.ts` cannot evaluate a POST session — the auth SDK's
-    // fast path is guarded by `method === "GET"` — so it degrades to checking
-    // that some session-cookie substring is present, which a forged cookie
-    // satisfies. This is the only real check on the path, and the identity it
-    // yields is never taken from the submission.
+    // Before the body is touched at all. For a Server Action this is not a second
+    // layer: `proxy.ts` cannot evaluate a POST session — the auth SDK's fast path
+    // is guarded by `method === "GET"` — so it degrades to checking that some
+    // session-cookie substring is present, which a forged cookie satisfies. This
+    // is the only real check on the path.
     const caller = await requireUser(deps.getUser, "postings")
     if (!caller.ok) return fail(caller.message)
 
@@ -224,13 +211,11 @@ export function createPostingActions(deps: PostingActionsDeps) {
 
     try {
       // ⚠️ **`caller.userId` here is not a shortcut past an ownership check — it
-      // is half the natural key.** `jobs` needs `requireOwnedJob` because a
-      // `jobs.id` addresses any row in the table; a Posting is not addressable
-      // without naming a user, so filtering on both *is* the check. One
-      // statement also closes the TOCTOU window a load-then-compare leaves open,
-      // and it is why "no such Posting" and "someone else's" arrive back here as
-      // the same `false` rather than as a distinction this action would then
-      // have to be careful not to leak.
+      // is half the natural key.** A Posting is not addressable without naming a
+      // user, so filtering on both *is* the check. One statement also closes the
+      // TOCTOU window a load-then-compare leaves open, and it is why "no such
+      // Posting" and "someone else's" arrive back as the same `false` rather than
+      // as a distinction this action would have to avoid leaking.
       updated = await setPostingStatus(
         deps.getPrisma(),
         caller.userId,
@@ -255,21 +240,18 @@ export function createPostingActions(deps: PostingActionsDeps) {
   /**
    * Delete one or more Postings, and the cover letter each one carries.
    *
-   * One action for both entry points. The trash icon on a row submits a single
-   * `postingId`; the bulk bar submits one field per selected row. A repeated
-   * form field is the plainest way to send a list through `useActionState`, and
-   * it means the row control is the bulk control with a list of one rather than
-   * a second code path that has to be kept honest separately.
+   * One action for both entry points: the row's trash icon submits a single
+   * `postingId`, the bulk bar one field per selected row. The row control is the
+   * bulk control with a list of one, rather than a second path kept honest
+   * separately.
    *
-   * ⚠️ **The letter is deleted before the row, and the order is the whole of
-   * the failure design.** A letter is addressed only as
+   * ⚠️ **The letter is deleted before the row, and the order is the whole of the
+   * failure design.** A letter is addressed only as
    * `{env}/{userId}/cover-letters/{postingId}.md`, and nothing lists letters
-   * except by walking the Postings on the page — so a row deleted first, with
-   * its object left behind by a failed S3 call, strands a document the user can
-   * never see, open or download again. Deleting the letter first inverts that:
-   * a storage failure leaves the Posting on the page, which is visible, and
-   * retrying is the obvious thing to do. The reverse order is the same mistake
-   * `recordArtifact` avoids by writing its row only after the upload returns.
+   * except by walking the Postings on the page — so a row deleted first, with its
+   * object left behind by a failed S3 call, strands a document the user can never
+   * see again. This way a storage failure leaves the Posting on the page, which
+   * is visible, and retrying is the obvious thing to do.
    *
    * ⚠️ **A deleted Posting can come back, and that is not a bug to fix here.**
    * `recordPostings` upserts on `(user_id, posting_id)`, so the next Run that
@@ -293,13 +275,12 @@ export function createPostingActions(deps: PostingActionsDeps) {
     if (!caller.ok) return fail(caller.message)
 
     // `getAll`, because the field repeats. The ids go into an `IN (…)` and each
-    // one becomes an S3 key segment, so both halves are bounded before either
-    // becomes a query.
+    // becomes an S3 key segment, so both halves are bounded before either becomes
+    // a query.
     //
-    // ⚠️ **Counted before it is parsed, and the order is deliberate.** Zod
-    // validates every element before reporting the array's length, so checking
-    // the bound afterwards means regex-testing a hundred thousand fields in
-    // order to refuse them. The count is free; the parse is not.
+    // ⚠️ **Counted before it is parsed.** Zod validates every element before
+    // reporting the array's length, so checking the bound afterwards means
+    // regex-testing a hundred thousand fields in order to refuse them.
     const submitted = formData.getAll("postingId")
     if (submitted.length > PAGE_SIZE) return fail(TOO_MANY_POSTINGS)
 
@@ -331,11 +312,9 @@ export function createPostingActions(deps: PostingActionsDeps) {
 
     // ⚠️ **Both documents per Posting, and both must go before the row does.**
     // Each is keyed on the Posting id, so a row deleted while one of its objects
-    // survives leaves that object unaddressable — there is no longer a Posting
-    // to name it by. The two deletes are one unit of work per Posting rather
-    // than two passes, so `DELETE_CONCURRENCY` still bounds how much is in
-    // flight and a Posting is only counted removable when *neither* document is
-    // left behind.
+    // survives leaves that object unaddressable. The two deletes are one unit of
+    // work per Posting, so `DELETE_CONCURRENCY` still bounds what is in flight and
+    // a Posting counts removable only when *neither* document is left behind.
     //
     // The key is built from the session's user id, never from the form, so a
     // tampered field can only ever address something in the caller's own prefix.
@@ -347,8 +326,7 @@ export function createPostingActions(deps: PostingActionsDeps) {
 
         // `allSettled`, not `all`: the ordinary case is that *neither* object
         // exists, and a rejection from one must not skip the other's delete —
-        // that is exactly how a tailored resume would be orphaned by a Posting
-        // that happened to have no cover letter.
+        // that is exactly how a tailored resume gets orphaned.
         const [letter, resume] = await Promise.allSettled([
           letters.delete(ref),
           tailoredResumes.delete(ref),
@@ -401,23 +379,20 @@ export function createPostingActions(deps: PostingActionsDeps) {
   /**
    * What the expanded row shows, fetched when the row is expanded.
    *
-   * ⚠️ **A read among mutations, and it sits here anyway.** Everything else in
-   * this factory writes. This is in the same place because it needs the same
-   * two things and must not get either of them differently: the caller from the
-   * session rather than from the submission, and the Posting id checked against
+   * ⚠️ **A read among mutations, and it sits here anyway.** It needs the same two
+   * things and must not get either differently: the caller from the session
+   * rather than the submission, and the Posting id checked against
    * `postingIdSchema` before it reaches a query. A read reachable by direct POST
    * is still a read someone can aim at another user's rows.
    *
-   * ⚠️ **A discriminated union, not a thrown error and not a bare
-   * `undefined`.** The panel has three things to say — here is the detail, this
-   * payload could not be read, and something went wrong — and only the middle
-   * one is a state `loadPostingDetail` returns. Collapsing "the store failed"
-   * into "nothing to show" would tell someone their advertisement carried no
-   * description when in fact the database refused.
+   * ⚠️ **A discriminated union, not a thrown error and not a bare `undefined`.**
+   * The panel has three things to say — here is the detail, this payload could
+   * not be read, something went wrong — and collapsing "the store failed" into
+   * "nothing to show" would claim the advertisement carried no description when
+   * in fact the database refused.
    *
-   * It takes a plain id rather than `(state, formData)` because it is a read.
-   * The `ActionState` shape exists so a form can carry a message back into the
-   * markup that submitted it; there is no form here, and no state to carry.
+   * A plain id rather than `(state, formData)` because it is a read: there is no
+   * form here, and no state to carry.
    */
   async function loadDetail(
     rawPostingId: unknown
@@ -468,9 +443,7 @@ export type PostingDetailResult =
  * that would not delete leaves its Posting on the page, and a message claiming
  * otherwise would read as a UI that had not refreshed.
  *
- * "documents", not "cover letters" — the same rule as `DOCUMENTS_UNAVAILABLE`:
- * a Posting carries two, and the message cannot name which one refused without
- * being wrong half the time.
+ * "documents", not "cover letters" — same rule as {@link DOCUMENTS_UNAVAILABLE}.
  */
 function deleteMessage(removed: number, attempted: number): string {
   if (removed < attempted) {

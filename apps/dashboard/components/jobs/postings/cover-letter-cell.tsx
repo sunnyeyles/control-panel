@@ -9,14 +9,12 @@ import { FileTextIcon, TriangleAlertIcon } from "lucide-react"
  * The letters for one page of the table, as the page hands them down.
  *
  * ⚠️ **A promise, not a result, and `null` is not an empty list.** The page no
- * longer awaits the cover letters — see `app/(app)/jobs/page.tsx`. `null`
- * means the store could not be read; an empty array means it was read and this
- * user has drafted nothing. Collapsing the two would tell someone who has
- * already written a letter that they have not, which is the exact failure the
- * page-level alert exists to prevent.
+ * longer awaits the cover letters. `null` means the store could not be read; an
+ * empty array means it was read and nothing is drafted. Collapsing the two
+ * would tell someone who has written a letter that they have not.
  *
- * An array rather than a `Map` keyed by Posting, because this crosses the RSC
- * boundary and a `Map` is an awkward payload.
+ * An array rather than a `Map` keyed by Posting: this crosses the RSC boundary,
+ * where a `Map` is an awkward payload.
  */
 export type CoverLetterPromise = Promise<readonly CoverLetterView[] | null>
 
@@ -31,14 +29,11 @@ export type CoverLetterLookup =
  *
  * ⚠️ **`use()` suspends the component that calls it, so where this hook is
  * called decides what waits.** Called in `PostingTableBody` it would put the
- * entire table behind S3 and undo the reason the page stopped awaiting these at
- * all. It belongs in a leaf with its own `<Suspense>` boundary — {@link
- * CoverLetterCell} below, and the letter section of the expanded detail.
+ * whole table behind S3. It belongs in a leaf with its own `<Suspense>` —
+ * {@link CoverLetterCell}, and the letter section of the expanded detail.
  *
- * A linear scan, not a lookup map. The array holds letters for the visible page
- * only — `coverLetterViewsFor` narrows the listing to exactly the ids being
- * rendered — so it is bounded by `PAGE_SIZE` and cannot grow with a user's
- * drafting history.
+ * A linear scan, not a lookup map: `coverLetterViewsFor` narrows the array to
+ * the visible ids, so it is bounded by `PAGE_SIZE`.
  */
 export function useCoverLetter(
   postingId: string,
@@ -56,15 +51,12 @@ export function useCoverLetter(
 /**
  * Whether this Posting has a letter — not what can be done with it.
  *
- * Drafting, editing and downloading live in the expanded detail. The column is
- * worth a cell of its own because "have I written to this one yet" is a scanning
- * question, and answering it per row is what stops someone opening twenty-five
- * details to find out.
+ * Drafting, editing and downloading live in the expanded detail; "have I
+ * written to this one yet" is a scanning question, which is what earns a cell.
  *
- * All three states render a glyph and a screen-reader phrase, and the three
- * phrases are different on purpose. An em-dash for "no letter" and an em-dash
- * for "we could not tell" would look identical to a sighted reader and read
- * identically to everyone else.
+ * All three states render a glyph and a distinct screen-reader phrase — an
+ * em-dash for "no letter" and one for "could not tell" would be indexed
+ * identically by everyone.
  */
 export function CoverLetterCell({
   postingId,

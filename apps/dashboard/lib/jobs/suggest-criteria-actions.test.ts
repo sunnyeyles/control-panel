@@ -30,22 +30,18 @@ import {
 /**
  * The suggestion action's refusals, and what it does with an answer.
  *
- * Every claim worth making about this feature is a claim about something the
- * happy path cannot show: that a signed-out caller is refused, that each way of
- * having no readable CV says its own thing, that a model that answers with
- * nonsense produces a message rather than a stack trace — and above all **that
- * nothing reaches the model until all of those have passed**. The action takes
- * its dependencies through a `createXActions(deps)` seam and imports nothing
- * from Next precisely so that is reachable here.
+ * Every claim worth making here is about something the happy path cannot show:
+ * that a signed-out caller is refused, that each way of having no readable CV
+ * says its own thing, that a nonsense answer produces a message rather than a
+ * stack trace — and above all **that nothing reaches the model until all of
+ * those have passed**.
  *
  * ⚠️ **`extractorBuilds` is the assertion that matters most in this file.** It
- * counts calls to the injected factory, not calls to `invoke()`, because the
- * property being defended is about spending: constructing the extractor is what
- * commits to a model, and every refusal must happen strictly before it. An
- * assertion on `prompts` alone would pass for an implementation that built an
- * agent and then decided not to use it — which is the shape this ordering
- * exists to prevent, and the shape a later refactor would most plausibly
- * introduce.
+ * counts calls to the injected factory, not to `invoke()`, because the property
+ * defended is about spending: constructing the extractor is what commits to a
+ * model, and every refusal must happen strictly before it. An assertion on
+ * `prompts` alone would pass for an implementation that built an agent and then
+ * decided not to use it.
  */
 
 const NOW = new Date("2026-08-05T04:15:00.000Z")
@@ -72,11 +68,10 @@ const CRITERIA = {
 /**
  * The corrupt-PDF fixture, borrowed from the cover-letter suite.
  *
- * Reached across directories rather than copied, because it is a binary and a
- * second copy is a second thing to keep in step for no gain. What it is doing
- * here is producing a genuine `extraction-failed` — the parser running and
- * *throwing*, which is a different branch from a parser that ran fine and found
- * nothing, and the only way to reach it is with bytes that really are broken.
+ * Reached across directories rather than copied — a second binary is a second
+ * thing to keep in step. It produces a genuine `extraction-failed`: the parser
+ * running and *throwing*, a different branch from one that ran fine and found
+ * nothing, and only bytes that really are broken reach it.
  */
 async function halfAPdf(): Promise<Uint8Array> {
   const whole = new Uint8Array(
@@ -92,10 +87,9 @@ async function halfAPdf(): Promise<Uint8Array> {
  * A stand-in for the profile extractor.
  *
  * Cast to `Agent` rather than built with `createProfileExtractor`, which would
- * need a LangChain chat model this app does not depend on. What the real agent
- * does with a prompt — and that it holds no tools — is asserted in
- * `packages/agents`; what matters here is *which* prompt reaches it, whether it
- * is reached at all, and what the action does with what comes back.
+ * need a LangChain chat model this app does not depend on. What matters here is
+ * *which* prompt reaches it, whether it is reached at all, and what the action
+ * does with what comes back; `packages/agents` covers the agent itself.
  */
 class FakeExtractor {
   readonly prompts: string[] = []

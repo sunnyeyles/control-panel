@@ -21,11 +21,9 @@ const SAVE_DEBOUNCE_MS = 2000
 /**
  * Write the board, and swallow whatever goes wrong.
  *
- * A failed autosave is not the user's problem to solve and there is nothing
- * useful to tell them — they did not ask for this write, and another one
- * follows the next time they touch anything. It is logged so a persistent
- * failure is visible in the console, which is where a client-side fault in this
- * app has to be read from anyway.
+ * A failed autosave is not the user's problem: they did not ask for this write,
+ * and another follows the next time they touch anything. Logged so a persistent
+ * failure is visible in the console.
  */
 async function saveBoard(editor: Editor): Promise<void> {
   try {
@@ -52,15 +50,13 @@ export interface WhiteboardCanvasProps {
 /**
  * The canvas itself.
  *
- * Reached only through `dynamic(..., { ssr: false })` in
+ * ⚠️ Reached only through `dynamic(..., { ssr: false })` in
  * `whiteboard-workspace.tsx` — tldraw reaches for `window` at import time, so
- * this module must never be evaluated on the server. Nothing else in the app
- * may import it, for the same reason.
+ * this module must never be evaluated on the server, and nothing else may
+ * import it.
  *
- * Beyond rendering it does two things: it hands the `Editor` up so the chat
- * panel can read the board and apply ops to it, and it records which shapes the
- * *user* has touched. That second job has to live here because it needs the
- * store's change feed.
+ * Beyond rendering it hands the `Editor` up for the chat panel, and records
+ * which shapes the *user* touched — that second job needs the store's feed.
  */
 export function WhiteboardCanvas({
   onEditor,
@@ -76,11 +72,9 @@ export function WhiteboardCanvas({
   // once against `null` and is never given a reason to run again.
   const [mountedEditor, setMountedEditor] = useState<Editor | null>(null)
 
-  // Frozen at the first render, deliberately. `snapshot` is a fresh object
-  // every time the server component re-renders, so depending on it directly
-  // would rebuild `handleMount`, remount `<Tldraw>`, and throw away whatever
-  // the user had drawn since. There is only ever one board to load, and this is
-  // it — later saves flow the other way.
+  // ⚠️ Frozen at the first render. `snapshot` is a fresh object on every server
+  // re-render, so depending on it directly would rebuild `handleMount`, remount
+  // `<Tldraw>`, and throw away whatever the user had drawn since.
   const [initialSnapshot] = useState(snapshot)
 
   const handleMount = useCallback(
@@ -109,14 +103,12 @@ export function WhiteboardCanvas({
 
       onEditor(editor)
 
-      // `source: "user"` excludes changes tldraw itself synthesises, and
-      // nothing else: in `@tldraw/store` it means *local*, so the agent's
-      // writes through `applyOps` arrive here too. Telling those apart is
-      // `recent-edits.ts`'s job, and the reason it cannot be done with the
-      // source filter is written up there.
+      // ⚠️ `source: "user"` means *local* in `@tldraw/store`, so it excludes
+      // only what tldraw synthesises — the agent's `applyOps` writes arrive
+      // here too. Telling those apart is `recent-edits.ts`'s job.
       //
-      // `onMount` may return a cleanup function, so the two subscriptions are
-      // composed into one and torn down with the editor.
+      // `onMount` may return a cleanup, so the two subscriptions compose into
+      // one and are torn down with the editor.
       const stopTracking = editor.store.listen(
         (entry) => {
           for (const record of Object.values(entry.changes.added)) {
@@ -152,11 +144,10 @@ export function WhiteboardCanvas({
     [onEditor, initialSnapshot]
   )
 
-  // tldraw keeps its own light/dark preference, which knows nothing about
-  // next-themes, and its default is light — so without this a dark-mode user
-  // gets a white canvas. Depending on the editor and not only the theme is what
-  // makes it fire at all: the editor arrives after this component's first
-  // effects have run, and `resolvedTheme` may never change again.
+  // ⚠️ tldraw keeps its own light/dark preference, defaulting to light, so
+  // without this a dark-mode user gets a white canvas. Depending on the editor
+  // as well as the theme is what makes it fire: the editor arrives after this
+  // component's first effects, and `resolvedTheme` may never change again.
   useEffect(() => {
     if (!mountedEditor || !resolvedTheme) return
     mountedEditor.user.updateUserPreferences({
@@ -167,11 +158,9 @@ export function WhiteboardCanvas({
   return (
     <div
       className="h-full w-full"
-      // tldraw binds its own single-letter shortcuts — `d` for the draw tool,
-      // and a dozen others — which collide with the app's global `d` for dark
-      // mode. This attribute tells `theme-provider.tsx` to stand down inside
-      // here; see the note there for why it is a marker rather than a
-      // stopPropagation, which would take tldraw's own shortcuts with it.
+      // tldraw's single-letter shortcuts collide with the app's global `d` for
+      // dark mode. This tells `theme-provider.tsx` to stand down in here; see
+      // that file for why it is a marker rather than a stopPropagation.
       data-owns-shortcuts=""
     >
       <Tldraw onMount={handleMount} />

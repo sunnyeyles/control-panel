@@ -8,34 +8,25 @@ import { isStale } from "./staleness"
  * The state of each briefing's most recent Run, whatever became of it.
  *
  * Deliberately separate from `lib/postings/list-postings.ts`, which asks a
- * different question — every Posting a user's briefings have ever found, with
- * no Run in the answer at all. This one is about what a Run is *doing*, and
- * merging them would give one type two jobs: the table is cumulative and has no
- * per-briefing row, while this is per-briefing and has nothing to say about
- * what was found.
+ * different question: that table is cumulative with no per-briefing row, while
+ * this is per-briefing with nothing to say about what was found.
  *
  * **Nothing here imports Next**, and the client arrives as an argument rather
- * than through `getPrisma()`, for the reason `list-postings.ts` gives: which
- * rows a user can reach is the interesting behaviour, and a page component
- * cannot be tested for it.
+ * than through `getPrisma()`: which rows a user can reach is the interesting
+ * behaviour, and a page component cannot be tested for it.
  */
 
 /**
  * What the card shows beside its name.
  *
- * `stale` is split out from `running` rather than folded into `failed` because
- * they are different claims. A stale row means *nobody knows* — the worker
- * never wrote a terminal status, so the run may have finished, may have died,
- * and nothing will ever say which. Reporting that as a failure would assert
- * something untrue, and reporting it as running would spin forever.
+ * ⚠️ `stale` is its own arm rather than folded into `failed`, because they are
+ * different claims: a stale row means *nobody knows*. Reporting it as a failure
+ * asserts something untrue; reporting it as running spins forever.
  *
  * `note` on the succeeded arm is how a run that worked and found nothing stops
- * being silent. A `succeeded` row used to say "Last ran 5 minutes ago" and
- * nothing else, whether the run had added twenty postings or none — the table
- * was simply unchanged, with no reason for it anywhere a user could reach. The
- * worker writes the sentence into `runs.failure` on a succeeded row, which is
- * exactly what that column is for ("succeeded with warnings is `succeeded` with
- * a non-empty `failure`" — `@workspace/db`'s `types.ts`).
+ * being silent — it used to say "Last ran 5 minutes ago" whether it had added
+ * twenty postings or none. The worker writes the sentence into `runs.failure`,
+ * which is what that column is for on a succeeded row.
  */
 export type RunActivity =
   | { state: "never-run" }
@@ -121,10 +112,9 @@ function reasonOf(failure: unknown): { reason?: string } {
 /**
  * Why a successful run added nothing, when that is what happened.
  *
- * The same defensive read as {@link reasonOf} one level down: the warning bag on
- * a succeeded row holds a key per thing that went wrong, and only `noPostings`
- * is about the run having produced nothing. The other keys are lost writes and
- * dropped ids — real, and not what somebody is asking when they look at a
+ * The same defensive read as {@link reasonOf} one level down. Only `noPostings`
+ * is about the run having produced nothing; the other keys are lost writes and
+ * dropped ids — real, but not what somebody is asking when they look at a
  * briefing whose table did not change.
  */
 function noteOf(failure: unknown): { note?: string } {

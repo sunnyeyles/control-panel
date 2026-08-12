@@ -3,30 +3,18 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
 /**
  * The other half of the navigation fix, and the half that is actually visible.
  *
- * Every page in this group is `force-dynamic`, and Next's prefetching guide is
- * blunt about what that costs without this file
- * (`next/dist/docs/01-app/02-guides/prefetching.md`): a dynamic page is
- * "**No**, unless `loading.js`" under Prefetched, and its client cache TTL is
- * "Off". So a click on a sidebar link prefetched nothing, blocked on a full
- * server render, and left the *previous* page on screen the whole time with no
- * indication anything was happening. The navigation docs name this case
- * directly — "Dynamic routes without `loading.tsx` … This can give the users
- * the impression that the app is not responding."
+ * ⚠️ **Load-bearing, not decoration.** Every page in this group is
+ * `force-dynamic`, and per `next/dist/docs/01-app/02-guides/prefetching.md` a
+ * dynamic page is not prefetched *at all* without a `loading.js`, with its
+ * client cache TTL off. Deleting this restores the original symptom: a click
+ * that blocks on a full server render while the previous page stays on screen.
  *
- * Adding the boundary makes the transition start immediately: the router swaps
- * to this instantly and streams the real page in behind it.
+ * It renders only the content area — the sidebar and header sit above this
+ * boundary in `layout.tsx` and stay interactive while a page loads.
  *
- * It renders only the content area. The sidebar and header live in
- * `layout.tsx`, above this boundary, so they stay put and stay interactive
- * while a page loads — which is the difference between a loading state and a
- * flash of empty app.
- *
- * Deliberately shape-agnostic. One `loading.tsx` at the group root covers `/`,
- * `/documents` and `/settings`, and those are a chat, a form over a list, and a
- * settings panel — so a skeleton that mimics any one of them misrepresents the
- * other two, and the mimicry is visible precisely because it is replaced a
- * moment later. Add a `loading.tsx` inside a segment if that segment ever earns
- * a shape worth previewing.
+ * Deliberately shape-agnostic: one file covers a chat, a document list and a
+ * settings panel, so mimicking any one misrepresents the others. Add a
+ * `loading.tsx` inside a segment that earns a shape worth previewing.
  */
 export default function Loading() {
   return (

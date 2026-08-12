@@ -41,16 +41,12 @@ type DbClient = PrismaClient | Prisma.TransactionClient
  * One job by its id, or `undefined` when there is no such row.
  *
  * ⚠️ **This does not filter by `user_id`, and no helper in this file does.** A
- * `jobs.id` addresses any row in the table, which is right for the worker — its
- * tick legitimately operates across every user's jobs, and `dueJobs` and
- * `claimJob` would be wrong if it did not. It is exactly wrong for a `jobId`
- * arriving from a form, so **a caller acting on behalf of a user must check
- * ownership itself**: `requireOwnedJob` in the dashboard is that check, and its
- * docblock says why it lives up there rather than being pushed in here.
+ * `jobs.id` addresses any row, which is right for the worker's tick and exactly
+ * wrong for a `jobId` arriving from a form — **a caller acting for a user must
+ * check ownership itself**, via the dashboard's `requireOwnedJob`.
  *
  * `undefined` rather than Prisma's `null`, matching {@link pauseJob} and
- * {@link resumeJob} — a caller then has one absent value to handle rather than
- * two.
+ * {@link resumeJob}, so a caller has one absent value rather than two.
  */
 export async function findJob(
   prisma: DbClient,

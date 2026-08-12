@@ -21,22 +21,18 @@ import { geoValueFor, isGeoKind, shapeTypeFor } from "./shape-kinds"
 /**
  * Execute a batch of canvas ops against the live editor.
  *
- * This is the only place in the app that writes to the canvas on the agent's
- * behalf, and it is deliberately dumb: it translates, it does not decide. Every
- * judgement — where a shape goes, whether an id exists, how a row is spaced —
- * was made server-side against the shadow board before the op was written.
+ * The only place in the app that writes to the canvas on the agent's behalf, and
+ * deliberately dumb: it translates, it does not decide. Every judgement was made
+ * server-side against the shadow board. Being the only such place is why
+ * attribution lives here — tldraw's change feed cannot tell the agent's writes
+ * from the user's, so each is claimed with `noteAgentEdit` on the way past; see
+ * `recent-edits.ts` for why that is a claim consumed later, not a flag held now.
  *
- * Being the only such place is also why attribution lives here. tldraw's change
- * feed cannot tell the agent's writes from the user's, so each one is claimed
- * with `noteAgentEdit` on the way past; see `recent-edits.ts` for why that is a
- * claim consumed later rather than a flag held now.
- *
- * **Ops are applied on a best-effort basis and never throw.** The user has been
- * drawing the whole time the agent was thinking, so an op can legitimately
- * arrive for a shape they have just deleted. Skipping it is correct — last
- * write wins, and a missing target means the user's newer intent stands. What
- * failed comes back as prose, which the caller sends up with the *next* turn's
- * board so the model learns what did not land rather than believing it did.
+ * ⚠️ **Ops are applied best-effort and never throw.** The user has been drawing
+ * the whole time the agent was thinking, so an op can arrive for a shape they
+ * just deleted; last write wins. What failed comes back as prose, which the
+ * caller sends with the *next* turn's board so the model learns what did not
+ * land rather than believing it did.
  */
 
 /** A short id (`s7`) is the second half of a tldraw id (`shape:s7`). */

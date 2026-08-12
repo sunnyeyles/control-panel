@@ -48,11 +48,10 @@ const RESERVED_METADATA_KEYS: ReadonlySet<string> = new Set(
 /**
  * The tag every object carries.
  *
- * Not decoration, and not redundant with the key. S3 lifecycle filters are
- * literal prefixes with no wildcard support, so with `kind` sitting below
- * `userId` in the key there is no prefix that means "every user's briefs".
- * Lifecycle rules therefore filter on this tag instead — it is the only reason
- * briefs and resumes can have different retention at all.
+ * Not redundant with the key. S3 lifecycle filters are literal prefixes with no
+ * wildcards, and with `kind` below `userId` no prefix means "every user's
+ * briefs" — so lifecycle rules filter on this tag. It is the only reason briefs
+ * and resumes can have different retention.
  */
 const KIND_TAG = "kind"
 
@@ -96,11 +95,9 @@ export function createS3UserObjectStore(
       const contentType = requireContentType(object.kind, parts.extension)
       const metadata = assertCustomMetadata(object.metadata)
 
-      // Encode up front rather than handing S3 a string. It pins the encoding
-      // to UTF-8 explicitly instead of relying on the SDK's default, and it
-      // gives a byte-accurate Content-Length for a body whose character count
-      // and byte count differ the moment it contains an em dash. A Uint8Array
-      // passes through untouched, which is what an uploaded PDF requires.
+      // Encoding up front pins UTF-8 rather than trusting the SDK's default and
+      // gives a byte-accurate Content-Length, which a string carrying an em dash
+      // would not. A Uint8Array passes through untouched, as a PDF requires.
       const body =
         typeof object.body === "string"
           ? Buffer.from(object.body, "utf8")
@@ -357,17 +354,14 @@ function custom(
 /**
  * Run one S3 call, translating every SDK failure into this package's errors.
  *
- * Takes a thunk rather than a command so that `client.send` is resolved at the
- * call site, where its overloads still know which output type goes with which
- * command. A wrapper that accepted the command instead would collapse all of
- * them to the union and hand back `unknown`.
+ * Takes a thunk, not a command, so `client.send` resolves at the call site
+ * where its overloads still pair output type with command; accepting the
+ * command would collapse them to the union and hand back `unknown`.
  *
- * The seam exists so no caller ever catches an `S3ServiceException`. A missing
- * object and an unreachable bucket are genuinely different problems — one is
- * the caller's, one is the platform's — and that is the only distinction drawn
- * here. `AccessDenied` lands with the platform faults deliberately: from the
- * caller's point of view a policy that does not permit the read is the store
- * being unavailable, not the object being absent.
+ * The seam exists so no caller catches an `S3ServiceException`. The only
+ * distinction drawn is missing object versus unreachable store. `AccessDenied`
+ * lands with the platform faults deliberately — to a caller, a policy that
+ * forbids the read is the store being unavailable, not the object being absent.
  */
 async function guard<Output>(
   key: string,
@@ -391,13 +385,11 @@ async function guard<Output>(
  * A missing *object*, as distinct from a missing bucket.
  *
  * GetObject reports a missing key as `NoSuchKey`; HeadObject has no response
- * body to put an error code in and reports the same condition as a bare 404
- * named `NotFound`. Both mean the object is not there.
+ * body to carry a code and reports the same condition as a bare 404 `NotFound`.
  *
- * `NoSuchBucket` is also a 404 and must not land here. A bucket that does not
- * exist is a misconfigured `USER_STORAGE_BUCKET_NAME` — the store being
- * unavailable — and reporting it as a missing object would send whoever is
- * debugging it looking for the wrong thing entirely.
+ * ⚠️ `NoSuchBucket` is also a 404 and must not land here — that is a
+ * misconfigured `USER_STORAGE_BUCKET_NAME`, and calling it a missing object
+ * sends whoever debugs it after the wrong thing.
  */
 const NOT_A_MISSING_OBJECT = new Set(["NoSuchBucket", "PermanentRedirect"])
 

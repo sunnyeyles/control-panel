@@ -52,16 +52,10 @@ export function LetterInstructionsForm({
 
       {/*
         ⚠️ **Only the example is keyed, and only on the stored value.** A
-        textarea is uncontrolled, so when the import form below writes a
-        document's text into the row, nothing would otherwise replace what is on
-        screen — the import would land in the database and look like it had done
-        nothing.
-
-        The key is on this field alone rather than on both, because a remount
-        discards whatever is in the box: keying the pair would mean importing an
-        example silently reverted unsaved edits to the instructions above it.
-        An ordinary save cannot trip either, because by then the stored value is
-        already what is on screen.
+        textarea is uncontrolled, so without this an import would land in the
+        database and look like it had done nothing. On this field alone, because
+        a remount discards the box: keying both would make importing an example
+        silently revert unsaved edits to the instructions above it.
       */}
       <ExampleField
         key={`example:${exampleLetter}`}
@@ -83,12 +77,10 @@ export function LetterInstructionsForm({
 }
 
 /**
- * ⚠️ **No `maxLength` on either field, and that is deliberate.** A browser
- * truncates a paste against `maxLength` silently — the user sees a full-looking
- * box, saves, and loses the tail with nothing anywhere saying so. That is the
- * exact failure this feature refuses everywhere else, so the cap is enforced
- * server-side where it can be refused out loud with the count and the limit in
- * the message. The counters below warn; they do not enforce.
+ * ⚠️ **No `maxLength` on either field.** A browser truncates a paste against
+ * `maxLength` silently, so the user sees a full-looking box, saves, and loses
+ * the tail with nothing saying so. The cap is enforced server-side where it can
+ * be refused out loud. The counters below warn; they do not enforce.
  */
 function InstructionsField({
   value,
@@ -167,11 +159,9 @@ function ExampleField({ value, pending }: { value: string; pending: boolean }) {
 /**
  * The number of characters that would actually be stored.
  *
- * Trimmed, because `saveSchema` in `letter-instructions-actions.ts` trims
- * before it measures — so a counter over raw `value.length` would turn red on a
- * paste with a trailing newline that the server then accepts without complaint.
- * The two have to measure the same string or the warning is not about the rule
- * being enforced.
+ * ⚠️ Trimmed, because `saveSchema` in `letter-instructions-actions.ts` trims
+ * before it measures — a counter over raw `value.length` turns red on a paste
+ * with a trailing newline the server then accepts without complaint.
  */
 function countOf(value: string): number {
   return value.trim().length
@@ -180,10 +170,9 @@ function countOf(value: string): number {
 /**
  * A fixed locale, not the runtime's.
  *
- * `toLocaleString()` with no locale reads the server's default on the first
- * render and the browser's on hydration, and React reports the disagreement as
- * a hydration mismatch rather than as the formatting difference it is — the
- * same trap `briefing-summary.ts` names for dates.
+ * ⚠️ `toLocaleString()` with no locale reads the server's default on first
+ * render and the browser's on hydration, which React reports as a hydration
+ * mismatch — the same trap `briefing-summary.ts` names for dates.
  */
 const COUNT_FORMAT = new Intl.NumberFormat("en-AU")
 

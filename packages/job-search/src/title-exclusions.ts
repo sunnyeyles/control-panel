@@ -1,30 +1,23 @@
 /**
  * Words that rule a Posting out by its title — the one copy of that rule.
  *
- * A briefing's criteria are all inclusive: titles, locations and keywords each
- * widen a search. This is the only subtractive one, and unlike
- * {@link JobSearchConfig.exclude} — which is rendered into the scout's brief and
- * which the model is free to disregard — it is *enforced*. A wish expressed to a
- * model is not a filter.
+ * Every other criterion widens a search. This is the only subtractive one, and
+ * unlike {@link JobSearchConfig.exclude} — rendered into the scout's brief,
+ * which the model may disregard — it is *enforced*. A wish expressed to a model
+ * is not a filter.
  *
- * It lives here rather than in either caller because it has two enforcers and
- * they must not disagree:
+ * It lives here because it has two enforcers that must not disagree: the worker
+ * drops matching postings before the brief is written, and the dashboard hides
+ * matching rows the table already collected.
  *
- * - the worker drops matching postings after the scout reports and before the
- *   brief is written, so nothing new arrives; and
- * - the dashboard hides matching rows the table has already collected.
- *
- * ⚠️ **The rule is written twice — here and in SQL** — for the same reason
- * `parsePostedAt()` and migration `0006` state the date rule twice: a paginated
+ * ⚠️ **The rule is written twice — here and in SQL** — because a paginated
  * query cannot be answered by a predicate that only exists in TypeScript. The
  * SQL half is `postings.title_normalized`, a `GENERATED ALWAYS … STORED` column
- * added by `0010`, so it cannot fall out of step with the title it is derived
- * from. {@link normalizeTitle} is the half that has to agree with it, and it is
- * the only thing in this module that does.
+ * from migration `0010`; {@link normalizeTitle} is the half that must agree
+ * with it, and the only thing here that does.
  *
- * The list itself is per *user*, not per job, and so is stored in
- * `posting_filters` rather than in `jobs.config`. Nothing here knows that — this
- * module is the rule, and the caller supplies the terms.
+ * The list is per *user*, so it lives in `posting_filters`, not `jobs.config`.
+ * Nothing here knows that — the caller supplies the terms.
  */
 
 /**
@@ -54,20 +47,16 @@ const NOT_ALPHANUMERIC = /[^\p{L}\p{N}]+/gu
  *
  *     "Senior/Staff Engineer (Remote)"  →  " senior staff engineer remote "
  *
- * **The padding is what makes a substring test a whole-word test.** Asking
- * whether `" senior "` appears in the normalised title matches "Senior Backend
- * Engineer" and "Backend Engineer, Senior" and refuses "Seniority Partners" —
- * with no word-boundary support needed on either side of the seam, which is
- * precisely what lets the database answer it with an ordinary `LIKE '%…%'`.
+ * **The padding is what makes a substring test a whole-word test.** `" senior "`
+ * matches "Senior Backend Engineer" and "Backend Engineer, Senior" but not
+ * "Seniority Partners" — needing no word-boundary support on either side of the
+ * seam, which is what lets the database answer it with a plain `LIKE '%…%'`.
+ * Multi-word terms fall out for free: `" tech lead "` matches "Tech Lead" and
+ * not "Lead Tech".
  *
- * It also makes multi-word terms work with no extra rule: `tech lead` normalises
- * to `" tech lead "` and matches "Tech Lead" but not "Lead Tech".
- *
- * ⚠️ **Whole-word rather than plain substring, and that is not fussiness.** The
- * words a person actually wants to block are often short — `ml`, `ai`, `qa`,
- * `sre` — and a substring rule turns any of them into a trap: `ml` would hide
- * every "HTML Developer", silently, and the row would simply not be there to
- * notice.
+ * ⚠️ **Whole-word rather than substring is not fussiness.** The words people
+ * block are often short — `ml`, `ai`, `qa`, `sre` — and a substring rule makes
+ * `ml` silently hide every "HTML Developer".
  */
 export function normalizeTitle(title: string): string {
   return ` ${title.toLowerCase().replace(NOT_ALPHANUMERIC, " ").trim()} `
@@ -76,15 +65,13 @@ export function normalizeTitle(title: string): string {
 /**
  * A term as the thing to look for inside a {@link normalizeTitle} result.
  *
- * The same normalisation, deliberately: a term someone typed as "Tech-Lead" or
- * "  SENIOR " has to become the same string the title side produces, or it
- * matches nothing and the user is left with a filter that quietly does not work.
+ * The same normalisation, deliberately: "Tech-Lead" must become what the title
+ * side produces, or the filter quietly does nothing.
  *
- * A term that normalises to nothing at all — `","`, `"---"` — yields `" "`,
- * which is present in every normalised title. {@link parseTitleExclusions} drops
- * those before they can be stored, and {@link isExcludedTitle} refuses them
- * again at the point of use, because the storage and the rule are reached by
- * different paths.
+ * ⚠️ A term normalising to nothing (`","`, `"---"`) yields `" "`, which is in
+ * every normalised title. {@link parseTitleExclusions} drops those before
+ * storage and {@link isExcludedTitle} refuses them again at use, because the
+ * two are reached by different paths.
  */
 export function titleMatchPattern(term: string): string {
   return normalizeTitle(term)
@@ -154,28 +141,17 @@ export function partitionByExcludedTitle<T extends Titled>(
  * A comma-separated field as the list that gets stored.
  *
  * Comma separated for the reason `criteriaList` in the dashboard's
- * `search-criteria.ts` gives about titles and locations: these are short phrases
- * a person types in one go, and a tag editor is a lot of component for a field
- * edited about twice a year.
+ * `search-criteria.ts` gives: short phrases typed in one go, and a tag editor is
+ * a lot of component for a field edited twice a year.
  *
- * Three things happen here that the caller must not have to repeat:
+ * Four things the caller must not repeat: blanks dropped, so `[]` is the single
+ * representation of "none"; terms lowercased, since the rule is
+ * case-insensitive; duplicates dropped, including ones colliding only after
+ * normalisation ("tech lead" and "Tech-Lead"); and terms normalising to nothing
+ * dropped, because a pattern of `" "` would empty the Postings table on a typo.
  *
- * - **Blanks are dropped**, so `""`, `"   "` and `",,"` all arrive as `[]` and
- *   `[]` is the single representation of "none".
- * - **Terms are lowercased**, because the rule is case-insensitive and storing
- *   "Senior" would render a checkbox-free setting back to the user in a case
- *   that implies a distinction it does not make.
- * - **Duplicates are dropped**, including ones that only collide after
- *   normalisation — "tech lead" and "Tech-Lead" are one term, and storing both
- *   would show the user a list with what looks like a redundant entry in it.
- *
- * Terms that normalise to nothing (`","`, `"--"`) are dropped rather than
- * stored: a pattern of `" "` is inside every title, so keeping one would empty
- * the user's Postings table on a typo.
- *
- * **The bound is not applied here.** This answers what the user typed; whether
- * that is more than {@link MAX_TITLE_EXCLUSIONS} is a validation failure the
- * caller reports with a message, exactly as the criteria form does.
+ * **The bound is not applied here.** Whether the result exceeds
+ * {@link MAX_TITLE_EXCLUSIONS} is a validation failure the caller reports.
  */
 export function parseTitleExclusions(input: string): string[] {
   const seen = new Set<string>()

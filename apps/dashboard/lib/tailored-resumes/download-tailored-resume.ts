@@ -19,11 +19,8 @@ export type TailoredResumeDownload = PostingDocumentDownload
 /**
  * The tailored resume this user generated for this Posting.
  *
- * "Tailored resume" and not "Resume": the user's Documents shelf is full of
- * files they would call a resume, and a download landing beside them under that
- * name is one the app generated pretending to be one they wrote. The PDF export
- * derives its name from this one by swapping the extension, so the distinction
- * carries there too.
+ * The `label` is "Tailored resume" and not "Resume" — `tailored-resume-ref.ts`
+ * says why the distinction matters.
  */
 export async function downloadTailoredResume(
   userId: string,

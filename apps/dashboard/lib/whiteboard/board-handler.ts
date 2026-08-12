@@ -6,16 +6,14 @@ import { saveBoard } from "@workspace/db"
 /**
  * Autosave for the canvas.
  *
- * **A route handler rather than a Server Action, deliberately.** The app's
- * action contract is `(state, formData) => ActionState` driven by
- * `useActionState`, because every other write in the app is somebody pressing a
- * button on a form. This one is a debounced background write of a JSON blob
- * that no form produced and whose result nothing renders. Forcing it into that
- * shape would mean inventing a form state for a save the user never asked for.
+ * **A route handler rather than a Server Action, deliberately.** The action
+ * contract is `(state, formData) => ActionState` because every other write in
+ * the app is somebody pressing a button on a form; this is a debounced
+ * background write of a JSON blob no form produced and whose result nothing
+ * renders.
  *
- * Nothing here imports Next, for the reason the rest of `lib/` does not: the
- * authorization and size branches are exactly what a unit test can cover, and a
- * session is exactly what it cannot produce.
+ * Nothing here imports Next: the authorization and size branches are exactly
+ * what a unit test can cover, and a session is what it cannot produce.
  */
 
 /**
@@ -54,12 +52,10 @@ export function createBoardHandler(
       return Response.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Measured before parsing. The bytes are unavoidably buffered first — a
-    // `Request` offers no earlier hook short of streaming, and the platform's
-    // own request cap bounds that — so what this guard protects is the
-    // decode, the parse and the Postgres row, not the buffer. Bytes and not
-    // `string.length`: code units under-count multi-byte text by up to 3×,
-    // which would let a snapshot through at triple the named limit.
+    // Measured before parsing. The bytes are unavoidably buffered first, so what
+    // this guards is the decode, the parse and the Postgres row. Bytes and not
+    // `string.length`: code units under-count multi-byte text by up to 3×, which
+    // would let a snapshot through at triple the named limit.
     const buffer = await req.arrayBuffer()
     if (buffer.byteLength > MAX_SNAPSHOT_BYTES) {
       return Response.json({ error: "Board is too large" }, { status: 413 })

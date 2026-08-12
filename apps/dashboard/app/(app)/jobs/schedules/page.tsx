@@ -39,15 +39,13 @@ export default async function BriefingSchedulesPage() {
 
         <div className="flex w-full max-w-2xl flex-col gap-10">
           {/*
-            `user.userId` is `users.id` — the platform identity — not the Neon
-            Auth id. It is what `jobs.user_id` references, so it is the only
+            `user.userId` is `users.id` — the platform identity, not the Neon
+            Auth id — which is what `jobs.user_id` references and so the only
             thing that can scope this list.
 
-            Streamed rather than awaited above, so the tab bar and the shell
-            paint as soon as the session resolves off its cookie instead of
-            waiting on the jobs query. Same arrangement as `/jobs/letters`, and
-            the same reason `/jobs` puts each of its four loads behind its own
-            boundary: an `await` at the top of a page is the whole page's wait.
+            Streamed rather than awaited above, so the shell paints as soon as
+            the session resolves: an `await` at the top of a page is the whole
+            page's wait.
           */}
           <Suspense fallback={<BriefingSectionSkeleton cards={2} />}>
             <BriefingSection userId={user.userId} />

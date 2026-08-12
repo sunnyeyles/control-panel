@@ -60,14 +60,10 @@ export function RoleTitleField({
   const full = chosen.length >= MAX_ROLE_TITLES
 
   /*
-    The datalist is rebuilt on every keystroke, and it has to be —
-    `roleTitleCompletions` explains why an option's value is the whole field
-    rather than one title. Only the eight matches are ever in the DOM, which is
-    the other half of why this is affordable; eight hundred <option>s per render
-    would not be.
-
-    Nothing is offered at the cap. A completion the field would refuse to accept
-    is worse than none.
+    Rebuilt on every keystroke, and it has to be — `roleTitleCompletions` says
+    why an option's value is the whole field rather than one title. Only the
+    eight matches reach the DOM, which is what makes that affordable. Nothing is
+    offered at the cap: a completion the field would refuse is worse than none.
   */
   const options = useMemo(
     () => (full ? [] : roleTitleCompletions(value, COMPLETION_LIMIT)),
@@ -115,17 +111,12 @@ export function RoleTitleField({
                   key={title}
                   suggestion={title}
                   onClick={() => onChange(appendRoleTitle(value, title))}
-                  // ⚠️ Disabled at the cap rather than hidden. A row of
-                  // buttons that vanished when the third title landed would
-                  // read as the suggestion having been withdrawn; a disabled
-                  // one beside a field saying "3 at most" reads as the rule it
-                  // is.
-                  //
-                  // `hasRoleTitle` rather than a plain `includes`, so the
-                  // button disables under exactly the comparison
-                  // `appendRoleTitle` would refuse on — otherwise a
-                  // differently-cased duplicate is a live button that does
-                  // nothing.
+                  // ⚠️ Disabled at the cap rather than hidden: buttons that
+                  // vanished when the third title landed would read as the
+                  // suggestion being withdrawn. `hasRoleTitle` rather than
+                  // `includes`, so the button disables under exactly the
+                  // comparison `appendRoleTitle` refuses on — otherwise a
+                  // differently-cased duplicate is a live button doing nothing.
                   disabled={pending || full || hasRoleTitle(value, title)}
                 />
               ))}

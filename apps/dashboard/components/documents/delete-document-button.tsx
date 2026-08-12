@@ -64,14 +64,10 @@ export function DeleteDocumentButton({
 
         <form action={formAction}>
           {/*
-            Untrusted, and validated server-side. What it cannot do is name
+            Untrusted and validated server-side. What it cannot do is name
             another user: the row is looked up by `(id, userId)` with the userId
-            coming from the session, so a tampered value here can only ever
-            address something the caller owns.
-
-            The extension used to be a second field beside this one. It comes
-            off the row now — the object key is built from what the database
-            holds rather than from what the browser sent back.
+            from the session. The extension comes off the row, so the object key
+            is built from the database rather than from what the browser sent.
           */}
           <input type="hidden" name="documentId" value={documentId} />
 

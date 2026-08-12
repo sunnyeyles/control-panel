@@ -70,17 +70,11 @@ export function createChatHandler(
   const getUser = deps.getUser ?? getCurrentUser
 
   return async function POST(req: Request): Promise<Response> {
-    // The authoritative gate. `proxy.ts` also turns anonymous requests away,
-    // but this is the check that matters: this route spends the OpenAI budget,
-    // and it must not be reachable because a matcher pattern was wrong.
-    //
-    // Before anything else, including parsing the body — an unauthenticated
-    // caller gets no signal about what a well-formed request looks like.
-    //
-    // "refused" and "anonymous" both answer 401 rather than 403. Distinguishing
-    // them here would tell an unapproved caller that their account exists and
-    // is merely not on the list, which is more than they need to know; the
-    // pages, which have already established who they are, do tell them apart.
+    // The authoritative gate, before anything else including parsing the body:
+    // this route spends the OpenAI budget and must not be reachable because a
+    // `proxy.ts` matcher was wrong. "refused" and "anonymous" both answer 401
+    // rather than 403 — distinguishing them would tell an unapproved caller that
+    // their account exists and is merely not on the list.
     const caller = await requireUser(getUser, "chat")
 
     if (!caller.ok) {

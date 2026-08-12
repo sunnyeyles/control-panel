@@ -50,21 +50,18 @@ export interface FileEditorDialogProps {
   /**
    * Rendered in the footer beneath the active file's name.
    *
-   * The slot exists so a caller's own status — a refused save, a confirmation —
-   * lands *inside* the open dialog. A message rendered beside the trigger would
-   * sit behind the overlay, unreadable until the user closed the thing the
-   * message is about.
+   * So a caller's own status — a refused save, a confirmation — lands *inside*
+   * the open dialog. Rendered beside the trigger it would sit behind the
+   * overlay, unreadable until the user closed the thing it is about.
    */
   footer?: React.ReactNode
   /**
    * ⚠️ **Required: this dialog renders no trigger of its own.**
    *
-   * Every caller mounts it only while it is open, so that TipTap — the editor,
-   * its ProseMirror core and the markdown pipeline — is fetched on the first
-   * open rather than shipped with the page. A dialog that rendered its own
-   * trigger could not be mounted lazily, because the trigger is the thing that
-   * has to be on screen *before* the chunk is wanted. Opening is therefore the
-   * caller's business, and this is the only way in.
+   * Callers mount it only while open, so TipTap and the markdown pipeline are
+   * fetched on first open rather than shipped with the page. A dialog owning
+   * its trigger could not be lazy — the trigger has to be on screen *before*
+   * the chunk is wanted.
    */
   open: boolean
   /** Required for the same reason `open` is — nothing here closes itself. */
@@ -122,15 +119,10 @@ function FileEditorDialog({
     filesRef.current = currentFiles
   })
 
-  // Load the selected file into the editor. Keyed on the *derived* id, not on
-  // `activeId`, so the two cases where the selection stops resolving — a list
-  // that arrives after mount, and a parent that removes the file being edited —
-  // fall through to the first file and reload here on their own. Keeping
-  // `activeId` as nothing more than "what the user last clicked" is what avoids
-  // an effect that corrects state and cascades a render.
-  //
-  // Content is deliberately not a dependency: those changes are the editor's
-  // own output coming back around.
+  // Keyed on the *derived* id, not `activeId`, so a list arriving after mount or
+  // a parent removing the edited file falls through to the first file and
+  // reloads here — no effect that corrects state and cascades a render. Content
+  // is deliberately not a dependency: it is the editor's own output coming back.
   const activeFileId = activeFile?.id
   useEffect(() => {
     if (!editor) return
