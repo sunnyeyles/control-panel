@@ -20,15 +20,12 @@ import { createMatchActions, MATCH_BATCH } from "./match-actions"
  *
  * ⚠️ **`assessorBuilds` is the assertion that matters most in this file**, for
  * the reason `suggest-criteria-actions.test.ts` gives about its own: it counts
- * calls to the injected *factory*, not calls to `invoke()`, because the property
- * being defended is about spending. Constructing an assessor is what commits to
- * a model, and every refusal must happen strictly before it. An assertion on the
- * prompts alone would pass for an implementation that built an agent and then
- * decided not to use it.
+ * calls to the injected *factory*, not to `invoke()`, because constructing an
+ * assessor is what commits to a model and every refusal must happen strictly
+ * before it.
  *
- * The other property with no happy path is the batch's independence: this action
- * makes several model calls at once, and one of them failing must cost one row
- * rather than the round.
+ * The other property with no happy path is the batch's independence: several
+ * model calls at once, and one failing must cost one row rather than the round.
  */
 
 const NOW = new Date("2026-08-05T04:15:00.000Z")

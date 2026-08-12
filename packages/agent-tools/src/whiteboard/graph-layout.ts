@@ -2,19 +2,14 @@
  * Layered graph layout: nodes and the arrows between them in, a position for
  * each node out.
  *
- * **This module exists because coordinates are the thing the model is worst
- * at.** Asked for twelve positions it produces eleven good ones and one that
- * overlaps, and it cannot see the result to correct it. The same reasoning
- * already put `arrange_shapes` here rather than in the prompt; this is that
- * argument carried to its end, because a layout that respects the *arrows* is
- * the half `arrange_shapes` could never do — it never looked at connections at
- * all.
+ * **This exists because coordinates are what the model is worst at**: asked for
+ * twelve positions it produces one that overlaps, and it cannot see the result
+ * to correct it. Unlike `arrange_shapes`, this layout respects the arrows.
  *
- * **It imports nothing, deliberately.** Not even `@workspace/whiteboard-schema`, and so not
- * zod. Everything here is arithmetic over `{key, w, h}` and `{from, to}`, which
- * makes it exhaustively testable without a board, a session or a model, and
- * keeps the one genuinely intricate algorithm in this package free of any
- * reason to reach for a mock.
+ * **It imports nothing, deliberately** — not `@workspace/whiteboard-schema`, so
+ * not zod either. Everything here is arithmetic over `{key, w, h}` and
+ * `{from, to}`, so the one intricate algorithm in this package is testable
+ * without a board, session or model.
  *
  * The algorithm is Sugiyama's, in the reduced form a box diagram needs:
  *
@@ -23,21 +18,15 @@
  *    ranking rather than reversed — reversing `A → B → A` would demand that A
  *    rank after B as well as before it, which is the contradiction the drop
  *    avoids. Every edge is still drawn; only the ranking ignores them.
- * 2. **Rank** by longest path, so a node sits one step past its furthest
- *    predecessor and every arrow advances along the flow.
- * 3. **Order** within each rank by barycentre sweeps, which is what stops the
- *    arrows crossing.
- * 4. **Position**: ranks are laid out end to end along the flow; within a rank
- *    nodes are packed across it, then pulled toward the centre of their
- *    neighbours and re-separated. The separation pass is what makes
- *    "no two boxes overlap" a property of the algorithm rather than a hope.
- * 5. **Components** are laid out independently and stacked, so two unrelated
- *    boxes do not stretch the diagram that matters.
+ * 2. **Rank** by longest path, so every arrow advances along the flow.
+ * 3. **Order** within each rank by barycentre sweeps, which stops crossings.
+ * 4. **Position**: ranks end to end along the flow; within a rank, pack, pull
+ *    toward neighbours' centre, then re-separate. The separation pass is what
+ *    makes "no two boxes overlap" a property rather than a hope.
+ * 5. **Components** are laid out independently and stacked.
  *
- * Everything works in *along* and *across* axes and is mapped to x/y at the
- * very end. That is the whole of how one implementation serves both a
- * left-to-right pipeline and a top-to-bottom hierarchy: for `"right"`, along is
- * x; for `"down"`, along is y.
+ * Everything works in *along* and *across* axes, mapped to x/y at the very end
+ * — one implementation serves both `"right"` and `"down"`.
  */
 
 /** Anything with a position and a size. Both a board shape and a bare box fit. */

@@ -26,22 +26,14 @@ import {
  * below it, so key building and `assertSegment()` keep their single
  * implementation.
  *
- * ⚠️ **`list()` deliberately returns less than `head()` does**, because
- * ListObjectsV2 returns no user metadata. For resumes that means a listed one
- * has no `originalFilename`; for tailored resumes it means no provenance and a
- * `generatedAt` off the object's own write time. Both fakes drop it on purpose:
- * supplying it here would hide that the postings table dates a tailored resume
- * by when the object was written, and would make the bucket look like a place a
- * display name can be read from cheaply — which is the assumption `/documents`
- * was built on before `documents` in Postgres replaced it. Cover letters are
- * addressed directly by Posting id and have no `list()` at all, so their
- * metadata is always read through `head()`.
+ * ⚠️ **`list()` deliberately returns less than `head()`**, because ListObjectsV2
+ * returns no user metadata: no `originalFilename` on a listed resume, no
+ * provenance on a tailored one. Supplying it would make the bucket look like a
+ * place a display name can be read from cheaply — the assumption `/documents`
+ * was built on before `documents` in Postgres replaced it.
  *
  * ⚠️ **The resume fake and `createDevPrisma()` are two halves of one fixture.**
- * `/documents` reads the rows and downloads the bytes, so an id present in
- * `devUploads()` and absent from `devDocuments()` — or the reverse — reproduces
- * a real production state and not a useful default. See the note on
- * `DEV_DOCUMENT_IDS` in `fixtures.ts`.
+ * See the note on `DEV_DOCUMENT_IDS` in `fixtures.ts`.
  */
 
 /**
@@ -62,37 +54,27 @@ interface DevStores {
 /**
  * Anything these fakes address an object by.
  *
- * `TailoredResumeRef` and `CoverLetterRef` are structurally identical — both are
- * `(userId, postingId)` — so naming it here buys nothing at the type level and
- * is written out anyway: the helpers below fan out over every kind the fakes
- * hold, and a union that lists two of three reads as an oversight.
+ * `TailoredResumeRef` and `CoverLetterRef` are structurally identical, so the
+ * third member buys nothing at the type level — but a union listing two of the
+ * three kinds the fakes hold reads as an oversight.
  */
 type DevRef = ResumeRef | CoverLetterRef | TailoredResumeRef
 
 /**
- * ⚠️ **The fakes are memoized on `globalThis`, not in a module variable, and
- * that is not belt-and-braces.** `next dev` does not give every server bundle
- * the same module instance: a Server Action and a Route Handler that both
- * import `lib/storage.ts` can each get their own copy of its `let coverLetters`
- * memo, and therefore their own `Map`. Against S3 that is invisible — two
- * facades over one bucket — but against an in-memory fake the two are separate
- * worlds, and a write through one is unreadable through the other.
+ * ⚠️ **Memoized on `globalThis`, not in a module variable, and that is not
+ * belt-and-braces.** `next dev` does not give every server bundle the same
+ * module instance, so a Server Action and a Route Handler importing
+ * `lib/storage.ts` can each get their own `Map`. Against S3 that is invisible —
+ * two facades over one bucket — but against an in-memory fake a write through
+ * one is unreadable through the other.
  *
- * The symptom is specific and reads as a product bug rather than a harness one:
- * saving an edited cover letter reports success, the action can read its own
- * write back, and `/api/cover-letters/{postingId}` still serves the fixture. The
- * same shape applies to `/documents`, where an upload is a Server Action and the
- * download is a Route Handler.
+ * It reads as a product bug: saving an edited cover letter succeeds, the action
+ * reads its own write back, and `/api/cover-letters/{postingId}` still serves
+ * the fixture. `lib/db.ts` memoizes the fake Prisma the same way for the same
+ * reason.
  *
- * A string-keyed property rather than `Symbol.for`, only because a symbol from
- * `Symbol.for` is typed `symbol` rather than `unique symbol` and cannot be a
- * computed key in an interface.
- *
- * `lib/dev/fake-prisma.ts` had the same gap and no longer does — `lib/db.ts`
- * moved it onto `globalThis` under `Symbol.for("@workspace/dashboard.devPrisma")`
- * when the whiteboard turned out to write from a route handler and read from a
- * page. The two fakes are now memoized the same way for the same reason; only
- * the key differs, and that one is a symbol because it can be.
+ * A string key rather than `Symbol.for`, only because such a symbol is typed
+ * `symbol` rather than `unique symbol` and cannot be a computed key.
  */
 function devStores(): DevStores {
   const holder = globalThis as typeof globalThis & {
@@ -297,10 +279,9 @@ function createDevTailoredResumeStore(): TailoredResumeStore {
         .filter((resume) => resume.userId === userId)
         .map((resume) => ({
           // See the warning at the top of this file: a listing carries no user
-          // metadata, so the provenance is dropped and the instant falls back
-          // to the object's own write time — which is what the real store does
-          // too, and what the postings table therefore renders. Faking it
-          // richer here would hide that from every local run.
+          // metadata, so provenance is dropped and the instant falls back to the
+          // write time, as the real store does. Faking it richer would hide that
+          // from every local run.
           ...withoutTailoredMarkdown(resume),
           provenance: {},
         }))
@@ -326,19 +307,15 @@ function mustGet<T>(stored: Map<string, T>, ref: DevRef): T {
 }
 
 /**
- * ⚠️ **A delete of something that is not there throws, and this fake used to
- * shrug** — "idempotent, like S3", which describes the `DeleteObject` API and
- * not the store built on it. `S3UserObjectStore.delete()` deliberately HEADs
- * first and raises {@link ObjectNotFoundError}, both so a caller deleting a
- * typo is not told it worked and because the ownership check needs metadata
- * only a read can supply.
+ * ⚠️ **A delete of something absent throws, and this fake used to shrug** —
+ * "idempotent, like S3" describes the `DeleteObject` API, not the store built on
+ * it. `S3UserObjectStore.delete()` HEADs first and raises
+ * {@link ObjectNotFoundError}, so a caller deleting a typo is not told it worked
+ * and the ownership check gets the metadata only a read supplies.
  *
- * The divergence mattered most where it was least visible. Deleting a
- * **Posting** removes its **Cover Letter** and its **Tailored Resume** first,
- * and most Postings have neither — so `object_not_found` is the *ordinary* path
- * there, and a fake that never raised it meant `DEV_AUTH_BYPASS=1` exercised the
- * branch zero times. A missing branch would have looked perfect locally and
- * refused every delete of a Posting nothing had been written for in production.
+ * Deleting a Posting removes its Cover Letter and Tailored Resume first, and
+ * most Postings have neither — so `object_not_found` is the *ordinary* path, and
+ * a shrugging fake left that branch untested under `DEV_AUTH_BYPASS=1`.
  */
 function mustDelete(stored: Map<string, unknown>, ref: DevRef): void {
   if (!stored.delete(refKey(ref))) {

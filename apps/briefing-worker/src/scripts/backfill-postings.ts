@@ -15,40 +15,21 @@ import { toNewPostings } from "../postings.ts"
  * Put every Posting a succeeded Run already found into the cumulative record.
  *
  * Run once, after the migration that creates the table and before the dashboard
- * that reads it — see `RELEASING.md`. Without it, the moment the page reads
+ * that reads it — see `RELEASING.md`. Otherwise, the moment the page reads
  * `postings` instead of `runs.findings`, every Posting a user has ever seen
- * disappears, including ones they already have a drafted cover letter for. That
- * is silent data loss, and the data is right there.
+ * disappears, drafted cover letters included.
  *
- * **Why this is a script and not part of the migration.** A Posting's identity
- * is a SHA-256 of a *normalised* URL — tracking parameters dropped, the
- * survivors sorted, a default port removed, one trailing slash stripped. SQL
- * could be made to do that, and a reimplementation disagreeing by a single rule
- * would mint identities nothing else in the system agrees with: the same
- * advertisement would land as two rows, and the cover letter already stored at
- * `…/cover-letters/{posting_id}.md` would belong to neither. SEEK stamps `?ref=`
- * on the URLs the scout returns, so a normalisation disagreement is the ordinary
- * case rather than a rare one. So this walks the Runs in TypeScript and feeds
- * {@link toNewPostings} and `recordPostings` — the *same* two functions the
- * worker feeds on every run — which makes the ids identical by construction
- * rather than by review.
- *
- * Three properties follow from reusing the worker's write path rather than
- * writing rows here:
- *
- * - **Idempotent.** `recordPostings` is an upsert whose `DO UPDATE SET` list
- *   omits `status` and `status_changed_at`, so running this a second time
- *   rewrites the same values and a status a person set is untouched. There is
- *   no "already backfilled" flag to keep, and none is needed.
- * - **Order-independent.** Runs are walked oldest-first and each one's
- *   `started_at` is passed as `seenAt`, so `first_seen_at` means "when this
- *   advertisement first appeared" rather than "when the backfill ran". The
- *   upsert's trailing `WHERE EXCLUDED.last_seen_at >= postings.last_seen_at` is
- *   what lets that walk race live ticks: a historic sighting arriving late
- *   cannot drag `last_seen_at` backwards, so the worker does not have to be
- *   stopped for this to be safe.
- * - **Duplicates within one Run are already handled**, inside the helper, where
- *   the hazard is — Postgres `21000` for a statement touching one row twice.
+ * **A script, not part of the migration**, because a Posting's identity is a
+ * SHA-256 of a *normalised* URL, and SQL that disagreed by one rule would mint
+ * ids nothing else agrees with — the same advertisement as two rows, and the
+ * cover letter at `…/cover-letters/{posting_id}.md` belonging to neither. SEEK
+ * stamps `?ref=` on scout URLs, so a disagreement would be the ordinary case.
+ * Feeding the worker's own {@link toNewPostings} and `recordPostings` makes the
+ * ids identical by construction rather than by review, and carries three
+ * properties with it: idempotent (the upsert's `DO UPDATE SET` omits `status`),
+ * order-independent (its `WHERE EXCLUDED.last_seen_at >= postings.last_seen_at`
+ * lets this race live ticks, so the worker need not be stopped), and safe
+ * against duplicates within one Run (Postgres `21000`).
  */
 
 /** One line, at the end, in the shape of `TickReport` and `AdHocReport`. */
@@ -88,13 +69,11 @@ const BATCH_SIZE = 100
  * same shape as `runTick`, so the walk is reachable from a test without a
  * database.
  *
- * **Absent findings are skipped here, in TypeScript, and deliberately not
- * filtered in the query.** Prisma distinguishes `Prisma.DbNull` from
- * `Prisma.JsonNull` on a nullable JSONB column, and a `{ findings: { not: null } }`
- * filter over one is the well-known way to write a predicate that silently
- * matches nothing — which, in a backfill, looks exactly like a clean run over an
- * empty table. Reading a few rows that turn out to be discarded is the cheaper
- * mistake.
+ * **Absent findings are skipped in TypeScript, deliberately not filtered in the
+ * query.** Prisma distinguishes `Prisma.DbNull` from `Prisma.JsonNull` on a
+ * nullable JSONB column, so `{ findings: { not: null } }` silently matches
+ * nothing — which in a backfill looks exactly like a clean run over an empty
+ * table. Reading a few rows that get discarded is the cheaper mistake.
  */
 export async function backfillPostings(
   prisma: PrismaClient,

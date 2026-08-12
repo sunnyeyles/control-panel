@@ -1,22 +1,15 @@
-# ---------------------------------------------------------------------------
-# Vercel OIDC, so the dashboard can reach the user-storage bucket
-# ---------------------------------------------------------------------------
+# Vercel OIDC, so the dashboard can reach the user-storage bucket.
 #
-# Why this is here rather than in `infra/aws/`, where the role that uses it
-# lives: `deploy-iam.tf` grants nothing in the `iam:*OpenIDConnectProvider*`
-# family. The deploy role can create the *role* — `control-panel-vercel-dashboard`
-# matches `managed_role_arn_patterns` — but it cannot create the provider that
-# role federates against. So the provider is a bootstrap concern, applied by
-# hand with admin, and the root looks it up by URL.
+# Here rather than in `infra/aws/` because `deploy-iam.tf` grants nothing in the
+# `iam:*OpenIDConnectProvider*` family: the deploy role can create the *role*
+# (`control-panel-vercel-dashboard` matches `managed_role_arn_patterns`) but not
+# the provider it federates against. The root looks this up by URL.
 #
-# Same shape as `oidc.tf`, and for the same reason: Vercel mints a short-lived
-# token per invocation and AWS exchanges it for temporary credentials. There is
-# no access key on the dashboard side either.
+# Same shape and reasoning as `oidc.tf` — a short-lived token per invocation, no
+# access key on the dashboard side.
 #
-# Optional. Everything here is gated on `vercel_team_slug`, so `terraform apply`
-# with the two flags `bootstrap/README.md` documents still works untouched and
-# creates nothing new. Supply the slug when the dashboard is ready to store
-# documents.
+# Everything is gated on `vercel_team_slug`, so an apply without it creates
+# nothing new.
 
 locals {
   vercel_enabled = var.vercel_team_slug != null
@@ -45,12 +38,10 @@ resource "aws_iam_openid_connect_provider" "vercel" {
   url            = local.vercel_issuer_url
   client_id_list = [local.vercel_audience]
 
-  # Empty and then ignored, for the reasons `oidc.tf` sets out at length: AWS
-  # validates the provider's certificate against its own trust store rather
-  # than a pinned thumbprint, and it repopulates this list of its own accord
-  # immediately after creation. Without `ignore_changes` every future plan of
-  # this hand-applied root reports a change that never converges, and "no
-  # changes" stops being the signal that the file and the account agree.
+  # Empty and then ignored, for the reasons `oidc.tf` gives: AWS validates the
+  # certificate against its own trust store, and repopulates this list right
+  # after creation, so without `ignore_changes` every plan reports a change that
+  # never converges.
   thumbprint_list = []
 
   lifecycle {

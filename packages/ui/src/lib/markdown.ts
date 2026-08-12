@@ -12,15 +12,12 @@ import TurndownService from "turndown"
  * bullets for `-`, `* * *` for `---`), so on the defaults an untouched save
  * rewrites every line carrying emphasis, a bullet, or a rule.
  *
- * That churn is not cosmetic. A cover letter is stored as one object per
- * Posting, so a save is the whole file: bytes that differ for no reason are
- * bytes a user cannot tell apart from an edit they made. `markdown.test.ts`
- * asserts the round trip is a fixed point over the constructs a letter actually
- * contains — that test is the guard, not this comment.
- *
- * Extracted from `file-editor-dialog.tsx` rather than left inline so it can be
- * asserted without a DOM: the dialect is plain string-to-string, and only the
- * editor around it needs React.
+ * That churn is not cosmetic. A cover letter is one object per Posting, so a
+ * save is the whole file, and bytes that differ for no reason are bytes a user
+ * cannot tell apart from an edit they made. `markdown.test.ts` asserts the trip
+ * is a fixed point over the constructs a letter contains — that test is the
+ * guard, not this comment. It lives outside the component so it can be asserted
+ * without a DOM.
  *
  * ⚠️ **The trip is a fixed point over the constructs the writers emit, not
  * over all of GFM.** Turndown ships no table rule, so a pipe table in a

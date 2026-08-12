@@ -10,15 +10,13 @@ import { Trash2Icon } from "lucide-react"
 /**
  * What can be done to the ticked rows, above the table.
  *
- * Above rather than in a column, because a bulk action is about the selection
- * and not about any one row — and because the postings table was deliberately
- * narrowed, so a control that only matters while something is ticked has no
+ * Above rather than in a column: a bulk action is about the selection, not any
+ * one row, and a control that only matters while something is ticked has no
  * claim on horizontal space the rest of the time.
  *
- * The container is always rendered and reserves its own height. Mounting it
- * only when something is ticked would shift the whole table down on the first
- * click and back up on the last, which puts the row someone is aiming at
- * somewhere else between the two.
+ * ⚠️ The container always renders and reserves its own height. Mounting it only
+ * when something is ticked would shift the table down on the first click and
+ * back up on the last, moving the row someone is aiming at.
  */
 export function PostingBulkBar({
   letters,

@@ -52,19 +52,13 @@ export const dynamic = "force-dynamic"
  * instance has to connect to first, plus a single S3 listing for the cover
  * letters.
  *
- * Raised from 15 when the letters arrived, and kept there now that they cost
- * one request rather than twenty-five: the binding constraint is the cold
- * connection, not the fan-out that is gone.
+ * The binding constraint is the cold connection, not fan-out — both the letters
+ * and the tailored resumes cost one `ListObjectsV2`, not one per row.
  *
- * The tailored resumes added one more S3 call and not one more per row — a
- * single `ListObjectsV2` — so this did not move again for them.
- *
- * ⚠️ **Raised to 60 for `addPostingByLinkAction`, which is not a page load.**
- * A Server Action posts to the route it was rendered from, so this number
- * bounds it too — and that action fetches a page through Tavily and then makes
- * a model call, in sequence. Thirty seconds is a plausible total for the two
- * and therefore not a safe one; a timeout there reads to the user as a link
- * that could not be read.
+ * ⚠️ **60 for `addPostingByLinkAction`, which is not a page load.** A Server
+ * Action posts to the route it was rendered from, so this bounds it too — and
+ * that action fetches through Tavily and then makes a model call, in sequence.
+ * Thirty seconds is a plausible total for the two and therefore not a safe one.
  */
 export const maxDuration = 60
 
@@ -72,33 +66,21 @@ export const maxDuration = 60
  * Every Posting this user's briefings have ever found.
  *
  * ⚠️ **`requirePageUser()` is this page's own authorization check and is not
- * inherited.** `app/(app)/layout.tsx` calls `getCurrentUser()` too, but that
- * call renders the sidebar: a layout does not re-render on navigation, so its
- * check is not re-run as someone moves between routes. See
- * `lib/auth/require-page-user.ts`.
+ * inherited.** The layout's `getCurrentUser()` renders the sidebar; a layout
+ * does not re-render on navigation, so its check is not re-run between routes.
  *
- * The guard establishes who is asking. It does **not** scope rows — that is
- * `where: { userId }` inside `listPostings`, and the session's `userId` passed
- * to `listCoverLetters`, which is where the two user-isolation tests point.
- * Neither identifier is ever read from the URL or a form.
+ * The guard establishes who is asking; it does **not** scope rows — that is
+ * `where: { userId }` inside `listPostings` and the `userId` handed to
+ * `listCoverLetters`, never read from the URL or a form. ⚠️ It runs *before*
+ * `searchParams` is touched, the app's first untrusted GET input.
  *
- * ⚠️ **The guard runs before `searchParams` is touched.** The query string is
- * the app's first untrusted GET input; establishing who is asking before
- * reading anything they sent keeps the order the rest of the app has.
+ * ⚠️ **Four independent loads, four independent failures, and none may blank
+ * the other three.** Each storage grant is a Terraform apply away from the code
+ * needing it, so "unreadable" is a state this page will genuinely be in —
+ * `prod:tailored-resumes` is the newest and likeliest to be missing.
  *
- * ⚠️ **Four independent loads, four independent failures, and none of them may
- * blank the other three.** The postings are Postgres; the letters and the
- * tailored resumes are S3, read by different means and therefore able to fail
- * separately; and the run activity is a fourth query answering a different
- * question — the latest Run of any status rather than the rows a briefing has
- * ever produced. Each of the dashboard's storage grants is a Terraform apply
- * away from the code that needs it, so "unreadable" is a state this page will
- * genuinely be in — and `prod:tailored-resumes` is the newest of them, so it is
- * the one most likely to be missing.
- *
- * `searchParams` is typed inline rather than with the generated `PageProps`
- * helper, which only exists once `next typegen` has written `.next/types/` —
- * a typecheck in a clean checkout would not have it.
+ * `searchParams` is typed inline rather than with the generated `PageProps`,
+ * which only exists once `next typegen` has written `.next/types/`.
  */
 export default async function BriefingsPage({
   searchParams,
@@ -106,39 +88,27 @@ export default async function BriefingsPage({
   /** A promise in Next 16, and a repeated parameter arrives as `string[]`. */
   searchParams: Promise<SearchParams>
 }) {
-  // Timed as well as the loads below, because it is the one thing genuinely in
-  // front of all of them and it is not free: the session itself resolves from a
-  // signed cookie, but `ensureUserForAuth` is a database round trip on every
-  // request. Whether that is worth caching across requests is a question this
-  // number answers.
+  // Timed because it sits in front of everything else and is not free: the
+  // session resolves off a signed cookie, but `ensureUserForAuth` is a database
+  // round trip on every request.
   const user = await timed("briefings.gate", requirePageUser)
   const query = parsePostingQuery(await searchParams)
 
-  // ⚠️ **These two awaits are the whole of what this component blocks on, and
-  // keeping it that way is the point.** Everything that talks to Postgres or S3
-  // is inside a `<Suspense>` below, in a child that awaits it — so the shell
-  // (the copy, the table's own chrome) is on screen as soon as the session
-  // resolves off its cookie, and the route's `loading.tsx` is replaced then
-  // rather than when the last query lands. Moving a `listPostings` or a
-  // `runActivityForUser` back up here would put the entire page behind it
-  // again, which is exactly what made a sort click feel like a page load.
+  // ⚠️ **The two awaits above are the whole of what this component blocks on.**
+  // Everything touching Postgres or S3 is awaited inside a `<Suspense>` child,
+  // so the shell replaces `loading.tsx` as soon as the session resolves rather
+  // than when the last query lands. Moving a `listPostings` back up here is
+  // what made a sort click feel like a page load.
   //
-  // ⚠️ **Started here, awaited in two different children.** The run activity
-  // answers a different question from the table — the latest Run of any status,
-  // rather than every Posting ever found — so it depends on neither of the other
-  // loads and must not queue behind them; `06-fetching-data.md` is explicit that
-  // sequential `await`s in one component are sequential *requests*, however
-  // unrelated they are. One promise shared by both children is one request.
-  //
-  // Two queries rather than one because the strip needs both halves and neither
-  // supplies the other: `runActivityForUser` returns nothing at all for a
-  // briefing that has never run, and it carries no names. They share a promise
-  // because they are one feature — a strip with names and no status, or status
-  // and no names, is not worth rendering half of.
+  // ⚠️ **Started here, awaited in two different children.** Sequential `await`s
+  // in one component are sequential *requests* (`06-fetching-data.md`), however
+  // unrelated; one shared promise is one request. Two queries rather than one
+  // because neither half supplies the other — `runActivityForUser` returns
+  // nothing for a briefing that has never run, and carries no names.
   //
   // ⚠️ **The `.catch()` is attached now, not at the `await`.** A rejection
-  // before anything is awaiting is an unhandled rejection, which in Node is a
-  // process-level event and not this page's problem to survive.
+  // before anything awaits is an unhandled rejection — a process-level event in
+  // Node, not something this page can survive.
   const activityPromise: ActivityPromise = timed("briefings.activity", () =>
     Promise.all([
       getPrisma().job.findMany({
@@ -156,21 +126,15 @@ export default async function BriefingsPage({
     return null
   })
 
-  // ⚠️ **Started here rather than after the postings, and the reason is in the
-  // signature.** `listCoverLetters` takes the user and nothing else — narrowing
-  // to the twenty-five ids on screen is `coverLetterViewsFor`, a filter over the
-  // result. So this depends on the postings query for nothing and used to wait
-  // for it anyway, which on a function deployed away from its data is a round
-  // trip to a second service paid in series for no reason.
+  // ⚠️ **Started here rather than after the postings**, because the signature
+  // says it can be: `listCoverLetters` takes the user and nothing else, and
+  // narrowing to the ids on screen is `coverLetterViewsFor`. Waiting for the
+  // postings query paid an S3 round trip in series for no dependency. The
+  // trade: a user with no postings pays one listing they will not read.
   //
-  // The trade, stated in `cover-letter-views.ts`: a user with no postings now
-  // pays one listing they will not read.
-  //
-  // `null` on failure, never an empty list. The two sources are Postgres and S3,
-  // and the dashboard's `prod:cover-letters` grant is a Terraform apply away
-  // from the code that needs it — so "letters unreadable" is a state this page
-  // will genuinely be in. Degrading it to "nothing drafted" would tell someone
-  // who has already written a letter that they have not.
+  // ⚠️ **`null` on failure, never an empty list.** The `prod:cover-letters`
+  // grant is a Terraform apply away from the code needing it, and degrading to
+  // "nothing drafted" would tell someone who has written a letter they have not.
   const listedLetters: ListedLetters = timed("briefings.cover-letters", () =>
     listCoverLetters(user.userId, getCoverLetterStore())
   ).catch((error) => {
@@ -178,13 +142,8 @@ export default async function BriefingsPage({
     return null
   })
 
-  // ⚠️ **Same start-early shape as the letters, and for the same reason.**
-  // `listTailoredResumes` takes the user and nothing else — narrowing to the
-  // twenty-five ids on screen is `tailoredResumeViewsFor`. Starting it after
-  // `listPostings` would pay an S3 round trip in series for no dependency.
-  //
-  // `null` on failure, never an empty list — same correctness property as the
-  // letters. `prod:tailored-resumes` is the newest grant, so the
+  // Same start-early shape as the letters, and `null` on failure for the same
+  // correctness reason. `prod:tailored-resumes` is the newest grant, so the
   // missing-permission case is the likely one.
   const listedResumes: ListedResumes = timed("briefings.tailored-resumes", () =>
     listTailoredResumes(user.userId, getTailoredResumeStore())
@@ -217,19 +176,12 @@ export default async function BriefingsPage({
           </p>
 
           {/*
-            Two things the ticket requires be said outright rather than left to
-            be discovered:
-
-            - A drafted letter is a **first draft to edit**. Bracketed
-              placeholders are visible in the output by design — the writer is
-              instructed to leave one wherever a fact nobody supplied would
-              otherwise be invented and attributed to the user.
-            - **Three CV formats cannot be read.** `.doc`, `.odt` and `.rtf`
-              upload and store fine and have no parser — see
-              `READABLE_PROFILE_EXTENSIONS` in `lib/candidate/profile-text.ts`
-              — so a user whose CV is one of them is refused for a reason that
-              has nothing to do with their document being wrong. PDF and DOCX
-              *are* read, and this paragraph claimed otherwise for far too long.
+            Said outright rather than left to be discovered: bracketed
+            placeholders are in the output by design, and `.doc`, `.odt` and
+            `.rtf` upload and store fine with no parser behind them — see
+            `READABLE_PROFILE_EXTENSIONS` in `lib/candidate/profile-text.ts`.
+            ⚠️ PDF and DOCX *are* read; this paragraph claimed otherwise for
+            far too long.
           */}
           <p className="text-sm text-muted-foreground">
             Drafting a cover letter gives you a{" "}
@@ -256,11 +208,10 @@ export default async function BriefingsPage({
           <AddPostingByLink />
 
           {/*
-            One reserved strip row. The height genuinely depends on how many
-            briefings someone has, so this is a guess — but it sits directly
-            above the table, so the alternative was not "no guess", it was
-            pushing the table down by a whole row every time the strip landed.
-            See `BriefingStripSkeleton` for why one row is the guess to make.
+            One reserved strip row — a guess, since the height depends on how
+            many briefings someone has, but it sits directly above the table, so
+            the alternative was pushing the table down every time the strip
+            landed. `BriefingStripSkeleton` says why one row is the guess.
           */}
           <Suspense fallback={<BriefingStripSkeleton />}>
             <BriefingActivitySection activity={activityPromise} />
@@ -402,23 +353,17 @@ async function PostingsSection({
     )
   }
 
-  // ⚠️ **Narrowed with `.then`, not with `await`, and that is still the fix.**
-  // The listing is one S3 request for the whole user — see
-  // `lib/cover-letters/cover-letter-views.ts` — and it is already in flight,
-  // started alongside the postings query above. Awaiting it here to apply the
-  // filter would put a second service back on the table's critical path, which
-  // is the wait this shape exists to remove. The promise goes down to the cells
-  // that need it, each behind its own `<Suspense>`, so the table paints and the
-  // letter column fills in. See `cover-letter-cell.tsx`.
+  // ⚠️ **Narrowed with `.then`, not with `await`.** The listing is already in
+  // flight; awaiting it here to filter would put a second service back on the
+  // table's critical path, which is the wait this shape exists to remove. The
+  // promise goes down to the cells behind their own `<Suspense>`, so the table
+  // paints and the letter column fills in.
   //
-  // `null` survives the narrowing: a store that could not be read is a distinct
-  // state from a user with nothing drafted, and only the alert below may speak
-  // for it.
+  // `null` survives the narrowing: a store that could not be read is distinct
+  // from a user with nothing drafted, and only the alert below speaks for it.
   //
-  // An array rather than a `Map` keyed by Posting, because this crosses the RSC
-  // boundary into client components and a `Map` is an awkward payload. It is
-  // bounded by the page size, so the per-row scan that replaces the keying is
-  // bounded too.
+  // An array rather than a `Map`, because this crosses the RSC boundary and a
+  // `Map` is an awkward payload; the page size bounds the per-row scan.
   const postingIds = postings.postings.map((posting) => posting.id)
 
   const lettersPromise: CoverLetterPromise = letters.then((listed) =>
@@ -454,14 +399,10 @@ async function PostingsSection({
 
       {/*
         ⚠️ **Mounted only when there are rows, and it decides the rest for
-        itself.** Whether anything actually needs scoring depends on which
-        document is currently labelled Resume, and answering that here would put
-        a second document query on the render path of every page view — so the
-        component asks the action, which already has to resolve the CV before it
-        can score anything. A user whose Postings are all scored pays one cheap
-        query and renders nothing.
-
-        It is not inside a `<Suspense>` and has no server work of its own: it is
+        itself.** Whether anything needs scoring depends on which document is
+        labelled Resume, and answering that here would put a second document
+        query on every page view — so the component asks the action, which has
+        to resolve the CV anyway. No `<Suspense>` and no server work of its own:
         a client component that starts a Server Action on mount.
       */}
       {postings.total > 0 ? <ScorePendingMatches /> : null}

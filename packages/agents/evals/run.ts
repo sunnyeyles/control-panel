@@ -2,17 +2,14 @@
  * The eval CLI: run every case against a real model and record the scores in
  * Langfuse.
  *
- * A standalone script rather than a vitest suite, and deliberately. Evals are
- * *scored*, repeated to see their variance, and compared against a previous
- * run — none of which fits an assert-or-fail runner, and all of which fits the
- * shape `apps/briefing-worker/src/dev/` already uses for "run it against the
- * real model and write the result somewhere".
+ * A standalone script rather than a vitest suite: evals are scored, repeated to
+ * see their variance, and compared against a previous run, none of which fits
+ * an assert-or-fail runner.
  *
- * **The run is a Langfuse experiment, and that is the whole reason this file is
- * short.** Scoring, aggregation, the markdown summary, per-item traces and
- * run-over-run comparison all belong to `experiment.run`. What stays here is
- * the part that is about whiteboards: which cases to run, how many times, and
- * which model judges.
+ * **The run is a Langfuse experiment**, which is why this file is short —
+ * scoring, aggregation, the summary, per-item traces and run-over-run
+ * comparison all belong to `experiment.run`. What stays here is the whiteboard
+ * part: which cases to run, how many times, and which model judges.
  *
  * **It exits non-zero only when it could not run.** A low score is information,
  * not a broken build; making it a failure would push whoever hit it toward
@@ -41,13 +38,11 @@ import type { EvalCase, EvalExpectation } from "./types.ts"
 /**
  * Cases no longer run one at a time.
  *
- * They used to, because a rate limit part-way through a fan-out turned a
- * handful of unrelated cases into zeroes that looked like regressions. That is
- * no longer what happens: `experiment.run` settles each item on its own, so a
- * throttled case is dropped from the results with an error logged, and the
- * cases beside it still score. Four at a time is a compromise between a full
- * pass taking minutes and hammering one account; lower it if the account is
- * tight.
+ * They used to, because a rate limit mid-fan-out turned unrelated cases into
+ * zeroes that looked like regressions. `experiment.run` now settles each item
+ * on its own, so a throttled case is dropped with an error logged and the rest
+ * still score. Four is a compromise between a slow pass and hammering one
+ * account; lower it if the account is tight.
  */
 const DEFAULT_CONCURRENCY = 4
 

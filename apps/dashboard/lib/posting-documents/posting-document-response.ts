@@ -6,30 +6,21 @@ import type { PostingDocumentDownload } from "./download-posting-document"
  * One `PostingDocumentDownload`, as the HTTP response both download routes
  * serve.
  *
- * The two routes under `app/api/{cover-letters,tailored-resumes}/` used to
- * each spell out this mapping and these headers; the status→code mapping and
- * the header set are one contract, and this module imports nothing from Next
- * (`Response` is a web global, the same reason `download-posting-document.ts`
- * avoids Next) — which is what makes the mapping testable at all.
+ * The status→code mapping and the header set are one contract, spelled out once
+ * rather than in each route. Imports nothing from Next (`Response` is a web
+ * global), which is what makes the mapping testable.
  *
  * The headers, and why each is load-bearing:
  *
- * - **`Content-Disposition: attachment`** — the kind is stored `inline`
- *   because these bytes were written by this application rather than
- *   uploaded, but a *download* is what the routes are for, so
- *   `contentDisposition()` is reused rather than restated. It also does the
- *   header escaping, which is the half worth not writing twice.
- * - **`nosniff`** — belt-and-braces beside a Markdown body: this is not an
- *   upload, so the stored-XSS argument that makes documents an attachment
- *   does not apply, but a browser that sniffed the body as HTML would still
- *   run it on this origin with the session cookie attached.
- * - **`private, no-store`** — personal data behind a CDN (a tailored resume
- *   is a home address and a phone number). `private` keeps it out of shared
- *   caches; `no-store` keeps it out of the browser's disk cache on a shared
- *   machine.
+ * - **`Content-Disposition: attachment`** — `contentDisposition()` is reused for
+ *   the header escaping, the half worth not writing twice.
+ * - **`nosniff`** — a browser that sniffed this Markdown body as HTML would run
+ *   it on this origin with the session cookie attached.
+ * - **`private, no-store`** — personal data behind a CDN (a tailored resume is a
+ *   home address and a phone number); also keeps it off a shared machine's disk.
  *
- * `not-found` and `failed` stay distinct on purpose: the buttons that `fetch`
- * this body branch on the status code to decide what to tell the user.
+ * `not-found` and `failed` stay distinct: the buttons that `fetch` this body
+ * branch on the status code to decide what to tell the user.
  */
 export function postingDocumentResponse(
   download: PostingDocumentDownload

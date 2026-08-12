@@ -12,20 +12,15 @@ import {
  * worse document.
  *
  * The hardest line to hold is the third paragraph. A model asked to make a CV
- * "fit" a job will reach for the vocabulary of the advertisement and attach it to
- * the candidate — and a resume is read as a list of facts, so an invented
- * technology is not a stylistic liberty, it is a false claim the candidate then
- * has to answer for in an interview. The rule is therefore stated as a
- * correspondence rather than as a prohibition: every line must have a
- * counterpart in the source.
+ * "fit" a job attaches the advertisement's vocabulary to the candidate, and a
+ * resume is read as facts — an invented technology is a false claim they answer
+ * for in an interview. Hence a correspondence rather than a prohibition: every
+ * line must have a counterpart in the source.
  *
- * ⚠️ **No bracketed placeholders, and that is the one place this deliberately
- * departs from the cover letter.** A letter is a draft with visible gaps where a
- * fact nobody supplied would otherwise be invented — a start date, a named
- * recipient. A resume has no such gaps to leave: everything in it is already in
- * the source document or does not belong. A `[metric]` sitting in an experience
- * bullet is not a draft, it is a broken document, and it invites exactly the
- * invention the rest of the prompt forbids.
+ * ⚠️ **No bracketed placeholders** — the one deliberate departure from the
+ * cover letter, which leaves visible gaps for facts nobody supplied. A resume
+ * has no such gaps; a `[metric]` in an experience bullet is a broken document,
+ * and it invites the invention the rest of the prompt forbids.
  */
 export const RESUME_TAILOR_SYSTEM_PROMPT = [
   "You rewrite one resume so that it fits one job advertisement. The candidate already has a resume; your job is to produce the version of it they should send for this particular role. The result must be a complete resume they could send as it stands, not a set of notes about what to change.",
@@ -51,20 +46,13 @@ export type CreateResumeTailorOptions = ToollessAgentOptions
  * The resume tailor: rewrites one resume for one Posting, and can do nothing
  * else.
  *
- * Tool-lessness is the containment, exactly as it is for the cover-letter
- * writer, and the argument transfers without weakening: this agent holds the
- * candidate's whole CV in its context while the Posting's `highlights` reach
- * its prompt *verbatim* — text written by anyone who can pay to place an
- * advertisement. An agent that can both read a CV and issue an outbound
- * request can be induced to put one inside the other. Having no tools is what
- * makes copying the advertisement acceptable: injected text can shape the
- * prose of a document the user then reads and edits, and can reach nothing
- * else.
- *
- * **Do not add a tool here.** When a page fetcher eventually exists it goes on
- * a separate agent that never sees the resume, and hands this one validated
- * data. The mechanism — and the structural assertion that no caller can arm it
- * — is `defineToollessAgent`, proven once in `agent-options.test.ts`.
+ * Tool-lessness is the containment, on the cover-letter writer's argument
+ * exactly: the whole CV sits beside `highlights`, which reach the prompt
+ * verbatim from whoever paid to place the advertisement. With no tools,
+ * injected text can shape prose the user reads and edits, and reach nothing
+ * else. **Do not add a tool here** — a page fetcher goes on a separate agent
+ * that never sees the resume. The structural assertion is
+ * `defineToollessAgent`, proven in `agent-options.test.ts`.
  */
 export const createResumeTailor = defineToollessAgent(
   RESUME_TAILOR_SYSTEM_PROMPT

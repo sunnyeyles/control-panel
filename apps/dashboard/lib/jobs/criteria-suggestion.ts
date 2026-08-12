@@ -2,42 +2,30 @@
  * What the "suggest criteria from my resume" action hands back to
  * `useActionState`.
  *
- * **This module has no imports, for the reason `lib/actions/action-state.ts`
- * has none**: a client component needs the initial state, while the action
- * module beside it imports `@workspace/agents` and `@workspace/user-storage` —
- * so importing the state from there would pull an agent runtime and the AWS SDK
- * into the browser bundle for the sake of one object literal.
+ * ⚠️ **No imports, for the reason `lib/actions/action-state.ts` has none**: a
+ * client component needs the initial state, and the action module beside it
+ * imports `@workspace/agents` and `@workspace/user-storage` — so importing from
+ * there would pull an agent runtime and the AWS SDK into the browser bundle for
+ * one object literal.
  *
- * **A second union rather than a reuse of `ActionState`, deliberately.** That
- * module argues for one shared union, and the argument is about duplication:
- * the documents and briefings copies were byte-identical apart from their
- * names, so two copies only created somewhere for them to drift apart. This
- * shape is not a copy — it *carries a payload*, because the whole point of the
- * action is to return criteria the form then renders. Widening the shared union
- * with an optional payload nobody else sets would push this feature's shape
- * onto every action in the app.
- *
- * Serializable by construction, like the shared union: this crosses the RSC
- * boundary, so everything here is a string.
+ * A second union rather than a reuse of `ActionState` because this one *carries
+ * a payload*; widening the shared union with an optional payload nobody else
+ * sets would push this feature's shape onto every action in the app.
+ * Serializable by construction — it crosses the RSC boundary.
  */
 
 /**
  * The extracted criteria, ready for the controls that render them.
  *
  * `locations` and `keywords` are comma-joined because that is what their fields
- * take, and because `searchCriteriaSchema` parses the same comma-separated
- * shape on the way back in — the suggestion is edited by hand before it is
- * submitted, so it has to arrive in the format a person edits. An empty string
- * means "the CV did not say", and is a real answer rather than a missing one:
- * most obviously for `locations`, which a CV often omits.
+ * take and what `searchCriteriaSchema` parses on the way back in — a suggestion
+ * is edited by hand before submitting. An empty string means "the CV did not
+ * say", a real answer rather than a missing one.
  *
- * ⚠️ **`titles` is a list, and the asymmetry is the feature.** It used to be
- * joined like its neighbours and written straight into the field. It is now
- * offered as one button per title, for two reasons that point the same way: a
- * user wants three of five proposed titles far more often than all five, and a
- * briefing may hold at most `MAX_ROLE_TITLES` of them — so a bulk fill of a
- * six-title extraction would drop the field into an invalid state the instant
- * the suggestion landed, having thrown away whatever was there before.
+ * ⚠️ **`titles` is a list, and the asymmetry is the feature.** It is offered as
+ * one button per title: a briefing may hold at most `MAX_ROLE_TITLES`, so bulk
+ * filling a six-title extraction would drop the field into an invalid state
+ * having thrown away whatever was there before.
  */
 export interface SuggestedCriteria {
   titles: readonly string[]
@@ -48,16 +36,13 @@ export interface SuggestedCriteria {
 /**
  * What the "suggest adjacent role titles" action hands back.
  *
- * A third union rather than a reuse of either neighbour, for the reason set out
- * at the top of this file: it carries a payload, and the payload is not the one
- * {@link CriteriaSuggestionState} carries. This action proposes titles *only*,
- * against the ones already chosen, and returning a `SuggestedCriteria` with two
+ * A third union rather than a reuse of either neighbour: this proposes titles
+ * *only*, against the ones already chosen, and a `SuggestedCriteria` with two
  * fields permanently blank would invite a caller to render them.
  *
- * ⚠️ **No `resetKey`.** Nothing here is written into a field — the titles are
- * rendered as buttons, and a click appends one. There is nothing to remount, and
- * a key would be an invitation to remount the field this action must not
- * disturb.
+ * ⚠️ **No `resetKey`.** The titles are buttons and a click appends one, so
+ * there is nothing to remount — a key would invite remounting the very field
+ * this action must not disturb.
  */
 export type RoleTitleSuggestionState =
   | { status: "idle" }

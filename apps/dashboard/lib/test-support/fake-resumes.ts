@@ -13,15 +13,10 @@ import { ENVIRONMENT, USER_ID } from "./identities"
  * The shelf a user's uploads sit on, in memory.
  *
  * ⚠️ **A Document is two things and `add()` writes both.** `listDocuments` and
- * `findDocument` read Postgres, and only the bytes come out of the bucket — so
- * an object with no row beside it is invisible to every read path, and a suite
- * that registered only one of the two would be testing a state the system
- * cannot reach. {@link rows} is meant to be handed to `fakeDocumentDb`.
- *
- * Four suites had a copy of this — a cover letter, a tailored resume, proposing
- * search criteria, and importing an example letter. They differed by which
- * default body they filled a document with and by whether they needed
- * {@link failsWith}, which is what the constructor and that method are for.
+ * `findDocument` read Postgres and only the bytes come out of the bucket, so an
+ * object with no row beside it is invisible to every read path — a suite that
+ * registered one of the two would be testing a state the system cannot reach.
+ * {@link rows} is meant to be handed to `fakeDocumentDb`.
  */
 export class FakeResumes implements ResumeStore {
   private readonly documents: StoredResume[] = []
@@ -124,10 +119,9 @@ export class FakeResumes implements ResumeStore {
 
   async list(userId: string): Promise<StoredResume[]> {
     // ⚠️ Mirrors the real store: ListObjectsV2 carries no user metadata, so a
-    // listed object has no filename. Nothing on these paths calls it any more —
-    // the listing is a query, and `rows` is what carries the ownership property
-    // the suites test — and it stays honest so that a future caller does not
-    // read a display name off something S3 never supplies.
+    // listed object has no filename. Nothing calls it on these paths any more,
+    // and it stays honest so a future caller does not read a display name off
+    // something S3 never supplies.
     return this.documents
       .filter((document) => document.userId === userId)
       .map((document) => ({

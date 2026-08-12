@@ -3,32 +3,27 @@ import { z } from "zod"
 /**
  * The Postings table's view, as it travels in the query string.
  *
- * **Nothing here imports Next**, for the reason `lib/jobs/job-actions.ts` gives
- * about itself: what is interesting is how a hand-edited URL degrades, and that
- * is exactly what a page component cannot be tested for. The page awaits
- * `searchParams` and hands the plain object here.
+ * **Nothing here imports Next**: what is interesting is how a hand-edited URL
+ * degrades, and that is exactly what a page component cannot be tested for. The
+ * page awaits `searchParams` and hands the plain object here.
  *
- * ⚠️ **This is the app's first reader of untrusted GET input.** Every other
- * value the app parses arrives through a form it rendered; a query string
- * arrives however someone typed it, and there is no submit button to refuse.
- * Two consequences shape the whole module:
+ * ⚠️ **This is the app's first reader of untrusted GET input.** Every other value
+ * the app parses arrives through a form it rendered; a query string arrives
+ * however someone typed it, with no submit button to refuse. Two consequences:
  *
  * - **Per-field `.catch()`, never a whole-object `safeParse`.**
- *   `?page=abc&sort=title` must keep the sort and quietly fix the page. A single
- *   object parse fails as a unit, which would throw away a perfectly good sort
- *   because a number beside it was nonsense — and a 500 is the wrong answer to a
- *   URL somebody edited by hand.
- * - **`page` is capped.** It becomes `skip` in an offset query, and an
- *   arbitrarily large integer there is a scan the database is asked to perform
- *   for a page that cannot exist. The clamp against the *real* page count
- *   happens in `list-postings.ts`, which is the only place that knows the total;
- *   this cap is the bound that applies before anything has been counted.
+ *   `?page=abc&sort=title` must keep the sort and quietly fix the page; a single
+ *   object parse fails as a unit, and a 500 is the wrong answer to a URL somebody
+ *   edited by hand.
+ * - **`page` is capped**, because it becomes `skip` and an arbitrarily large
+ *   offset is a scan for a page that cannot exist. The clamp against the *real*
+ *   page count is `list-postings.ts`'s; this one applies before anything has been
+ *   counted.
  *
- * Next 16 hands `searchParams` to a page as a **`Promise`**, and a repeated
+ * ⚠️ Next 16 hands `searchParams` to a page as a **`Promise`**, and a repeated
  * parameter (`?page=1&page=2`) arrives as a `string[]` — both verified against
  * `next/dist/docs/01-app/03-api-reference/03-file-conventions/page.md:75`. The
- * array case is handled at the edge, in {@link first}, so nothing downstream
- * deals in `string | string[] | undefined`.
+ * array case is handled at the edge, in {@link first}.
  */
 
 /** One page of the table. */
@@ -46,29 +41,21 @@ export const MAX_PAGE = 10_000
 /**
  * The orderable columns, as the URL spells them.
  *
- * Deliberately not the Prisma field names: `list-postings.ts` maps them, so
- * what a user sees in their address bar is not a database column they can probe
- * by editing it.
+ * Deliberately not the Prisma field names: `list-postings.ts` maps them, so what
+ * a user sees in their address bar is not a database column to probe by editing.
  *
- * ⚠️ **Four of these are headings and one is not.** `title`, `company`,
- * `posted` and `match` are the sortable headings — see `POSTING_COLUMNS` in
- * `posting-columns.ts`, which names per column why the other two do not sort.
+ * ⚠️ **Four of these are headings and one is not.** `title`, `company`, `posted`
+ * and `match` are the sortable headings — see `POSTING_COLUMNS` in
+ * `posting-columns.ts`, which names per column why the others do not sort.
  * `lastSeen` has no heading and is here because it is {@link DEFAULT_SORT}: the
  * order of the page nobody has sorted still has to be spellable.
  *
- * `firstSeen` and `status` were here while the table had a heading for each. The
- * table narrowed to five columns and both moved into the expanded detail, which
- * left two entries no control could ever produce — so they went. A URL still
- * naming one is not an error: `SortSchema` catches it back to the default, the
- * same as `?sort=salary` always did.
- *
- * ⚠️ **Status has a heading again and still does not sort, which is a different
- * decision from the one above.** It came back as a read-only column so the value
- * is visible without expanding a row; ordering by it would mean a sixth
- * `PostingOrder` in `@workspace/db`, and that enum is closed on purpose —
- * "adding one is a decision about the index, not a convenience". Putting the
- * entry back here without that is a heading that links to a sort the query
- * cannot perform.
+ * ⚠️ **Status has a heading and still does not sort.** Ordering by it would mean
+ * a sixth `PostingOrder` in `@workspace/db`, and that enum is closed on purpose —
+ * "adding one is a decision about the index, not a convenience". Adding the entry
+ * back without that is a heading linking to a sort the query cannot perform. A
+ * URL naming a sort that is not here is not an error: `SortSchema` catches it
+ * back to the default.
  */
 export const POSTING_SORTS = [
   "lastSeen",

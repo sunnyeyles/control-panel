@@ -50,26 +50,16 @@ export type PostingPayload = Record<string, unknown>
 /**
  * `new` on discovery, and the other three only ever set by a person.
  *
- * **Who acts is not uniform across them, and the names are only readable if you
- * know that.** `applied` and `not-interested` are decisions the user takes
- * about the *advertisement* — one to pursue it, one to pass on it. `rejected`
- * is the *employer's* answer to an application already sent, so it can only
- * follow `applied`. Nothing enforces that ordering, and nothing should: see
- * below.
+ * **Who acts is not uniform.** `applied` and `not-interested` are the user's
+ * decisions about the advertisement; `rejected` is the *employer's* answer, so
+ * it can only follow `applied`. Nothing enforces that ordering, and nothing
+ * should — a person may change their mind in any direction, including back to
+ * `new`. Nothing in the pipeline may move a Posting off a user's value, which
+ * is why `recordPostings` omits `status` from its `DO UPDATE SET`.
  *
- * Text plus a CHECK rather than a Postgres enum, mirroring {@link RunStatus}.
- * Nothing in the pipeline may move a Posting off the value a user chose: the
- * `DO UPDATE SET` list in `recordPostings` omits `status` for exactly that
- * reason, and no transition is enforced beyond the CHECK because every one of
- * them is legal — a person may change their mind about a Posting in any
- * direction, including back to `new`.
- *
- * `not-interested` is hyphenated rather than `not_interested` because that is
- * how this schema already spells a multi-word CHECK value: see
- * {@link DocumentType} and `documents_doc_type_check`.
- *
- * Type-only, and it erases. The runtime list is `POSTING_STATUSES` in
- * `postings.ts`; this file must stay importable without pulling in a value.
+ * Text plus a CHECK rather than a Postgres enum, mirroring {@link RunStatus};
+ * hyphenated per `documents_doc_type_check`. Type-only, and it erases — the
+ * runtime list is `POSTING_STATUSES` in `postings.ts`.
  */
 export type PostingStatus = "new" | "applied" | "not-interested" | "rejected"
 
@@ -77,18 +67,15 @@ export type PostingStatus = "new" | "applied" | "not-interested" | "rejected"
  * What the user says a Document is.
  *
  * Text plus a CHECK rather than a Postgres enum, mirroring {@link RunStatus}
- * and {@link PostingStatus}. `other` is not filler: without it a document that
- * is none of the other five has to be mislabelled as one of them, and a label
- * nobody trusts is worse than no label.
+ * and {@link PostingStatus}. `other` is not filler — without it a document that
+ * is none of the other five gets mislabelled.
  *
- * These are not storage *kinds*. A kind — `resumes`, `briefs`,
- * `cover-letters`, `tailored-resumes` in `@workspace/user-storage` — is a key
- * segment, an S3 object tag and a file-type allowlist at once, and every one of
- * these six wants the same three. They all live on the `resumes` shelf.
+ * ⚠️ **These are not storage *kinds*.** A kind in `@workspace/user-storage` is
+ * a key segment, an S3 tag and a file-type allowlist at once; all six of these
+ * live on the `resumes` shelf.
  *
- * Type-only, and it erases. The runtime list is `DOCUMENT_TYPES` in
- * `documents.ts`; this file must stay importable without pulling in a value,
- * which is what lets a client component import the type for a label map.
+ * Type-only, and it erases — the runtime list is `DOCUMENT_TYPES` in
+ * `documents.ts`, which is what lets a client component import the type.
  */
 export type DocumentType =
   | "resume"

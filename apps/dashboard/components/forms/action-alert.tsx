@@ -8,14 +8,11 @@ import { Alert, AlertDescription } from "@workspace/ui/components/alert"
  * unconditionally rather than repeating the `status !== "idle"` test.
  *
  * `role="status"` with `aria-live="polite"` rather than `role="alert"`: the
- * message arrives in response to something the user did, so it should be
- * announced after the current utterance finishes rather than interrupting it.
- * That pairing was already correct at every call site and is now impossible to
- * get wrong at a new one.
+ * message answers something the user did, so it should be announced after the
+ * current utterance rather than interrupting it.
  *
- * Not a client component. It takes a plain serializable prop and renders no
- * interactivity, so it stays a server component and is simply rendered inside
- * whichever client form owns the state.
+ * Not a client component — a plain serializable prop and no interactivity, so
+ * it renders inside whichever client form owns the state.
  */
 export function ActionAlert({ state }: { state: ActionState }) {
   if (state.status === "idle") return null

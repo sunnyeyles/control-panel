@@ -30,11 +30,9 @@ export function NavMain({ items }: { items: readonly NavItem[] }) {
       <SidebarGroupContent className="flex flex-col gap-2">
         <SidebarMenu>
           {/*
-            `asChild` with a `<Link>`, matching `nav-secondary.tsx` five lines
-            away. Without it `SidebarMenuButton` renders a bare <button> and
-            every url in `navMain` is inert — the items looked like navigation
-            and did nothing, which went unnoticed while there was only one of
-            them and it pointed at the page you were already on.
+            ⚠️ `asChild` with a `<Link>`. Without it `SidebarMenuButton` renders
+            a bare <button> and every url in `navMain` is inert — items that look
+            like navigation and do nothing.
           */}
           {items.map((item) =>
             "items" in item ? (
@@ -88,25 +86,18 @@ function NavGroupItem({
   /**
    * Open the group when navigation lands inside it — and never close it here.
    *
-   * The seed above runs once and only once. `NavMain` sits in
-   * `app/(app)/layout.tsx`, which Next guarantees will "preserve state, remain
-   * interactive, and do not rerender" on navigation, so `useState(inGroup)`
-   * covers a deep link to `/jobs/schedules` and nothing else. Without this,
-   * following the prose link from `/jobs` would leave the active child
-   * hidden behind a collapsed parent — the one place the highlight is most
-   * needed.
+   * ⚠️ The seed above runs once: `NavMain` sits in a layout Next does not
+   * re-render on navigation, so `useState(inGroup)` covers a deep link and
+   * nothing else. Without this, following a link from `/jobs` leaves the active
+   * child hidden behind a collapsed parent.
    *
-   * **One-way on purpose.** The obvious `setOpen(inGroup)` would also collapse
-   * the group on the way out, throwing away a chevron the user clicked
-   * deliberately. Navigation may open this; only the user closes it.
+   * **One-way on purpose** — `setOpen(inGroup)` would also collapse the group on
+   * the way out, discarding a chevron the user clicked deliberately.
    *
-   * **A render-phase adjustment rather than a `useEffect`**, which is React's
-   * own prescription for state that has to track a changing prop
-   * (`react.dev/learn/you-might-not-need-an-effect`, "Adjusting some state when
-   * a prop changes"), and what `react-hooks/set-state-in-effect` warns about
-   * otherwise. React re-runs this component immediately, before the browser
-   * paints — so the group is never briefly drawn collapsed over the page you
-   * just navigated to.
+   * **A render-phase adjustment rather than a `useEffect`**, which is React's own
+   * prescription for state tracking a changing prop and what
+   * `react-hooks/set-state-in-effect` warns about. React re-runs this
+   * immediately, before paint, so the group is never briefly drawn collapsed.
    */
   if (inGroup !== wasInGroup) {
     setWasInGroup(inGroup)
@@ -133,10 +124,8 @@ function NavGroupItem({
             {item.items.map((child) => (
               <SidebarMenuSubItem key={child.title}>
                 {/*
-                  No icon: the indent and the rule down the left are what say
-                  these belong to the item above. `SidebarMenuSubButton` renders
-                  an <a>, so `asChild` with a `<Link>` is the same reason as the
-                  flat items — without it these would be inert too.
+                  No icon: the indent and the left rule say these belong to the
+                  item above. `asChild` for the same reason as the flat items.
                 */}
                 <SidebarMenuSubButton asChild isActive={pathname === child.url}>
                   <Link href={child.url}>

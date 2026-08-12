@@ -8,21 +8,18 @@ import { describe, expect, it } from "vitest"
 /**
  * `NAMING.md` R1, R2, R5 and R8, asserted against the source tree.
  *
- * **This has to be a test rather than a lint rule**, and not because a lint rule
- * would be harder to write. `eslint-plugin-only-warn` is in
- * `packages/eslint-config/base.js`, so every rule in the repo is downgraded to a
- * warning and `pnpm lint` exits 0 no matter what it found. A convention nothing
- * can fail on is a convention that drifts, which is the whole reason these rules
- * were written down.
+ * **This has to be a test rather than a lint rule.** `eslint-plugin-only-warn`
+ * is in `packages/eslint-config/base.js`, so every rule in the repo is
+ * downgraded to a warning and `pnpm lint` exits 0 no matter what it found. A
+ * convention nothing can fail on is a convention that drifts.
  *
  * ⚠️ **It must live under `lib/`.** `vitest.config.ts` has
  * `include: ["lib/**\/*.test.ts"]`, so a `naming.test.ts` at the app root would
  * be silently skipped — green, and never run.
  *
- * Every assertion here reads the tree with `node:fs` and matches on text. That
- * is coarse, deliberately: it costs nothing, needs no parser, and the four
- * properties it pins are all lexical. What it cannot see — whether a name is
- * *good* — is the reviewer's job and always was.
+ * Every assertion reads the tree with `node:fs` and matches on text. Coarse,
+ * deliberately: it costs nothing, needs no parser, and the four properties it
+ * pins are all lexical. Whether a name is *good* is the reviewer's job.
  */
 
 const APP = fileURLToPath(new URL("..", import.meta.url))
@@ -144,10 +141,9 @@ describe("R1 — `job` names a row in `jobs`, never a Posting", () => {
    * are blanked out before anything is matched, leaving the positions where the
    * word would be a *name*.
    *
-   * The blanking is regex-shaped and therefore approximate — it does not know
-   * about a brace inside a string inside a JSX attribute, and it does not need
-   * to. A false negative here costs one identifier the reviewer still sees; a
-   * parser would cost a dependency and a maintenance burden for the same rule.
+   * The blanking is regex-shaped and therefore approximate, deliberately: a
+   * false negative costs one identifier the reviewer still sees, where a parser
+   * would cost a dependency and a maintenance burden for the same rule.
    */
   function code(source: string): string {
     return (
@@ -217,17 +213,15 @@ describe("R5 — a `Row` does not cross into a client component", () => {
    * The half of R5 that is a runtime property rather than taste.
    *
    * A `<X>Row` is a shape `@workspace/db` returns, `Date` fields and all; a
-   * `<X>View` is what has already been projected to strings for the client. A
-   * `Row` handed to a component is the failure the suffix vocabulary exists to
-   * name — and TypeScript will not stop it, because a `Date` is a perfectly
-   * good `Date` right up until React serializes it across the RSC boundary or
-   * a browser formats it in the visitor's own locale.
+   * `<X>View` is what has already been projected to strings for the client.
+   * TypeScript will not stop a `Row` reaching a component, because a `Date` is a
+   * perfectly good `Date` right up until React serializes it across the RSC
+   * boundary or a browser formats it in the visitor's own locale.
    *
    * ⚠️ **The module specifier is matched first, and that filter is
-   * load-bearing.** `components/documents/document-list.tsx` and
-   * `components/jobs/postings/posting-table.tsx` both import `TableRow` from
-   * `@workspace/ui/components/table`, which is a `<tr>` and not a row of
-   * anything. What the rule is about is our own data crossing the boundary, so
+   * load-bearing.** `document-list.tsx` and `posting-table.tsx` both import
+   * `TableRow` from `@workspace/ui/components/table`, which is a `<tr>` and not
+   * a row of anything. The rule is about our own data crossing the boundary, so
    * it looks only at `@/lib/…` and `@workspace/db`.
    */
   const DATA_MODULE = /^(@\/lib\/|@workspace\/db$)/

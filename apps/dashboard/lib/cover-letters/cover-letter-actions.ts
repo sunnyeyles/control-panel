@@ -45,56 +45,37 @@ import { z } from "zod"
  * `app/(app)/jobs/actions.ts`, which is `"use server"`, supplies the real
  * dependencies, and calls `refresh()`.
  *
- * Three properties this module exists to hold, each of which would be invisible
- * if it were satisfied only by the current call site:
+ * Three properties this module exists to hold:
  *
- * 1. **The form carries one identifier, never a Posting.** A Posting arriving
- *    in form data would let a caller put text of their choosing into a stored
- *    document written in the user's voice — and it would break *copied, never
- *    composed* at the last step of the chain that maintains it. The Posting is
- *    re-read server-side out of the stored row's `payload` — the validated
- *    advertisement as its producer wrote it, which nothing on the client can
- *    write. `cover-letter-actions.test.ts` submits a `posting` field and
- *    asserts it changes nothing.
- * 2. **The Posting is addressed by (session user, posting id), so there is no
- *    ownership to assume.** `(user_id, posting_id)` is the natural key of
- *    `postings` and the user half comes from the session, so a stranger's
- *    advertisement cannot be *named* from here rather than being named, loaded,
- *    and then refused by a comparison somebody has to remember to write. There
- *    is no Run in the path at all, and no window between a check and a read.
- * 3. **The storage key is built from the session's user id.** Nothing from the
- *    form reaches the `userId` segment, so `assertSegment` in
- *    `@workspace/user-storage` is a second line of defence rather than the only
- *    one.
+ * 1. **The form carries one identifier, never a Posting.** A Posting in form
+ *    data would let a caller put text of their choosing into a document written
+ *    in the user's voice. It is re-read server-side from `postings.payload`;
+ *    `cover-letter-actions.test.ts` submits a `posting` field and asserts it
+ *    changes nothing.
+ * 2. **The Posting is addressed by (session user, posting id)**, the natural key
+ *    of `postings`, so a stranger's advertisement cannot be *named* rather than
+ *    being named, loaded, then refused by a comparison somebody must remember
+ *    to write. No Run in the path, no window between a check and a read.
+ * 3. **The storage key is built from the session's user id**, so `assertSegment`
+ *    in `@workspace/user-storage` is a second line of defence, not the only one.
  *
- * Properties 1 and 2 are held by `lib/postings/load-stored-posting.ts`, which
- * this file used to contain and which the tailored-resume actions now share —
- * including why the Posting is read from `postings.payload` and never from
- * `runs.findings`. The reasoning lives there; what stays here is that this
- * action passes it one identifier out of the form and the caller's own id, and
- * nothing else.
+ * 1 and 2 live in `lib/postings/load-stored-posting.ts`, shared with the
+ * tailored-resume actions; the reasoning is there.
  *
- * The candidate's saved instructions extend that first property rather than
- * qualifying it. They are read from the database, keyed on the session's user
- * id, and there is deliberately **no form field for them** — one would be a
- * second way to put text of the caller's choosing into the system prompt of an
- * agent holding the user's CV, which is exactly what re-reading the Posting
- * server-side exists to prevent.
+ * Saved instructions extend property 1: read from the database keyed on the
+ * session user, with deliberately **no form field** — one would be a second way
+ * to put caller-chosen text into the system prompt of an agent holding the CV.
  *
- * And one that is about spending rather than security: the refusal for "no
- * readable CV" happens **before** the writer is constructed, so a user with
- * nothing to write from costs no model call. That is the same rule as
- * `assertDraftable`, one step earlier.
+ * The "no readable CV" refusal happens **before** the writer is constructed, so
+ * a user with nothing to write from costs no model call.
  */
 
 /**
  * One message for "no such Posting" and "someone else's Posting".
  *
- * Re-exported from `lib/actions/not-found.ts` so posting-actions and tests share
- * one string. The two cases are indistinguishable to this action by construction —
- * the lookup names the caller as half its key — and that identity is load-bearing:
- * Posting ids are derived from an advertisement's URL, so two messages would turn
- * a form into an oracle for whether a stranger has been shown it.
+ * The identity is load-bearing: Posting ids are derived from an advertisement's
+ * URL, so two messages would turn the form into an oracle for whether a stranger
+ * has been shown it.
  */
 export { POSTING_NOT_FOUND }
 
@@ -103,41 +84,27 @@ const KIND = "cover-letters"
 
 /**
  * ⚠️ **Only one of the three actions here parses its own form, and that is the
- * other two agreeing rather than a duplication to collapse.** A letter is
- * addressed by `(user, Posting)` however it came to be written, so drafting asks
- * for exactly one identifier and saving asks for an identifier and a body — each
- * of those schemas lives with the shared function that enforces it,
- * `preparePostingDocument` and `editPostingDocument` respectively, and both are
- * shared with the tailored resume because they refuse the same fields for the
- * same reasons. Keeping them two modules rather than one is what leaves the pair
- * most worth diverging free to: one of them takes letter text from the caller and
- * the other must never.
+ * other two agreeing rather than a duplication to collapse.** Drafting and
+ * saving keep their schemas beside the functions that enforce them,
+ * `preparePostingDocument` and `editPostingDocument` — two modules rather than
+ * one because saving takes letter text from the caller and drafting must never.
  *
  * {@link createSchema} below is this file's alone, because manual creation is
  * this feature's alone — see {@link RESUME_NOT_FOUND} in
  * `tailored-resume-actions.ts` for why there is no resume counterpart.
- *
- * `POSTING_ID_PATTERN` is imported rather than restated — see
- * `lib/posting-documents/posting-document-ref.ts` for why there is one copy of it.
  */
 
 /**
  * There is no letter at that address to edit.
  *
  * ⚠️ **This refusal is the security property of {@link
- * createCoverLetterActions.saveCoverLetter}, not a convenience.** Drafting
- * deliberately never accepts letter text from a form — see property 1 above —
- * because text taken from a form would become arbitrary content inside a
- * document stored in the user's own voice. Saving *does* accept text, which is
- * safe only for as long as it can nothing but overwrite a letter the caller
- * already has. Requiring the object to exist is what holds that line: without
- * it, a caller could spell any well-formed Posting id and mint a letter of
- * their choosing at it.
+ * createCoverLetterActions.saveCoverLetter}, not a convenience.** Saving accepts
+ * caller text, which is safe only while it can do nothing but overwrite a letter
+ * the caller already has. Without the existence check a caller could spell any
+ * well-formed Posting id and mint a letter of their choosing at it.
  *
- * It is also the "not yours" answer, which is the same conflation the download
- * route makes: the key is built from the session's user, so another user's
- * letter is not merely refused here — it cannot be addressed at all, and what
- * the caller sees is an empty prefix.
+ * It is also the "not yours" answer: the key is built from the session's user,
+ * so another user's letter cannot be addressed at all.
  */
 export const LETTER_NOT_FOUND =
   "There is no drafted cover letter for that posting. Draft one before editing it."

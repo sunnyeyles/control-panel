@@ -24,16 +24,13 @@ function ThemeProvider({
 /**
  * Marks a subtree that binds its own single-letter keyboard shortcuts.
  *
- * The whiteboard canvas is the one that needs it: `d` is tldraw's draw tool, so
- * without this the user cannot pick up a pen without the theme flipping — and
- * the same collision waits for every other letter tldraw owns.
+ * The whiteboard canvas needs it: `d` is tldraw's draw tool, so without this the
+ * user cannot pick up a pen without the theme flipping.
  *
- * An attribute rather than stopping the event at the canvas, and that
- * distinction is load-bearing. Suppressing it there means either a
- * capture-phase handler, which stops the key reaching tldraw at all, or a
- * bubble-phase one, which depends on where tldraw happens to have bound its
- * own listener. Refusing the hotkey here leaves the event completely untouched,
- * and keeps this file from having to know what a canvas is.
+ * ⚠️ An attribute rather than stopping the event at the canvas. Suppressing it
+ * there means either a capture-phase handler, which stops the key reaching
+ * tldraw at all, or a bubble-phase one, which depends on where tldraw bound its
+ * own listener. Refusing here leaves the event untouched.
  */
 const OWNS_SHORTCUTS_ATTRIBUTE = "data-owns-shortcuts"
 

@@ -6,14 +6,11 @@ const mobileMediaQuery = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`
 /**
  * One `MediaQueryList` for the whole app, created on first use.
  *
- * `getSnapshot` runs on every render, and it used to call `window.matchMedia()`
- * each time — allocating a fresh `MediaQueryList` to read one boolean off it,
- * for every render of every component that asks. The list is a live object, so
- * one of them answers for everybody.
- *
- * Lazily rather than at module scope: this module is evaluated on the server
- * too, where `window` does not exist, and `getServerSnapshot` below is what
- * answers there.
+ * `getSnapshot` runs on every render and used to call `window.matchMedia()` each
+ * time, allocating a fresh `MediaQueryList` to read one boolean. The list is
+ * live, so one answers for everybody. Lazily rather than at module scope
+ * because this module is evaluated on the server, where `window` does not
+ * exist — `getServerSnapshot` answers there.
  */
 let mediaQueryList: MediaQueryList | undefined
 

@@ -37,50 +37,18 @@ export type { PostingDetailState } from "@/components/jobs/postings/posting-deta
 /**
  * One advertisement in full, shown in the expanded table row beneath it.
  *
- * The compact row carries only what is worth scanning — title, company,
- * location, when the advertisement was posted, and whether a letter exists.
- * Everything a row has no width for lives here: the status control, the summary,
- * the highlights copied from the advertisement, why it matched, which Briefing
- * found it, both sighting times, all three Cover Letter controls, and the
- * Tailored Resume controls beneath them.
+ * ⚠️ Columns hidden at a breakpoint reappear here, each guarded by the
+ * breakpoint of the column it stands in for — hiding is a relocation, and
+ * nothing is ever on screen twice. See `PostingColumn.visibility`.
  *
- * ⚠️ **"What the row has no width for" is a function of the viewport, so part of
- * this panel appears only on a narrow one.** Location, Posted and Source are
- * columns above `lg`, and below it they stop being rendered — see
- * `PostingColumn.visibility`. This panel is where they go, which makes hiding
- * them a relocation rather than a loss; the title comes with them below `md`,
- * where its column is too narrow to finish the sentence. Each of those pieces
- * carries the breakpoint of the column it stands in for, so nothing is ever on
- * screen twice.
+ * ⚠️ The summary, highlights and match reason arrive as {@link PostingDetailView},
+ * fetched by the row above on expansion: they are the largest fields a Posting
+ * has and at most one row is open. Everything else comes from the
+ * {@link PostingView} the page already holds.
  *
- * ⚠️ **Most of this costs no round trip; the advertisement's own words do.**
- * The link, the status control, the sighting times and the letter controls all
- * come from the {@link PostingView} the page already holds. The summary, the
- * highlights and the match reason arrive as {@link PostingDetailView}, fetched
- * by the row above when it was expanded — they are the largest fields a Posting
- * has and at most one row is open, so shipping them for all twenty-five was a
- * page of prose in every navigation that nobody read. See
- * `lib/postings/load-posting-detail.ts`.
- *
- * Opening a document for editing has always worked this way:
- * {@link EditCoverLetterButton} and {@link EditTailoredResumeButton} fetch the
- * body on demand into the shared `FileEditorDialog`, so the table never
- * server-renders anyone's markdown.
- *
- * ⚠️ **Every letter and resume control lives here, together.** Editing either is
- * offered nowhere else in the app, so leaving it behind when moving generation
- * would delete the editor, and nothing would fail to compile to say so. The
- * status select is in the same position: this is the only place in the app it is
- * rendered, and the only caller of `setPostingStatusAction`.
- *
- * ⚠️ **The Tailored Resume has no table column, and the Cover Letter does.**
- * "Have I written to this one yet" is a question worth scanning a page for;
- * "have I tailored my CV for this one" is asked once you are already reading a
- * Posting. A sixth column would narrow the five that carry the advertisement.
- *
- * `"use client"` is explicit rather than inherited. The file was always in the
- * client bundle — the table body imports it — and it now calls a hook, so the
- * directive states what was already true.
+ * ⚠️ This is the only place in the app that renders the status select or any
+ * letter/resume control, so moving generation elsewhere would silently delete
+ * the editors.
  */
 export function PostingDetail({
   posting,
@@ -92,41 +60,27 @@ export function PostingDetail({
   /**
    * The advertisement's own words, fetched when this row was expanded.
    *
-   * ⚠️ **Three states, and `failed` is not `loading`.** A request that never
-   * comes back would otherwise leave a skeleton pulsing forever, which reads as
-   * "still working" rather than as "this did not load" — so the failure carries
-   * a message and says so. Everything on this panel that needs no request is
-   * rendered under all three.
+   * ⚠️ `failed` is a distinct state from `loading`: a request that never comes
+   * back would otherwise pulse a skeleton forever, reading as "still working".
    */
   detail: PostingDetailState
-  /**
-   * Every letter on this page, still in flight.
-   *
-   * The same promise the compact rows read, consumed the same way and behind
-   * its own boundary. By the time a detail is open it has almost always
-   * resolved, so the skeleton below is rarely seen — but a detail opened during
-   * the first paint must not block the panel it sits in.
-   */
+  /** Every letter on this page, still in flight; read only behind a boundary. */
   letters: CoverLetterPromise
   /**
    * Every tailored resume on this page, still in flight.
    *
-   * A **second** promise rather than one merged object, because the two loads
-   * fail independently: they list two different prefixes, so one can be
-   * unreadable while the other is fine, and each section says so for itself.
-   * Merging them would make either failure blank both.
+   * A second promise rather than one merged object: the two list different
+   * prefixes and fail independently, and merging would blank both on either
+   * failure.
    */
   tailoredResumes: TailoredResumePromise
 }) {
   /**
    * `summary` is absent exactly when the stored payload no longer matched the
-   * schema — see `loadPostingDetail()` in `lib/postings/load-posting-detail.ts`,
-   * which degrades such a row to empty rather than failing the request.
-   * `matchReason` and `highlights` go with it, so one branch covers all three.
-   *
-   * Distinct from `detail.status === "failed"`, which is the request itself not
-   * arriving. A drifted payload is a fact about the row; a failed request is a
-   * fact about this moment, and only the second is worth retrying.
+   * schema; `loadPostingDetail()` degrades such a row to empty rather than
+   * failing, and `matchReason`/`highlights` go with it. Distinct from
+   * `status === "failed"` — a drifted payload is a fact about the row, and only
+   * a failed request is worth retrying.
    */
   const payloadUnreadable =
     detail.status === "ready" && detail.view.summary === undefined
@@ -134,25 +88,19 @@ export function PostingDetail({
   return (
     <div className="flex min-w-0 flex-col gap-5 py-2 break-words">
       {/*
-        ⚠️ **The title, and only where the row above cannot finish it.** Below
-        `md` the Title column is around 170px, so `line-clamp-2` clips most real
-        advertisement titles and the `title` attribute that would otherwise
-        rescue them is a hover tooltip — nothing at all on a touch screen. Above
-        `md` the row is showing the whole thing and this would be it twice.
-
-        `aria-hidden`, because the clipping is purely visual: `line-clamp` hides
-        no text from the accessibility tree, so the row's own cell already reads
-        the full title out and this copy would be the second time.
+        Only below `md`, where the ~170px Title column clips and its `title`
+        tooltip is nothing at all on a touch screen. `aria-hidden` because
+        `line-clamp` hides no text from the accessibility tree — the row's own
+        cell already reads the full title out.
       */}
       <p aria-hidden="true" className="text-sm font-medium md:hidden">
         {posting.title}
       </p>
 
       {/*
-        A plain anchor, not `next/link`: this leaves the app entirely, and
-        prefetching a third party's advertisement site is neither useful nor ours to
-        do. `noreferrer` keeps the board from being told where the click
-        came from, and `noopener` keeps the opened tab from reaching back.
+        A plain anchor, not `next/link`: this leaves the app, and prefetching a
+        third party's site is not ours to do. `noreferrer noopener` keeps the
+        board from learning where the click came from or reaching back.
       */}
       <a
         href={posting.url}
@@ -165,24 +113,12 @@ export function PostingDetail({
       </a>
 
       {/*
-        The one field on this Posting a person writes. Everything else is
-        whatever the last Run that saw the advertisement reported, which is why
-        `recordPostings` in `@workspace/db` leaves `status` alone on conflict —
-        a re-find must not undo an "applied".
+        The one field on this Posting a person writes, which is why
+        `recordPostings` leaves `status` alone on conflict — a re-find must not
+        undo an "applied".
 
-        It sits near the top because it is an action rather than a fact, beside
-        the only other one that does not depend on reading further. It moved off
-        the compact row when the table narrowed to five columns; a select is a
-        wide control to repeat twenty-five times down a page, and Radix sets
-        `aria-expanded` on its trigger while open, which tripped the row
-        highlight meant for the disclosure chevron.
-
-        ⚠️ **The row shows the value now, and this is still where it is
-        changed.** The Status column renders a read-only badge — see
-        `posting-status-badge.tsx` — so this section is no longer the only way to
-        find out where an application stands, only the only way to move it. That
-        is also why the heading stays: below `md` the column is not rendered and
-        this is the whole of it.
+        ⚠️ The Status column shows the value read-only; this is the only place
+        it can be changed, and the only rendering of it at all below `md`.
       */}
       <PostingDetailSection title="Status">
         <PostingStatusSelect
@@ -193,16 +129,10 @@ export function PostingDetail({
       </PostingDetailSection>
 
       {/*
-        ⚠️ **The score comes from the row, the words behind it come from the
-        fetch, and that split is why this section is outside the three-state
-        branch below.** `posting.matchScore` is a column on the page the table
-        already holds, so the number is on screen the instant a row opens; the
-        reason and the gaps are prose and arrive with the rest of the detail —
-        see `lib/postings/load-posting-detail.ts`.
-
-        Rendered only once something has scored this advertisement. A Posting
-        nobody has scored yet has nothing to say here, and a heading over "not
-        yet" would be a section that is empty for every row on a first visit.
+        Outside the three-state branch below because the score is a column the
+        table already holds — on screen the instant a row opens — while the
+        reason and gaps arrive with the fetched detail. Rendered only once
+        something has scored the advertisement.
       */}
       {posting.matchScore === undefined ? null : (
         <PostingDetailSection title="Match against your resume">
@@ -219,10 +149,8 @@ export function PostingDetail({
           </p>
 
           {/*
-            ⚠️ **Said every time a score is shown, not once on the page.** The
-            number reads as a measurement and is a model's judgement of one
-            document against another; the sentence is what keeps somebody from
-            discarding an advertisement on the strength of it.
+            Said every time a score is shown, not once on the page: the number
+            reads as a measurement and is a model's judgement.
           */}
           <p className="text-xs text-muted-foreground">
             Read from the newest document you have labelled <em>Resume</em>,
@@ -236,21 +164,11 @@ export function PostingDetail({
       )}
 
       {/*
-        ⚠️ **The columns this viewport is not rendering, and nothing else.**
-        These three are cells of the compact row above `lg` — see
-        `PostingColumn.visibility` — so each pair here carries the breakpoint at
-        which its own column comes back, and the section carries the widest of
-        them. Above `lg` the whole thing is gone rather than a heading over an
-        empty grid.
-
-        Three separate breakpoints and not one, because the columns do not all
-        leave together: Location and Posted go at `md`, Source at `lg`. Hiding
-        the pairs as a block would put Source on screen twice between 768px and
-        1024px.
-
-        The same `dl` as **Seen** below, deliberately: they are the same kind of
-        content — labelled single facts — and two grid shapes for that in one
-        panel would read as two different things.
+        The columns this viewport is not rendering, and nothing else. Three
+        separate breakpoints rather than one, because the columns do not leave
+        together — Location and Posted at `md`, Source at `lg` — and hiding the
+        pairs as a block would put Source on screen twice between 768 and
+        1024px. Same `dl` shape as **Seen** below, deliberately.
       */}
       <PostingDetailSection title="Where and when" className="lg:hidden">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -268,12 +186,9 @@ export function PostingDetail({
           </dd>
 
           {/*
-            The same three branches the cell above draws, and for the same
-            reason: `outline` marks a host no board in `JOB_BOARDS` claimed, and
-            an em-dash means the stored URL would not parse at all. A panel that
-            collapsed those into one would make a board missing from the
-            registry invisible on precisely the viewport where the column that
-            reveals it is not rendered. See `lib/postings/posting-source.ts`.
+            The same three branches the cell above draws: `outline` marks a host
+            no board in `JOB_BOARDS` claimed, an em-dash means the stored URL
+            would not parse. See `lib/postings/posting-source.ts`.
           */}
           <dt className="lg:hidden">Source</dt>
           <dd className="lg:hidden">
@@ -356,16 +271,11 @@ export function PostingDetail({
 /**
  * What has been drafted for this Posting, and what can be done about it.
  *
- * Split out because it is the only part of the detail that waits on anything:
- * `use()` suspends its whole component, so keeping this separate is what lets
- * the summary, the highlights and the sighting times paint while the page's
- * storage reads are still in flight.
+ * Split out because it is the only part of the detail that waits: `use()`
+ * suspends its whole component, so the rest of the panel paints meanwhile.
  *
- * ⚠️ **"Could not be read" is a third state, not a synonym for "none".** With
- * the letters unavailable, offering *Draft a cover letter* would invite someone
- * to spend a model call replacing a letter this panel simply could not see. So
- * that case says so and offers nothing — the page-level alert above the table
- * says the same thing once, for the whole page.
+ * ⚠️ "Could not be read" is a third state, not a synonym for "none" — offering
+ * *Draft* then would invite replacing a letter this panel could not see.
  */
 function CoverLetterControls({
   posting,
@@ -393,17 +303,10 @@ function CoverLetterControls({
   const letter = lookup.state === "drafted" ? lookup.letter : undefined
 
   /*
-    Derived from the Posting rather than read off the letter. Both used to be
-    fields of `CoverLetterView`, taken from the letter's stored S3 provenance —
-    but the page now learns which Postings have letters from one
-    `ListObjectsV2`, and a listing carries no object metadata. See
-    `lib/cover-letters/cover-letter-views.ts`.
-
-    The visible difference is the right way round: a letter drafted when the
-    advertisement had a different title downloads under the title on screen,
-    rather than the one captured at drafting time. `coverLetterFilename` is the
-    same function the drafting path names its object with, so the two cannot
-    drift apart.
+    Derived from the Posting, not read off the letter: the page learns which
+    Postings have letters from one `ListObjectsV2`, and a listing carries no
+    object metadata. The same `coverLetterFilename` the drafting path names its
+    object with, so the two cannot drift.
   */
   const filename = coverLetterFilename({
     postingId: posting.id,
@@ -457,21 +360,13 @@ function CoverLetterControls({
  * What has been tailored for this Posting, and what can be done about it.
  *
  * The letter's counterpart, holding the same three-state rule for the same
- * reason: with the store unreadable, offering *Generate* would invite someone to
- * spend a model call replacing a document this panel simply could not see.
+ * reason.
  *
- * ⚠️ **Every name shown here comes from `posting`, not from storage.** The
- * lookup carries a Posting id and a date and nothing else, because
- * `listTailoredResumes` reads with one `ListObjectsV2` and a listing carries
- * no user metadata. The title and company the download link and the PDF button
- * need are already on this component's props — the same values, out of
- * Postgres rather than S3.
+ * ⚠️ Every name here comes from `posting`, not storage: `listTailoredResumes`
+ * reads with one `ListObjectsV2` and a listing carries no user metadata.
  *
- * ⚠️ **Two ways to a PDF, and neither is redundant.** The button below makes one
- * from the stored markdown without opening anything; the editor's own *Download
- * PDF* makes one from whatever is on screen, including unsaved edits. Removing
- * the first would mean opening an editor to get a file, and removing the second
- * would mean saving before you could see how an edit prints.
+ * ⚠️ Two ways to a PDF, neither redundant: this button renders the stored
+ * markdown, the editor's own *Download PDF* renders unsaved edits.
  */
 function TailoredResumeControls({
   posting,
@@ -520,11 +415,8 @@ function TailoredResumeControls({
       }
       emptyHint={
         resume ? undefined : (
-          // Said once, where the decision is made, rather than in the page-level
-          // paragraph above the table: a tailored resume is a rearrangement of a
-          // document the user wrote, and the one failure mode worth naming is the
-          // model quietly adding something. Reading it against the original is
-          // the whole of what the user has to do about that.
+          // Said where the decision is made: the one failure mode worth naming
+          // is the model quietly adding something the CV does not say.
           <p className="text-sm text-muted-foreground">
             Rewrites the newest document you have labelled <em>Resume</em> for
             this advertisement — reordering and re-emphasising what is already

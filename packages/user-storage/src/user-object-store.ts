@@ -4,14 +4,11 @@ import type { ObjectKind } from "./kinds.ts"
 /**
  * Everything needed to address one stored object.
  *
- * `environment` is absent on purpose: it is deployment configuration, not
- * per-object data, so the store supplies it from its own config. A caller
- * therefore cannot reach into another environment's data, however it is
- * called — which is the same boundary the IAM policy draws.
- *
- * `userId` is likewise not an optional convenience. It is what the key is
- * built from and what the stored object is checked against, so a caller cannot
- * ask for an object without saying who is asking.
+ * `environment` is absent on purpose — deployment configuration, supplied by
+ * the store, so no caller can reach into another environment's data. `userId`
+ * is mandatory for the mirror reason: it builds the key and is what the stored
+ * object is checked against, so nobody asks for an object without saying who is
+ * asking.
  */
 export interface ObjectRef {
   userId: string
@@ -27,14 +24,10 @@ export interface NewObject extends ObjectRef {
   /**
    * The bytes.
    *
-   * A `string` is encoded as UTF-8; bytes are stored verbatim. Both are
-   * accepted because the two kinds genuinely differ — a brief is text this
-   * process just produced, a resume is an opaque upload that must survive
-   * byte-for-byte.
-   *
-   * Note what is *not* here: a content type. That is derived from the
-   * extension against the kind's allowlist, because a caller-supplied media
-   * type is a caller-supplied claim.
+   * A `string` is encoded as UTF-8; bytes are stored verbatim — a brief is text
+   * this process produced, a resume is an opaque upload that must survive
+   * byte-for-byte. Note what is *not* here: a content type. That is derived
+   * from the extension, because a caller-supplied media type is a claim.
    */
   body: string | Uint8Array
 
@@ -66,15 +59,12 @@ export interface FetchedObject extends StoredObject {
 /**
  * Durable per-user object storage.
  *
- * Deliberately says nothing about S3, buckets, or commands. That is the point:
- * callers depend on this and nothing else, so the backend can be swapped,
- * faked in a test, or pointed at a local directory without a single caller
- * changing. `createS3UserObjectStore` is the only implementation today and the
- * only module in this package that imports the AWS SDK.
+ * Deliberately says nothing about S3, buckets, or commands, so the backend can
+ * be swapped or faked without a caller changing. `createS3UserObjectStore` is
+ * the only implementation and the only module here importing the AWS SDK.
  *
- * This is the generic core. Most code should prefer the narrower facades —
- * `createBriefStore` and `createResumeStore` — which know their kind's key
- * shape and file types so a call site does not have to restate them.
+ * This is the generic core; prefer the narrower facades (`createBriefStore`,
+ * `createResumeStore`), which know their kind's key shape and file types.
  *
  * Every method rejects with a `UserStorageError` — never a raw SDK error.
  */

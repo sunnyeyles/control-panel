@@ -69,20 +69,18 @@ const PAYLOAD = {
  * A stand-in for `prisma.posting` that filters on **both** halves of the natural
  * key, because that filter is the claim under test.
  *
- * The real `setPostingStatus` from `@workspace/db` runs against this rather than
- * being mocked: what the tests below assert is that a stranger's Posting is
- * unreachable and that the refusal is indistinguishable from a missing one, and
- * a mocked helper would assert only that this file passed it some arguments.
+ * The real `setPostingStatus` runs against this rather than being mocked: the
+ * claim is that a stranger's Posting is unreachable and that the refusal is
+ * indistinguishable from a missing one, and a mocked helper would assert only
+ * that this file passed it some arguments. Every call is recorded, so "refused
+ * before anything is queried" is a fact about the store rather than an inference
+ * from a message.
  *
- * Every call is recorded, so "refused before anything is queried" can be checked
- * as a fact about the store rather than inferred from a message.
- *
- * **The `where` is read by the same predicate the dev fake reads it with** —
- * `matchesPostingWhere` and `removeMatchingPostings` from `lib/dev/fake-prisma`.
- * The rows and the call log are this file's own, and deliberately so: the seeded
- * dev database knows one user, and these tests need a stranger. What is shared
- * is only the rule for which rows a `where` names, because two hand-written
- * spellings of an ownership filter can drift apart while both keep passing.
+ * ⚠️ **The `where` is read by the same predicate the dev fake reads it with** —
+ * `matchesPostingWhere` and `removeMatchingPostings` — because two hand-written
+ * spellings of an ownership filter can drift apart while both keep passing. The
+ * rows and call log stay this file's own: the dev database knows one user, and
+ * these tests need a stranger.
  */
 class FakeDb {
   readonly rows: PostingRow[] = []
@@ -92,10 +90,9 @@ class FakeDb {
   /** Times the client itself was asked for — a query cannot precede this. */
   handedOut = 0
   /**
-   * Every row-touching call and every letter delete, in the order they were
-   * made. What makes "the letter goes before the row" assertable at all — the
-   * ordering is a property of the action, and each fake on its own can only say
-   * that it was reached.
+   * Every row-touching call and every letter delete, in order. What makes "the
+   * letter goes before the row" assertable at all — each fake on its own can
+   * only say that it was reached.
    */
   readonly log: string[] = []
 

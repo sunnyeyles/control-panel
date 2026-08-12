@@ -9,17 +9,15 @@ import { ensureUserForAuth } from "@workspace/db"
 /**
  * The one place a Neon Auth session becomes a platform user.
  *
- * Three states rather than a nullable user, because "not signed in" and "signed
- * in but not allowed" need different answers — a redirect to sign-in and an
- * explanation respectively — and collapsing them into `null` makes the caller
- * guess. The chat route turns both into 401; the pages tell them apart.
+ * Three states rather than a nullable user: "not signed in" and "signed in but
+ * not allowed" need different answers — a redirect and an explanation — and
+ * `null` makes the caller guess. The chat route turns both into 401.
  *
- * `userId` is `users.id`, a uuid this repo generates — never the upstream Neon
- * Auth id. That distinction is load-bearing: `users.id` is what `jobs.user_id`
- * references and what becomes the `userId` segment of every S3 object key, and
- * `assertSegment()` in @workspace/user-storage treats that segment as the
- * ownership boundary. Letting a third party's identifier into it would put
- * someone else in charge of that boundary.
+ * ⚠️ **`userId` is `users.id`, a uuid this repo generates — never the upstream
+ * Neon Auth id.** It is what `jobs.user_id` references and what becomes the
+ * `userId` segment of every S3 key, which `assertSegment()` in
+ * `@workspace/user-storage` treats as the ownership boundary. A third party's
+ * identifier there would put someone else in charge of that boundary.
  */
 export type CurrentUser =
   | { status: "anonymous" }
@@ -35,18 +33,16 @@ export type CurrentUser =
 /**
  * Closed signup, enforced here rather than upstream.
  *
- * Neon Auth can refuse an account at creation time through a
- * `user.before_create` webhook, but that needs a publicly reachable endpoint and
- * never fires against localhost, so it cannot be the only check during
- * development. This one runs on every request in every environment.
+ * Neon Auth's `user.before_create` webhook needs a publicly reachable endpoint
+ * and never fires against localhost, so it cannot be the only check. This runs
+ * on every request in every environment.
  *
- * The accepted cost: someone outside the list can still create a Neon Auth
- * account and hold a valid session. They simply never get past this function,
- * so they can neither read a page nor spend a token.
+ * The accepted cost: someone outside the list can still hold a valid Neon Auth
+ * session. They never get past this function, so they can neither read a page
+ * nor spend a token.
  *
- * An unset or empty list refuses everyone. Failing closed is the entire point of
- * this effort — an allowlist that silently means "everybody" when a variable is
- * missing would reintroduce the hole it exists to close.
+ * ⚠️ **An unset or empty list refuses everyone.** An allowlist that silently
+ * meant "everybody" on a missing variable would reopen the hole it closes.
  */
 function isAllowed(email: string): boolean {
   const allowed = (process.env.AUTH_ALLOWED_EMAILS ?? "")
@@ -60,28 +56,24 @@ function isAllowed(email: string): boolean {
 /**
  * Wrapped in React's `cache()`, which memoizes per request and not beyond.
  *
- * `app/(app)/layout.tsx` needs the user to render the sidebar, and every page
- * beneath it calls this again to run its own authorization check — a
- * duplication that is deliberate, because a layout does not re-render on
- * navigation and so cannot be the only gate. Without memoization that shape
- * would cost two session resolutions and two identity upserts on every full
- * page load, purely to ask the same question twice.
+ * `app/(app)/layout.tsx` reads the user for the sidebar and every page beneath
+ * calls this again for its own authorization check — deliberate duplication,
+ * since a layout does not re-render on navigation and cannot be the only gate.
+ * Memoizing keeps that from costing two session lookups and two upserts per load.
  *
- * `cache()` and not a module-level variable: the scope is one request. A
- * module-level cache on a server handling many users would serve one person's
- * identity to the next, which here is the identity that becomes the `userId`
- * segment of their S3 keys.
+ * ⚠️ **`cache()` and not a module-level variable**: the scope must be one
+ * request, or a server handling many users serves one person's identity — the
+ * one that becomes their S3 key segment — to the next.
  */
 export const getCurrentUser = cache(
   async function getCurrentUser(): Promise<CurrentUser> {
     /**
      * ⚠️ **The one way past everything below.** Every page, Server Action and
-     * API route establishes who is asking through this function, so opening it
-     * opens the app — and nothing downstream needs a branch of its own.
-     *
-     * Returning before `auth.getSession()` skips the session lookup, the
-     * allowlist and the `ensureUserForAuth` lookup together, which is what lets
-     * the app run with no `NEON_*` variables and no database.
+     * API route asks who is calling through this function, so opening it opens
+     * the app — and nothing downstream needs a branch of its own. Returning
+     * before `auth.getSession()` skips the session lookup, the allowlist and
+     * `ensureUserForAuth` together, which is what lets the app run with no
+     * `NEON_*` variables and no database.
      */
     if (devMockEnabled()) return DEV_USER
 
@@ -94,11 +86,9 @@ export const getCurrentUser = cache(
       return { status: "refused", email: user.email }
     }
 
-    // Idempotent by construction, so this is safe to run on every request and
-    // self-heals if a previous attempt failed after the account existed
-    // upstream. It reads before it writes, so the request that finds an
-    // existing mapping — every request but the first — never opens a write
-    // transaction; see `ensureUserForAuth`.
+    // Idempotent, so it is safe on every request and self-heals if a previous
+    // attempt failed after the account existed upstream. It reads before it
+    // writes, so every request but the first opens no write transaction.
     const platformUser = await ensureUserForAuth(getPrisma(), user.id)
 
     return {

@@ -103,3 +103,7 @@ packages/db/src/generated/
 
 # claude code worktrees (scratch checkouts, never part of the repo)
 .claude/worktrees/
+
+# agent scratch space: plans, ticket sets and audits written while working.
+# Working notes, not the product — they go stale the moment the work ships.
+.scratch/

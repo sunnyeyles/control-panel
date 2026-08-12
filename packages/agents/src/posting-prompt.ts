@@ -1,13 +1,11 @@
 /**
  * The one prompt body both posting-document features are built from.
  *
- * `toCoverLetterPrompt` and `toTailoredResumePrompt` were line-for-line
- * identical apart from three sentences: how the task is opened, how the
- * candidate's document is headed, and how it is introduced. The rest — the
- * posting block, the quoted-material fence around `highlights`, the
- * "everything known about the role" close — is one contract, and keeping two
- * copies of it meant two places for the fence to drift. The wrappers hold
- * their three distinguishing sentences and nothing else.
+ * `toCoverLetterPrompt` and `toTailoredResumePrompt` differ only in three
+ * sentences: how the task opens, how the candidate's document is headed, and
+ * how it is introduced. The rest — the posting block, the quoted-material fence
+ * around `highlights`, the "everything known about the role" close — is one
+ * contract, and two copies meant two places for the fence to drift.
  *
  * Two properties this builder exists to hold, for every caller:
  *

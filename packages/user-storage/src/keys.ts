@@ -26,17 +26,17 @@ export interface ObjectKeyParts {
 /**
  * `environment/userId/kind/…tail.ext`
  *
- * Environment leads so a single bucket can hold several without their IAM
- * prefixes overlapping. User comes next so one `s3:prefix` condition can scope
- * an identity to one user's data — and so erasing a user is one prefix, not
- * one prefix per kind. Kind comes third so an IAM policy can still narrow to a
- * single category — IAM resource ARNs do take wildcards, so a resource ending
- * `/prod/<any user>/resumes/<anything>` is expressible.
+ * Environment leads so one bucket holds several without their IAM prefixes
+ * overlapping. User comes next so one `s3:prefix` condition scopes an identity
+ * to one user, and so erasing a user is one prefix rather than one per kind.
+ * Kind is still reachable by an IAM policy, because resource ARNs take
+ * wildcards — a resource ending `/prod/<any user>/resumes/<anything>` is
+ * expressible.
  *
- * Note what this ordering costs: S3 **lifecycle** filters are literal prefixes
- * with no wildcard support, so "expire every user's briefs" is not expressible
- * as a prefix here. That is why every object is also tagged with its kind —
- * the lifecycle rules filter on the tag. See `infra/aws/modules/user-storage`.
+ * ⚠️ What that costs: S3 **lifecycle** filters are literal prefixes with no
+ * wildcards, so "expire every user's briefs" is not expressible here. Every
+ * object is therefore also tagged with its kind and the lifecycle rules filter
+ * on the tag. See `infra/aws/modules/user-storage`.
  */
 const KEY_PATTERN =
   /^(?<environment>[^/]+)\/(?<userId>[^/]+)\/(?<kind>[^/]+)\/(?<tail>.+)$/
@@ -54,14 +54,10 @@ const SEGMENT_PATTERN =
  * Whether a string may stand as one segment of an object key.
  *
  * Exported so a package that *mints* segment-shaped identifiers — the Posting
- * id in `@workspace/agents` is the first — can assert its output against this
- * rule instead of restating the pattern. A restated pattern is the drift
- * described on {@link EXTENSION_SOURCE}, caught late and at the wrong layer:
- * the id would look fine everywhere except the moment a key is built from it.
- *
- * A predicate rather than the regex itself, because the shape is this module's
- * business and an exported `RegExp` is an invitation to compose one that means
- * something slightly different.
+ * id in `@workspace/agents` is the first — asserts against this rule instead of
+ * restating the pattern; a restated one drifts, and the id would look fine
+ * everywhere except the moment a key is built from it. A predicate rather than
+ * the regex, so nobody composes a variant that means something slightly else.
  */
 export function isObjectKeySegment(value: string): boolean {
   return typeof value === "string" && SEGMENT_PATTERN.test(value)
@@ -70,20 +66,15 @@ export function isObjectKeySegment(value: string): boolean {
 /**
  * The extension half of a stored object's address, including its dot.
  *
- * Exported as the pattern *source* rather than a compiled `RegExp` because the
- * dashboard composes it into a larger expression — the download route parses a
- * `<uuid><ext>` path segment in one match — and a compiled anchored regex
- * cannot be embedded in another one without unpicking its anchors.
+ * The pattern *source*, not a compiled `RegExp`, because the dashboard composes
+ * it into a larger expression (the download route parses `<uuid><ext>` in one
+ * match) and an anchored regex cannot be embedded without unpicking its
+ * anchors. Exported because the shape used to live in two places — the
+ * dashboard's copy bounded at 10 characters against this one's 16, so a request
+ * could be refused at the edge for a shape the store would have accepted.
  *
- * It is exported at all because this is the single source of truth for the
- * shape, and it used to be two: the dashboard carried its own copy bounded at
- * 10 characters against this one's 16. The looser bound here is what actually
- * gates key construction, so the stricter copy only meant a request could be
- * refused at the edge for a shape the store would have accepted — latent rather
- * than broken, and exactly the kind of drift two copies produce.
- *
- * Note what this does *not* decide: which extensions are allowed. That is the
- * per-kind allowlist in `kinds.ts`, and it is far narrower than this shape.
+ * This does *not* decide which extensions are allowed — that is the far
+ * narrower per-kind allowlist in `kinds.ts`.
  */
 export const EXTENSION_SOURCE = "\\.[a-z0-9]{1,16}"
 
@@ -94,16 +85,12 @@ const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 /**
  * Whether a `YYYY-MM-DD` string names a real calendar date.
  *
- * `new Date("2026-02-30")` does not fail — it rolls forward to 2 March.
- * Rebuilding the date from its own digits via `Date.UTC` and comparing back
- * through `toISOString` is what actually rejects an impossible day; a plain
- * parse does not on its own. Timezone-independent by construction, unlike a
- * check on how the whole string happened to parse.
+ * `new Date("2026-02-30")` does not fail — it rolls forward to 2 March. Only
+ * rebuilding the date from its own digits via `Date.UTC` and comparing back
+ * rejects an impossible day, and it is timezone-independent by construction.
  *
- * Exported so a caller elsewhere in the monorepo checking the same
- * `YYYY-MM-DD` shape doesn't restate the technique — see
- * `apps/briefing-worker/src/postings.ts`'s `parsePostedAt`, which applies the
- * identical rule to the date embedded in a scouted posting's ISO timestamp.
+ * Exported so the technique isn't restated — see `parsePostedAt` in
+ * `apps/briefing-worker/src/postings.ts`.
  */
 export function isRealCalendarDate(value: string): boolean {
   const match = DATE_PATTERN.exec(value)

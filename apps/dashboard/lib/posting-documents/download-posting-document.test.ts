@@ -1,17 +1,15 @@
 /**
  * Fetching one **Posting Document** for download, tested once for both kinds.
  *
- * These assertions were made twice — once in the letters' suite and once in the
- * resumes' — and every branch they exercised belongs to
- * `downloadPostingDocument`, which neither feature adds to beyond a kind and a
- * label. The gates and the error mapping run once, because nothing in them
- * varies by kind; the table below runs the two feature delegations through the
- * **real** facades over an in-memory store, which is what proves each kind's
- * key, label and instant survive the round trip.
+ * Every branch these two suites exercised belongs to `downloadPostingDocument`,
+ * which neither feature adds to beyond a kind and a label. The gates and the
+ * error mapping run once; the table below runs the two feature delegations
+ * through the **real** facades over an in-memory store, which is what proves
+ * each kind's key, label and instant survive the round trip.
  *
- * The property the ownership block holds: the caller supplies the Posting id
- * and nothing else, and the `userId` segment of the key comes from the session
- * at the call site. A request naming another user's document cannot be spelled.
+ * ⚠️ The caller supplies the Posting id and nothing else — the `userId` segment
+ * of the key comes from the session at the call site, so a request naming
+ * another user's document cannot be spelled.
  */
 
 import {

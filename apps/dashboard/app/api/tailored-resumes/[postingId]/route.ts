@@ -12,24 +12,19 @@ import { downloadTailoredResume } from "@/lib/tailored-resumes/download-tailored
  * return value is RSC-serialized, and there is no way to attach `Content-Type`
  * and `Content-Disposition` to it.
  *
- * ⚠️ **Three things fetch this URL, not one**, and the extras are why the
- * headers below are worth reading twice. The download link takes the response as
- * a file; the **Edit** button takes the body as text into the shared editor; and
- * the **Download PDF** button takes the body as text and renders it in the
- * browser with `exportMarkdownToPdf`. One route serves all three because they
- * want the same bytes under the same ownership rule — and `Content-Disposition:
- * attachment` is harmless to the two that read the body with `fetch`.
+ * ⚠️ **Three things fetch this URL**: the download link takes it as a file,
+ * **Edit** takes the body as text into the editor, and **Download PDF** renders
+ * that text with `exportMarkdownToPdf`. One route serves all three because they
+ * want the same bytes under the same ownership rule, and
+ * `Content-Disposition: attachment` is harmless to the two using `fetch`.
  *
- * Under `/api/` deliberately, so `proxy.ts`'s redirect→401 conversion applies:
- * without it an unauthenticated `fetch` would follow a 307 to the sign-in page
- * and receive an HTML document with a success status, unable to tell it was
- * refused. The two button paths depend on that directly — they branch on the
- * status code to decide what to say.
+ * Under `/api/` deliberately, so `proxy.ts`'s redirect→401 conversion applies —
+ * otherwise an unauthenticated `fetch` follows a 307 and gets HTML with a
+ * success status. The two button paths branch on that status code.
  *
- * The path segment is the Posting id alone — no extension, because a tailored
- * resume has exactly one (`.md`, fixed by `tailored-resume-store.ts`) and a URL
- * that let the caller choose one would be a URL that suggests they can. The PDF
- * is made in the browser and never exists on this side.
+ * The path segment is the Posting id alone: a tailored resume has exactly one
+ * extension, and a URL letting the caller choose suggests they can. The PDF is
+ * made in the browser and never exists on this side.
  */
 
 /** Required of anything reading the session — it depends on cookies. */

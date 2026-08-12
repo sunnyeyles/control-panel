@@ -11,16 +11,10 @@ export const dynamic = "force-dynamic"
 /**
  * Raised for the example-letter import action, not for the listing.
  *
- * `listDocuments()` is one indexed Postgres query now — the old S3
- * `HeadObject` fan-out is gone — so painting this page no longer needs a
- * raised ceiling. A Server Action runs under the duration of the segment that
- * invoked it, and importing an example letter still `get`s the chosen
- * document's bytes from the object store. Without the raise, a slow get of a
- * multi-megabyte CV can be cut off mid-read.
- *
- * **It moved here from `/settings` with the section that needs it.** That page
- * raised the ceiling when this section lived there; it dropped back to the
- * default when the section left.
+ * ⚠️ A Server Action runs under the duration of the segment that invoked it,
+ * and importing an example letter `get`s the chosen document's bytes — without
+ * the raise, a slow get of a multi-megabyte CV is cut off mid-read. Painting
+ * the page needs no raise: `listDocuments()` is one indexed Postgres query.
  */
 export const maxDuration = 30
 
@@ -29,15 +23,11 @@ export const maxDuration = 30
  * example to learn a voice from.
  *
  * Job-search configuration, so it sits with the postings that use it rather
- * than under the app's global Settings — a letter is drafted from a Posting one
- * tab away, and the instructions that shape it were two clicks in the other
- * direction.
+ * than under the app's global Settings.
  *
  * ⚠️ **`requirePageUser()` is this page's own authorization check and is not
- * inherited.** `app/(app)/layout.tsx` calls `getCurrentUser()` too, but that
- * call renders the sidebar: a layout does not re-render on navigation, so its
- * check is not re-run as someone moves between routes. See
- * `lib/auth/require-page-user.ts`.
+ * inherited.** The layout's `getCurrentUser()` renders the sidebar; a layout
+ * does not re-render on navigation, so its check is not re-run between routes.
  */
 export default async function CoverLetterSettingsPage() {
   const user = await requirePageUser()
@@ -56,13 +46,11 @@ export default async function CoverLetterSettingsPage() {
 
         <div className="flex w-full max-w-2xl flex-col gap-10">
           {/*
-            `user.userId` is `users.id` — the platform identity — not the Neon
-            Auth id. It is the only thing that can scope what this section reads.
+            `user.userId` is `users.id` — the platform identity, not the Neon
+            Auth id — the only thing that can scope what this section reads.
 
-            Streamed rather than awaited above, so the tab bar and the shell
-            paint immediately instead of waiting on the document listing
-            `CoverLetterSection` pays for. {@link maxDuration} above is for
-            the import action, not this read.
+            Streamed rather than awaited above, so the shell paints instead of
+            waiting on the document listing `CoverLetterSection` pays for.
           */}
           <Suspense fallback={<CoverLetterSectionSkeleton cards={1} />}>
             <CoverLetterSection userId={user.userId} />

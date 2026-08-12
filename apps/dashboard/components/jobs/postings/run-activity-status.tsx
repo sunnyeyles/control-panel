@@ -8,12 +8,10 @@ import { Spinner } from "@workspace/ui/components/spinner"
 /**
  * What a briefing's most recent Run is doing, beside its name.
  *
- * Every displayed instant arrives pre-formatted from the server — see
- * `run-activity.ts` — so nothing here formats a `Date`. The one live value is
- * the elapsed counter, which is a *duration* rather than a time and so cannot
- * disagree across hydration in the way a formatted date would; it still starts
- * at `null` and fills in after mount, because the first client render has to
- * match the server's.
+ * ⚠️ Every displayed instant arrives pre-formatted from the server (see
+ * `run-activity.ts`), so nothing here formats a `Date`. The one live value is a
+ * *duration*, which still starts at `null` and fills in after mount because the
+ * first client render has to match the server's.
  */
 export function RunActivityStatus({ activity }: { activity: RunActivity }) {
   switch (activity.state) {

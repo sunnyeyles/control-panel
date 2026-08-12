@@ -1,23 +1,18 @@
 /**
  * Making a value safe to travel as S3 user metadata.
  *
- * ⚠️ **S3 user-metadata values are HTTP headers.** A value carrying a newline
- * is header injection, and a non-ASCII one is silently mangled somewhere
- * between the SDK and the bucket. Neither failure is visible at the call site:
- * the write succeeds and the stored object is wrong, or worse, the request is
- * not the request the caller thought it was making.
+ * ⚠️ **S3 user-metadata values are HTTP headers.** A newline in a value is
+ * header injection; a non-ASCII character is silently mangled between the SDK
+ * and the bucket. Neither is visible at the call site — the write succeeds and
+ * the stored object is wrong.
  *
- * This module exists because that cleaning was written once, for an uploaded
- * filename, inside `resume-store.ts` — and the second caller that needs it
- * (`cover-letter-store.ts`, whose provenance values are text a model copied out
- * of an advertisement) must not restate the rule. Model-copied company names
- * and titles are exactly the values most likely to carry an em dash, a
- * non-breaking space, or a stray newline, so this is a live path rather than a
- * formality.
+ * Every caller uses this rather than restating the rule, which is how the
+ * cleaning came to be filename-only inside `resume-store.ts`. The live path is
+ * provenance: model-copied company names and titles are the values most likely
+ * to carry an em dash, a non-breaking space, or a stray newline.
  *
- * Nothing here validates a *key*. S3 lowercases metadata names in transit; the
- * names this package writes are its own compile-time constants, never caller
- * input, so there is nothing to sanitise on that side.
+ * Nothing here validates a *key* — metadata names are this package's own
+ * compile-time constants, never caller input.
  */
 
 /**
@@ -44,14 +39,12 @@ const UNSAFE = /[^\x20-\x7E]/g
 /**
  * The value as a header can carry it, or `undefined` if nothing survives.
  *
- * `undefined` rather than an empty string, so a caller spreads the result into
- * a metadata record and an unrepresentable value simply is not written — a
- * present-but-empty metadata field says "we know this and it is blank", which
- * is a different and false claim.
+ * `undefined` rather than an empty string, so spreading the result simply does
+ * not write an unrepresentable value — a present-but-empty field would claim
+ * "we know this and it is blank", which is false.
  *
- * Callers that must have the value — an uploaded filename, which is the only
- * thing standing between a document and being unnamed — check for `undefined`
- * and raise. See `cleanFilename` in `resume-store.ts`.
+ * Callers that must have the value check for `undefined` and raise; see
+ * `cleanFilename` in `resume-store.ts`.
  */
 export function toMetadataValue(
   value: string | undefined | null,
@@ -88,10 +81,9 @@ export function toMetadataRecord(
  * A metadata value as the instant it records, or `undefined` if it is absent
  * or unparseable.
  *
- * The parse-or-nothing half of reading an instant back, shared so the rule is
- * stated once; what to fall back to is the caller's decision, because the
- * right answer differs — the brief store degrades to its partition day, the
- * posting-document store to the object's own write time.
+ * The parse-or-nothing half only; the fallback is the caller's decision,
+ * because the right answer differs — the brief store degrades to its partition
+ * day, the posting-document store to the object's own write time.
  */
 export function parseInstant(raw: string | undefined): Date | undefined {
   const parsed = raw ? new Date(raw) : undefined

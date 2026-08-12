@@ -24,16 +24,11 @@ import { refresh } from "next/cache"
  */
 
 /**
- * `refresh()` after every success is not optional here. `next.config.ts` sets
- * `staleTimes.dynamic: 30`, so without it a switch the user just turned off
- * comes back on when they navigate away and back — the cached segment outliving
- * the change that made it stale. `documents/actions.ts` explains why it is
- * `refresh()` rather than `revalidatePath` or `revalidateTag`.
- *
- * `refresh()` takes no path and clears the client router cache, so it covers
- * this segment and `/jobs` alike — which matters more here than it did on
- * `/settings`, since the two pages are now one click apart and the postings
- * page reads the same rows for its briefing strip and its empty state.
+ * ⚠️ `refresh()` after every success is not optional: `staleTimes.dynamic: 30`
+ * means a switch the user just turned off comes back on when they navigate away
+ * and back. It takes no path and clears the client router cache, so it covers
+ * this segment and `/jobs` alike — which matters, since the postings page reads
+ * the same rows for its briefing strip and empty state.
  */
 const actions = createJobActions({
   getUser: getCurrentUser,
@@ -78,12 +73,10 @@ export async function createJobAction(
 /**
  * Changing what an existing briefing searches for.
  *
- * `refresh()` for the reason `saveTitleFiltersAction` gives, which applies here
- * more sharply than to the switch above: the edit form renders the stored
- * criteria as `defaultValue`s off a server render, so without it
- * `staleTimes.dynamic` serves the pre-save titles back on the next visit — a
- * save that looks like it silently did not happen. It also re-queries `/jobs`,
- * which is where the consequence of the change is eventually visible.
+ * `refresh()` for the reason `saveTitleFiltersAction` gives, more sharply: the
+ * edit form renders stored criteria as `defaultValue`s off a server render, so
+ * without it the pre-save titles come back on the next visit — a save that
+ * looks like it silently did not happen.
  */
 export async function updateJobCriteriaAction(
   state: ActionState,
@@ -110,12 +103,10 @@ const titleFilters = createTitleFilterActions({
 
 /**
  * ⚠️ **`refresh()` matters more here than for the actions above.** The form
- * renders the saved terms as a `defaultValue`, so without it `staleTimes.dynamic`
- * serves the pre-save list back on the next visit — which looks exactly like a
- * save that silently did not happen. It also clears the client router cache
- * outright, which is what makes `/jobs` re-query: the filter decides which rows
- * that page shows, and a stale segment there would show the postings the user
- * has just hidden.
+ * renders saved terms as a `defaultValue`, so without it the pre-save list
+ * comes back on the next visit. It also makes `/jobs` re-query: the filter
+ * decides which rows that page shows, and a stale segment there would keep
+ * showing the postings the user just hid.
  */
 export async function saveTitleFiltersAction(
   state: ActionState,
@@ -132,11 +123,9 @@ export async function saveTitleFiltersAction(
  * Reading proposed search criteria out of the user's uploaded CV, for the
  * new-briefing form to render into its own fields.
  *
- * Same seam and same page as the three above, with one dependency each: the
- * session, and the shelf the CV is read from. The extractor is deliberately
- * *not* supplied here — `createSuggestCriteriaActions` defaults it, and the
- * default constructs a model that reads `OPENAI_API_KEY`, which must not happen
- * at module scope in a file every render of this page imports.
+ * ⚠️ The extractor is deliberately *not* supplied: the factory's default
+ * constructs a model that reads `OPENAI_API_KEY`, which must not happen at
+ * module scope in a file every render of this page imports.
  */
 const suggestCriteria = createSuggestCriteriaActions({
   getUser: getCurrentUser,
@@ -145,19 +134,12 @@ const suggestCriteria = createSuggestCriteriaActions({
 })
 
 /**
- * ⚠️ **No `refresh()` here, unlike every other action in this file, and that is
- * deliberate rather than forgotten.**
- *
- * The action writes nothing — it returns criteria for the user to review, edit
- * and then submit through `createJobAction`, which is where a row is actually
- * written and which does invalidate. There is therefore no cached segment that
- * this call could have made stale, and calling `refresh()` anyway would throw
- * away the rest of the form — the name the user typed, the schedule they
- * picked — by re-rendering the server segment the suggestion is meant to be
- * filling in.
- *
- * The absence is load-bearing: restoring the missing `refresh()` "for
- * consistency" is exactly the change this comment exists to stop.
+ * ⚠️ **No `refresh()`, unlike every other action here — deliberate, not
+ * forgotten.** This writes nothing; `createJobAction` is what writes the row
+ * and invalidates. Calling `refresh()` anyway would re-render the segment the
+ * suggestion is meant to be filling in, throwing away the name and schedule the
+ * user already typed. Restoring it "for consistency" is the change this comment
+ * exists to stop.
  */
 export async function suggestCriteriaAction(
   state: CriteriaSuggestionState,
@@ -170,13 +152,8 @@ export async function suggestCriteriaAction(
  * Proposing the role titles adjacent to the ones already chosen.
  *
  * **No `refresh()`, for the reason above** — it writes nothing, and calling it
- * would re-render the segment the answer is meant to be offered into, throwing
- * away the half-filled form around it. The same absence, and the same warning
- * against restoring it for consistency.
- *
- * The suggester, like the extractor, is deliberately not supplied here: the
- * factory defaults it, and the default reads `OPENAI_API_KEY` when it
- * constructs a model.
+ * would throw away the half-filled form the answer is offered into. The
+ * suggester, like the extractor, is left to the factory's default.
  */
 export async function suggestRoleTitlesAction(
   state: RoleTitleSuggestionState,

@@ -22,26 +22,20 @@ import {
 /**
  * The dashboard's document storage, one per server instance.
  *
- * ⚠️ **This is the second module in the repository to import
- * `@aws-sdk/client-s3`**, and until this file existed `s3-user-object-store.ts`
- * was the only one — `CLAUDE.md` and `OVERVIEW.md` both said so. The reason it
- * has to be here is credentials: `@workspace/user-storage` deliberately exposes
- * no way to pass any ("Note what is *not* here: any way to pass credentials"),
- * because a package that accepts a credential is a package someone hard-codes a
- * key into. What it does expose is a `client` seam, so the credential decision
- * lives at the composition root that already owns configuration — here. Do not
- * "fix" this by adding a `credentials` option to the package.
+ * ⚠️ **The second module in the repository to import `@aws-sdk/client-s3`**, and
+ * credentials are why. `@workspace/user-storage` deliberately exposes no way to
+ * pass any — a package that accepts a credential is one someone hard-codes a key
+ * into — only a `client` seam, so the decision lives at the composition root
+ * that owns configuration. Do not "fix" this by adding a `credentials` option to
+ * the package.
  *
- * Memoized rather than constructed per request, matching `lib/db.ts`: an
- * `S3Client` maintains a connection pool and a serverless instance handling
- * many requests should not build many. Still a function rather than a
- * module-level `const`, because constructing it reads configuration, and this
- * repo's rule is that configuration is read when something asks for it and not
- * at import time.
+ * Memoized rather than per-request, matching `lib/db.ts`: an `S3Client` holds a
+ * connection pool. Still a function, because constructing it reads
+ * configuration and configuration is read on demand, not at import time.
  *
- * A consequence worth knowing: nothing here runs during `next build`. A missing
- * `USER_STORAGE_BUCKET_NAME` surfaces at the first upload, not at build time,
- * so a green build says less about this file than it does about most.
+ * ⚠️ Nothing here runs during `next build`, so a missing
+ * `USER_STORAGE_BUCKET_NAME` surfaces at the first upload and a green build says
+ * less about this file than most.
  */
 let objects: UserObjectStore | undefined
 let resumes: ResumeStore | undefined
@@ -51,28 +45,23 @@ let tailoredResumes: TailoredResumeStore | undefined
 /**
  * The role the memoized client assumes, or `undefined` for the default chain.
  *
- * The role ARN *is* the identity, so it is also the whole memo key: changing it
- * is a change of identity, and the existing client would otherwise keep
- * assuming the role it was built with. `undefined !== undefined` is `false`, so
- * the default-chain case memoizes exactly as well as the OIDC one; `!resumes`
- * is what distinguishes "never built" from "built for the default chain".
+ * The role ARN *is* the identity, so it is the whole memo key — otherwise a
+ * changed role leaves the existing client assuming the old one. `!objects` is
+ * what distinguishes "never built" from "built for the default chain".
  */
 let builtFor: string | undefined
 
 /**
  * Documents the user uploaded.
  *
- * The facade is memoized alongside the client it wraps — building one is a
- * closure over an interface and costs nothing, but rebuilding it per request
- * would make "is this the same store" a question with a different answer every
- * time, which is the sort of thing a future caching layer would get wrong.
+ * The facade is memoized alongside the client it wraps, so "is this the same
+ * store" does not get a different answer every request.
  */
 export function getResumeStore(): ResumeStore {
-  // Before `getObjectStore()` reads the storage config and builds an
-  // `S3Client` — the two things this mode exists to not need.
-  // Memoized inside the dev module rather than here: `next dev` can hand two
-  // server bundles two copies of this module, and two copies of an in-memory
-  // store are two different worlds. See `getDevResumeStore`.
+  // Before `getObjectStore()` reads the storage config and builds an `S3Client`
+  // — the two things this mode exists to not need. ⚠️ Memoized inside the dev
+  // module, not here: `next dev` can hand two server bundles two copies of this
+  // module, and two copies of an in-memory store are two worlds.
   if (devMockEnabled()) return getDevResumeStore()
 
   const store = getObjectStore()
@@ -83,17 +72,15 @@ export function getResumeStore(): ResumeStore {
 /**
  * Cover letters this app drafts.
  *
- * A second facade over the **same** client and the same credentials — the
- * dashboard's Vercel role now holds `prod:resumes` and `prod:cover-letters`,
- * and nothing else. Note what that grant does not include: `prod:briefs`. The
- * app still cannot read what the worker wrote, which is why `/jobs`
- * renders the Findings on the Run row rather than the Brief.
+ * A second facade over the **same** client and credentials. The grant does not
+ * include `prod:briefs`, which is why `/jobs` renders the Findings on the Run
+ * row rather than the Brief.
  *
- * ⚠️ **The grant is Terraform, not TypeScript.** A `cover-letters` kind
- * declared in `packages/user-storage/src/kinds.ts` without the matching
- * `object_kinds` entry and role attachment in `infra/aws/` gets no retention
- * rule and 403s on the first write — surfacing here as nothing more specific
- * than "Document storage is unavailable".
+ * ⚠️ **The grant is Terraform, not TypeScript.** A kind declared in
+ * `packages/user-storage/src/kinds.ts` without the matching `object_kinds` entry
+ * and role attachment in `infra/aws/` gets no retention rule and 403s on the
+ * first write — surfacing as nothing more specific than "Document storage is
+ * unavailable".
  */
 export function getCoverLetterStore(): CoverLetterStore {
   if (devMockEnabled()) return getDevCoverLetterStore()
@@ -106,15 +93,12 @@ export function getCoverLetterStore(): CoverLetterStore {
 /**
  * Resumes this app rewrites for one Posting.
  *
- * A third facade over the **same** client and the same credentials. The
- * dashboard's Vercel role holds `prod:resumes`, `prod:cover-letters` and
- * `prod:tailored-resumes`, and still not `prod:briefs`.
+ * A third facade over the **same** client and credentials.
  *
  * ⚠️ **The grant is Terraform, not TypeScript** — the same warning as the
- * letters above, and it is not hypothetical here: this kind is new, so until
- * `terraform -chdir=infra/aws apply` has run there is no lifecycle rule and no
- * role attachment for it, and the first **Generate tailored resume** click 403s
- * with nothing more specific on screen than "Document storage is unavailable".
+ * letters above, and not hypothetical here: until
+ * `terraform -chdir=infra/aws apply` has run for this kind, the first **Generate
+ * tailored resume** click 403s as "Document storage is unavailable".
  */
 export function getTailoredResumeStore(): TailoredResumeStore {
   if (devMockEnabled()) return getDevTailoredResumeStore()
@@ -127,25 +111,16 @@ export function getTailoredResumeStore(): TailoredResumeStore {
 /**
  * The one client every facade shares.
  *
- * Split out of `getResumeStore` when the second facade arrived: independent
- * memos would have meant several `S3Client`s, several connection pools, and
- * several opportunities for one of them to be left pinned to a stale credential
- * branch.
+ * Shared so the facades cannot each build their own `S3Client`, connection pool,
+ * and opportunity to be pinned to a stale credential branch.
  */
 function getObjectStore(): UserObjectStore {
   // ⚠️ **The credential source is recomputed every call; only the client is
-  // memoized.**
-  //
-  // `createClient` decides between OIDC and the SDK's default chain by reading
-  // the environment. Deciding that once, at whatever moment the first request
-  // happened to arrive, means an instance that came up before `AWS_ROLE_ARN`
-  // was in place is pinned to the default chain for its whole life — and every
-  // upload it serves fails on absent credentials, which `DEPLOYING.md` has to
-  // warn surfaces as nothing more specific than "Document storage is
-  // unavailable". Cheap to re-read a string; expensive to diagnose.
-  //
-  // In the steady state this never changes, so it rebuilds nothing and the
-  // connection pool is still shared across requests.
+  // memoized.** Deciding the OIDC-vs-default-chain branch once pins an instance
+  // that came up before `AWS_ROLE_ARN` was in place to the default chain for
+  // life, failing every upload as "Document storage is unavailable". Cheap to
+  // re-read a string; expensive to diagnose. In the steady state the answer
+  // never changes, so nothing is rebuilt.
   const roleArn = oidcRoleArn()
 
   if (!objects || builtFor !== roleArn) {
@@ -157,11 +132,9 @@ function getObjectStore(): UserObjectStore {
     })
     builtFor = roleArn
 
-    // The facades close over the client, so a rebuilt client must invalidate
-    // them too — otherwise a role change would swap the credentials underneath
-    // and leave the facades holding the old ones. **Every facade above needs a
-    // line here**; one left out is a store that keeps assuming the previous
-    // role for the life of the instance, and nothing anywhere would say so.
+    // ⚠️ The facades close over the client, so a rebuild must invalidate them
+    // too. **Every facade above needs a line here** — one left out keeps
+    // assuming the previous role for the life of the instance, silently.
     resumes = undefined
     coverLetters = undefined
     tailoredResumes = undefined
@@ -173,29 +146,19 @@ function getObjectStore(): UserObjectStore {
 /**
  * The role to assume on Vercel, or `undefined` anywhere else.
  *
- * ⚠️ **Do not gate this on `VERCEL_OIDC_TOKEN`.** That variable is not how the
- * token reaches a deployed function, and reading it here is what made every
- * upload fail with `Could not load credentials from any providers` — a message
- * that names no role, so it looks like a missing IAM attachment rather than a
- * branch that was never taken. `@vercel/oidc` resolves the token as
+ * ⚠️ **Do not gate this on `VERCEL_OIDC_TOKEN`.** `@vercel/oidc` resolves the
+ * token as a **per-request header** —
+ * `getContext().headers?.["x-vercel-oidc-token"] ?? process.env.VERCEL_OIDC_TOKEN`
+ * — with the variable only a `vercel env pull` fallback. On a real deployment
+ * nothing sets it, so the gate is always false, `createClient` takes its
+ * no-credentials branch, and every upload fails with `Could not load credentials
+ * from any providers`: a message naming no role, so it reads as a missing IAM
+ * attachment. The tell is that STS is never called at all — a trust-policy or
+ * audience mismatch would still leave a CloudTrail event.
  *
- *     getContext().headers?.["x-vercel-oidc-token"] ?? process.env.VERCEL_OIDC_TOKEN
- *
- * — a **per-request header**, with the environment variable only as a fallback
- * for `vercel env pull` locally. On a real deployment nothing sets it, so a
- * gate on it is always false, `createClient` takes its no-credentials branch,
- * and STS is never called at all. That last part is the tell: a trust-policy or
- * audience mismatch still produces a CloudTrail event, and this produces none.
- *
- * `AWS_ROLE_ARN` is the right signal because it is the one that says *assume a
- * role*, and it is set only where that is wanted. It is safe at build time
- * despite `VERCEL=1` being set then too: `awsCredentialsProvider` returns a
- * lazy provider that resolves nothing until the SDK first asks, and nothing in
- * this module runs during `next build` anyway.
- *
- * It stays a function, and `getResumeStore` still calls it on every request,
- * for the reason given there — the answer must not be frozen at whichever
- * moment the first request happened to arrive.
+ * `AWS_ROLE_ARN` is the right signal: it says *assume a role* and is set only
+ * where that is wanted. Safe at build time despite `VERCEL=1`, since
+ * `awsCredentialsProvider` is lazy and nothing here runs during `next build`.
  */
 function oidcRoleArn(): string | undefined {
   return process.env.AWS_ROLE_ARN
@@ -205,37 +168,24 @@ function oidcRoleArn(): string | undefined {
  * On Vercel, credentials come from an OIDC token exchanged for a role; anywhere
  * else they come from the SDK's own default chain.
  *
- * Three things here are non-obvious enough to be worth stating, because each
- * one looks like a simplification waiting to happen:
+ * Three things, each of which looks like a simplification waiting to happen:
  *
  * 1. **Memoize the client, not the credentials.** `awsCredentialsProvider`
- *    returns a provider *function* that the SDK calls again as expiry
- *    approaches, and each call reads the current invocation's token. So one
- *    long-lived client is correct and does not staple a expiring credential to
- *    the instance. If `ExpiredToken` ever does appear, stop memoizing the
- *    client — never reach for a static access key.
+ *    returns a provider *function* the SDK re-calls as expiry approaches, so one
+ *    long-lived client staples no expiring credential to the instance. If
+ *    `ExpiredToken` ever appears, stop memoizing the client — never reach for a
+ *    static access key. Memoizing *which branch was taken* is the part that is
+ *    not fine; the caller re-reads the environment and passes the answer in.
+ * 2. **Branch on `AWS_ROLE_ARN` and nothing else** — see `oidcRoleArn`, which is
+ *    where that mistake was made.
+ * 3. **`AWS_ROLE_ARN` collides with the SDK's own `fromTokenFile` provider.** It
+ *    never fires, because that also needs `AWS_WEB_IDENTITY_TOKEN_FILE` and
+ *    Vercel sets none — a coincidence of conventions, not a guarantee, so the
+ *    explicit branch below is what decides.
  *
- *    Note the limit of that: memoizing the client is fine, memoizing *which
- *    branch below was taken* is not. See `getResumeStore`, which re-reads the
- *    environment on every call for exactly that reason and passes the answer
- *    in, rather than letting this function decide once and for all.
- *
- * 2. **Branch on `AWS_ROLE_ARN`, and on nothing else.** Neither `VERCEL` nor
- *    `VERCEL_OIDC_TOKEN` belongs in that test — the first is set during builds
- *    as well as at runtime, and the second is never set on a deployment at all,
- *    because the token is a per-request header. See `oidcRoleArn`, which is
- *    where that mistake was made and is worth reading before changing this.
- *
- * 3. **`AWS_ROLE_ARN` collides with the SDK's own `fromTokenFile` provider,**
- *    which reads the same variable. It never fires here, because it also
- *    requires `AWS_WEB_IDENTITY_TOKEN_FILE` and Vercel does not set one — but
- *    that is a coincidence of two providers' conventions rather than a
- *    guarantee, so the explicit branch below is what actually decides.
- *
- * Locally (`next dev`, not `vercel dev`) there is no token, so this falls to
- * the default chain — `AWS_PROFILE` or an SSO session — which is exactly what
- * `readUserStorageConfig` documents. Note that a local run therefore writes to
- * whatever `USER_STORAGE_ENVIRONMENT` says, and there is only one environment.
+ * Locally (`next dev`, not `vercel dev`) there is no token, so this falls to the
+ * default chain. ⚠️ A local run therefore writes to whatever
+ * `USER_STORAGE_ENVIRONMENT` says, and there is only one environment.
  */
 function createClient(
   config: UserStorageConfig,

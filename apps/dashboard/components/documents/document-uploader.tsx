@@ -23,16 +23,13 @@ const MAX_MB = (MAX_DOCUMENT_BYTES / (1024 * 1024)).toFixed(0)
 /**
  * Guess what a document is from what it is called.
  *
- * This is the whole of what makes the type field feel like a confirmation
- * rather than a chore: a file called `cv.pdf` or `alice-resume.pdf` arrives
- * with the right answer already selected and the user never touches it.
+ * What makes the type field a confirmation rather than a chore: `cv.pdf` or
+ * `alice-resume.pdf` arrives with the right answer already selected.
  *
- * Order matters and is not free of trade-offs. `cover|letter` runs first so
- * that "cover letter (from my resume pack).pdf" reads as a cover letter — but
- * the same rule makes "letter of reference.pdf" one too, since `letter` matches
- * before the reference test is reached. That is accepted rather than solved: a
- * guess is offered next to a visible control for changing it, and reordering
- * the two only moves which case is wrong.
+ * ⚠️ Order matters and trades off. `cover|letter` runs first so "cover letter
+ * (from my resume pack).pdf" reads as a cover letter — which also makes "letter
+ * of reference.pdf" one. Accepted rather than solved: the guess sits beside a
+ * visible control for changing it, and reordering only moves which case is wrong.
  */
 function inferDocumentType(filename: string): string {
   const name = filename.toLowerCase()
@@ -69,17 +66,14 @@ export function DocumentUploader({
     >
       {/*
         Keyed on the last successful upload's id, so a success remounts the
-        fields — a fresh empty file input and a fresh inferred type. That is the
-        form reset, and doing it this way means there is **no effect here at
-        all**: resetting from `useEffect` would call `setState` inside it, which
-        cascades a render and is what `react-hooks/set-state-in-effect` warns
-        about. One reset per success, never one per re-render.
+        fields. That is the form reset, and it means **no effect here at all** —
+        resetting from `useEffect` is what `react-hooks/set-state-in-effect`
+        warns about.
 
         ⚠️ **Read the reset key on every non-idle state, not only on a success.**
-        An error state carries the previous success's key forward precisely so
-        this key holds still; keying on `status === "success"` instead sends it
-        back to "new" the moment an upload fails, remounting the fields and
-        discarding the file the user picked while telling them to try again.
+        An error carries the previous key forward so this holds still; keying on
+        `status === "success"` discards the file the user picked at the moment
+        they are told to try again.
       */}
       <UploadFields
         key={state.status === "idle" ? "new" : (state.resetKey ?? "new")}

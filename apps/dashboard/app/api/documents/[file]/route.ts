@@ -31,13 +31,10 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ file: string }> }
 ): Promise<Response> {
-  // Before the params are even read. An unauthenticated caller learns nothing
-  // about what a well-formed request looks like, and both "not signed in" and
-  // "not on the allowlist" answer identically — telling them apart would
-  // confirm to an unapproved caller that their account exists. `requireUser`
-  // makes that conflation, and the refusal of a thrown `getCurrentUser`, one
-  // decision rather than four copies of it; the 401 stays here because a route
-  // answers with a `Response` and an action does not.
+  // ⚠️ Before the params are read, and "not signed in" answers identically to
+  // "not on the allowlist" — telling them apart would confirm to an unapproved
+  // caller that their account exists. `requireUser` makes that conflation once;
+  // the 401 stays here because a route answers with a `Response`.
   const caller = await requireUser(getCurrentUser, "documents")
 
   if (!caller.ok) {
@@ -83,19 +80,13 @@ export async function GET(
     console.error("documents: download failed", error)
 
     if (isUserStorageError(error)) {
-      // `object_not_found` and `object_ownership` both answer 404 with the same
-      // body. Distinguishing them would turn this route into an oracle for
-      // whether another user's document id exists — which is exactly what
-      // `errors.ts` warns about, and the reason the store bothers to have two
-      // error types rather than the caller having two responses.
-      //
-      // `invalid_object_key` joins them, for a different reason: a key the
-      // store will not address is one that cannot name an object, which from
-      // the caller's side is indistinguishable from an object that is not
-      // there. `parseDocumentFile` should already have caught every such id, so
-      // this is the second line rather than the first — but answering 500 would
-      // report a malformed request as a server fault and fill the log with
-      // alarms anyone can trigger from the address bar.
+      // ⚠️ `object_not_found` and `object_ownership` answer 404 with the same
+      // body: distinguishing them makes this route an oracle for whether
+      // another user's document id exists. `invalid_object_key` joins them
+      // because a key that cannot name an object is, from the caller's side,
+      // indistinguishable from one that is not there — and a 500 would report a
+      // malformed request as a server fault, filling the log with alarms anyone
+      // can trigger from the address bar.
       if (
         error.code === "object_not_found" ||
         error.code === "object_ownership" ||
@@ -127,12 +118,10 @@ export async function GET(
       // `Lebenslauf  2026.pdf` on the object and intact in Postgres.
       // `contentDisposition` is what makes the intact one safe to send back.
       "Content-Disposition": contentDisposition(document.filename),
-      // These bytes arrived from outside. `kinds.ts` calls the `attachment`
-      // disposition the stored-XSS guard and notes it was belt-and-braces while
-      // nothing served uploaded bytes to a browser — this route is what makes
-      // it load-bearing, so `nosniff` belongs beside it. A browser that sniffs
-      // an uploaded file as HTML and renders it on this origin runs it with the
-      // session cookie attached.
+      // ⚠️ These bytes arrived from outside. A browser that sniffs an uploaded
+      // file as HTML and renders it on this origin runs it with the session
+      // cookie attached — which is what makes `kinds.ts`'s `attachment`
+      // disposition load-bearing here, and why `nosniff` sits beside it.
       "X-Content-Type-Options": "nosniff",
       // Personal data behind a CDN. `private` keeps it out of shared caches;
       // `no-store` keeps it out of the browser's disk cache on a shared machine.

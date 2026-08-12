@@ -3,26 +3,19 @@
  *
  * Its own module because bulk posting delete fans out one pair of object-store
  * deletes per selected Posting (`lib/postings/posting-actions.ts`), and that
- * bound has to live somewhere neither the action nor a future second caller
- * can quietly diverge from. Document listing used to need the same helper for
- * bounded `HeadObject` calls; that path is one Postgres query now, so this
- * module has a single production caller until another fan-out appears.
- *
- * Imports nothing, so a test can reach it — and, more to the point, so a
- * second caller does not have to carry its own copy. Two copies of a bounded
+ * bound has to live somewhere a future second caller cannot quietly diverge
+ * from. Imports nothing, so a test can reach it — two copies of a bounded
  * fan-out is how one of them quietly gets a different bound.
  */
 
 /**
  * Same contract as `allSettled` — results are positional and a rejection never
- * fails the whole batch — which is what lets a caller keep treating each row
- * independently.
+ * fails the whole batch — so a caller keeps treating each row independently.
  *
- * The workers share one array iterator rather than slicing the input into
- * chunks. `next()` is synchronous and JavaScript is single-threaded, so no two
- * workers can ever be handed the same entry, and a worker that finishes early
- * immediately takes the next item instead of idling until its chunk-mates are
- * done. Chunking would make the batch as slow as the slowest item in each
+ * The workers share one array iterator rather than slicing into chunks.
+ * `next()` is synchronous and JavaScript single-threaded, so no two workers get
+ * the same entry, and one that finishes early takes the next item instead of
+ * idling. Chunking would make the batch as slow as the slowest item in each
  * chunk, which for one slow S3 response is most of the point of bounding it.
  */
 export async function settleWithConcurrency<T, R>(

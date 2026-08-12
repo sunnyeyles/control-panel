@@ -19,15 +19,11 @@ export interface PrismaRecorders {
  * The recorder wiring both entry points hand to `runBriefing`, built once.
  *
  * `seenAt` is **this run's occurrence** — `slot.scheduledFor` for a scheduled
- * run, `claimed.startedAt` for a manual one — never the wall clock. The
- * brief's S3 partition day derives from the same instant, and the cumulative
- * posting record must agree with it: a 23:30 slot that finishes after
- * midnight must not claim it found something the following day. The clock
- * says when the work happened; the occurrence says which run it was.
- *
- * The two call sites used to each spell out these closures with that
- * paragraph beside them; the factory exists so the choice of instant is made
- * once per run, in one argument, instead of being re-derived per callback.
+ * run, `claimed.startedAt` for a manual one — never the wall clock. The brief's
+ * S3 partition day derives from the same instant and the posting record must
+ * agree: a 23:30 slot finishing after midnight must not claim it found
+ * something the following day. The factory exists so that choice is made once
+ * per run rather than re-derived per callback.
  */
 export function prismaRecorders(
   prisma: PrismaClient,

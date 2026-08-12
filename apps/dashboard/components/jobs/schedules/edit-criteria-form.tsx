@@ -19,18 +19,13 @@ import { SubmitButton } from "@workspace/ui/components/submit-button"
 /**
  * Change what an existing briefing searches for.
  *
- * The criteria were write-once until this existed: a card showed a name, a
- * switch and a cadence, and changing a role title meant deleting the briefing
- * and building another — losing its name, its schedule, and the fact that it
- * had been running. That was tolerable while the fields were three text boxes
- * typed once. It stopped being tolerable the moment the point of the feature
- * became *tuning* them after reading a thin brief.
+ * The criteria were write-once until this existed: changing a role title meant
+ * deleting the briefing and building another, losing its name, its schedule and
+ * the fact that it had been running.
  *
- * **Collapsed by default.** A schedules page showing four briefings would
- * otherwise be four full criteria forms stacked down the screen, and the
- * common visit to this page changes nothing at all. `<details>` rather than the
- * Collapsible primitive, matching how "Add another briefing" is already folded
- * away in `briefing-section.tsx` — one idiom for one behaviour.
+ * **Collapsed by default**, since four briefings would otherwise stack four
+ * full criteria forms down a page most visits change nothing on. `<details>`
+ * rather than the Collapsible primitive, matching `briefing-section.tsx`.
  *
  * ⚠️ **No `key` on the fields, unlike the create form.** There is no suggestion
  * to remount for — the fields are seeded from the stored config and the

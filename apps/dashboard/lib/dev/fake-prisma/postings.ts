@@ -21,17 +21,9 @@ export function createPostingDelegate(store: DevStore) {
     count: async (query: PostingsForUser) => countPostings(store, query.where),
     findMany: async (query: FindManyPostings) => findManyPostings(store, query),
     /**
-     * Both single-row reads, because there is one.
-     *
-     * `loadStoredPosting` and `loadPostingDetail` used to spell the same
-     * lookup two ways — one compound `findUnique`, one plain `findFirst` — and
-     * this delegate carried both. They share `postingPayload` in
-     * `@workspace/db` now, so `findFirst` went with the second spelling.
-     *
-     * Answering from **both** halves of the natural key is the part that must
-     * not be relaxed: that pair *is* the ownership check, so a fake that
-     * answered from `postingId` alone would let the real one stop scoping
-     * without anything here noticing.
+     * ⚠️ **Answering from both halves of the natural key must not be relaxed:**
+     * that pair *is* the ownership check, so a fake answering from `postingId`
+     * alone would let the real one stop scoping unnoticed.
      */
     findUnique: async (query: ByUserAndPostingId) =>
       findPosting(store, query.where.userId_postingId),
@@ -49,19 +41,12 @@ function countPostings(store: DevStore, where: PostingWhere): number {
 }
 
 /**
- * ⚠️ **`orderBy` is honoured here, unlike in findManyJobs.**
- *
- * That one may ignore it because every caller wants the same order. This one
- * may not: the columns are sortable, the order is chosen from the URL, and a
- * fake that ignored it would render the table in one fixed order under
- * `DEV_AUTH_BYPASS` — silently, correctly-looking, and wrong — in exactly the
- * environment the table is built in. `skip` and `take` are honoured for the
- * same reason: paging that did nothing would make every page identical.
- *
- * ⚠️ **`select` is honoured too, relations included** — see projectPosting.
- * It was ignored until the table started asking which Briefing found a Posting,
- * at which point ignoring it stopped being a harmless superset and became a
- * blank in the dialog.
+ * ⚠️ **`orderBy` is honoured here, unlike in findManyJobs**, which may ignore it
+ * because every caller wants the same order. Here the order comes from the URL,
+ * so ignoring it would render one fixed order under `DEV_AUTH_BYPASS` —
+ * silently, correctly-looking, wrong — in the environment the table is built in.
+ * `skip`/`take` likewise: paging that did nothing would make every page
+ * identical, and `select` likewise, relations included (see projectPosting).
  */
 function findManyPostings(store: DevStore, query: FindManyPostings): unknown[] {
   const ordered = sortPostings(
@@ -85,15 +70,9 @@ function findManyPostings(store: DevStore, query: FindManyPostings): unknown[] {
  * One row as the `select` asked for it — columns copied across, relations
  * resolved against the other fixtures.
  *
- * ⚠️ **Every branch here either answers or throws; none returns
- * `undefined`.** That is the whole file's principle applied where the
- * alternative is invisible: a projection that quietly skipped a field it did
- * not understand would render a missing Briefing exactly like a Briefing
- * whose name is blank, and the page would look like it worked.
- *
- * A query carrying no `select` at all is not a shape to handle here —
- * findManyPostings answers those with whole rows, which is what
- * Prisma does too.
+ * ⚠️ **Every branch either answers or throws; none returns `undefined`.**
+ * Quietly skipping an unrecognised field would render a missing Briefing exactly
+ * like one whose name is blank, and the page would look like it worked.
  */
 function projectPosting(
   store: DevStore,
@@ -137,18 +116,13 @@ function projectPosting(
  * the fixtures rather than stored on the row: `lastSeenRunId` → `runs.job_id`
  * → `jobs.name`, which is the join the real query makes.
  *
- * Joining beats denormalising it onto the fixture rows, for the reason
- * devPostings derives its ids rather than writing them out: a name
- * copied onto a Posting could disagree with the Briefing that fixture claims
- * to have come from, and disagree silently.
+ * Joining beats denormalising it onto the fixtures: a name copied onto a Posting
+ * could silently disagree with the Briefing that fixture claims to come from.
  *
- * ⚠️ **`null` and a dangling reference are not the same thing.** A Posting
- * with no `lastSeenRunId` is one the user added by pasting its link, which
- * `0009` made legal and which the page renders as "Added by link" — so it
- * answers `null` rather than throwing. An id that names *no* run still
- * throws: the foreign key makes that impossible in Postgres, so it is a
- * fixture that has drifted, and it should say so by name here rather than
- * reach `list-postings.ts` as an unnamed Briefing.
+ * ⚠️ **`null` and a dangling reference are not the same thing.** No
+ * `lastSeenRunId` means the user pasted the link — legal since `0009`, rendered
+ * as "Added by link" — so it answers `null`. An id naming *no* run throws: the
+ * foreign key makes that impossible in Postgres, so it is a drifted fixture.
  */
 function briefingThatFound(store: DevStore, row: Posting): string | null {
   if (row.lastSeenRunId === null) return null
@@ -222,10 +196,9 @@ function matching(store: DevStore, where: PostingWhere): Posting[] {
 /**
  * Exactly `{ select: { job: { select: { name: true } } } }`, and nothing wider.
  *
- * Matched by shape rather than merely by the key `lastSeenRun`, in the spirit of
- * executeRaw: a caller that starts asking the relation for a second field gets
- * a named refusal here, instead of a row missing whichever field this fake
- * never learned to fill in.
+ * Matched by shape rather than by the key alone, in the spirit of executeRaw: a
+ * caller asking the relation for a second field gets a named refusal instead of
+ * a row missing whichever field this fake never learned to fill in.
  */
 function isBriefingNameSelect(wanted: NestedSelect): boolean {
   const runSelect = wanted.select

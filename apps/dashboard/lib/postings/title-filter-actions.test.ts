@@ -19,14 +19,14 @@ import { createTitleFilterActions } from "./title-filter-actions"
  * Saving the title filter: authorization, the bound, and what actually lands in
  * the row.
  *
- * Every claim here is about something invisible from the happy path — that an
- * unauthenticated POST is refused before the body is read, that the row is
- * addressed by the session and never by a form field, that an over-long list is
- * refused rather than trimmed, and that what is *stored* has been through the
- * same parse the *matching* rule is built from.
+ * Every claim here is invisible from the happy path — that an unauthenticated
+ * POST is refused before the body is read, that the row is addressed by the
+ * session and never by a form field, that an over-long list is refused rather
+ * than trimmed, and that what is *stored* has been through the same parse the
+ * *matching* rule is built from.
  *
- * That last one is the bug this suite exists for. A filter that saves cleanly
- * and then matches nothing — because the stored term kept its capitals, or its
+ * ⚠️ That last one is the bug this suite exists for. A filter that saves cleanly
+ * and then matches nothing — the stored term kept its capitals, or its
  * punctuation — is invisible from both ends: the field shows what the user
  * typed, and the table shows every posting they thought they had hidden.
  */

@@ -3,18 +3,17 @@ import type { Document, DocumentType, PrismaClient } from "@workspace/db"
 /**
  * A `documents` table, for tests.
  *
- * **Test support, imported by `*.test.ts` and by nothing that ships.** It lives
- * here rather than being restated in each suite because four of them need the
- * same thing: `listDocuments` and `findDocument` now read Postgres, so any test
- * of a path that reaches a document has to supply rows as well as bytes.
- * `lib/dev/fake-prisma.ts` is the `DEV_AUTH_BYPASS=1` fake, and
- * is deliberately not reused — it is seeded from the fixed dev fixtures and
- * answers for one hardcoded user.
+ * Here rather than restated in each suite because four of them need the same
+ * thing: `listDocuments` and `findDocument` read Postgres, so any test of a path
+ * that reaches a document must supply rows as well as bytes.
+ * `lib/dev/fake-prisma.ts` is deliberately not reused — it is the
+ * `DEV_AUTH_BYPASS=1` fake, seeded from fixed fixtures and answering for one
+ * hardcoded user.
  *
  * ⚠️ **`userId` is honoured on both reads.** In the real thing that filter *is*
  * the ownership check — `findDocument` and `deleteDocument` have no second one
- * underneath — so a double that answered from the id alone would let the
- * scoping be dropped with every test still green.
+ * underneath — so a double answering from the id alone would let the scoping be
+ * dropped with every test still green.
  */
 
 /** One row, with everything a test does not care about defaulted. */
@@ -93,11 +92,9 @@ export function fakeDocumentDb(userId: string, rows: Document[]): PrismaClient {
 /**
  * Two partial clients as one.
  *
- * An action holds a single `PrismaClient`, so a suite that fakes both its own
- * tables and `documents` has to hand over one object with both delegates on it.
- * A shallow merge is exactly right here and would not be if the two ever named
- * the same table — they do not, and a delegate silently winning would be worth
- * noticing, so keep them disjoint.
+ * An action holds a single `PrismaClient`, so a suite faking both its own tables
+ * and `documents` needs one object with both delegates. A shallow merge is right
+ * only while the two name no table in common — keep them disjoint.
  */
 export function mergeClients(...clients: PrismaClient[]): PrismaClient {
   return Object.assign({}, ...clients) as PrismaClient

@@ -6,14 +6,11 @@ import type { TraceEvent, TraceSink } from "../trace.ts"
  * A trace, rendered for a person watching it happen.
  *
  * The one sink whose output is meant to be read rather than parsed, which is
- * why it lives under `dev/` and never ships: `dist/` is a deploy root, the
- * bundle's only entry point is `src/index.ts`, and nothing under here is
- * reachable from it.
+ * why it lives under `dev/` and never ships.
  *
- * Written to be watched live rather than read afterwards. A step announces
- * itself when it starts, not when it finishes, because the scout routinely
- * takes twenty seconds and a harness that prints nothing for twenty seconds is
- * indistinguishable from one that has hung.
+ * Written to be watched live: a step announces itself when it starts, because
+ * the scout routinely takes twenty seconds and a harness that prints nothing
+ * for twenty seconds is indistinguishable from one that has hung.
  */
 
 /** Trailing content is cut, not wrapped — a brief is thousands of words. */

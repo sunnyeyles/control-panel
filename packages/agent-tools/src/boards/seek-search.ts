@@ -14,34 +14,23 @@ import type { SearchLog } from "./search-log.ts"
 /**
  * SEEK job search, via Apify's `unfenced-group/seek-com-au-scraper` actor.
  *
- * The scout used to find postings with general web search, and the URLs in its
- * briefs were mostly dead on arrival: a search engine's index carries a job
- * board's *browse* pages rather than its postings, and the few posting URLs it
- * does surface are often closed by the time anyone clicks. Querying the
- * board's live inventory removes both failure modes at the source — every
- * result is an individual posting at its canonical `seek.com.au/job/{id}`
- * URL, and it was listed at the moment the search returned it.
+ * Replaced general web search, whose URLs were mostly dead on arrival: an index
+ * carries a board's *browse* pages, not its postings. Every result here is an
+ * individual posting at its canonical `seek.com.au/job/{id}` URL, live at the
+ * moment the search returned it.
  *
- * Everything that is not about SEEK lives in `apify-search.ts` — the token, the
- * run timeout, the clamp, the failure split, the description bound and the
- * rendering are shared with every other board. What is left here is the actor
- * id, the request body it wants, and which of its fields carry what.
+ * Everything not about SEEK lives in `apify-search.ts`. What is left here is
+ * the actor id, its request body, and its field mapping.
  *
- * Every result carries the advertisement's full description into the catalog,
- * because the actor is asked for it — `fetchDetails`, which was off until the
- * cost of turning it on was measured rather than assumed. Without it the teaser
- * and three bullet points are everything a posting has, which is enough to
- * summarise a role and not enough to argue anyone into one. What reaches the
- * model is the teaser; the description is read back by id through
- * `posting-details.ts`. See the comment on the request body for what the flag
- * actually costs.
+ * `fetchDetails` is on, so every result carries the full description into the
+ * catalog; without it a posting is a teaser and three bullets. The model sees
+ * the teaser and reads the description back by id through
+ * `posting-details.ts`. See the request body for what the flag costs.
  *
- * Two caveats, stated rather than hidden. The actor is a community scraper,
- * not a SEEK product, and SEEK's terms prohibit automated collection — using
- * it was an explicit product decision, not a technical default. And the actor
- * itself accepts webhook, Telegram and Slack notification fields that this
- * tool never sends: the input schema below is the scout's entire reach, which
- * is what keeps "a scraper returns data and performs no side effects"
+ * Caveats: the actor is a community scraper, not a SEEK product, and SEEK's
+ * terms prohibit automated collection — an explicit product decision. And the
+ * actor accepts webhook, Telegram and Slack notification fields this tool never
+ * sends, which keeps "a scraper returns data and performs no side effects"
  * structural rather than a prompt line.
  */
 

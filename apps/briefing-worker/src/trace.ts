@@ -3,24 +3,16 @@ import type { Findings } from "@workspace/agents"
 /**
  * The **trace**: everything a briefing run did, as it did it.
  *
- * Distinct from the two things that already exist and neither of which replaces
- * it. The **run** is the row — queryable state, three statuses, what a filter
- * runs against. The **run report** is the single JSON line an invocation emits
- * — the outcome, the counts, the object key. The trace is the third thing: the
- * transcript. Every step boundary, every model message, every tool round trip,
- * in order, with the inputs and outputs a person needs to answer "why did it do
- * that".
+ * The third thing, next to the **run** (the row — queryable state) and the **run
+ * report** (one JSON line per invocation — outcome, counts, object key): the
+ * transcript. Every step boundary, model message and tool round trip, in order,
+ * with what a person needs to answer "why did it do that". It exists because
+ * `.invoke()` throws that transcript away, reducing the whole exchange to two
+ * integers.
  *
- * It exists because `.invoke()` throws that transcript away. A run holds the
- * whole exchange in memory and then reduces it to two integers, and everything
- * that happened on the way to them — which searches were made, what came back,
- * what the model did with it — is observable live and gone afterwards.
- *
- * Nothing here writes anywhere. A trace is a stream of events and a
- * {@link TraceSink} is whatever consumes them, so the same run feeds a terminal
- * renderer, a JSON-lines file, an S3 object or an SSE response without knowing
- * which. That is the whole point of the shape: one seam, many renderers, rather
- * than a second logging system per destination.
+ * Nothing here writes anywhere. A {@link TraceSink} is whatever consumes the
+ * events, so one run feeds a terminal renderer, a JSON-lines file, an S3 object
+ * or an SSE response without knowing which — one seam, many renderers.
  */
 
 /** Which agent an event came from. */

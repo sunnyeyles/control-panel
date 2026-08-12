@@ -28,15 +28,9 @@ import type {
 /**
  * The world `DEV_AUTH_BYPASS=1` renders.
  *
- * Picked to exercise branches, not to look plausible: one briefing paused
- * (`nextRunAt: null` is the only thing that makes `enabled` false), one on a
- * cron the picker cannot express (draws the "set outside the app" warning), one
- * posting with no `postedAt` and one with no `highlights`, and one cover letter
- * matching a posting plus one orphan. A fixture where every field is present
- * proves nothing about the optional ones.
- *
- * Dates are fixed so renders are deterministic, except `nextRunAt` — see
- * {@link devJobs}.
+ * Picked to exercise branches, not to look plausible — a fixture where every
+ * field is present proves nothing about the optional ones. Dates are fixed so
+ * renders are deterministic, except `nextRunAt`; see {@link devJobs}.
  */
 
 /** Fixed so every id derived from it — S3 keys included — is stable. */
@@ -72,12 +66,10 @@ const DEV_RUN_PAUSED_ID = "3f8d1b2a-0000-4000-8000-0000000000b2"
 /**
  * The paused briefing's *latest* run, which found nothing.
  *
- * A third run rather than a change to the two above, because it has to be the
- * newest one for that briefing and the earlier one has a Posting pointing at it
- * (`firstSeenRunId`). Together they are the state this whole warning exists for:
- * a briefing that found a role last week, found nothing today, and — until the
- * `noPostings` warning — said "Last ran …" either way with an unchanged table
- * underneath.
+ * A third run rather than a change to the two above: it has to be the newest for
+ * that briefing, and the earlier one has a Posting pointing at it
+ * (`firstSeenRunId`). Together they are the state the `noPostings` warning
+ * exists for — found a role last week, nothing today, same table underneath.
  */
 const DEV_RUN_EMPTY_ID = "3f8d1b2a-0000-4000-8000-0000000000b3"
 
@@ -105,9 +97,9 @@ const MERIDIAN: Posting = {
 /**
  * No `postedAt`: the advertisement did not say, which is the common case.
  *
- * On `au.linkedin.com` rather than `www.`, which is what the board actually
- * answers an Australian search with — and the case `boardForHost`'s suffix
- * match exists for, so the Source badge here reads LinkedIn and not a hostname.
+ * `au.linkedin.com` rather than `www.` is what the board answers an Australian
+ * search with, and the case `boardForHost`'s suffix match exists for — so the
+ * Source badge reads LinkedIn and not a hostname.
  */
 const NORTHWIND: Posting = {
   title: "Platform Engineer",
@@ -138,12 +130,9 @@ const CORVUS: Posting = {
 /**
  * A Posting nobody's Run found: the user pasted its link.
  *
- * ⚠️ **It carries no `matchReason`, and that is the point of it being here.**
- * There were no criteria behind a pasted link, so the field is absent — which
- * is legal only against `StoredPostingSchema` and not against the scout's own
- * `PostingSchema`. Under `DEV_AUTH_BYPASS` this is the row that proves a
- * link-added Posting parses, renders "Added by link" where the others name a
- * Briefing, and still opens a detail panel with no Match reason block.
+ * ⚠️ **No `matchReason`, which is the point of it.** There were no criteria
+ * behind a pasted link, so the field is absent — legal against
+ * `StoredPostingSchema` and not against the scout's own `PostingSchema`.
  */
 const HOLLOWAY: StoredPosting = {
   title: "Backend Engineer",
@@ -260,37 +249,23 @@ export function devRuns(): Run[] {
  * The rows the Postings table reads: every advertisement these briefings have
  * "ever" found, deduped, with a status on each.
  *
- * Fresh rows per call, for the reason {@link devJobs} gives — the fake Prisma
- * mutates what it is seeded with, so a shared array would leak one status
- * change into the next seed.
+ * Fresh rows per call, for the reason {@link devJobs} gives.
  *
- * Three properties this fixture exists to make checkable by hand, none of which
- * a smaller set would exercise:
+ * What a smaller set would not exercise, all checkable by hand:
  *
- * - **Thirty rows, so the table has two pages.** Pagination is a branch, and
- *   the file's philosophy is that fixtures are picked to exercise branches. At
- *   `PAGE_SIZE = 25` the second page holds five rows, which also proves the
- *   last page is not padded.
- * - **Every sort visibly differs.** Titles and companies run down the alphabet
- *   in the opposite order to the dates, `firstSeenAt` and `lastSeenAt` are
- *   spread over different spans, and the posting dates are scattered against
- *   both — so no two of "sorted by title", "sorted by last seen" and "sorted by
- *   posted" can be mistaken for each other on screen.
- * - **A third of the rows have no posting date**, which is what makes the
- *   Posted column's NULLS-LAST order checkable: they must sit at the bottom
- *   under *both* directions, not float to the top when it is reversed.
- * - **One row per status**, on the four hand-written Postings, so the status
- *   column is not thirty copies of `new`. Exactly one each, which is why
- *   changing one of these four means finding the status it gave up.
- * - **Both Briefings are represented, on both pages.** The Run a row names is
- *   what the detail dialog resolves into a Briefing name, so rows alternate
- *   between the two — see the loop below.
+ * - **Thirty rows**, so the table has two pages and the last is not padded.
+ * - **Every sort visibly differs** — titles run up the alphabet as the dates run
+ *   down, and the posting dates are scattered against both.
+ * - **A third have no posting date**, so the Posted column's NULLS-LAST order is
+ *   checkable: they must sit at the bottom under *both* directions.
+ * - **One row per status**, on the four hand-written Postings — so changing one
+ *   means finding the status it gave up.
+ * - **Both Briefings on both pages**, via the alternating loop below.
  *
  * ⚠️ **The ids are derived by `postingId()`, never written out.** The seeded
- * cover letter is keyed by {@link DEV_DRAFTED_POSTING_ID}, which is derived the
- * same way from the same Posting — hard-coding either would let the letter and
- * the row it belongs to drift apart, and the drafted state on the row is
- * exactly what that match draws.
+ * cover letter is keyed by {@link DEV_DRAFTED_POSTING_ID}, derived the same way
+ * from the same Posting; hard-coding either lets them drift, and the match is
+ * what draws the drafted state on the row.
  */
 export function devPostings(): PostingRow[] {
   const seeded = [
@@ -340,21 +315,15 @@ export function devPostings(): PostingRow[] {
   /**
    * The rest, generated, alternating between the two Runs.
    *
-   * ⚠️ **Which Run a row names is no longer only bookkeeping.** The detail
-   * dialog resolves it to the Briefing that found the advertisement —
-   * `lastSeenRunId` → `runs.job_id` → `jobs.name` — so a fixture where every
-   * generated row named {@link DEV_RUN_ACTIVE_ID}, as they all once did, would
-   * put a single Briefing name on twenty-nine of the thirty rows and nothing
-   * but that name on the second page. Alternating puts both on both pages,
-   * which is what makes the point of the field — a table cumulative across
-   * Briefings — checkable by eye.
+   * ⚠️ **Which Run a row names is not only bookkeeping.** The detail dialog
+   * resolves it to a Briefing name — `lastSeenRunId` → `runs.job_id` →
+   * `jobs.name` — so naming one Run throughout, as this once did, put a single
+   * name on twenty-nine rows and nothing else on page two. Alternating is what
+   * makes a table cumulative across Briefings checkable by eye.
    *
-   * It stays a lie about which Run *found* them, and a harmless one: drafting
-   * reads `postings.payload`, which every row here has, so **Draft cover
-   * letter** works on a generated row and the run id only rides along as
-   * provenance on the letter. It used to be refused as no longer in the run,
-   * because the draft action re-read the Posting out of that Run's findings and
-   * they hold two Postings.
+   * A harmless lie about which Run *found* them: drafting reads
+   * `postings.payload`, which every row has, so the run id only rides along as
+   * provenance.
    */
   for (let index = seeded.length; index < DEV_POSTING_COUNT; index++) {
     const postedOn = generatedPostedOn(index)
@@ -383,15 +352,11 @@ const DEV_POSTING_COUNT = 30
  * date sorts do not agree with each other — a fixture where they did would make
  * a wrong `orderBy` invisible.
  *
- * ⚠️ **`postedOn` is passed in rather than parsed out of `posting.postedAt`,
- * deliberately.** A fixture is data, and the rule for reading a date out of
- * what a producer copied — `parsePostedAt()` in `@workspace/agents` — is
- * already stated twice, the other being the SQL backfill in
- * `0006_posting_posted_at`. Calling it here would put a rule in a fixture; the
- * caller supplies the answer instead, which is all a fixture ever needed to do.
+ * ⚠️ **`postedOn` is passed in, not parsed out of `posting.postedAt`.** A
+ * fixture is data; calling `parsePostedAt()` here would put a rule in one, and
+ * that rule is already stated twice (there and in `0006_posting_posted_at`).
  *
- * `runId` is `null` for a Posting the user added by pasting its link, which is
- * the state `0009` made legal.
+ * `runId` is `null` for a Posting added by link — the state `0009` made legal.
  */
 function devPosting(
   index: number,
@@ -410,12 +375,9 @@ function devPosting(
     userId: DEV_USER_ID,
     postingId: postingId(posting),
     title: posting.title,
-    // ⚠️ **Derived, unlike `postedOn` above.** `title_normalized` is a
-    // `GENERATED ALWAYS … STORED` column: Postgres computes it from `title` and
-    // nobody can write a value that disagrees, so a fixture stating one by hand
-    // would be stating something the database cannot produce. `normalizeTitle()`
-    // is the TypeScript half of that same rule, which is why calling it here is
-    // reproducing the column rather than putting a rule in a fixture.
+    // ⚠️ Derived, unlike `postedOn` above: `title_normalized` is
+    // `GENERATED ALWAYS … STORED`, so a hand-written value is one the database
+    // cannot produce. `normalizeTitle()` is the TypeScript half of that column.
     titleNormalized: normalizeTitle(posting.title),
     company: posting.company,
     location: posting.location,
@@ -439,21 +401,17 @@ function devPosting(
  * The match columns for one fixture row — a score for two rows in every three,
  * and nothing at all for the third.
  *
- * ⚠️ **Both states are needed and neither is the default.** A page where every
- * row is scored never renders the em-dash the Match column shows for an
- * unscored advertisement, and never starts the scoring loop in
- * `score-pending-matches.tsx`; a page where none is never renders a number, a
- * reason or a gaps list. Two in three is what puts several of each on both
- * pages of the fixture set.
+ * ⚠️ **Both states are needed and neither is the default.** All-scored never
+ * renders the em-dash or starts the loop in `score-pending-matches.tsx`;
+ * none-scored never renders a number, reason or gaps list.
  *
- * ⚠️ **`matchResumeId` is the Markdown CV, which is the *newest* document
- * labelled Resume — so these rows read as scored against the current one.**
- * Naming the PDF instead would make every row stale, and every page view under
- * the flag would spend a real model call re-scoring thirty advertisements.
+ * ⚠️ **`matchResumeId` is the Markdown CV — the *newest* document labelled
+ * Resume — so these rows read as scored against the current one.** Naming the
+ * PDF would make every row stale, and every page view under the flag would
+ * spend a real model call re-scoring thirty advertisements.
  *
- * All five together or none, which is what `postings_match_complete_check`
- * enforces in Postgres and what this returns as one object rather than five
- * fields for.
+ * All five together or none: `postings_match_complete_check` enforces it, which
+ * is why this returns one object rather than five fields.
  */
 function devMatch(
   index: number
@@ -495,12 +453,10 @@ function devMatch(
 /**
  * The hosts the filler rows cycle through, one per Source badge state.
  *
- * ⚠️ **The fourth entry is deliberately not a board.** Every fixture URL used to
- * be `www.seek.com.au`, so under `DEV_AUTH_BYPASS` the Source column would have
- * rendered one badge, forever, in the one environment this table is built in —
- * and the unrecognised-host path, which is the whole reason that badge has a
- * second variant, would never have been seen. Keep a host no entry in
- * `JOB_BOARDS` claims.
+ * ⚠️ **The fourth entry is deliberately not a board.** With every URL on
+ * `www.seek.com.au` the Source column rendered one badge forever, in the one
+ * environment this table is built in, and the unrecognised-host variant was
+ * never seen. Keep a host no entry in `JOB_BOARDS` claims.
  */
 const GENERATED_HOSTS: readonly [string, ...string[]] = [
   "https://www.seek.com.au/job/dev-fixture-generated-",
@@ -513,13 +469,12 @@ const GENERATED_HOSTS: readonly [string, ...string[]] = [
  * A filler advertisement, distinct in every field a column sorts on.
  *
  * The title and company letters run *up* the alphabet as the dates run *down*,
- * so no two sorts produce the same order. The host cycles independently of
- * both — no column sorts on it, so it is free to vary.
+ * so no two sorts produce the same order. The host cycles independently — no
+ * column sorts on it.
  *
- * `postedOn` is the caller's {@link generatedPostedOn} result, passed in
- * rather than recomputed here — the same value also becomes the row's
- * `postedAt` column in `devPostings`, so the two are one computation shared
- * through a parameter rather than two calls that merely happen to agree.
+ * `postedOn` is passed in rather than recomputed: the same value becomes the
+ * row's `postedAt` column, so it is one computation shared through a parameter
+ * rather than two calls that merely happen to agree.
  */
 function generatedPosting(index: number, postedOn: Date | null): Posting {
   const letter = String.fromCharCode(65 + (index % 26))
@@ -550,15 +505,13 @@ function generatedPosting(index: number, postedOn: Date | null): Posting {
  * When a generated advertisement says it was posted, or `null` for the third of
  * them that say nothing.
  *
- * ⚠️ **Scattered rather than walked, on purpose.** Stepping seven days per row
- * and wrapping at thirty puts these in an order that matches neither the
- * alphabet the titles run down nor either sighting order, so a wrong `orderBy`
- * on the Posted column cannot hide behind a fixture that happened to be in that
- * order already.
+ * ⚠️ **Scattered rather than walked, on purpose.** Stepping seven days and
+ * wrapping at thirty matches neither the title alphabet nor either sighting
+ * order, so a wrong `orderBy` on the Posted column cannot hide behind a fixture
+ * that was already in that order.
  *
- * Midnight UTC, because that is what {@link generatedPosting} round-trips
- * through a `YYYY-MM-DD` string and what `parsePostedAt()` would read back out
- * of one.
+ * Midnight UTC, which is what {@link generatedPosting} round-trips through a
+ * `YYYY-MM-DD` string.
  */
 function generatedPostedOn(index: number): Date | null {
   if (index % 3 === 0) return null
@@ -587,13 +540,11 @@ export function devAdHocFindings(): { postings: Posting[]; notes: string } {
  * does not already prove.
  *
  * ⚠️ **The example letter claims an employer the CV does not mention —
- * Brightwater Systems — and a team of eleven.** That is the whole point of it:
- * it makes the acceptance criterion the split fields exist for checkable by
- * hand under the flag. Draft a letter and neither "Brightwater" nor the team
- * size may appear in it, because {@link DEV_CV_MARKDOWN} is the only source of
- * fact about this candidate. The instructions are checkable the same way by
- * eye: no letter may contain "passionate", and every one must end "Kind
- * regards".
+ * Brightwater Systems — and a team of eleven.** That is the acceptance
+ * criterion the split fields exist for, checkable by hand: a drafted letter may
+ * contain neither, because {@link DEV_CV_MARKDOWN} is the only source of fact
+ * about this candidate. The instructions check the same way — no "passionate",
+ * always "Kind regards".
  */
 export function devCoverLetterInstructions(): CoverLetterInstructions[] {
   return [
@@ -609,13 +560,11 @@ export function devCoverLetterInstructions(): CoverLetterInstructions[] {
 /**
  * ⚠️ **A Document is two fixtures, and they have to agree.**
  *
- * {@link devUploads} is the bytes in the fake bucket; {@link devDocuments} is
- * the row in the fake database, and the row is what the application reads. The
- * `id` of a row is the `resumeId` of its object — that is the real key
- * relationship, not a convention of the fixtures — so a row without a matching
- * object lists fine and 404s on download, and an object without a row is
- * invisible. Both are real states in production; neither is a useful default
- * here, so the three below are paired.
+ * {@link devUploads} is the bytes in the fake bucket, {@link devDocuments} the
+ * row in the fake database, and a row's `id` is its object's `resumeId` — the
+ * real key relationship, not a fixture convention. Each half alone is a real
+ * production state (a row with no object 404s on download, an object with no
+ * row is invisible), so the three below are paired.
  */
 const DEV_DOCUMENT_IDS = {
   markdownCv: "3f8d1b2a-0000-4000-8000-0000000000c1",
@@ -662,11 +611,11 @@ export function devUploads(): NewResume[] {
  * The rows in `documents` for the objects above — what `/documents`, the
  * settings picker and `loadCandidateBackground` actually read.
  *
- * `uploadedAt` is staggered rather than shared so the newest-first order is
- * observable: the Markdown CV is the newest, which is what makes it the one
- * **Draft cover letter** reads. The filename on the last one carries an en dash
- * on purpose — it is the character the old S3-metadata storage stripped, so a
- * row that shows it intact is the visible half of why this table exists.
+ * `uploadedAt` is staggered so newest-first is observable: the Markdown CV is
+ * the newest, which is what makes it the one **Draft cover letter** reads. The
+ * en dash in the last filename is the character the old S3-metadata storage
+ * stripped, so a row showing it intact is the visible half of why this table
+ * exists.
  */
 export function devDocuments(): Document[] {
   return [
@@ -729,16 +678,14 @@ export function devCoverLetters(): NewCoverLetter[] {
 /**
  * Tailored resumes as they arrive at `TailoredResumeStore.put()`.
  *
- * ⚠️ **Exactly one, and it is on the Posting that already has a cover letter.**
- * That is what makes the two states checkable side by side without generating
- * anything: the Meridian row shows a tailored resume with its download, PDF,
- * replace and edit controls, and every other row on the page shows the
- * un-generated state. Seeding more would leave nothing to compare against.
+ * ⚠️ **Exactly one, on the Posting that already has a cover letter.** That puts
+ * both states side by side without generating anything — Meridian shows the
+ * download, PDF, replace and edit controls, every other row the un-generated
+ * state. Seeding more would leave nothing to compare against.
  *
- * The markdown is deliberately {@link DEV_CV_MARKDOWN} rearranged rather than
- * rewritten — Kestrel first, the payments work cut, no employer or metric that
- * is not in the CV. It is the fixture *and* the worked example of the rule the
- * Resume Tailor's prompt is trying to hold.
+ * The markdown is {@link DEV_CV_MARKDOWN} rearranged rather than rewritten, so
+ * it is the fixture *and* the worked example of the rule the Resume Tailor's
+ * prompt is trying to hold.
  */
 export function devTailoredResumes(): NewTailoredResume[] {
   return [
@@ -814,12 +761,9 @@ Dev User
  * {@link DEV_CV_MARKDOWN}, rearranged for the Meridian advertisement.
  *
  * ⚠️ **Check it against the CV rather than reading it as filler.** Every
- * employer, date, number and technology here appears in `DEV_CV_MARKDOWN`: the
- * logistics role leads, the billing role is shortened to one line, the skills
- * are reordered so the ones the advertisement names come first, and the payments
- * half of the summary is dropped because this advertisement is not about
- * payments. Nothing is added, nothing is upgraded, and there is no bracketed
- * placeholder anywhere — which is exactly the difference from
+ * employer, date, number and technology here appears in `DEV_CV_MARKDOWN`,
+ * reordered for this advertisement: nothing added, nothing upgraded, and no
+ * bracketed placeholder — exactly the difference from
  * {@link DEV_LETTER_MARKDOWN} beneath it.
  */
 const DEV_TAILORED_RESUME_MARKDOWN = `# Dev User

@@ -17,18 +17,16 @@ import { BotIcon } from "lucide-react"
  * Built from `@workspace/ui` rather than `@neondatabase/auth-ui`.
  *
  * The prebuilt components ship their own stylesheet, and this repo has exactly
- * one — `packages/ui/src/styles/globals.css`, owned by the UI package. A second
- * one competing with it is a worse trade than a form we write ourselves.
+ * one — `packages/ui/src/styles/globals.css`. A second competing with it is a
+ * worse trade than a form we write ourselves.
  *
- * There is no sign-up form and there will not be one: signup is closed, and the
- * allowlist in `lib/auth/current-user.ts` is what enforces it.
+ * There is no sign-up form and will not be one: signup is closed, enforced by
+ * the allowlist in `lib/auth/current-user.ts`.
  *
- * **Google is the only button because it is the only provider.** `neon
- * neon-auth oauth-provider list` returns `google` alone, and a `provider` the
- * project has not enabled is refused with `400 PROVIDER_NOT_SUPPORTED` — so the
- * GitHub button that used to sit here could not work in any environment,
- * including production. Adding one back means enabling the provider in Neon
- * first, not the other way round.
+ * ⚠️ **Google is the only button because it is the only enabled provider.** A
+ * `provider` the project has not enabled is refused with
+ * `400 PROVIDER_NOT_SUPPORTED`, which is what the GitHub button here did in
+ * every environment. Adding one back means enabling it in Neon first.
  */
 export function SignInForm({
   callbackOrigin,
@@ -107,15 +105,11 @@ export function SignInForm({
 }
 
 /**
- * Names the two failures that are configuration rather than bad luck, because
- * "try again" is actively wrong advice for both — neither clears by retrying,
- * and the fix for each is one command.
+ * Names the two failures that are configuration rather than bad luck: "try
+ * again" is wrong advice for both, and each is fixed by one command.
  *
- * Naming them in the UI is appropriate here in a way it would not be in a
- * consumer app: signup is closed, so everyone who reaches this page is an
- * approved operator who can act on it. The alternative is what this replaced,
- * where the only signal was a generic sentence and the real code was visible
- * only to someone already reading the browser console.
+ * Naming them in the UI is appropriate here because signup is closed, so
+ * everyone reaching this page is an operator who can act on it.
  */
 function describe(error: unknown, callbackURL: string): string {
   const code =

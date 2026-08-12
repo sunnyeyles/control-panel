@@ -12,14 +12,12 @@ import { getCoverLetterStore } from "@/lib/storage"
  * value is RSC-serialized, and there is no way to attach `Content-Type` and
  * `Content-Disposition` to it, which is the entire job here.
  *
- * Under `/api/` deliberately, so `proxy.ts`'s redirect→401 conversion applies:
- * without it an unauthenticated `fetch` would follow a 307 to the sign-in page
- * and receive an HTML document with a success status, unable to tell it was
- * refused.
+ * Under `/api/` deliberately, so `proxy.ts`'s redirect→401 conversion applies —
+ * otherwise an unauthenticated `fetch` follows a 307 and gets HTML with a
+ * success status.
  *
- * The path segment is the Posting id alone — no extension, because a letter has
- * exactly one (`.md`, fixed by `cover-letter-store.ts`) and a URL that lets the
- * caller choose one would be a URL that suggests they can.
+ * The path segment is the Posting id alone: a letter has exactly one extension,
+ * and a URL letting the caller choose suggests they can.
  */
 
 /** Required of anything reading the session — it depends on cookies. */

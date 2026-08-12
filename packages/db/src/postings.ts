@@ -4,19 +4,12 @@ import type { PostingPayload, PostingStatus } from "./types.ts"
 type DbClient = PrismaClient | Prisma.TransactionClient
 
 /**
- * The four statuses, as a value, in the order the interface offers them —
- * which is the order a person moves through them.
+ * The four statuses, in the order a person moves through them.
  *
- * Lives here rather than in `types.ts`, which is type-only and erases: a
- * runtime array there would make that module emit, and every consumer that
- * imports a type from it would start pulling in a value.
- *
- * `satisfies` catches a value here that is *not* a {@link PostingStatus}, and
- * that is the only direction it catches: a short array still satisfies
- * `readonly PostingStatus[]`, so adding a member to the union and forgetting
- * this list compiles cleanly. **The exhaustiveness gate is
- * `POSTING_STATUS_LABELS`** in `apps/dashboard/lib/postings/`, which is
- * `satisfies Record<PostingStatus, string>` and does fail on a missing member.
+ * Here rather than in the type-only `types.ts`, which would start emitting.
+ * `satisfies` only catches a value that is *not* a {@link PostingStatus} — a
+ * short array still compiles, so the exhaustiveness gate is
+ * `POSTING_STATUS_LABELS` in `apps/dashboard/lib/postings/`.
  */
 export const POSTING_STATUSES = [
   "new",
@@ -44,13 +37,9 @@ export interface NewPosting {
   location: string
   url: string
   /**
-   * When the advertisement said the role was posted, parsed.
-   *
-   * Absent when it said nothing and absent when what it said is not a date —
-   * the producer decides which, and this package does not know the rule. It is
-   * a `Date` rather than the string the payload carries precisely so that it
-   * cannot be: a column the table orders by has to be a point in time before it
-   * gets here.
+   * When the advertisement said the role was posted, parsed. Absent when it
+   * said nothing, or said something that is not a date. A `Date` rather than
+   * the payload's string because the table orders by the column.
    */
   postedAt?: Date
   payload: PostingPayload
@@ -66,11 +55,9 @@ export interface SeenPostings {
    */
   runId: string
   /**
-   * When they were found. The caller supplies it rather than the database
-   * defaulting to `now()`, because the two callers mean different instants:
-   * the worker passes the Run's *slot*, and the backfill passes each historic
-   * Run's `started_at` so `first_seen_at` means "when this advertisement first
-   * appeared" rather than "when the backfill ran".
+   * When they were found. The caller's clock, not `now()`: the worker passes
+   * the Run's *slot*, the backfill each historic Run's `started_at`, so
+   * `first_seen_at` never means "when the backfill ran".
    */
   seenAt: Date
   postings: NewPosting[]
@@ -83,41 +70,24 @@ export interface SeenPostings {
  * `postings.length`: a sighting older than the one already recorded matches the
  * `WHERE` below, changes nothing, and is not counted.
  *
- * ⚠️ **Five things about the `DO UPDATE SET` list below are load-bearing, and
- * every one of them is silently undoable.**
+ * ⚠️ **What the `DO UPDATE SET` list omits is load-bearing, and every omission
+ * is silently undoable.**
  *
- * 1. **`status` is absent, and that absence is the feature.** It is the only
- *    column in this schema a person writes. Adding `status = EXCLUDED.status`
- *    "for symmetry", or rewriting this as DELETE + INSERT, would mean a Posting
- *    marked `applied` reverts to `new` the next time a Run re-finds it —
- *    discarding the only data in this table a person entered, on a schedule,
- *    with no error and no trace.
- * 2. **`status_changed_at` is absent for the same reason.** It answers "when
- *    did the user last touch this", and a Run touching the row is not the user
- *    touching it.
- * 3. **The five `match_*` columns are absent, and this is the same hazard
- *    wearing different clothes.** A match is a model call against a document a
- *    Run cannot even read — the worker holds the `briefs` grant and nothing
- *    else — so there is no value for `EXCLUDED` to carry but NULL. Adding any
- *    of them here would blank a score every time a Briefing re-found the
- *    advertisement it belongs to, which for a live search is nightly, and the
- *    completeness CHECK in `0011` would not catch it because all five would go
- *    together. {@link recordPostingMatch} is the only writer.
- * 4. **`first_seen_at` and `first_seen_run_id` are absent too.** They answer
- *    "when did this first appear, and which Run found it" — a question a second
- *    sighting cannot change the answer to. Writing them here would make every
- *    row claim it was first seen by the most recent Run.
- * 5. **The trailing `WHERE` is what makes this write order-independent.** The
- *    backfill walks Runs oldest-first while live ticks are recording new ones;
- *    without the guard an old sighting arriving late would drag `last_seen_at`
- *    backwards and leave `last_seen_run_id` naming a Run that is not the most
- *    recent one to have seen it.
+ * - `status` and `status_changed_at` are the only things a *person* writes
+ *   here; updating them would walk an `applied` Posting back to `new` on every
+ *   re-find, on a schedule, with no error and no trace.
+ * - The five `match_*` columns would go to NULL — a Run cannot read the
+ *   document a score came from — blanking a score nightly, and the `0011`
+ *   completeness CHECK would not catch it because all five go together.
+ *   {@link recordPostingMatch} is the only writer.
+ * - `first_seen_at` / `first_seen_run_id` answer a question a second sighting
+ *   cannot change; writing them would make every row claim the latest Run.
+ * - The trailing `WHERE` makes this order-independent: the backfill walks Runs
+ *   oldest-first while live ticks record new ones, and without it a late-
+ *   arriving old sighting drags `last_seen_at` backwards.
  *
- * Raw SQL rather than `prisma.posting.upsert` in a loop, per this package's
- * rule that conflict-shaped writes are helpers owning their `ON CONFLICT`
- * target — the same reason `claimJob` is raw. One statement is atomic and one
- * round trip; a read-then-write upsert would turn two overlapping ticks finding
- * the same advertisement into a unique violation.
+ * Raw SQL, not `upsert` in a loop: one atomic statement and one round trip,
+ * where a read-then-write would make two overlapping ticks a unique violation.
  */
 export async function recordPostings(
   prisma: DbClient,
@@ -180,30 +150,15 @@ export interface LinkedPosting {
  * `0009` made legal — which is the whole of how a link-added Posting is
  * distinguishable from a found one. There is no `source` column.
  *
- * ⚠️ **`DO NOTHING`, and that is the entire safety argument for this function
- * existing beside {@link recordPostings} rather than as a flag on it.** A link
- * may *create* a Posting and may never *revise* one. Every way of writing an
- * update here is a way of destroying something:
+ * ⚠️ **`DO NOTHING` is the entire reason this exists beside
+ * {@link recordPostings} rather than as a flag on it.** A link may *create* a
+ * Posting and may never *revise* one: an update would walk `status` back to
+ * `new`, overwrite `last_seen_run_id` with this path's NULL, swap a Run's
+ * fuller `payload` for a thinner one, and blank the five `match_*` columns.
  *
- * - `status` is the one column a person writes, and re-pasting a link for an
- *   advertisement already marked `applied` must not walk it back to `new`.
- * - `last_seen_run_id` records which Run most recently found it. Overwriting a
- *   Run's id with the NULL this path carries would erase provenance and make a
- *   Posting several Runs have found read as one nobody ever did.
- * - `payload` written by a Run carries a `matchReason` this path has none of, so
- *   an update would swap a fuller record for a thinner one.
- * - The five `match_*` columns are not in the column list at all, so they take
- *   NULL on an insert and are untouched on a conflict. Re-pasting the link for
- *   an advertisement already scored against the user's resume leaves the score
- *   where it is.
- *
- * The caller checks for an existing Posting before it spends a page fetch and a
- * model call, so a duplicate paste normally never reaches this statement. What
- * this clause covers is the race the check cannot: two submissions in flight at
- * once, and a Run recording the same advertisement in between.
- *
- * A `false` return is therefore not a failure — it means the advertisement is
- * already tracked, which is an ordinary thing to tell somebody.
+ * The caller checks for an existing Posting first, so this clause only covers
+ * the race that check cannot. A `false` return is not a failure — it means the
+ * advertisement is already tracked.
  */
 export async function recordLinkedPosting(
   prisma: DbClient,
@@ -237,33 +192,22 @@ export async function recordLinkedPosting(
 /** One Posting's stored payload, and the Run that most recently reported it. */
 export interface StoredPostingPayload {
   /**
-   * The advertisement as its producer validated it, opaque to this package.
-   *
-   * The caller parses it. `@workspace/db` must not depend on the agent stack, so
-   * the schema that would say whether this is still readable lives on the other
-   * side of the seam — which is why both callers own a "the stored payload no
-   * longer parses" branch rather than being handed one.
+   * The advertisement as its producer validated it, opaque to this package —
+   * the schema lives on the other side of the seam, so callers own a "the
+   * stored payload no longer parses" branch rather than being handed one.
    */
   payload: PostingPayload
   /**
-   * `last_seen_run_id`: provenance, and no part of the identity.
-   *
-   * `null` for a Posting the user added by pasting its link, which no Run has
-   * ever seen. Callers that stamp provenance onto something they generate — a
-   * cover letter, a tailored resume — leave the field off rather than
-   * substituting anything for it.
+   * `last_seen_run_id`: provenance, no part of the identity. `null` for a
+   * Posting the user added by pasting its link.
    */
   lastSeenRunId: string | null
   /**
-   * The match against the user's resume, or `null` when nobody has scored this
-   * advertisement yet.
+   * The match against the user's resume, or `null` when nobody has scored it.
    *
-   * ⚠️ **Read with the payload rather than with the page, and that placement is
-   * the point.** `reason` is a sentence or two and `gaps` is a short list, which
-   * is small per row and a page of prose across twenty-five of them — the exact
-   * weight `load-posting-detail.ts` exists to keep out of every sort click. The
-   * *score* travels with the page, because a column sorts on it; the words
-   * behind the score arrive when somebody opens the row.
+   * ⚠️ Read with the payload, not with the page: `reason` and `gaps` are a page
+   * of prose across twenty-five rows. Only the *score* travels with the page,
+   * because a column sorts on it.
    */
   match: PostingMatchRow | null
 }
@@ -271,22 +215,16 @@ export interface StoredPostingPayload {
 /**
  * The stored payload for one owned Posting, or `undefined` when there is none.
  *
- * ⚠️ **`(userId, postingId)` is the whole of the ownership check, and it is not
- * a shortcut past one.** A Posting is not addressable without naming a user —
- * that pair is the natural key — so filtering on both *is* the check, exactly as
- * {@link setPostingStatus} describes. "No such Posting" and "someone else's" come
- * back as the same `undefined`, which is what stops the distinction being leaked:
- * Posting ids are derived from an advertisement's URL, so a caller that could
- * tell them apart would be an oracle for whether a stranger has been shown one.
+ * ⚠️ **`(userId, postingId)` is the ownership check, not a shortcut past one** —
+ * the pair is the natural key, so filtering on both *is* the check. "No such
+ * Posting" and "someone else's" are both `undefined`, so the distinction cannot
+ * be used as an oracle for what a stranger has been shown.
  *
- * ⚠️ **`findUnique`, not `findFirst`.** The pair is a unique index, so this is a
- * single index probe rather than a scan the planner has to be trusted to stop
- * early. One of the two callers spelled it the other way, which is the sort of
- * difference two copies of a read acquire and nobody notices.
+ * ⚠️ **`findUnique`, not `findFirst`** — the pair is a unique index, so this is
+ * one index probe rather than a scan the planner must be trusted to stop early.
  *
- * The `postingId` reaching this must already have been checked against the shape
- * an id can have — `POSTING_ID_PATTERN` in the dashboard. This does not restate
- * that rule, and the CHECK on the column is not a stand-in for it.
+ * The caller must already have checked the id's shape against
+ * `POSTING_ID_PATTERN`; the column's CHECK is not a stand-in for that.
  */
 export async function postingPayload(
   prisma: DbClient,
@@ -321,15 +259,11 @@ export async function postingPayload(
  *
  * ⚠️ **Deliberately a second enum from `POSTING_SORTS` in the dashboard's
  * `posting-query.ts`, and the two must not be merged.** That one is how a *URL*
- * spells a sort — `?sort=lastSeen` — and `list-postings.ts` maps it onto this
- * one. Keeping them separate is what stops an address bar from naming a
- * database column: a value arriving from outside has to survive a mapping
- * somebody wrote, rather than being handed to the query because it happened to
- * parse.
+ * spells a sort; `list-postings.ts` maps it onto this one, so an address bar can
+ * never name a database column directly.
  *
- * Five, and no more. Every entry here is a column with an ordering the table
- * offers; adding one is a decision about the index, not a convenience —
- * `match` came with `postings_user_match_idx` in `0011`.
+ * Adding an entry is a decision about the index, not a convenience — `match`
+ * came with `postings_user_match_idx` in `0011`.
  */
 export type PostingOrder =
   "lastSeenAt" | "title" | "company" | "postedAt" | "match"
@@ -349,16 +283,11 @@ export interface PostingPageQuery {
   /**
    * Title patterns whose rows are left out of the page and the counts.
    *
-   * ⚠️ **Patterns, not words**, and the distinction is what keeps this package
-   * free of a dependency on `@workspace/job-search`. A pattern is what
-   * `titleMatchPattern()` produces — `" senior "`, space-padded and normalised —
-   * and matching it is a substring test against `postings.title_normalized`,
-   * which `0010` generates by the same rule. This package filters; it does not
-   * decide what a user's word means, exactly as it stores a `payload` it will
-   * not parse.
-   *
-   * Absent or empty filters nothing, which is what makes "no filter set" and
-   * "an empty filter" the same query.
+   * ⚠️ **Patterns, not words** — that is what keeps this package free of a
+   * dependency on `@workspace/job-search`. A pattern is what
+   * `titleMatchPattern()` produces (`" senior "`, space-padded and normalised),
+   * matched as a substring against the `title_normalized` column `0010`
+   * generates by the same rule. Absent or empty filters nothing.
    */
   excludeTitlePatterns?: readonly string[]
 }
@@ -374,27 +303,20 @@ export interface PostingMatchRow {
   score: number
   reason: string
   /**
-   * The stated requirements the resume does not evidence. Opaque to this
-   * package, exactly as {@link PostingPayload} is: it is a producer's validated
-   * JSON, and the schema that says it is an array of strings lives on the other
-   * side of the seam.
+   * The stated requirements the resume does not evidence. Opaque here, exactly
+   * as {@link PostingPayload} is — the schema is on the other side of the seam.
    */
   gaps: unknown
   /**
    * The `documents.id` this was scored against.
    *
-   * ⚠️ **This is the staleness key and the only one.** A caller compares it
-   * with the user's current resume; a different value means the score describes
-   * a document they have replaced. Nothing here decides that — this package
-   * does not know which document is current — which is why the field is carried
-   * out rather than turned into a boolean.
+   * ⚠️ **The staleness key, and the only one.** A caller compares it with the
+   * user's current resume; this package does not know which that is, which is
+   * why the id is carried out rather than reduced to a boolean.
    *
-   * **`documentId`, although the column is `match_resume_id`.** The column
-   * predates `documents` and cannot be renamed cheaply; `CONTEXT.md` gives the
-   * word to Document, so the translation happens here — `toMatchRow` and
-   * {@link recordPostingMatch} are the only two places the two spellings meet.
-   * Same shape as `docType` → `documentType` in the dashboard's
-   * `lib/documents/list-documents.ts`.
+   * **`documentId`, although the column is `match_resume_id`** — the column
+   * predates `documents` and cannot be renamed cheaply, so the translation
+   * happens here and in {@link recordPostingMatch}.
    */
   documentId: string
   matchedAt: Date
@@ -416,45 +338,30 @@ export interface PostingListRow {
   firstSeenAt: Date
   lastSeenAt: Date
   /**
-   * How well this advertisement matches the user's resume, 0–100, or `null`
-   * when nobody has scored it yet.
-   *
-   * ⚠️ **The score and nothing else.** The reason and the gaps behind it are
-   * read with the payload — see {@link StoredPostingPayload.match} — because a
-   * page carries twenty-five rows and at most one of them is ever expanded.
-   * What a column has to sort on is the number.
+   * 0–100, or `null` when nobody has scored it yet. **The score and nothing
+   * else** — the reason and gaps are read with the payload
+   * ({@link StoredPostingPayload.match}), because a page carries twenty-five
+   * rows and at most one is ever expanded.
    */
   matchScore: number | null
   /**
-   * The name of the Briefing that most recently found this advertisement,
-   * flattened out of `postings.last_seen_run_id` → `runs.job_id` → `jobs.name`.
+   * The Briefing that most recently found this, flattened out of
+   * `postings.last_seen_run_id` → `runs.job_id` → `jobs.name`.
    *
-   * ⚠️ **Flattened here rather than handed over as a nested relation, and that
-   * is the point of this function existing.** A caller holding
-   * `{ lastSeenRun: { job: { name } } }` has to be handed a client that can
-   * answer a two-level nested `select` — which is what made the dev fake
-   * reimplement the shape, and what made a fake that answered *less* than it was
-   * asked take a whole page down with a `TypeError` on `.job`.
+   * ⚠️ **Flattened rather than handed over as a nested relation** — a caller
+   * holding `{ lastSeenRun: { job: { name } } }` needs a client that answers a
+   * two-level nested `select`, and a dev fake that answered *less* than it was
+   * asked took a whole page down with a `TypeError` on `.job`.
    *
-   * `null` in two quite different situations, which {@link addedByLink}
-   * separates. Either no Run has ever seen this advertisement — the user added
-   * it by pasting its link, and there is no Briefing to name — or the relation
-   * answered nothing when it should have, which is a client that narrowed the
-   * projection rather than anything Postgres can produce. **A blank name is not
-   * treated as absent here**; that is a display rule and belongs with whatever
-   * renders it.
+   * `null` either because no Run has ever seen it — {@link addedByLink} — or
+   * because the relation answered nothing when it should have, which is a
+   * reportable fault. A blank name is not treated as absent here.
    */
   briefing: string | null
   /**
-   * No Run has ever found this: `first_seen_run_id IS NULL`, which the user
-   * pasting a link is the only way to produce.
-   *
-   * Derived rather than stored, for the reason `posting-source.ts` gives about
-   * the board a Posting came from: the row already carries the fact, and a
-   * second copy is a second thing to keep true. It is on the row rather than
-   * left to the caller so that {@link briefing} being `null` stays a reportable
-   * fault — a page full of link-added Postings must not read as a page full of
-   * broken relations.
+   * `first_seen_run_id IS NULL`: the user pasted a link. Derived rather than
+   * stored, and on the row rather than left to the caller so that
+   * {@link briefing} being `null` stays a reportable fault.
    */
   addedByLink: boolean
 }
@@ -462,26 +369,16 @@ export interface PostingListRow {
 export interface PostingListPage {
   rows: PostingListRow[]
   /**
-   * Every Posting this user has *that the filter admits*, not the length of
-   * {@link rows}.
-   *
-   * ⚠️ **The filter is in this count, deliberately.** It is what
-   * {@link PostingListPage.pageCount} is derived from and what a table renders
-   * as "N postings", so a total that counted rows the page will not show would
-   * paginate past the end and label the table with a number nothing on it adds
-   * up to. What was left out is {@link hidden}, which is a separate fact.
+   * Every Posting this user has *that the filter admits*, not `rows.length`.
+   * The filter is in the count deliberately: {@link pageCount} derives from it,
+   * so counting rows the page will not show would paginate past the end.
    */
   total: number
   /**
-   * How many of this user's Postings the filter removed.
-   *
-   * `0` whenever no patterns were supplied — there is nothing to report and no
-   * second count is issued.
-   *
-   * ⚠️ **This exists so that hiding is never silent.** A filter that quietly
-   * shrinks a table is indistinguishable from a briefing that stopped finding
-   * anything, and the person best placed to notice is the one who set it. The
-   * caller is expected to say the number out loud.
+   * How many of this user's Postings the filter removed; `0` when no patterns
+   * were supplied. **Exists so that hiding is never silent** — a filter that
+   * quietly shrinks a table looks exactly like a briefing that stopped finding
+   * anything. The caller is expected to say the number out loud.
    */
   hidden: number
   /** The page actually read, which is not always the one asked for. */
@@ -492,50 +389,30 @@ export interface PostingListPage {
 /**
  * One page of a user's Postings, in the order asked for.
  *
- * ⚠️ **`where: { userId }` is the whole of the row scoping, and it is not
- * optional.** Whatever established *who is asking* says nothing about which rows
- * they may read. A Posting is not addressable without naming a user —
- * `(user_id, posting_id)` is the natural key — so this filter is the check
- * rather than a shortcut past one.
+ * ⚠️ **`where: { userId }` is the row scoping and is not optional.** A Posting
+ * is not addressable without naming a user — `(user_id, posting_id)` is the
+ * natural key — so the filter *is* the check, not a shortcut past one.
  *
- * ⚠️ **The count and the page are asked for together, and the re-fetch below is
- * what keeps that safe.** `?page=99` on a three-page table must render the last
- * page, not an empty one with working controls underneath it — so the page still
- * has to be clamped against a total only the count knows. Doing that in order
- * meant two serial round trips on *every* render to pay for a case that almost
- * never happens. Asking for both at once and re-fetching only when the requested
- * page really did overshoot costs one round trip in the common case and the
- * original two in the rare one.
+ * ⚠️ **The count and the page are asked for together, and the re-fetch below
+ * keeps that safe.** `?page=99` on a three-page table must render the last page,
+ * which needs a total only the count knows; doing it in order cost two serial
+ * round trips on every render. Speculating costs one in the common case and the
+ * original two when the page really did overshoot, at the price of a discarded
+ * query that ran alongside the count anyway.
  *
- * The price is a query that is sometimes wasted: an empty table and an
- * overshooting page both issue a fetch whose result is discarded. Neither costs
- * wall-clock, because it ran alongside the count either way — and an empty table
- * is the cheapest query this schema has.
+ * A hand-typed `?page=9999` reaches `skip` before the clamp and is survivable:
+ * `OFFSET` only discards rows that exist, so the work is bounded by the user's
+ * row count. Keeping the value finite is the caller's job — `MAX_PAGE` in the
+ * dashboard's `posting-query.ts`.
  *
- * ⚠️ **A hand-typed `?page=9999` reaches `skip` before the clamp, and that is
- * survivable rather than an oversight.** `OFFSET` can only discard rows that
- * exist, so the work is bounded by how many Postings the *user* has and not by
- * the number they typed — a huge offset over a small table scans the same index
- * entries and returns nothing. **The bound that keeps the value finite in the
- * first place is the caller's**: `MAX_PAGE` in the dashboard's
- * `posting-query.ts` clamps the app's first untrusted GET input, before anything
- * has been counted. That one is about a URL and stays there; this one is about
- * the query and lives here. Two clamps, two owners, and neither stands in for
- * the other.
+ * ⚠️ **`orderBy` is tie-broken on `postingId`, and that is a correctness fix.**
+ * Offset pagination over a non-unique key lets the database choose freely among
+ * equal rows, so one row appears on two pages and another on none. The tie-break
+ * runs in the sort's direction so the default order stays a scan of
+ * `postings_user_last_seen_idx` — `(last_seen_at DESC, posting_id DESC)`.
  *
- * ⚠️ **`orderBy` is tie-broken on `postingId`, and that is a correctness fix,
- * not a nicety.** Offset pagination over a non-unique key — every order here but
- * the dates is non-unique, and two Runs in one slot can share a `last_seen_at`
- * too — lets the database choose freely among equal rows, so the same row can
- * appear on page 1 and page 2 while another appears on neither. The tie-break is
- * in the same direction as the sort so that the default order stays a scan of
- * `postings_user_last_seen_idx`, which carries `(last_seen_at DESC, posting_id
- * DESC)`.
- *
- * **Text ordering follows the database's collation.** Neon's default sorts
- * naturally; a `C`-collation database would put every uppercase title before
- * every lowercase one. One line to know about rather than something to work
- * around in the query.
+ * Text ordering follows the database's collation: Neon's default sorts
+ * naturally, a `C`-collation database would sort uppercase titles first.
  */
 export async function listPostingPage(
   prisma: DbClient,
@@ -573,15 +450,11 @@ export async function listPostingPage(
 /**
  * Which of this user's rows the page is about.
  *
- * ⚠️ **One builder, used by the count and by the fetch**, because a filter
- * applied to only one of them is a table whose pager walks off the end of
- * itself. That is the same reason `findPostingPage` exists as one function
- * rather than two copies of a projection.
+ * ⚠️ **One builder for the count and the fetch**, because a filter applied to
+ * only one of them is a table whose pager walks off the end of itself.
  *
- * ⚠️ **`userId` is the ownership check and not a filter in front of one.** A
- * Posting is not addressable without naming a user — `(user_id, posting_id)` is
- * the natural key — so it is here unconditionally and the exclusions are added
- * beside it, never in place of it.
+ * ⚠️ **`userId` is the ownership check, not a filter in front of one** — it is
+ * here unconditionally, with exclusions beside it and never in place of it.
  *
  * The exclusion is a `NOT (OR …)`: a row is admitted when it matches *no*
  * pattern. Each arm is a substring test against `title_normalized`, the
@@ -606,11 +479,10 @@ function postingPageWhere(userId: string, query: PostingPageQuery) {
 /**
  * One slice of `postings`, in the order asked for.
  *
- * Split out because it is issued from two places — speculatively for the page
- * that was asked for, and again for the clamped page when that overshot. The
- * projection has to be identical in both, which is what having one function
- * guarantees. `page` is a parameter rather than being read off `query` precisely
- * because the two disagree in the case this exists to serve.
+ * Issued twice — speculatively for the requested page, then again for the
+ * clamped page when that overshot — and the projection must be identical in
+ * both. `page` is a parameter rather than read off `query` because the two
+ * disagree in exactly the case this exists to serve.
  */
 function findPostingPage(
   prisma: DbClient,
@@ -634,20 +506,15 @@ function findPostingPage(
       payload: true,
       firstSeenAt: true,
       lastSeenAt: true,
-      // The score alone — see {@link PostingListRow.matchScore}. The reason and
-      // the gaps are a page of prose across twenty-five rows and belong with the
-      // payload read that a single expanded row pays for.
+      // The score alone — see {@link PostingListRow.matchScore}.
       matchScore: true,
-      // Which Briefing found it, asked for with the page rather than resolved
-      // row by row afterwards. **`lastSeenRun`, not `firstSeenRun`** — the
-      // Briefing that most recently found the advertisement is the one whose
-      // criteria still match it, and it is the sighting the default order runs
-      // on. Flattened before it leaves this module; see
-      // {@link PostingListRow.briefing}.
+      // **`lastSeenRun`, not `firstSeenRun`** — the Briefing that most recently
+      // found it is the one whose criteria still match, and it is the sighting
+      // the default order runs on. Flattened before it leaves this module.
       lastSeenRun: { select: { job: { select: { name: true } } } },
-      // Not rendered, and not carried past {@link toListRow}: it is what tells
-      // "no Run has ever seen this" apart from "the relation answered nothing",
-      // which are the same `briefing: null` and are not the same fault.
+      // Not rendered: it is what tells "no Run has ever seen this" apart from
+      // "the relation answered nothing" — the same `briefing: null`, different
+      // faults.
       firstSeenRunId: true,
     },
   })
@@ -657,24 +524,17 @@ function findPostingPage(
  * The order one page is read in, written out per column rather than built from
  * a computed key.
  *
- * A `{ [field]: direction }` object would be the same handful of lines with the
- * column name arriving as a string, which is both untypeable against Prisma's
- * input and a shape a reader has to check by hand. Written out, the set of
- * orderable fields is this function and not "whatever `postings` happens to
- * have".
+ * A computed `{ [field]: direction }` would take the column name as a string,
+ * which is untypeable against Prisma's input; written out, the orderable set is
+ * this function rather than "whatever `postings` happens to have".
  *
- * **Every branch carries the `postingId` tie-break, in the same direction.** See
- * {@link listPostingPage} for why a page boundary without it shows one row twice
- * and skips another.
+ * **Every branch carries the `postingId` tie-break, in the same direction** —
+ * see {@link listPostingPage} for why a page boundary without it shows one row
+ * twice and skips another.
  *
- * ⚠️ **`postedAt` is NULLS LAST in *both* directions, and that asymmetry is the
- * point.** It is the one nullable column here, and NULL does not mean "long
- * ago": it means the advertisement did not state a date, or stated one the write
- * path would not read as a date. Postgres would default to NULLS FIRST under
- * `DESC`, which puts every row that says nothing above every row that says
- * something — the opposite of what someone sorting by it is asking for. Sorting
- * ascending does not make those rows interesting either, so they stay at the
- * bottom whichever way the column runs.
+ * ⚠️ **`postedAt` is NULLS LAST in *both* directions.** NULL means the
+ * advertisement stated no date, not "long ago", and Postgres defaults to NULLS
+ * FIRST under `DESC` — putting every row that says nothing on top.
  */
 function orderByFor(query: PostingPageQuery) {
   const to = query.direction
@@ -698,11 +558,9 @@ function orderByFor(query: PostingPageQuery) {
       ]
 
     case "match":
-      // NULLS LAST both ways, exactly as `postedAt`, and for the same reason
-      // stated more sharply: an unscored Posting is not a badly-matched one.
-      // Under `DESC` Postgres would put every row nobody has looked at above
-      // every row somebody has, and ascending does not make them interesting
-      // either — they belong at the bottom whichever way the column runs.
+      // NULLS LAST both ways, as `postedAt`: an unscored Posting is not a
+      // badly-matched one, and under `DESC` Postgres would sort every row
+      // nobody has looked at above every row somebody has.
       return [
         { matchScore: { sort: to, nulls: "last" as const } },
         { postingId: to },
@@ -737,10 +595,9 @@ function toListRow(row: {
     firstSeenAt: row.firstSeenAt,
     lastSeenAt: row.lastSeenAt,
     matchScore: row.matchScore,
-    // ⚠️ **Both halves are read optionally although neither relation is
-    // optional in the schema.** The nullability is not a claim about the
-    // database — it is what keeps a client that answered *less* than it was
-    // asked from taking a whole page down with a `TypeError` on `.job`.
+    // ⚠️ Read optionally although neither relation is optional in the schema —
+    // it keeps a client that answered *less* than it was asked from taking a
+    // whole page down with a `TypeError` on `.job`.
     briefing: row.lastSeenRun?.job?.name ?? null,
     addedByLink: row.firstSeenRunId === null,
   }
@@ -749,19 +606,14 @@ function toListRow(row: {
 /**
  * The five match columns as one object, or `null`.
  *
- * ⚠️ **`match_score IS NULL` is the test, and the other four are read through
- * it rather than checked again.** `postings_match_complete_check` makes all
- * five NULL together or set together, so a row with a score and a missing
- * reason is not a state this function has to have an opinion about — it is a
- * state the database refuses.
+ * ⚠️ **`match_score IS NULL` is the test; the other four are read through it.**
+ * `postings_match_complete_check` makes all five NULL or set together, so a
+ * score with a missing reason is a state the database refuses.
  *
- * ⚠️ **Nullish rather than `=== null`, and the `??` fallbacks are the same
- * concession** — both are for the clients that are not Postgres. The dashboard's
- * dev fake and the test doubles under it are hand-written, and one that answered
- * *less* than it was asked would otherwise produce a match object with
- * `undefined` inside it: a score that renders as a blank rather than as the
- * absent score it is. Same reasoning `toListRow` gives for reading its relations
- * optionally although neither is optional in the schema.
+ * ⚠️ **Nullish rather than `=== null`, and the `??` fallbacks with it** — both
+ * are for the clients that are not Postgres. A hand-written dev fake answering
+ * *less* than it was asked would otherwise yield a match object with
+ * `undefined` inside it, rendering blank rather than absent.
  */
 function toMatchRow(row: {
   matchScore?: number | null
@@ -800,11 +652,7 @@ export interface PostingMatchWrite {
    * {@link PostingMatchRow.documentId} gives.
    */
   documentId: string
-  /**
-   * When it was scored. The caller's clock, for the reason
-   * {@link SeenPostings.seenAt} gives — and here it is also what a reader dates
-   * a stale score by.
-   */
+  /** When it was scored — the caller's clock, per {@link SeenPostings.seenAt}. */
   matchedAt: Date
 }
 
@@ -812,20 +660,13 @@ export interface PostingMatchWrite {
  * Record a match against a Posting that already exists. `false` means there is
  * no such Posting for this user.
  *
- * ⚠️ **It updates and never inserts, and that is not a convenience.** A score
- * is about an advertisement somebody already tracks; a statement that could
- * insert would let a caller mint a Posting out of a score, with no title, no
- * URL and no sighting. `updateMany` rather than `update` for the reason
- * {@link setPostingStatus} gives: a guarded write whose row count is the
- * answer, where `update` would turn an ordinary miss into a thrown error.
+ * ⚠️ **It updates and never inserts.** A statement that could insert would let
+ * a caller mint a Posting out of a score — no title, no URL, no sighting.
+ * `updateMany` and the `userId` in the `where` are both as
+ * {@link setPostingStatus} sets out.
  *
- * **`userId` in the `where` is the ownership check**, again as
- * {@link setPostingStatus} sets out — a Posting is not addressable without
- * naming a user, so filtering on both halves of the natural key *is* the check.
- *
- * All five columns are written in one statement, which is what keeps
- * `postings_match_complete_check` satisfiable at all: there is no legal
- * intermediate state to pass through.
+ * All five columns go in one statement, which is what keeps
+ * `postings_match_complete_check` satisfiable: there is no legal intermediate.
  */
 export async function recordPostingMatch(
   prisma: DbClient,
@@ -848,18 +689,13 @@ export async function recordPostingMatch(
 /**
  * "Not scored against this document", as one predicate two readers share.
  *
- * ⚠️ **The `OR` is the whole of the staleness rule and the `null` arm is not
- * redundant.** A row that has never been scored has `match_resume_id` NULL; a
- * row scored against a CV the user has since replaced carries some *other* id.
- * Both want scoring. Written as a bare inequality it would be `col <> $1`,
- * which NULL does not satisfy — every unscored Posting in the table would be
- * silently invisible to the one loop whose job is to find them. Spelled out
- * rather than left to a `not` filter's null handling, because that behaviour is
- * a property of whichever client version is installed and this is not.
+ * ⚠️ **The `null` arm is not redundant.** A bare inequality compiles to
+ * `col <> $1`, which NULL does not satisfy — every never-scored Posting would
+ * be invisible to the one loop whose job is to find them. Spelled out rather
+ * than left to a `not` filter, whose null handling is a client-version detail.
  *
- * One function rather than two copies because the list and the count must agree
- * exactly: a loop that stops when the count says zero, over a list built from a
- * different predicate, either never terminates or terminates early.
+ * One function because the list and the count must agree exactly: a loop that
+ * stops on a count from a different predicate never terminates, or stops early.
  */
 function unmatchedAgainst(documentId: string) {
   return {
@@ -871,14 +707,10 @@ function unmatchedAgainst(documentId: string) {
  * The Postings this user has that are not scored against `documentId`, newest
  * sighting first, at most `limit` of them.
  *
- * **Bounded, and the caller has to say by how much.** Scoring is one model call
- * per row against a whole CV, so an unbounded list here would be an unbounded
- * bill and a request that outlives its own timeout. What this returns is one
- * round's worth; the caller comes back for the next.
- *
- * Ordered by `last_seen_at DESC` rather than by anything about the match, so a
- * page of newly-found advertisements scores before a backlog nobody has looked
- * at in a month.
+ * **Bounded, and the caller says by how much** — scoring is one model call per
+ * row against a whole CV, so an unbounded list is an unbounded bill and a
+ * request that outlives its timeout. Ordered `last_seen_at DESC` so newly-found
+ * advertisements score before a month-old backlog.
  */
 export async function listUnmatchedPostingIds(
   prisma: DbClient,
@@ -901,10 +733,9 @@ export async function listUnmatchedPostingIds(
 /**
  * How many of this user's Postings are not scored against `documentId`.
  *
- * The same predicate as {@link listUnmatchedPostingIds} and deliberately beside
- * it: what drives the scoring loop is "is there more", and a caller inferring
- * that from a short page would stop early the moment a round happened to
- * return fewer rows than it asked for.
+ * The same predicate as {@link listUnmatchedPostingIds}, beside it: the scoring
+ * loop runs on "is there more", and inferring that from a short page would stop
+ * early the first time a round returned fewer rows than it asked for.
  */
 export async function countUnmatchedPostings(
   prisma: DbClient,
@@ -921,15 +752,12 @@ export async function countUnmatchedPostings(
  *
  * **`userId` in the `where` is not a shortcut past an ownership check — it is
  * half the natural key.** `jobs` needs `requireOwnedJob` because a `jobs.id`
- * addresses any row in the table; a Posting is not addressable without naming a
- * user, so filtering on both *is* the check. One statement also closes the
- * TOCTOU window a load-then-compare would leave open, and the caller gets one
- * answer for "no such Posting" and "someone else's" rather than a distinction
- * that tells a stranger the row exists.
+ * addresses any row; a Posting is not addressable without naming a user. One
+ * statement also closes the TOCTOU window a load-then-compare would leave, and
+ * "no such Posting" and "someone else's" get the same answer.
  *
- * `updateMany` rather than `update` for the reason `claimAdHocRun` gives: a
- * guarded write whose row count is the answer. `update` throws on no match,
- * which would turn an ordinary miss into an error.
+ * `updateMany` rather than `update`, per `claimAdHocRun`: a guarded write whose
+ * row count is the answer, where `update` throws on an ordinary miss.
  */
 export async function setPostingStatus(
   prisma: DbClient,
@@ -950,17 +778,13 @@ export async function setPostingStatus(
  * Which of these Posting ids this user actually owns, in no particular order.
  *
  * Exists so a caller can act on the *stored* Postings before deleting them —
- * `apps/dashboard` removes each one's cover letter from S3 first, and needs to
- * know which ids are real to avoid addressing objects for rows that never
- * existed. It is also what lets a bulk delete report how many rows it found
- * rather than only how many it removed.
+ * `apps/dashboard` clears each one's cover letter from S3 first — and so a bulk
+ * delete can report how many rows it found, not only how many it removed.
  *
  * **This is not the ownership check, and {@link deletePostings} must not treat
- * it as one.** It answers a question; the check is the `userId` in the delete's
- * own `where`, exactly as it is in {@link setPostingStatus}. Two calls with a
- * gap between them is a TOCTOU window, and the only thing that can happen in it
- * is a Run re-recording an advertisement — which the delete then removes, which
- * is what the user asked for.
+ * it as one.** The check is the `userId` in the delete's own `where`. The gap
+ * between the two calls is a TOCTOU window whose only occupant is a Run
+ * re-recording an advertisement — which the delete then removes anyway.
  */
 export async function ownedPostingIds(
   prisma: DbClient,
@@ -980,22 +804,18 @@ export async function ownedPostingIds(
 /**
  * Remove Postings by their derived ids. Returns how many rows went.
  *
- * **`userId` in the `where` is the ownership check**, for the reason
- * {@link setPostingStatus} sets out at length: a Posting is not addressable
- * without naming a user, so filtering on both halves of the natural key *is*
- * the check rather than a shortcut past one. It stays here whether or not the
- * caller already narrowed the list with {@link ownedPostingIds} — a helper that
- * borrowed its safety from an earlier call would be one refactor away from
- * deleting a stranger's rows.
+ * **`userId` in the `where` is the ownership check**, per
+ * {@link setPostingStatus}. It stays here whether or not the caller narrowed
+ * the list with {@link ownedPostingIds} — a helper that borrowed its safety
+ * from an earlier call is one refactor away from deleting a stranger's rows.
  *
  * ⚠️ **A deleted Posting is not gone for good, by design.**
- * {@link recordPostings} upserts on `(user_id, posting_id)`, so the next Run
- * that re-finds the same advertisement inserts it again at `status = 'new'`.
- * There is no tombstone and adding one is a schema decision, not a tidy-up —
- * anything that surfaces this needs to say so rather than promise finality.
+ * {@link recordPostings} upserts on `(user_id, posting_id)`, so the next Run to
+ * re-find the advertisement inserts it again at `status = 'new'`. There is no
+ * tombstone; anything surfacing this must not promise finality.
  *
- * Nothing references a Posting, so no cascade is involved: all three of its
- * relations point *out*, at `users` and `runs`, and every one is `Restrict`.
+ * No cascade is involved: all three relations point *out*, and all are
+ * `Restrict`.
  */
 export async function deletePostings(
   prisma: DbClient,
@@ -1016,13 +836,10 @@ export async function deletePostings(
  *
  * Not defensive tidying. Postgres raises `21000` — *"ON CONFLICT DO UPDATE
  * command cannot affect row a second time"* — when two rows in one statement
- * collide on the conflict target, and two advertisements in one findings list
- * normalising to the same id is exactly what `postingId()` exists to merge:
- * SEEK stamps `?ref=` on its links, so the same posting reached two ways is the
- * ordinary case. First wins because findings arrive best-match first.
- *
- * Deliberately **inside** this helper rather than at the call site — the hazard
- * is a property of the statement, so it is fixed where the statement is.
+ * collide on the conflict target, and SEEK stamps `?ref=` on its links, so the
+ * same posting reached two ways is the ordinary case. First wins because
+ * findings arrive best-match first. Inside the helper, because the hazard is a
+ * property of the statement.
  */
 function dedupe(postings: NewPosting[]): NewPosting[] {
   const seen = new Set<string>()

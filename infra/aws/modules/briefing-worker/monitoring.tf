@@ -1,14 +1,9 @@
 # Alerting, because with retries off a failure is a silent gap.
 #
-# Going without is defensible while someone is watching the thing get built. It
-# stops being defensible once the worker is the only thing producing a daily
-# artifact and nobody is looking at it on purpose.
-#
-# The topic and its subscription are not here: they belong to the root, which
-# owns one topic for every stack. A per-stack topic means a per-stack
-# confirmation mail, and the fourth stack means a fourth one for the same human.
-# This module states which alarms exist; where they are delivered is not its
-# business.
+# The topic and its subscription belong to the root, which owns one for every
+# stack — a per-stack topic means a per-stack confirmation mail to the same
+# human. This module states which alarms exist; where they are delivered is not
+# its business.
 
 # A tick that ran and threw. `runTick` rethrows after emitting its tick report
 # — and each failing job has already emitted its own run report — while the
@@ -48,18 +43,14 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
 # and silence is indistinguishable from success unless something asserts that
 # an invocation should have happened.
 #
-# The assertion is "at least one invocation a day, and none at all means the
-# schedule is broken". Deliberately unchanged when the cadence became hourly:
-# tightening the period to match would catch a dead scheduler roughly a day
-# sooner and would also fire on any single Neon wake that outlasts one hour, and
-# an alarm that cries wolf is worse than one that is slow. Twenty-four missed
-# ticks in a row is not a subtle condition.
+# The assertion is "at least one invocation a day". Deliberately left daily when
+# the cadence became hourly: an hourly period would catch a dead scheduler a day
+# sooner but also fire on any Neon wake outlasting an hour, and twenty-four
+# missed ticks in a row is not a subtle condition.
 #
-# Gated on the schedule, because `treat_missing_data = "breaching"` means a
-# disabled schedule puts this alarm permanently in ALARM. An alarm that is
-# always red while the worker is deliberately off duty is an alarm people learn
-# to ignore — and it is the only one that catches silence, so that is precisely
-# the habit not to teach.
+# ⚠️ Gated on the schedule, because `treat_missing_data = "breaching"` puts this
+# permanently in ALARM while the worker is deliberately off duty — and it is the
+# only alarm that catches silence, so that is the habit not to teach.
 resource "aws_cloudwatch_metric_alarm" "not_invoked" {
   count = var.schedule_enabled ? 1 : 0
 

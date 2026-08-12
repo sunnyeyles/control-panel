@@ -7,17 +7,14 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
  * One compact line per briefing, above the table.
  *
  * ⚠️ **This exists because the table has nowhere else to put these two
- * controls.** `RunNowButton` and `RunActivityStatus` used to hang off the
- * per-briefing card in `components/jobs/postings/briefing-list.tsx`; a cumulative
- * table has no per-briefing row at all, so deleting that component without this
- * strip would have removed the ability to run a briefing on demand and to see
- * that one is running — a feature regression with nothing failing to compile to
- * announce it. Both controls are reused **unchanged**; what is new is only the
- * arrangement.
+ * controls.** A cumulative table has no per-briefing row, so retiring the old
+ * briefing card without this strip would have silently removed the ability to
+ * run a briefing on demand and see that one is running. Both controls are
+ * reused unchanged; only the arrangement is new.
  *
- * A server component that takes only strings: `RunActivity` was formatted in
- * `lib/briefing-runs/run-activity.ts`, and the one live value on screen — the
- * elapsed counter — is a duration the client computes for itself.
+ * A server component taking only strings — `RunActivity` is formatted in
+ * `lib/briefing-runs/run-activity.ts`, and the elapsed counter is computed
+ * client-side.
  */
 export interface BriefingStripEntry {
   id: string
@@ -68,19 +65,15 @@ export function BriefingStrip({
 /**
  * The strip's shape while the activity load is in flight.
  *
- * ⚠️ **One row, which is a guess — and the alternative was a worse one.** The
- * strip sits directly above the table, so anything it does on arrival moves the
- * table. With no placeholder at all it pushed the whole table down by 72px on
- * every load, which is the jump most visible to someone whose eyes are already
- * on the first row. Reserving one row is right for one briefing, 72px too much
- * for none, and 72px short for two — so the error is bounded and, for the common
- * case, zero. This component cannot do better: how many briefings someone has is
- * the answer the query it is standing in for has not come back with yet.
+ * ⚠️ **One row, which is a guess — and the alternative was worse.** The strip
+ * sits directly above the table, so no placeholder at all pushed it down 72px
+ * on every load. One row is exact for one briefing and 72px out either way for
+ * none or two, so the error is bounded and zero in the common case; this
+ * component cannot do better, since the count is what the pending query answers.
  *
- * Beside the component rather than in `posting-table-skeleton.tsx` or in either
- * caller, so the markup it imitates is the next thing in the file. The two
- * callers — `page.tsx`'s `<Suspense fallback>` and `loading.tsx` — are the same
- * pair the table skeleton has, and drift between them is the same defect.
+ * Beside the component so the markup it imitates is the next thing in the file.
+ * Its two callers are the pair the table skeleton has, and drift between them
+ * is the same defect.
  */
 export function BriefingStripSkeleton() {
   return (

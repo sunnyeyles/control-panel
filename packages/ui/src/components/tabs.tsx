@@ -59,18 +59,15 @@ function TabsList({
  * What one tab looks like, lifted out of {@link TabsTrigger} so something that
  * is not a Radix trigger can wear it.
  *
- * **The active styles key off `data-active`, and that is what makes this
- * reusable.** `shadcn/tailwind.css` — imported at the top of
- * `src/styles/globals.css` — defines `data-active` as a custom variant matching
- * `[data-state="active"]` *or* a bare `[data-active]:not([data-active="false"])`.
- * Radix sets the first; anything else can set the second. So a `<Link>` that
- * carries `data-active` renders identically to the trigger below, with no
- * duplicated class string and nothing to keep in step.
+ * **The active styles key off `data-active`, which is what makes this
+ * reusable.** `shadcn/tailwind.css` defines it as a variant matching
+ * `[data-state="active"]` *or* bare `[data-active]:not([data-active="false"])`
+ * — Radix sets the first, anything else sets the second, so a `<Link>` renders
+ * identically to the trigger with nothing duplicated.
  *
- * The `group-data-*` selectors still expect the surrounding structure: an
- * element with `group/tabs` and `data-orientation`, wrapping one with
- * `group/tabs-list` and `data-variant` — which is what {@link tabsListVariants}
- * supplies.
+ * ⚠️ The `group-data-*` selectors still expect the surrounding structure:
+ * `group/tabs` + `data-orientation` wrapping `group/tabs-list` + `data-variant`,
+ * which {@link tabsListVariants} supplies.
  */
 const tabsTriggerClassName = cn(
   "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 dark:text-muted-foreground dark:hover:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",

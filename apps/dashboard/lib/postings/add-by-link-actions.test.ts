@@ -22,19 +22,15 @@ import {
 /**
  * Adding a Posting from a pasted link, and above all what it refuses.
  *
- * Two properties are worth more than the happy path here, and neither is
- * observable from outside the seam:
- *
- * 1. **Nothing is spent until every refusal has passed.** A signed-out caller,
- *    a malformed link and an advertisement already tracked must each be
- *    answered before the page is fetched and before the extractor is *built* —
- *    building it is what commits to a model. `fetches` and `extractorBuilds`
- *    below count those two separately for that reason, and an assertion on the
- *    prompt alone would pass for an implementation that fetched a page and then
- *    decided not to use it.
- * 2. **The stored URL is the one the user pasted.** The extractor is never
- *    shown a link and its schema has nowhere to return one, so the assertion
- *    here is that a model going out of its way to supply one changes nothing.
+ * 1. **Nothing is spent until every refusal has passed.** A signed-out caller, a
+ *    malformed link and an advertisement already tracked must each be answered
+ *    before the page is fetched and before the extractor is *built* — building
+ *    it is what commits to a model. `fetches` and `extractorBuilds` count those
+ *    separately; an assertion on the prompt alone would pass for an
+ *    implementation that fetched a page and then decided not to use it.
+ * 2. **The stored URL is the one the user pasted.** The extractor is never shown
+ *    a link and its schema has nowhere to return one, so the assertion is that a
+ *    model going out of its way to supply one changes nothing.
  */
 
 const NOW = new Date("2026-08-05T04:15:00.000Z")

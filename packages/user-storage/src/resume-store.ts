@@ -8,16 +8,13 @@ const KIND = "resumes" as const
 /**
  * ⚠️ **The two metadata names below are written and never read back.**
  *
- * A Document's filename and its Document Type live in `documents` in Postgres,
- * which is what the application reads. They are still stamped on the object
- * because an object that describes itself is what makes the bucket recoverable
- * — an operator reading a key in the console, or a script inserting the rows a
- * lost table used to hold, has nothing else to go on.
+ * A Document's filename and Document Type live in `documents` in Postgres,
+ * which is what the application reads. They are stamped on the object anyway so
+ * the bucket stays self-describing — an operator in the console, or a script
+ * rebuilding a lost table, has nothing else to go on.
  *
- * Nothing here validates either value against a set. This package does not know
- * what the valid Document Types are and must not learn: that list is
- * `DOCUMENT_TYPES` in `@workspace/db`, enforced by a CHECK on the column, and
- * `@workspace/db` is not a dependency of this one.
+ * Neither is validated against a set, and must not be: `DOCUMENT_TYPES` lives
+ * in `@workspace/db`, which is not a dependency of this package.
  */
 
 /** The name the file arrived with. Provenance only. */
@@ -92,17 +89,14 @@ export interface ResumeStore {
   /**
    * Every resume belonging to one user.
    *
-   * ⚠️ **`originalFilename` is always undefined here.** It lives in S3 user
-   * metadata, and ListObjectsV2 does not return it — the underlying store
-   * supplies `metadata: {}` for every listed object. `key`, `size` and
+   * ⚠️ **`originalFilename` is always undefined here** — it is S3 user
+   * metadata and ListObjectsV2 does not return it. `key`, `size` and
    * `uploadedAt` are real.
    *
-   * **This is not how the application lists a user's documents**, and using it
-   * that way is what this method used to be for. `documents` in Postgres holds
-   * the filename and the Document Type, so `listDocuments` in the dashboard is
-   * one indexed query rather than this call plus a `head()` per object. What
-   * remains here is a view of what is actually *in the bucket*, which is a
-   * different question — the one a reconciliation or a backfill asks.
+   * **Not how the application lists a user's documents**; that is
+   * `listDocuments` in the dashboard, one indexed query over `documents`. This
+   * answers the different question of what is actually *in the bucket* — what a
+   * reconciliation or a backfill asks.
    */
   list(userId: string): Promise<StoredResume[]>
 }

@@ -41,18 +41,15 @@ import {
 /**
  * The draft action's authorization and provenance branches.
  *
- * Every claim the ticket makes about this feature is a claim about something
- * that cannot be seen from the happy path: that a form-supplied Posting is
- * ignored, that another user's Posting can neither be drafted for nor told
- * apart from one nobody has, that a user with no readable CV costs no model
- * call, and that a redraft overwrites one object. The action takes its
- * dependencies through a `createXActions(deps)` seam and imports nothing from
- * Next precisely so all four are reachable here.
+ * Every claim the ticket makes is invisible from the happy path: that a
+ * form-supplied Posting is ignored, that another user's Posting can neither be
+ * drafted for nor told apart from one nobody has, that a user with no readable
+ * CV costs no model call, and that a redraft overwrites one object.
  *
  * The storage side is the **real** `createCoverLetterStore` over an in-memory
- * `UserObjectStore`, not a stub that records a key someone typed into the test.
- * The key assertions therefore exercise the facade and `buildObjectKey`
- * together, which is what makes "writes the expected key" mean anything.
+ * `UserObjectStore`, so the key assertions exercise the facade and
+ * `buildObjectKey` together — which is what makes "writes the expected key" mean
+ * anything.
  */
 
 const NOW = new Date("2026-08-03T04:15:00.000Z")

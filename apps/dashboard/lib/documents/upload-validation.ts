@@ -2,18 +2,14 @@
  * Everything about an upload that can be decided without S3, without Next, and
  * without a session.
  *
- * No imports at all, on purpose. The accepted extensions arrive as a parameter
- * rather than being read from `@workspace/user-storage`, so this module's tests
- * need no workspace package built and no environment configured — which is what
- * makes it realistic to test the awkward filename cases exhaustively.
+ * No imports at all, on purpose: the accepted extensions arrive as a parameter,
+ * so the tests need no workspace package built and no environment configured —
+ * which is what makes the awkward filename cases realistic to cover.
  *
  * The size ceilings live here rather than in `@workspace/user-storage` because
- * they are not a property of the storage. That package validates keys, kinds
- * and content types and states plainly that it does no size validation; the
- * limits below exist because of how *Next* buffers a request body and what
- * Vercel's platform will carry. Moving them into the storage package would put
- * a transport constraint behind an interface that has nothing to do with
- * transport.
+ * they are not a property of the storage: they exist because of how *Next*
+ * buffers a request body and what Vercel's platform carries. Moving them there
+ * would put a transport constraint behind an interface unrelated to transport.
  */
 
 /**
@@ -28,22 +24,18 @@ export const MAX_DOCUMENT_BYTES = 3 * 1024 * 1024
 /**
  * The largest request body, checked against the `content-length` header.
  *
- * Larger than `MAX_DOCUMENT_BYTES` because a multipart body carries boundaries,
- * field names and headers around the file. The gap is generous; this limit is
- * not trying to be precise, it is trying to reject something enormous before
- * the bytes are read into memory.
+ * Larger than `MAX_DOCUMENT_BYTES` because a multipart body carries boundaries
+ * and headers around the file. Not precise — just enough to reject something
+ * enormous before the bytes are read into memory.
  *
  * ⚠️ **Used only to reject, never to accept.** `content-length` is
- * client-supplied. Its value in this design is narrow but real: Next's proxy
- * body buffering truncates an oversized body *silently* rather than failing,
- * and a truncated body's parsed `File.size` reports the truncated length — so
- * the file's own size can only ever under-report. The header is not rewritten
- * by truncation, which makes it the one honest witness to how large the request
- * claimed to be. A liar that only ever lies downward is still useful for
- * catching the too-big case.
+ * client-supplied, but Next's proxy buffering truncates an oversized body
+ * *silently*, and a truncated `File.size` reports the truncated length — so the
+ * file's own size only ever under-reports. Truncation does not rewrite the
+ * header, which makes it the one honest witness to the claimed size.
  *
  * Must stay strictly **below** {@link MAX_ACTION_BODY_BYTES}, or Next refuses
- * the request before the action runs and this check never gets to speak.
+ * the request before the action runs and this check never speaks.
  */
 export const MAX_REQUEST_BYTES = 4 * 1024 * 1024
 
@@ -52,40 +44,28 @@ export const MAX_REQUEST_BYTES = 4 * 1024 * 1024
  * this constant rather than restating it.
  *
  * ⚠️ **The gap above `MAX_REQUEST_BYTES` is the whole point of the number.**
- * These two were both 4 MiB, which is not a ladder — it is a tie, and Next won
- * it. Next enforces its own limit on the body as it streams, before the action
- * function is ever called, so at parity the friendly "That upload is too large."
- * was unreachable through the UI and every real oversized upload surfaced as a
- * generic Server Action error instead. A limit whose error message cannot be
- * reached is not a limit, it is a comment.
+ * Both were 4 MiB, which is a tie rather than a ladder, and Next won it: it
+ * enforces its limit as the body streams, before the action is called, so the
+ * friendly "That upload is too large." was unreachable and every oversized
+ * upload surfaced as a generic Server Action error.
  *
- * Bounded on the other side by Vercel's ~4.5 MB platform cap, which is enforced
- * before the request reaches Next and which no code here can turn into a
- * friendly message. So this value has to sit strictly between the two.
- *
- * Derived from `MAX_REQUEST_BYTES` rather than written as its own number, so
- * that raising one cannot silently re-create the tie — which is the mistake
- * this constant exists to undo. 128 KiB of headroom is far more than a
- * multipart envelope needs and still leaves ~175 KB under the platform cap.
- * (`4.2 * 1024 * 1024` would have been the obvious literal and is not a whole
- * number of bytes.)
+ * Bounded on the other side by Vercel's ~4.5 MB platform cap, enforced before
+ * the request reaches Next and unreachable by any message here — so this sits
+ * strictly between the two. Derived rather than written out, so raising one
+ * cannot silently re-create the tie.
  */
 export const MAX_ACTION_BODY_BYTES = MAX_REQUEST_BYTES + 128 * 1024
 
 /**
  * `experimental.proxyClientMaxBodySize` in `next.config.ts` — the top rung.
  *
- * Here for the same reason as the rung below it. Deriving the action limit from
- * `MAX_REQUEST_BYTES` fixed one tie and left this one written out as `"6mb"` in
- * a different file, in a different unit, related to the others only by prose —
- * which is exactly the arrangement that produced the tie in the first place.
- * Raising `MAX_REQUEST_BYTES` past ~5.87 MiB would have silently inverted the
- * pair `next.config.ts` warns loudest about, with nothing failing.
+ * Here for the same reason as the rung below. This was written out as `"6mb"` in
+ * another file in another unit, related to the others only by prose — the same
+ * arrangement that produced the tie, and raising `MAX_REQUEST_BYTES` past
+ * ~5.87 MiB would have inverted the pair with nothing failing.
  *
- * The gap is generous because this rung is not a limit anyone should reach:
- * exceeding it truncates the buffered body *without failing the request*, so
- * the design is for the action limit to always bind first. See the comment in
- * `next.config.ts` for what truncation would mean.
+ * ⚠️ Exceeding this rung truncates the buffered body *without failing the
+ * request*, so the action limit must always bind first.
  */
 export const MAX_PROXY_BUFFER_BYTES = MAX_ACTION_BODY_BYTES + 2 * 1024 * 1024
 
@@ -108,10 +88,9 @@ export interface UploadCandidate {
  * `.pdf`. A double extension is the oldest trick for getting an executable past
  * a filter that stops at the first dot it finds.
  *
- * Returns undefined for a name with no dot, a name ending in a dot, and a name
- * that is nothing but an extension (`.pdf`) — the last because such a name has
- * no basename, and it is far more likely to be a dotfile or a mangled upload
- * than a document someone meant to send.
+ * Returns undefined for a name with no dot, one ending in a dot, and one that is
+ * nothing but an extension (`.pdf`) — the last has no basename, so it is a
+ * dotfile or a mangled upload rather than a document someone meant to send.
  */
 export function extensionOf(filename: string): string | undefined {
   const trimmed = filename.trim()

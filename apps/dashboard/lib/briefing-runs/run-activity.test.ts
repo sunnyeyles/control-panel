@@ -8,14 +8,12 @@ import { runActivityForUser, type RunActivity } from "./run-activity"
  * run that recorded nothing is shown as.
  *
  * That case was the silence: `succeeded`, an unchanged Postings table, and "Last
- * ran 5 minutes ago" as the only thing the user was told, whether the run had
- * added twenty postings or none. The worker now writes a sentence into
- * `runs.failure` on the succeeded row — which is what that column is for — and
- * this is the read that surfaces it.
+ * ran 5 minutes ago" whether the run had added twenty postings or none. The
+ * worker now writes a sentence into `runs.failure` on the succeeded row — which
+ * is what that column is for — and this is the read that surfaces it.
  *
  * Driven through `runActivityForUser` with a fake `$queryRaw`, because the state
- * machine it implements is not exported and should not be: the interesting
- * behaviour is "a row like this shows like that".
+ * machine it implements is not exported and should not be.
  */
 
 const USER_ID = "33333333-3333-4333-8333-333333333333"

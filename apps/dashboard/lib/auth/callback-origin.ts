@@ -1,48 +1,27 @@
 /**
  * Where OAuth should send the browser back to, decided on the server.
  *
- * Its own module with no imports, for the reason `content-disposition.ts` is
- * one: the thing it serves is a client component, and `lib/auth/server.ts` next
- * door reaches the auth SDK — so a rule expressed inline at the call site is a
- * rule nothing can exercise.
+ * Its own module with no imports: what it serves is a client component, and a
+ * rule expressed inline at the call site is a rule nothing can exercise.
  *
- * ⚠️ **The origin this returns has to be a Neon Auth trusted domain, or
- * sign-in does not start at all.** The auth server checks `callbackURL` against
- * that allowlist *before* it checks the provider, and an origin missing from it
- * comes back as `403 INVALID_CALLBACKURL`.
+ * ⚠️ **The origin this returns has to be a Neon Auth trusted domain, or sign-in
+ * does not start at all.** The auth server checks `callbackURL` against the
+ * allowlist *before* the provider, answering `403 INVALID_CALLBACKURL`.
  *
- * That is what every preview deployment used to get. Vercel mints a fresh
- * `control-panel-<hash>-….vercel.app` host per deployment and links exactly
- * that host from the PR comment, so `window.location.origin` there names a host
- * nobody has trusted — and nobody sensibly could, since the allowlist would need
- * a new entry per build. It had 57 hand-added hashes and matched none of the 20
- * most recent deployments.
+ * Vercel mints a fresh `control-panel-<hash>-….vercel.app` host per deployment,
+ * so `window.location.origin` on a preview names a host nobody has trusted and
+ * nobody sensibly could. `VERCEL_BRANCH_URL` is the stable per-branch alias, so
+ * one `neon neon-auth domain add` per branch covers every build on it — and the
+ * session cookie is set for the origin OAuth returns to, so landing on the alias
+ * is the point rather than a side effect.
  *
- * `VERCEL_BRANCH_URL` is the stable per-branch alias for that same deployment,
- * so one `neon neon-auth domain add` per branch covers every build on the
- * branch. Landing on the alias rather than the hash host is the point, not a
- * side effect: the session cookie is set for the origin OAuth returns to, and
- * the alias is the origin that stays valid for the next push.
+ * Nothing here adds that entry; `.github/workflows/preview-auth-domain.yml`
+ * does, against main's instance, which is the list a preview falling back to
+ * main's `NEON_AUTH_BASE_URL` is checked against.
  *
- * **Nothing here adds that entry, and for a year nothing did.** One command per
- * branch is a treadmill slow enough to walk and still a treadmill: the list
- * reached 103 entries of which three were branch aliases, and every open pull
- * request's preview was refused. `.github/workflows/preview-auth-domain.yml`
- * now runs the command on `pull_request` and removes the entry when the pull
- * request closes, so this module's half of the arrangement can be relied on.
- *
- * **Which allowlist that entry lands on depends on where the deployment's
- * `NEON_AUTH_BASE_URL` points.** Once a preview reaches the auth instance Neon
- * provisions for its own branch — see `requiredFromIntegration` in
- * `lib/auth/server.ts` — the integration maintains that instance's list itself,
- * adding both this alias and the per-deployment host, and the workflow has
- * nothing left to do. It stays because production and any deployment still
- * falling back to main's instance are checked against main's list.
- *
- * A wildcard entry is not the alternative. Neon wildcards a whole hostname
- * segment (`https://*.example.com`), and Vercel varies the hash *inside* the
- * first label, so the only pattern that would match is `https://*.vercel.app` —
- * every Vercel site on the internet, trusted as a redirect target.
+ * A wildcard is not the alternative: Neon wildcards a whole hostname segment
+ * and Vercel varies the hash *inside* the first label, so the only pattern that
+ * matches is `https://*.vercel.app` — every Vercel site on the internet.
  */
 
 export interface CallbackOriginEnv {

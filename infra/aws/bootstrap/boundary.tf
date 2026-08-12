@@ -1,25 +1,20 @@
 # The ceiling on every role CI creates.
 #
-# The problem this solves is specific. The deploy role holds `iam:CreateRole`,
-# `iam:AttachRolePolicy` and `iam:PassRole`, because Terraform genuinely needs
-# all three to build the stacks. Ungoverned, that composes into full
-# administrator: create a role, attach `AdministratorAccess` to it, pass it to a
-# Lambda, invoke the Lambda. Anything that can push to `main` can do that, and
-# no amount of care in `deploy-*.tf` prevents it — the three grants are each
-# individually reasonable and the escalation is in their combination.
+# ⚠️ The deploy role holds `iam:CreateRole`, `iam:AttachRolePolicy` and
+# `iam:PassRole` — each individually reasonable, and together full administrator:
+# create a role, attach `AdministratorAccess`, pass it to a Lambda, invoke it.
+# Anything that can push to `main` could do that, and no care in `deploy-*.tf`
+# prevents it.
 #
-# A permissions boundary caps what a role can do *regardless of what is attached
-# to it*. The effective permissions of a bounded role are the intersection of its
-# policies and this document, so `AdministratorAccess` on a role bounded by this
-# grants exactly what is written below and nothing more.
+# A boundary caps a role *regardless of what is attached to it* — effective
+# permissions are the intersection — so `AdministratorAccess` on a role bounded
+# by this grants exactly what is below. `deploy-iam.tf` conditions role creation
+# on the boundary being set, which makes the cap unavoidable rather than merely
+# available.
 #
-# `deploy-iam.tf` then conditions role creation on this boundary being set, which
-# is what makes the cap unavoidable rather than merely available.
-#
-# What belongs here: the union of what every *workload* role legitimately needs —
-# not what any one of them needs. It is a ceiling, so it is allowed to be wider
-# than any individual role's own policy. What must never appear here is anything
-# in the `iam:` namespace, which is denied outright at the bottom.
+# What belongs here is the union of what every *workload* role needs; a ceiling
+# may be wider than any individual role's policy. Nothing in the `iam:`
+# namespace may ever appear — it is denied outright at the bottom.
 data "aws_iam_policy_document" "workload_boundary" {
   # Writing logs. `CreateLogGroup` is included even though Terraform owns the
   # groups: a boundary that forbids it turns the log-group race described in

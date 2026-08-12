@@ -140,22 +140,16 @@ function readCriteria(formData: FormData): CriteriaRead {
     maxPostings: formData.get("maxPostings"),
   })
 
-  // Titles and locations are not optional: the worker's `JobSearchConfigSchema`
-  // requires both, so a job created without them would claim its first slot and
-  // then fail to read its own config.
-  //
-  // ⚠️ **Two of the three optional-ish fields can reach here too**, and
-  // answering either with the generic sentence would name the wrong field.
-  // Optional means "may be empty", not "unbounded" — and the title cap is not
-  // about paste size at all.
+  // Titles and locations are not optional: the worker requires both, so a job
+  // created without them claims its first slot and then fails to read its own
+  // config. The optional fields can fail here too — optional means "may be
+  // empty", not "unbounded".
   if (!criteria.success) {
-    // ⚠️ **A field is named only when it is the *only* thing wrong.** Asking
-    // whether it merely appears among the issues gets the common case right and
-    // the overlapping one backwards: a submit that fails on an empty `titles`
-    // *and* an over-cap `keywords` would be answered with the keyword sentence,
-    // so the user trims the list, submits again, and only then learns about the
-    // field that was blocking them all along. One failure, two round trips, and
-    // the first message named a field that was not the obstacle.
+    // ⚠️ **A field is named only when it is the *only* thing wrong.** Matching
+    // on mere presence among the issues gets the overlapping case backwards: an
+    // empty `titles` plus an over-cap `keywords` would be answered with the
+    // keyword sentence, so the user trims the list and only then learns what
+    // was actually blocking them.
     const failed = new Set(criteria.error.issues.map((issue) => issue.path[0]))
     const only = (field: string) => failed.size === 1 && failed.has(field)
 
@@ -197,10 +191,9 @@ function readCriteria(formData: FormData): CriteriaRead {
   }
 
   // ⚠️ **The combination, not either field alone.** Three titles is fine and
-  // four locations is fine; together they are a sweep the scout is routed to
-  // `halt` partway through, which still produces a well-formed brief covering
-  // less than it was asked to. That failure is invisible from the outside,
-  // which is why it is refused here rather than warned about.
+  // four locations is fine; together the scout is routed to `halt` partway
+  // through and still produces a well-formed brief covering less than it was
+  // asked to. Invisible from the outside, so refused rather than warned about.
   if (
     !fitsSearchBudget(
       criteria.data.titles.length,
@@ -218,27 +211,20 @@ function readCriteria(formData: FormData): CriteriaRead {
    * No keywords means the field is *absent* from `config`, not present and
    * empty.
    *
-   * The worker accepts `keywords: []` happily, so this is not about validation.
-   * It is about what the row says: an absent field and an empty one should not
-   * both have to mean "none", and a stored `[]` reads as a choice the user made
-   * — someone (or something) having decided this briefing should match on no
-   * technologies in particular. Leaving the key out keeps "never said"
-   * distinguishable from "said none", which is the only form the question can
-   * be asked in later.
+   * Not validation — the worker accepts `keywords: []` happily. It is about
+   * what the row says: a stored `[]` reads as a choice somebody made, so
+   * leaving the key out keeps "never said" distinguishable from "said none".
    */
   const { keywords, maxPostings, ...requiredCriteria } = criteria.data
 
-  // `optionalCriteriaList` pipes to a plain `z.array(...)`, so this is always a
-  // `string[]` — an unfilled field arrives as `[]`, never as `undefined`.
-  // Spelling the test `.length > 0` rather than `?.length` says that: an
-  // optional chain here would imply an absent case the type forbids, and would
-  // keep working if the schema ever grew one, which is precisely the change
-  // that should fail loudly instead.
+  // `.length > 0` rather than `?.length`: `optionalCriteriaList` always yields
+  // a `string[]`, and an optional chain would imply an absent case the type
+  // forbids — and would keep working if the schema grew one, which is the
+  // change that should fail loudly instead.
   //
-  // `maxPostings` is left out on the same principle and for a stronger reason:
-  // an absent field means "whatever the default is", so a briefing created
-  // today follows the default when it changes, where a stored `20` would pin
-  // this row to today's number for ever.
+  // `maxPostings` is omitted for a stronger reason: an absent field means
+  // "whatever the default is", where a stored `20` pins this row to today's
+  // number for ever.
   return {
     ok: true,
     config: {
@@ -396,23 +382,13 @@ export function createJobActions(deps: JobActionsDeps) {
   /**
    * Change what an existing briefing searches for.
    *
-   * The criteria were write-once until this existed: the card showed a name, a
-   * switch and a cadence, and changing a role title meant deleting the briefing
-   * and building another — losing its name, its schedule and the fact that it
-   * had been running. That was tolerable while the fields were three text boxes
-   * typed once; it stopped being tolerable the moment the point of the feature
-   * became *tuning* them after reading a thin brief.
-   *
-   * ⚠️ **Its `resetKey` is the job's id, and is therefore constant.** The
-   * shared union requires the field on success, and every other action here
-   * mints a fresh uuid because theirs is a form that should return to a blank
-   * state. This one is an edit form over stored values: a changing key would
-   * remount it and discard the very fields that were just saved, rebuilding
-   * them from a server render that has not landed yet — the row flickering back
-   * to its old titles for as long as the `refresh()` in the wrapper takes. A
-   * constant makes that impossible whether the form keys on it or not.
-   * `carryResetKey` still holds the previous key through a failure, so a
-   * rejected save leaves what the user typed alone.
+   * ⚠️ **Its `resetKey` is the job's id, and is therefore constant**, unlike
+   * every other action here, which mints a fresh uuid to blank its form. This
+   * is an edit form over stored values: a changing key would remount it and
+   * discard the fields just saved, rebuilding them from a server render that
+   * has not landed — the row flickering back to its old titles for as long as
+   * the wrapper's `refresh()` takes. `carryResetKey` still holds the previous
+   * key through a failure, so a rejected save leaves the typing alone.
    */
   async function updateJobCriteriaAction(
     state: ActionState,
@@ -480,13 +456,11 @@ function storeMessage(operation: "create" | "update", error: unknown): string {
       case "invalid_schedule":
         return INVALID_INTERVAL
 
-      // No `database_unavailable` branch: @workspace/db no longer declares that
-      // code, because nothing ever threw it — a connection or permission fault
-      // arrives as Prisma's own error, never satisfies `isDbError`, and so
-      // reaches the "Something went wrong." at the end of this function, which
-      // is what it always did. It does not reach the `default` below. That
-      // `never` is what will demand a branch here the day a second code is
-      // added.
+      // No `database_unavailable` branch: `@workspace/db` no longer declares
+      // that code. A connection or permission fault arrives as Prisma's own
+      // error, never satisfies `isDbError`, and falls through to the
+      // "Something went wrong." below rather than reaching this `default`. The
+      // `never` demands a branch the day a second code is added.
       default: {
         const _exhaustive: never = error.code
         return _exhaustive

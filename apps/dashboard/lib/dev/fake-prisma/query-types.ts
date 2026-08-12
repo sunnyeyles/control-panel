@@ -44,14 +44,12 @@ export interface FindManyJobs {
  * explicit list of ids.
  *
  * **`userId` is not optional and must not become so.** A Posting is not
- * addressable without naming a user — that is what makes filtering on the
- * natural key an ownership check rather than a shortcut past one, in
- * `@workspace/db` and here.
+ * addressable without naming a user, which is what makes filtering on the
+ * natural key an ownership check rather than a shortcut past one.
  *
- * `postingId.in` is what `ownedPostingIds()` and `deletePostings()` add. Only
- * the `in` form is understood; a bare string or any other operator falls
- * through to {@link matchesPostingWhere}, which throws by name rather than
- * quietly matching everything and deleting a page.
+ * Only the `in` form of `postingId` is understood; anything else falls through
+ * to {@link matchesPostingWhere}, which throws by name rather than quietly
+ * matching everything and deleting a page.
  */
 export interface PostingWhere {
   userId: string
@@ -60,12 +58,10 @@ export interface PostingWhere {
    * The "not scored against this document" predicate, and the only `OR` this
    * fake understands.
    *
-   * ⚠️ **Two arms, and dropping either would break the loop it serves in
-   * opposite directions.** `unmatchedAgainst()` in `@workspace/db` spells it
-   * out rather than relying on a `not` filter's null handling; matching only
-   * the `not` arm here would hide every Posting nobody has scored — the ones
-   * the loop exists to find — and matching only the `null` arm would never
-   * re-score after the user uploads a new CV.
+   * ⚠️ **Two arms, and dropping either breaks the loop in opposite
+   * directions.** Only the `not` arm hides every Posting nobody has scored — the
+   * ones the loop exists to find; only the `null` arm never re-scores after a
+   * new CV is uploaded.
    */
   OR?: readonly PostingMatchClause[]
   /**
@@ -100,14 +96,11 @@ export interface PostingsForUser {
  * What `listPostings()` asks for.
  *
  * ⚠️ **`select` is applied for real, and it used not to be.** Answering the
- * whole row was defensible while every selected field was a column: the answer
- * was a superset of the question, and no caller could tell. It stopped being
- * defensible the moment the `select` named a **relation** — a whole `postings`
- * row does not carry `lastSeenRun`, so ignoring the `select` handed the page an
- * `undefined` where a Briefing's name belonged and the dialog rendered a blank.
- * Silently, in the one environment the dialog is built in. See
- * {@link DevDb.projectPosting}, which throws on a shape it cannot serve rather
- * than repeating that.
+ * whole row was defensible while every selected field was a column, and stopped
+ * being so the moment a `select` named a **relation**: a `postings` row carries
+ * no `lastSeenRun`, so the dialog rendered a blank Briefing name, silently, in
+ * the one environment it is built in. {@link DevDb.projectPosting} now throws on
+ * a shape it cannot serve.
  */
 export interface FindManyPostings extends PostingsForUser {
   orderBy?: PostingOrderBy[]
@@ -130,13 +123,12 @@ export interface NestedSelect {
 /**
  * One clause, as Prisma spells it.
  *
- * Two spellings, because Prisma has two: `{ field: "desc" }` for a column that
- * cannot be null, and `{ field: { sort: "desc", nulls: "last" } }` for one that
- * can. `postings.posted_at` is the only nullable column this table orders by,
- * and it uses the second — see `orderByFor` in `lib/postings/list-postings.ts`.
+ * Two spellings, because Prisma has two: `{ field: "desc" }` for a non-nullable
+ * column and `{ field: { sort, nulls } }` for a nullable one.
+ * `postings.posted_at` is the only nullable column this table orders by.
  *
- * Exported so `list-postings.test.ts`'s own `FakeDb` can type its `orderBy`
- * against the same shape instead of restating it under a different name.
+ * Exported so `list-postings.test.ts`'s `FakeDb` types its `orderBy` against the
+ * same shape rather than restating it.
  */
 export type PostingOrderBy = Record<string, SortDirection | NullableSort>
 
@@ -206,16 +198,13 @@ export interface RunningRunQuery {
 /**
  * The columns every Postings filter in this app is written against.
  *
- * `matchResumeId` is optional so that the narrower doubles which share this
- * predicate — `posting-actions.test.ts` builds one — do not have to carry a
- * column their `where` never mentions. Absent is read as NULL, which is what an
- * unscored Posting holds.
+ * `matchResumeId` is optional so narrower doubles sharing this predicate need
+ * not carry a column their `where` never mentions; absent reads as NULL, which
+ * is what an unscored Posting holds.
  *
- * `titleNormalized` is optional because the delete path builds its own rows from
- * the two identifying columns and has no title in hand — and because a `where`
- * with no exclusion in it never reads the field. A row that *is* filtered on and
- * carries no value is a fixture that has drifted, and
- * {@link matchesPostingWhere} says so by name rather than silently admitting it.
+ * `titleNormalized` is optional because the delete path has no title in hand. A
+ * row that *is* filtered on and carries no value is a drifted fixture, and
+ * {@link matchesPostingWhere} says so by name rather than admitting it.
  */
 export interface PostingKey {
   userId: string

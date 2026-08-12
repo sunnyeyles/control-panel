@@ -9,32 +9,23 @@ import { searchApiPost } from "../internal/http.ts"
 /**
  * Retrieve one advertisement from the board that serves it, by its own URL.
  *
- * ⚠️ **This is deliberately not a tool**, for the reason `page-extract.ts` gives
- * at greater length: a plain function, handed to no agent. Unlike that one this
- * sits under `boards/` — where a tool is perfectly ordinary, `posting-details.ts`
- * being one — so R9's directory rule cannot carry the case and the assertion in
- * `by-url.test.ts` is the whole guard. It lives here rather than beside the
- * other fetcher because it answers the same question by a board's own actor,
- * and only the general path involves a model afterwards.
+ * ⚠️ **This is deliberately not a tool**, for the reason `page-extract.ts`
+ * gives at greater length: a plain function, handed to no agent. It sits under
+ * `boards/`, where a tool is ordinary, so R9's directory rule cannot carry the
+ * case — the assertion in `by-url.test.ts` is the whole guard.
  *
- * **What this buys over the general fetcher is the absence of a model.** Tavily
- * returns a page, and a page has to be read by something — the Posting Extractor,
- * which costs a model call and can get the reading wrong. An actor returns
- * `title`, `company`, `location` and `descriptionMarkdown` as fields the board
- * itself published, so the same Posting arrives with nothing between the board
- * and the row. Cheaper, deterministic, and with no extraction step to be wrong
- * about. It also side-steps the one thing `page-extract.ts` cannot promise: SEEK
- * and Indeed are exactly the hosts most likely to serve a general fetcher a bot
- * wall, and an actor built for the board is how the scout reaches them already.
+ * **What it buys over the general fetcher is the absence of a model.** An actor
+ * returns `title`, `company`, `location` and `descriptionMarkdown` as the board
+ * published them, so the Posting arrives with no extraction step to get it
+ * wrong. It also side-steps the bot walls SEEK and Indeed serve a general
+ * fetcher.
  *
- * The trade is coverage. Only a board with a {@link ApifyBoardSpec.byUrl} can
- * answer here — which is SEEK and Indeed, and not LinkedIn, whose actor takes
- * search URLs only. Everything else in the world falls past this to the general
- * fetcher, which is the whole reason that one exists.
+ * The trade is coverage: only a board with a {@link ApifyBoardSpec.byUrl} can
+ * answer — SEEK and Indeed, not LinkedIn, whose actor takes search URLs only.
+ * Everything else falls past to the general fetcher.
  *
- * **Retrieval is delegated here too.** The request goes to Apify and Apify
- * fetches the page, so this process still never opens a socket to a host
- * somebody typed into a form.
+ * **Retrieval is delegated here too**, so this process still never opens a
+ * socket to a host somebody typed into a form.
  */
 
 /**
