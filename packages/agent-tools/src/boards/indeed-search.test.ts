@@ -13,7 +13,7 @@ import {
   requestBody,
   sequentialCatalog,
   type Capture,
-} from "./test-support/search-fakes.ts"
+} from "../test-support/search-fakes.ts"
 
 /**
  * What is true of Indeed and of no other board: the actor it runs, the request

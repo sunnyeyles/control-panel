@@ -13,7 +13,7 @@ import {
 import {
   TLDRAW_SHAPE_ID_PREFIX,
   type CanvasOp,
-} from "@workspace/agent-tools/canvas-schema"
+} from "@workspace/whiteboard-schema"
 
 import { noteAgentEdit } from "./recent-edits"
 import { geoValueFor, isGeoKind, shapeTypeFor } from "./shape-kinds"

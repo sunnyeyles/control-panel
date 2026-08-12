@@ -10,7 +10,7 @@
 import {
   createPostingCatalog,
   type PostingCatalog,
-} from "../posting-catalog.ts"
+} from "../boards/posting-catalog.ts"
 
 /** The token every Apify-backed suite injects. */
 export const API_TOKEN = "apify-test-token"

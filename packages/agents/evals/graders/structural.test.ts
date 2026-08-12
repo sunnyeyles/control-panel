@@ -9,7 +9,7 @@
  * all because it comes with a number attached.
  */
 
-import type { BoardShape, CanvasOp } from "@workspace/agent-tools/canvas-schema"
+import type { BoardShape, CanvasOp } from "@workspace/whiteboard-schema"
 import { describe, expect, it } from "vitest"
 
 import { board, shape } from "../cases/support.ts"

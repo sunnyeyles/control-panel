@@ -13,10 +13,11 @@ get re-derived per feature, and the derivations disagree — which is exactly ho
 the same dependency came to be called `createWriter`, `createTailor`,
 `createAssessor`, `createExtractor` and `createAgent` in seven files.
 
-**Rules R1, R2, R3, R5 and R8 are enforced by tests**, in
-`apps/dashboard/lib/naming.test.ts` and `packages/agents/src/naming.test.ts`.
-ESLint cannot do it: `eslint-plugin-only-warn` downgrades every rule, so
-`pnpm lint` exits 0 regardless. The rest are conventions a reviewer upholds.
+**Rules R1, R2, R3, R5, R8 and R9 are enforced by tests**, in
+`apps/dashboard/lib/naming.test.ts`, `packages/agents/src/naming.test.ts` and
+`packages/agent-tools/src/naming.test.ts`. ESLint cannot do it:
+`eslint-plugin-only-warn` downgrades every rule, so `pnpm lint` exits 0
+regardless. The rest are conventions a reviewer upholds.
 
 ---
 
@@ -196,6 +197,38 @@ held the Postings table.
 concepts (`lib/postings/`, `lib/candidate/`, `lib/briefing-runs/`), several of
 which serve more than one route. A component belongs to a page; a module belongs
 to a concept.
+
+## R9 — a tool in `@workspace/agent-tools` is named for the model, and lives in its domain
+
+Three parts, all tested by `packages/agent-tools/src/naming.test.ts`, which
+builds every tool the package can produce and asserts against the real `name` a
+model would see.
+
+**A tool name is `snake_case` and unique across the catalog.** `seek_search`,
+`get_posting_details`, `draw_diagram`. Uniqueness is not a style preference:
+`createToolRegistry` in `@workspace/agents-core` throws on a duplicate, so a
+collision is a runtime failure at agent construction — far from the edit that
+caused it, and only on the agent unlucky enough to carry both.
+
+**A module goes in the directory of the domain it serves**, not in one named for
+whether it is a tool: `boards/`, `whiteboard/`, `pages/`, or the package root
+for the two that serve no domain. A tool is a thin wrapper over the support code
+beside it, and splitting tools from support would put every feature in two
+places. `internal/` is the exception and holds what has no domain at all — the
+shared HTTP transport — and is not in the exports map.
+
+**No tool may live under `pages/`.** That directory holds the general page
+fetchers, which retrieve a URL somebody else chose; `OVERVIEW.md` sets out why
+one must not be handed to an agent casually. The test imports every module there
+and fails on any export with a tool's shape. This replaced an older assertion
+that the fetchers were "absent from `allTools`" — weaker in both directions,
+since a tool could satisfy it by staying out of one array, and that array no
+longer exists.
+
+The rule has one deliberate gap, stated so it is not read as an oversight:
+`boards/by-url.ts` is also a fetcher and also not a tool, but it sits under
+`boards/` where tools are ordinary — `posting-details.ts` is one. The directory
+rule cannot carry that case, so `by-url.test.ts` asserts it locally.
 
 ---
 

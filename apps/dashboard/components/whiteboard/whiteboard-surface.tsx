@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useRef, useState } from "react"
-import type { CanvasOp } from "@workspace/agent-tools/canvas-schema"
+import type { CanvasOp } from "@workspace/whiteboard-schema"
 import { Button } from "@workspace/ui/components/button"
 import { cn } from "@workspace/ui/lib/utils"
 import { PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react"

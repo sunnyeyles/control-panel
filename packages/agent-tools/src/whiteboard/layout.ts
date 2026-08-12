@@ -5,7 +5,11 @@
  * and so a new `Layout` variant fails to compile until a case exists.
  */
 
-import type { BoardConnection, BoardShape, Layout } from "./canvas-schema.ts"
+import type {
+  BoardConnection,
+  BoardShape,
+  Layout,
+} from "@workspace/whiteboard-schema"
 import { layerGraph } from "./graph-layout.ts"
 
 /**

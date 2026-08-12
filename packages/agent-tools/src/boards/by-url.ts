@@ -4,16 +4,18 @@ import {
   requireApifyToken,
   type ApifyBoardSpec,
 } from "./apify-search.ts"
-import { searchApiPost } from "./search-http.ts"
+import { searchApiPost } from "../internal/http.ts"
 
 /**
  * Retrieve one advertisement from the board that serves it, by its own URL.
  *
  * ⚠️ **This is deliberately not a tool**, for the reason `page-extract.ts` gives
- * at greater length: a plain function, absent from `allTools`, handed to no
- * agent. It sits beside that module rather than inside it because they answer
- * the same question by different means and only one of them involves a model
- * afterwards.
+ * at greater length: a plain function, handed to no agent. Unlike that one this
+ * sits under `boards/` — where a tool is perfectly ordinary, `posting-details.ts`
+ * being one — so R9's directory rule cannot carry the case and the assertion in
+ * `by-url.test.ts` is the whole guard. It lives here rather than beside the
+ * other fetcher because it answers the same question by a board's own actor,
+ * and only the general path involves a model afterwards.
  *
  * **What this buys over the general fetcher is the absence of a model.** Tavily
  * returns a page, and a page has to be read by something — the Posting Extractor,

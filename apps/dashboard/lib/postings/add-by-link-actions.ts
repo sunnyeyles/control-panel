@@ -1,11 +1,11 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
-import { extractPageViaApify } from "@workspace/agent-tools/page-extract-apify"
+import { extractPageViaApify } from "@workspace/agent-tools/pages/page-extract-apify"
 import {
   extractPage,
   type PageExtractResult,
-} from "@workspace/agent-tools/page-extract"
+} from "@workspace/agent-tools/pages/page-extract"
 import type { Agent } from "@workspace/agents"
 import {
   fetchPostingByUrl,
@@ -66,9 +66,9 @@ import { z } from "zod"
  * 1. **Nothing in this process opens a socket to the host the user named.** The
  *    retrieval is a POST to Tavily or to Apify, and they fetch the page — so
  *    there is no SSRF surface, no redirect chain to bound, and no streaming
- *    response to cut off. See `@workspace/agent-tools/page-extract`,
- *    `@workspace/agent-tools/page-extract-apify` and
- *    `@workspace/agent-tools/board-posting`, none of which is a tool.
+ *    response to cut off. See `@workspace/agent-tools/pages/page-extract`,
+ *    `@workspace/agent-tools/pages/page-extract-apify` and
+ *    `@workspace/agent-tools/boards/by-url`, none of which is a tool.
  * 2. **The page reaches exactly one agent, and that agent has no tools.**
  *    `cover-letter-writer.ts` and `resume-tailor.ts` both say a page fetcher,
  *    when it exists, "goes on a separate agent that never sees the profile, and

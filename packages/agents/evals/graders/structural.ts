@@ -18,7 +18,7 @@
  *   throw away the only signal that says whether a change helped.
  */
 
-import type { BoardShape, CanvasOp } from "@workspace/agent-tools/canvas-schema"
+import type { BoardShape, CanvasOp } from "@workspace/whiteboard-schema"
 
 import type { EvalCase, Score, TurnResult } from "../types.ts"
 

@@ -43,7 +43,7 @@ import type {
   CatalogEntry,
   PostingCatalog,
 } from "./posting-catalog.ts"
-import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
+import { clampMaxResults, requireEnv, searchApiPost } from "../internal/http.ts"
 import type { SearchLog } from "./search-log.ts"
 
 /** Caps every actor run server-side, in seconds. */
@@ -105,7 +105,7 @@ export interface ResolvedBoardSearch {
  * Every field is optional for the reason `BoardPosting`'s are: these are
  * community-maintained scrapers, and a missing field is something to render
  * around. What happens when the mandatory ones are missing is
- * `board-posting.ts`'s decision, not a board's.
+ * `by-url.ts`'s decision, not a board's.
  */
 export interface BoardAdvertisement {
   /**
@@ -206,7 +206,7 @@ export type BoardSearchDeps = ApifyHttpDeps
  * Mirrors `getTavilyApiKey()` in `web-search.ts`.
  *
  * `purpose` completes "there is no way to …", so it reads as `search SEEK` from
- * a board search and `read the SEEK posting at a link` from `board-posting.ts`.
+ * a board search and `read the SEEK posting at a link` from `by-url.ts`.
  */
 export function requireApifyToken(purpose: string): string {
   return requireEnv("APIFY_TOKEN", purpose)
@@ -244,7 +244,7 @@ function teaserFor(posting: BoardPosting): string | undefined {
  * The teaser if the board wrote one, else the head of the advertisement,
  * collapsed onto one line and cut to `maxChars`.
  *
- * Exported because `board-posting.ts` needs the same rule at a different bound:
+ * Exported because `by-url.ts` needs the same rule at a different bound:
  * a search result has two lines to spend and a stored Posting's `summary` is
  * read on its own, so the length differs and the rule must not. Both callers
  * rely on the same property of this data — a job advertisement puts its

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import { createBoardSession } from "./board-session.ts"
-import type { BoardContext, BoardShape } from "./canvas-schema.ts"
+import { createBoardSession } from "./session.ts"
+import type { BoardContext, BoardShape } from "@workspace/whiteboard-schema"
 
 function shape(overrides: Partial<BoardShape> & { id: string }): BoardShape {
   return {

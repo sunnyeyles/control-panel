@@ -266,7 +266,7 @@ export const INDEED_SPEC: ApifyBoardSpec<IndeedJob> = {
   // company jobs URL … or detail/product URLs", so a query beside a start URL
   // would give it two jobs to do. `maxItemsPerSearch: 1` bounds what a URL that
   // is *not* a job page can turn into, and the identity check in
-  // `board-posting.ts` is what refuses the result when it does.
+  // `by-url.ts` is what refuses the result when it does.
   //
   // The three flags carry over from the search body unchanged, for the reasons
   // stated there: no company profile, no apply-redirect chasing — which is also

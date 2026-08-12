@@ -94,8 +94,14 @@ and applies. One apply ships the Lambda code and the infrastructure together, so
 there is no window in which the function and its schedule disagree.
 
 The workflow is path-scoped: `apps/briefing-worker/**`, `packages/agents-core/**`,
-`packages/agents/**`, `packages/agent-tools/**`, `infra/**`, and its own file. A
-dashboard-only push does not start it.
+`packages/agents/**`, `packages/agent-tools/**`, `packages/whiteboard-schema/**`,
+`infra/**`, and its own file. A dashboard-only push does not start it.
+
+**A package the worker bundles must be on that list, including the ones it
+reaches transitively.** `@workspace/whiteboard-schema` looks like a dashboard
+concern and is one — but the worker's esbuild bundle pulls it in through
+`@workspace/agents`, so a change to it that did not appear here would ship to
+Vercel and not to Lambda, and nothing would say so.
 
 **Squash-merge.** GitGuardian scans every commit on a pull request, so a
 credential-shaped string removed in a later commit still flags.

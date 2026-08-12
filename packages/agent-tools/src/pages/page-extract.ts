@@ -1,20 +1,24 @@
-import { requireEnv, searchApiPost } from "./search-http.ts"
+import { requireEnv, searchApiPost } from "../internal/http.ts"
 
 /**
  * Retrieve the page at a link, as markdown.
  *
  * ⚠️ **This is deliberately not a tool, and that is the whole design.** It is a
- * plain function; it is absent from `allTools`; no `createX()` agent factory
- * receives it, and `page-extract.test.ts` asserts both. `OVERVIEW.md` records
- * why a fetcher must not be handed to an agent casually, and
+ * plain function; no `createX()` agent factory receives it. `OVERVIEW.md`
+ * records why a fetcher must not be handed to an agent casually, and
  * `cover-letter-writer.ts` and `resume-tailor.ts` both say in as many words that
  * when a page fetcher exists it "goes on a separate agent that never sees the
  * profile, and hands this one validated data". A caller retrieves the page, and
  * hands the text to an agent that can do nothing with it but answer.
  *
  * Adding `tool()` around this would put an arbitrary URL fetcher in the hands of
- * whichever agent picked it up — including the general assistant, which carries
- * `allTools`. Do not.
+ * whichever agent picked it up — including the general assistant. Do not.
+ *
+ * **Enforced by living in `pages/`.** `NAMING.md` R9 forbids a tool anywhere in
+ * this directory and `naming.test.ts` checks it by importing every module here
+ * and refusing anything with a tool's shape. That replaced an older assertion
+ * that this was absent from `allTools`, which was weaker in both directions: it
+ * named one array a tool could simply stay out of, and that array is gone.
  *
  * **Retrieval is delegated, and that is a security property rather than a
  * convenience.** The request goes to Tavily, and Tavily fetches the page; this

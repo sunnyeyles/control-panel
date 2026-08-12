@@ -29,8 +29,8 @@
 import { tool, type StructuredToolInterface } from "@langchain/core/tools"
 import * as z from "zod"
 
-import { renderBoard } from "./board-render.ts"
-import type { BoardSession } from "./board-session.ts"
+import { renderBoard } from "./render.ts"
+import type { BoardSession } from "./session.ts"
 import {
   CANVAS_OP_EVENT,
   DEFAULT_GAP,
@@ -40,7 +40,7 @@ import {
   shapeColorSchema,
   shapeKindSchema,
   type CanvasOpEvent,
-} from "./canvas-schema.ts"
+} from "@workspace/whiteboard-schema"
 
 /**
  * The slice of LangChain's `ToolRuntime` these tools use.

@@ -15,6 +15,7 @@ on:
       - "packages/agents-core/**"
       - "packages/agents/**"
       - "packages/agent-tools/**"
+      - "packages/whiteboard-schema/**"
       - "infra/**"
       - ".github/workflows/deploy-infra.yml"
   pull_request:
@@ -23,6 +24,7 @@ on:
       - "packages/agents-core/**"
       - "packages/agents/**"
       - "packages/agent-tools/**"
+      - "packages/whiteboard-schema/**"
       - "infra/**"
       - ".github/workflows/deploy-infra.yml"
   # Deliberately unfiltered — a manual run should always run.

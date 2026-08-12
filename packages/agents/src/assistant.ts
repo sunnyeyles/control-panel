@@ -1,9 +1,33 @@
-import { allTools } from "@workspace/agent-tools"
+import { getCurrentTime } from "@workspace/agent-tools/time"
+import { webSearch } from "@workspace/agent-tools/web-search"
 import { createAgent, type Agent } from "@workspace/agents-core"
+import type { StructuredToolInterface } from "@langchain/core/tools"
 
 import type { ExtraToolsAgentOptions } from "./agent-options.ts"
 
 export type CreateAssistantOptions = ExtraToolsAgentOptions
+
+/**
+ * What the general assistant carries.
+ *
+ * ⚠️ **Both entries are module singletons, and that is the whole membership
+ * rule.** This used to be `allTools` in `@workspace/agent-tools`, which called
+ * itself "every tool in the catalog" and had not been true for a long time:
+ * every tool added since is a `createX(catalog, log)` factory bound to one run,
+ * which a module-level array structurally cannot hold. Naming the two here
+ * makes the list honest and puts it where the decision belongs — which tools an
+ * agent carries is the agent's business, and the other agents in this package
+ * already choose theirs the same way.
+ *
+ * Adding to it is a product decision, not a wiring one. In particular a page
+ * fetcher must not appear: `extractPage` retrieves an arbitrary URL, and
+ * `OVERVIEW.md` sets out why that may not go to a chat agent. `assistant.test.ts`
+ * pins the list for that reason.
+ */
+export const ASSISTANT_TOOLS: readonly StructuredToolInterface[] = [
+  getCurrentTime,
+  webSearch,
+]
 
 /**
  * Product persona for the general-purpose assistant. Owned here rather than
@@ -17,7 +41,7 @@ export const ASSISTANT_SYSTEM_PROMPT = [
 ].join("\n")
 
 /**
- * A general-purpose assistant carrying the whole tool catalog.
+ * A general-purpose assistant carrying {@link ASSISTANT_TOOLS}.
  *
  * A factory rather than a ready-made instance on purpose: building an agent
  * constructs a model, which reads `OPENAI_API_KEY` and throws without one.
@@ -31,6 +55,6 @@ export function createAssistant(options: CreateAssistantOptions = {}): Agent {
   return createAgent({
     ...rest,
     systemPrompt: systemPrompt ?? ASSISTANT_SYSTEM_PROMPT,
-    tools: [...allTools, ...extraTools],
+    tools: [...ASSISTANT_TOOLS, ...extraTools],
   })
 }

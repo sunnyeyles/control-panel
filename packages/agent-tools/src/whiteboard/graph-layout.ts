@@ -10,7 +10,7 @@
  * the half `arrange_shapes` could never do — it never looked at connections at
  * all.
  *
- * **It imports nothing, deliberately.** Not even `canvas-schema`, and so not
+ * **It imports nothing, deliberately.** Not even `@workspace/whiteboard-schema`, and so not
  * zod. Everything here is arithmetic over `{key, w, h}` and `{from, to}`, which
  * makes it exhaustively testable without a board, a session or a model, and
  * keeps the one genuinely intricate algorithm in this package free of any

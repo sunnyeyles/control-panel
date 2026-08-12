@@ -1,4 +1,4 @@
-import type { ShapeKind } from "@workspace/agent-tools/canvas-schema"
+import type { ShapeKind } from "@workspace/whiteboard-schema"
 
 /**
  * The one place the agent's vocabulary meets tldraw's.
@@ -7,7 +7,7 @@ import type { ShapeKind } from "@workspace/agent-tools/canvas-schema"
  * `"cloud"`. Keeping that translation here — rather than teaching the model
  * tldraw's own type names — means the mapping can change, or the renderer be
  * swapped, without touching a prompt or a tool schema. It is also the reason
- * the wire contract in `@workspace/agent-tools/canvas-schema` can stay free of
+ * the wire contract in `@workspace/whiteboard-schema` can stay free of
  * any tldraw import: neither side of it knows this file exists.
  *
  * Five of the seven kinds are the same tldraw shape type with a different

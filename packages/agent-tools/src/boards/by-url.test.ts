@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { allTools } from "./index.ts"
-import { fetchBoardPosting, type BoardPostingDeps } from "./board-posting.ts"
+import { fetchBoardPosting, type BoardPostingDeps } from "./by-url.ts"
 import { INDEED_SPEC } from "./indeed-search.ts"
 import { LINKEDIN_SPEC } from "./linkedin-search.ts"
 import { SEEK_SPEC } from "./seek-search.ts"
@@ -11,7 +10,7 @@ import {
   jsonResponse,
   requestBody,
   type Capture,
-} from "./test-support/search-fakes.ts"
+} from "../test-support/search-fakes.ts"
 
 /**
  * Fetching one advertisement from the board that serves it.
@@ -393,17 +392,14 @@ describe("fetchBoardPosting", () => {
 /**
  * The same assertion `page-extract.test.ts` makes about the other fetcher, and
  * it is here for the same reason: a test is what stops the next person wrapping
- * `tool()` around this and handing an arbitrary fetcher to the general
- * assistant, which carries `allTools`.
+ * `tool()` around this and handing an arbitrary fetcher to a chat agent.
+ *
+ * Unlike that one this module does sit under `src/boards/`, which R9 does not
+ * forbid tools in — `posting-details.ts` is a tool and its neighbour. So the
+ * directory rule cannot carry this case and the local assertion is the whole
+ * guard.
  */
 describe("the board fetcher is not a tool", () => {
-  it("is absent from the catalog", () => {
-    expect(allTools.map((held) => held.name)).toEqual([
-      "get_current_time",
-      "web_search",
-    ])
-  })
-
   it("is a plain function with no schema to invoke", () => {
     expect(fetchBoardPosting).not.toHaveProperty("schema")
     expect(fetchBoardPosting).not.toHaveProperty("invoke")

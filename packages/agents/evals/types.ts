@@ -20,7 +20,7 @@ import type {
   BoardShape,
   CanvasOp,
   ShapeKind,
-} from "@workspace/agent-tools/canvas-schema"
+} from "@workspace/whiteboard-schema"
 
 export interface EvalExpectation {
   /** At least this many shapes must be created. */

@@ -16,7 +16,7 @@
 import type { Callbacks } from "@langchain/core/callbacks/manager"
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import type { BaseMessage } from "@langchain/core/messages"
-import type { CanvasOpEvent } from "@workspace/agent-tools/canvas-schema"
+import type { CanvasOpEvent } from "@workspace/whiteboard-schema"
 import type { ChatModelLike } from "@workspace/agents-core"
 
 import { createWhiteboardAgent } from "../src/whiteboard.ts"
