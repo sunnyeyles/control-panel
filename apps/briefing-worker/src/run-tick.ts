@@ -8,18 +8,13 @@ import {
 } from "./job-kinds.ts"
 
 /**
- * The worker is no longer "the thing that runs at 09:00". It is "the thing that
- * runs hourly and asks what is due".
- *
- * The cadence of an individual job lives in Postgres — `jobs.schedule_cron` and
- * `jobs.schedule_timezone` — because adding a second job with a different
- * cadence should cost an INSERT rather than a Terraform apply. What stayed in
- * Terraform is the tick itself, which is now the same for every job and so has
- * nothing left to drift.
+ * The worker runs hourly and asks what is due. A job's own cadence lives in
+ * Postgres (`jobs.schedule_cron`, `jobs.schedule_timezone`) so a second job
+ * costs an INSERT rather than a Terraform apply; only the tick stayed in
+ * Terraform, and it is the same for every job.
  *
  * Platform-independent on purpose, like `run-briefing.ts`: it takes a Prisma
- * client and a `BriefStore` rather than making either, so everything AWS-shaped
- * stays in `index.ts`.
+ * client and a `BriefStore` rather than making either.
  */
 
 /**
@@ -47,23 +42,18 @@ export interface TickReport {
 /**
  * Ask what is due, claim each slot, run it, record the outcome.
  *
- * **Sequential, in one invocation.** The map left this open, and sequential is
- * the answer while a tick is expected to find zero or one due job: fanning out
- * means a second Lambda, a second set of permissions and a second failure mode,
- * bought to parallelise a list that is usually empty. The Lambda timeout bounds
- * it, and `dueJobs()` is limited, so a backlog is worked oldest-slot-first
- * across several ticks rather than attempted all at once.
+ * **Sequential, in one invocation**, while a tick is expected to find zero or
+ * one due job: fanning out buys a second Lambda and a second failure mode to
+ * parallelise a usually-empty list. `dueJobs()` is limited, so a backlog is
+ * worked oldest-slot-first across several ticks.
  *
- * Rethrows if any job failed. That is the contract the alarm depends on: a
- * throw marks the invocation failed and produces the `Errors` datapoint, so a
- * bad run is visible without anyone reading logs. Every due job is attempted
- * first — one failing job must not stop the others from running.
+ * Rethrows if any job failed — the contract the alarm depends on, since the
+ * throw produces the `Errors` datapoint. Every due job is attempted first.
  *
- * Kind lookup and config validation happen **before** `claimJob`. An unhandled
- * kind or a malformed briefing config is knowable from the row alone; claiming
- * a slot to discover it would advance `next_run_at` for a job that had no
- * chance of running. Those failures still contribute to the rethrow — the
- * throw contract is untouched — but the slot is left alone.
+ * Kind lookup and config validation happen **before** `claimJob`: both are
+ * knowable from the row alone, and claiming a slot to discover them would
+ * advance `next_run_at` for a job that never had a chance. They still count
+ * toward the rethrow.
  */
 export async function runTick(
   prisma: PrismaClient,

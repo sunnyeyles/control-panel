@@ -15,13 +15,11 @@ import {
  * A `View` and not a `Row` (`NAMING.md` R5): it crosses into the table's client
  * boundary, so every `Date` is already a string — and there is no
  * `tailored_resumes` table for it to be a row of. What it projects is an **S3
- * listing**. It also contains only what the panel renders: an address and a
- * generated-on date.
+ * listing**.
  *
- * ⚠️ **No `displayName` and no `filename`, unlike `CoverLetterView`** — a
- * listing carries no provenance, so both are derived in the component from
- * the `PostingView` it already holds. Which is the same data, from the row
- * rather than from S3, and one fewer thing to be stale.
+ * ⚠️ **No `displayName` and no `filename`** — a listing carries no provenance, so
+ * both are derived in the component from the `PostingView` it already holds: the
+ * same data from the row rather than from S3, and one fewer thing to be stale.
  */
 export interface TailoredResumeView {
   postingId: string

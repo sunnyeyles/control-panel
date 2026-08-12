@@ -4,20 +4,14 @@
  * Pure — no I/O, no Next, no database — so `interval.test.ts` covers it without
  * any of them.
  *
- * **The interval is the whole schedule model the UI exposes.** There is no time
- * of day, no day of week and no cron field: a briefing repeats every N hours and
- * that is all there is to choose. `jobs.schedule_cron` is still free-form text
- * and the worker still reads a full cron expression — this module is a narrow
- * vocabulary written into that column, not a replacement for it.
+ * **The interval is the whole schedule model the UI exposes** — no time of day,
+ * no day of week. `jobs.schedule_cron` is still free-form text the worker reads
+ * as a full expression; this is a narrow vocabulary written into it, not a
+ * replacement.
  *
- * Two consequences worth knowing:
- *
- * - Rows written by hand, or by an earlier version of this form, can hold
- *   expressions no interval maps to. {@link fromCron} returns `undefined` for
- *   those rather than guessing, so the UI can say what is stored instead of
- *   showing a picker that quietly disagrees with it.
- * - Every interval is a divisor of 24, so slots land on the same hours every
- *   day rather than drifting.
+ * So a hand-written row can hold an expression no interval maps to, and
+ * {@link fromCron} answers `undefined` rather than guessing. Every interval
+ * divides 24, so slots land on the same hours daily rather than drifting.
  */
 
 /** The offered intervals, in hours. */
@@ -31,14 +25,11 @@ export const DEFAULT_INTERVAL_HOURS: IntervalHours = 24
 /**
  * Every schedule is stored in UTC, and no UI offers to change it.
  *
- * For a repeating interval this is the correct answer rather than a shortcut: a
- * zone that observes daylight saving would silently stretch or compress one
- * interval a year, so "every 12 hours" would occasionally mean eleven or
- * thirteen. UTC has no such discontinuity.
- *
- * `schedule_timezone` remains a real column with real meaning — `computeNextRunAt`
- * needs a zone, and a future UI that offers a *time of day* would need a real one
- * — so this is the value this form writes, not a claim that the column is dead.
+ * Correct rather than a shortcut: a zone observing daylight saving would
+ * stretch or compress one interval a year, so "every 12 hours" would sometimes
+ * mean eleven. `schedule_timezone` is still a real column — `computeNextRunAt`
+ * needs a zone, and a time-of-day UI would need a real one — so this is what
+ * the form writes, not a claim the column is dead.
  */
 export const SCHEDULE_TIMEZONE = "UTC"
 

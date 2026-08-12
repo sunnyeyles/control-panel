@@ -11,32 +11,27 @@ import { formatUtcDateTime } from "@/lib/format-dates"
 /**
  * The part of a Posting that only the expanded row shows.
  *
- * **Nothing here imports Next**, for the reason `list-postings.ts` gives about
- * itself: which rows a user can reach is the interesting behaviour, and a page
- * component cannot be tested for it. The client arrives as an argument for the
- * same reason.
+ * **Nothing here imports Next**, and the client arrives as an argument: which
+ * rows a user can reach is the interesting behaviour, and a page component
+ * cannot be tested for it.
  *
- * ⚠️ **This exists because these three fields were the heaviest thing on the
- * page and the least often looked at.** They live in `postings.payload` — the
- * validated Posting as the scout wrote it — and `listPostings` used to parse
- * them out for all twenty-five rows and hand them to a client component, which
- * put every summary, every match reason and every copied bullet into the RSC
- * payload of every sort click and every page click. At most one row is expanded
- * at a time, so twenty-four of those were never read.
+ * ⚠️ **This exists because these fields were the heaviest thing on the page and
+ * the least often looked at.** They live in `postings.payload`, and `listPostings`
+ * used to parse them for all twenty-five rows — every summary, match reason and
+ * copied bullet in the RSC payload of every sort click, when at most one row is
+ * expanded at a time.
  *
- * The trade this makes: opening a detail now costs one small round trip where
- * it used to cost none. `posting-table-body.tsx` warms it on hover and focus,
- * so the click usually lands on a request that has already finished.
+ * The trade: opening a detail now costs one small round trip where it cost none.
+ * `posting-table-body.tsx` warms it on hover and focus.
  */
 export interface PostingDetailView {
   /**
    * Absent exactly when the stored payload no longer matches the schema.
    *
-   * The same degradation `toView()` in `list-postings.ts` performs on the
-   * projected columns: `title`, `company`, `location` and `url` are written by
-   * the same statement as the payload, so a contract drift costs the detail and
-   * not the advertisement. `matchReason` and `highlights` go with it, which is
-   * why one branch in `posting-detail.tsx` covers all three.
+   * The same degradation `toView()` in `list-postings.ts` performs: the projected
+   * columns are written by the same statement as the payload, so a contract drift
+   * costs the detail and not the advertisement. `matchReason` and `highlights` go
+   * with it, which is why one branch in `posting-detail.tsx` covers all three.
    */
   summary?: string
   matchReason?: string
@@ -45,10 +40,9 @@ export interface PostingDetailView {
   /**
    * What the advertisement said about years of experience, in its own words.
    *
-   * Absent when it stated none, which is the ordinary case — every producer is
-   * instructed to copy the phrase or omit the field, never to work one out from
-   * the seniority in the title. Goes with `summary` when the payload no longer
-   * parses, for the reason above.
+   * Absent when it stated none, the ordinary case — every producer is instructed
+   * to copy the phrase or omit the field, never to work one out from the
+   * seniority in the title. Goes with `summary` when the payload no longer parses.
    */
   experience?: string
   /**
@@ -59,9 +53,8 @@ export interface PostingDetailView {
    * in `list-postings.ts`. A drifted advertisement still has a real score.
    *
    * Absent when nobody has scored this Posting yet. The score itself is on
-   * {@link PostingView} too, because a column sorts on it; what is only here is
-   * the reason and the gaps, which are prose and would otherwise ship with all
-   * twenty-five rows of every page render.
+   * {@link PostingView} too, because a column sorts on it; only the reason and
+   * the gaps are exclusive to here, being prose.
    */
   match?: PostingMatchView
 }
@@ -83,21 +76,15 @@ export interface PostingMatchView {
 /**
  * The detail for one Posting, or `undefined` when there is no such row.
  *
- * ⚠️ **The read is `postingPayload` in `@workspace/db`, and the `(userId,
- * postingId)` in it is the whole of the ownership check.** A Posting is not
- * addressable without naming a user — that pair is the natural key — so
- * filtering on both *is* the check rather than a shortcut past one, and "no
- * such Posting" and "someone else's" come back as the same `undefined`. The
- * reasoning lives with the query; what stays here is that this function passes
- * it the session's user id and a checked Posting id, and nothing else.
- *
- * It is the same read `load-stored-posting.ts` performs, which is why it is one
- * function now — this side used to spell it `findFirst` against a pair that is a
- * unique index.
+ * ⚠️ **The read is `postingPayload` in `@workspace/db`, and the
+ * `(userId, postingId)` in it is the whole of the ownership check.** A Posting is
+ * not addressable without naming a user — that pair is the natural key — so
+ * filtering on both *is* the check rather than a shortcut past one, and "no such
+ * Posting" and "someone else's" come back as the same `undefined`. The same read
+ * `load-stored-posting.ts` performs, which is why it is one function.
  *
  * The `postingId` reaching this must already have been checked against
- * `POSTING_ID_PATTERN` by its caller; neither this function nor the query
- * restates that rule.
+ * `POSTING_ID_PATTERN` by its caller; neither this nor the query restates that.
  */
 export async function loadPostingDetail(
   prisma: PrismaClient,
@@ -110,8 +97,7 @@ export async function loadPostingDetail(
 
   // Independent of the parse below, deliberately: the match lives in columns of
   // its own, written by a Server Action rather than by whatever produced the
-  // payload, so an advertisement whose stored JSON has drifted still has a real
-  // score to show. Same rule `toView` in `list-postings.ts` follows for `url`.
+  // payload, so an advertisement whose stored JSON has drifted still has a score.
   const match = toMatchView(row.match)
 
   const parsed = StoredPostingSchema.safeParse(row.payload)
@@ -136,18 +122,15 @@ export async function loadPostingDetail(
 /**
  * The stored match, narrowed to what the panel renders.
  *
- * ⚠️ **`gaps` is parsed rather than cast.** `@workspace/db` keeps it `unknown`
- * on purpose — it must not depend on the agent stack to say what shape a
- * producer's JSON has — so this is the seam where that shape is asserted, and
- * the same degradation rule applies as everywhere else on this page: a column
- * that will not read costs the gaps list and not the score. An empty list and an
- * unreadable one render identically, which is honest here in a way it is not for
- * a summary: an empty gaps list is the common, meaningful answer.
+ * ⚠️ **`gaps` is parsed rather than cast.** `@workspace/db` keeps it `unknown` on
+ * purpose — it must not depend on the agent stack to say what shape a producer's
+ * JSON has — so this is the seam where that shape is asserted, and the usual
+ * degradation applies: a column that will not read costs the gaps and not the
+ * score. Empty and unreadable render identically, which is honest here because an
+ * empty gaps list is the common, meaningful answer.
  *
- * Every `Date` becomes a string on the server, for the reason
- * `list-postings.ts` gives at length — a `Date` formatted in the browser uses
- * the browser's locale and zone, and React reports the disagreement as a
- * hydration mismatch rather than as the timezone bug it is.
+ * Every `Date` becomes a string on the server, for the hydration reason
+ * `list-postings.ts` gives.
  */
 function toMatchView(
   match: StoredPostingPayload["match"]

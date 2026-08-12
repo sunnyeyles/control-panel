@@ -48,15 +48,13 @@ describe("fitsSearchBudget", () => {
  * ⚠️ **The drift alarms.**
  *
  * `criteria-text.ts` may import nothing, so both numbers in it are hand-kept
- * copies of facts owned elsewhere. This suite is what stops them from being
- * merely *stated*. It runs in node, where the real modules are reachable —
- * which is the whole reason the dashboard's logic lives under `lib/` and
- * imports no Next.
+ * copies of facts owned elsewhere; this suite is what stops them being merely
+ * *stated*. It runs in node, where the real modules are reachable.
  *
- * The failure being guarded against is the quiet one: a fourth board, or a
- * lower ceiling in the worker, would leave the form promising a sweep the scout
- * is cut off partway through. That produces a well-formed brief covering less
- * than it was asked to, and nothing downstream can tell it from a quiet market.
+ * The failure guarded against is the quiet one: a fourth board, or a lower
+ * ceiling in the worker, would leave the form promising a sweep the scout is cut
+ * off partway through — a well-formed brief covering less than it was asked to,
+ * indistinguishable downstream from a quiet market.
  */
 describe("the form's copies of the worker's numbers", () => {
   it("counts the boards the scout actually carries", () => {
@@ -66,9 +64,8 @@ describe("the form's copies of the worker's numbers", () => {
   /**
    * Behavioural rather than arithmetic, because `MAX_SCOUT_LLM_CALLS` and
    * `NON_SEARCH_TURNS` are private to `job-search-config.ts` and should stay
-   * that way. A budget that has been clamped is one at or below the sweep it
-   * was sized for; an unclamped one always exceeds it, because the non-search
-   * turns are added on top.
+   * that way. A clamped budget is at or below the sweep it was sized for; an
+   * unclamped one always exceeds it, the non-search turns being added on top.
    */
   it("never permits a combination the scout would be cut off mid-sweep", () => {
     for (let titles = 1; titles <= MAX_ROLE_TITLES; titles += 1) {

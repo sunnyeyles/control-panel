@@ -1,22 +1,9 @@
 /**
- * What to say when the table has no rows, and why there are three answers.
+ * What to say when the table has no rows, and why there is more than one answer.
  *
- * This is where the `LatestFindings` union from the deleted
- * `lib/briefings/latest-postings.ts` went. Two of its four states do not
- * survive, and **neither can occur any more** rather than having been folded in
- * somewhere:
- *
- * - **`not-recorded`** — "that run kept no record of what it found" — was about
- *   a Run whose `findings` write failed. Postings are now written by their own
- *   non-fatal step against a payload the worker has already validated, so a
- *   failed findings write is a warning on the run rather than an empty page.
- * - **`unreadable`** — a `findings` record that did not match the schema —
- *   cannot reach this table either, for the same reason: nothing is recorded
- *   until it has parsed.
- *
- * What was `no-run` splits in two, because "you have no briefings" and "your
- * briefings have not run yet" are different situations with different next
- * steps, and the old single message could only address one of them.
+ * "You have no briefings" and "your briefings have not run yet" are separate
+ * states because they are different situations with different next steps; a
+ * single message could only ever address one of them.
  */
 export type PostingsEmptyState =
   "no-briefings" | "no-runs" | "no-postings" | "all-filtered"
@@ -35,22 +22,21 @@ export interface BriefingCounts {
 }
 
 /**
- * Which of the three empty states applies. Called only when the total is zero.
+ * Which empty state applies. Called only when the total is zero.
  *
- * Pure, and separate from the component, because the branch order is the whole
- * of the logic: a user with no briefings also has no runs and no postings, so
- * the most specific cause has to be tested first or every one of them reads
- * "nothing found yet".
+ * Pure, and separate from the component, because the branch order is the whole of
+ * the logic: a user with no briefings also has no runs and no postings, so the
+ * most specific cause has to be tested first or every one reads "nothing found
+ * yet".
  */
 export function postingsEmptyState(
   counts: BriefingCounts | undefined,
   hidden = 0
 ): PostingsEmptyState {
-  // ⚠️ **First, ahead of every other cause.** A user whose filters removed
-  // every row has postings — the table is empty because they asked for it —
-  // and telling them "your briefings found nothing, widen your criteria" would
-  // send them to fix a search that is working. It is also the only state with
-  // an undo, which is the thing worth saying.
+  // ⚠️ **First, ahead of every other cause.** A user whose filters removed every
+  // row has postings, so "your briefings found nothing, widen your criteria"
+  // would send them to fix a search that is working. It is also the only state
+  // with an undo, which is the thing worth saying.
   if (hidden > 0) return "all-filtered"
 
   if (counts === undefined) return "no-postings"

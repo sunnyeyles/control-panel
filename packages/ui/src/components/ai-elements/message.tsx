@@ -327,16 +327,14 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>
  * Three of Streamdown's four plugins are the most expensive thing the chat page
  * can load, and none of them is needed to render prose.
  *
- * `@streamdown/mermaid` does `import mermaid from "mermaid"` at module scope,
- * `@streamdown/math` pulls KaTeX, and `@streamdown/code` evaluates shiki's
- * `bundledLanguages` at module scope — every grammar in the bundle. Naming all
- * four in one module constant meant a landing page with no messages on it paid
- * for all three. They are now fetched when a message actually contains the
- * markdown that needs them, and never before.
+ * `@streamdown/mermaid` imports `mermaid` at module scope, `@streamdown/math`
+ * pulls KaTeX, and `@streamdown/code` evaluates every grammar in shiki's
+ * `bundledLanguages`. Naming all four in one constant made a landing page with
+ * no messages pay for all three; they are now fetched only when a message's
+ * markdown asks.
  *
- * `cjk` stays static: it is a pair of remark plugins with no heavy dependency,
- * and it changes how emphasis parses, so loading it late would reflow text that
- * had already rendered.
+ * `cjk` stays static — no heavy dependency, and it changes how emphasis parses,
+ * so loading it late would reflow text that had already rendered.
  */
 const basePlugins: PluginConfig = { cjk }
 
@@ -350,11 +348,10 @@ const pluginLoaders: Record<MarkdownPlugin, () => Promise<PluginConfig>> = {
 /**
  * The plugin set for one message, growing as its content asks for more.
  *
- * Deliberately per-message state rather than something lifted to the chat: a
- * plugin arriving from a parent would be dropped by the `memo` comparator
- * below, which compares only `children` and `isAnimating`. A component's own
- * `setState` is not filtered by its own `memo`, so keeping it here is what
- * makes the late arrival actually render.
+ * ⚠️ Per-message state rather than lifted to the chat: a plugin arriving from a
+ * parent would be dropped by the `memo` comparator below, which compares only
+ * `children` and `isAnimating`. A component's own `setState` is not filtered by
+ * its own `memo`, which is what makes the late arrival render.
  *
  * Runs from an effect, so it is client-only by construction — the heavy modules
  * never enter the server bundle either (`bundle-conditional`).

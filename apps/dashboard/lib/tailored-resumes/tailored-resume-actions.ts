@@ -26,43 +26,26 @@ import type { ResumeStore, TailoredResumeStore } from "@workspace/user-storage"
  * `app/(app)/jobs/actions.ts`, which is `"use server"`, supplies the real
  * dependencies, and calls `refresh()`.
  *
- * It is deliberately `cover-letter-actions.ts` with a different agent, and the
- * three properties transfer unchanged:
+ * Deliberately `cover-letter-actions.ts` with a different agent: the same three
+ * properties hold, and the reasoning for the first two lives in
+ * `lib/postings/load-stored-posting.ts`, which both share. The third is that the
+ * storage key is built from the session's user id, so `assertSegment` in
+ * `@workspace/user-storage` is a second line of defence rather than the only
+ * one. "No readable CV" is refused **before** the tailor is constructed, so a
+ * user with nothing to rewrite costs no model call.
  *
- * 1. **The form carries one identifier, never a Posting.** A Posting body
- *    accepted from form data would let a caller put text of their choosing into
- *    a document stored in the user's own name. The Posting is re-read
- *    server-side out of `postings.payload` by
- *    `lib/postings/load-stored-posting.ts` — shared with the letters for exactly
- *    this reason — and `tailored-resume-actions.test.ts` submits a `posting`
- *    field and asserts it changes nothing.
- * 2. **The Posting is addressed by (session user, posting id).** `(user_id,
- *    posting_id)` is the natural key of `postings` and the user half comes from
- *    the session, so a stranger's advertisement cannot be *named* from here.
- * 3. **The storage key is built from the session's user id.** Nothing from the
- *    form reaches the `userId` segment, so `assertSegment` in
- *    `@workspace/user-storage` is a second line of defence rather than the only
- *    one.
+ * ⚠️ **Where this differs from the letters is what a bad output costs.** An
+ * invented employer in a resume is a false claim the user has to answer for.
+ * Nothing on this side can check it — output and source are both markdown, and
+ * no schema distinguishes a reordered CV from an embellished one — so that lives
+ * in the agent's prompt (`packages/agents/src/resume-tailor.ts`). What this file
+ * can do is refuse to call the model when the source would not support an honest
+ * answer.
  *
- * And the spending rule: the refusal for "no readable CV" happens **before** the
- * tailor is constructed, so a user with nothing to rewrite costs no model call.
- *
- * ⚠️ **Where this genuinely differs from the letters is what a bad output
- * costs.** A cover letter is prose a reader weighs; a resume is read as a list
- * of facts, and an invented employer in one is a false claim the user has to
- * answer for. Everything that keeps that from happening lives in the agent's
- * prompt (`packages/agents/src/resume-tailor.ts`) rather than here, because
- * there is nothing on this side to check it against — the output is markdown and
- * the source is markdown, and no schema distinguishes a reordered CV from an
- * embellished one. What this file can do, and does, is refuse to call the model
- * at all when the source document would not support an honest answer.
- *
- * ⚠️ **There is no counterpart to `createCoverLetter` here.** A letter can be
- * written from a blank editor because writing your own letter is ordinary; a
- * hand-written "tailored resume" with no generation behind it is a document the
- * user already has a place to put, under `/documents`. Adding one would mean a
- * second action that accepts resume text and can mint an object, which is the
- * pair {@link RESUME_NOT_FOUND} exists to keep apart.
+ * ⚠️ **There is no counterpart to `createCoverLetter` here.** A hand-written
+ * "tailored resume" with no generation behind it already has a place under
+ * `/documents`; adding one would mean a second action that accepts resume text
+ * and can mint an object, which is the pair {@link RESUME_NOT_FOUND} keeps apart.
  */
 
 /**
@@ -79,34 +62,23 @@ export { POSTING_NOT_FOUND }
 const KIND = "tailored-resumes"
 
 /**
- * ⚠️ **Neither action in this file parses its own form, and the two parses are
- * still separate.** Generating asks for one identifier and saving asks for an
- * identifier and a body, and each of those schemas lives with the shared
- * function that enforces it — `preparePostingDocument` and `editPostingDocument`
- * respectively. That pair is the one most worth leaving free to diverge, since
- * one of them takes resume text from the caller and the other must never; two
- * modules is what keeps it so. What both spell the same way is the Posting id,
- * and there is one copy of that rule — see
- * `lib/posting-documents/posting-document-ref.ts`.
+ * ⚠️ **Neither action here parses its own form, and the two parses are still
+ * separate.** Each schema lives with the shared function that enforces it,
+ * `preparePostingDocument` and `editPostingDocument` — two modules because
+ * saving takes resume text from the caller and generating must never.
  */
 
 /**
  * There is no tailored resume at that address to edit.
  *
  * ⚠️ **This refusal is the security property of {@link
- * createTailoredResumeActions.saveTailoredResume}, not a convenience.**
- * Generating deliberately never accepts resume text from a form — see property 1
- * above — because text taken from a form would become arbitrary content inside a
- * document stored in the user's own name. Saving *does* accept text, which is
- * safe only for as long as it can do nothing but overwrite something the caller
- * already has. Requiring the object to exist is what holds that line: without
- * it, a caller could spell any well-formed Posting id and mint a document of
- * their choosing at it.
+ * createTailoredResumeActions.saveTailoredResume}, not a convenience.** Saving
+ * accepts caller text, which is safe only while it can do nothing but overwrite
+ * something the caller already has. Without the existence check a caller could
+ * spell any well-formed Posting id and mint a document of their choosing at it.
  *
- * It is also the "not yours" answer, the same conflation the download route
- * makes: the key is built from the session's user, so another user's tailored
- * resume is not merely refused here — it cannot be addressed at all, and what
- * the caller sees is an empty prefix.
+ * It is also the "not yours" answer: the key is built from the session's user,
+ * so another user's tailored resume cannot be addressed at all.
  */
 export const RESUME_NOT_FOUND =
   "There is no tailored resume for that posting. Generate one before editing it."
@@ -114,14 +86,11 @@ export const RESUME_NOT_FOUND =
 /**
  * The longest tailored resume that can be saved.
  *
- * The generating path needs no such bound because a model wrote the bytes and
- * its own output limit is the ceiling. Here a person does, through a rich-text
- * editor that will paste whatever is on a clipboard. Generous by the standards
- * of a CV — a long one is a few thousand characters — because refusing a
- * legitimate document is worse than storing an overlong one, and the object
- * store is not the thing under pressure. The same number as a cover letter's
- * limit, and deliberately its own constant: the two are alike today by
- * coincidence of scale rather than because one implies the other.
+ * The generating path needs no bound — the model's own output limit is the
+ * ceiling. Here a person pastes from a clipboard. Generous for a CV, because
+ * refusing a legitimate document is worse than storing an overlong one. The same
+ * number as the cover letter's limit and deliberately its own constant: alike by
+ * coincidence of scale, not because one implies the other.
  */
 export const MAX_RESUME_CHARS = 50_000
 

@@ -7,16 +7,12 @@ import { Spinner } from "@workspace/ui/components/spinner"
 /**
  * A submit button that shows the action running.
  *
- * A spinner, not a progress bar — and that is a real constraint rather than a
- * style choice. A Server Action surfaces no progress events, so a bar would
- * either be fake or sit at zero, both of which read as the app having hung.
+ * A spinner, not a progress bar: a Server Action surfaces no progress events,
+ * so a bar would be fake or stuck at zero — both read as the app having hung.
  *
- * `pending` is passed in rather than read from `useFormStatus()`. Callers
- * already hold it from `useActionState`, and some dispatch without a `<form>`
- * at all, so there is no form status to read.
- *
- * `disabled` composes with `pending` rather than replacing it: a caller may
- * disable on a client-side check *and* while submitting.
+ * `pending` is passed in, not read from `useFormStatus()`: callers hold it from
+ * `useActionState`, and some dispatch without a `<form>` at all. `disabled`
+ * composes with it rather than replacing it.
  */
 function SubmitButton({
   pending,

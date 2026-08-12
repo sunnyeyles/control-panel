@@ -30,62 +30,35 @@ import { isExcludedTitle } from "@workspace/job-search"
 import { z } from "zod"
 
 /**
- * Adding a Posting the user found themselves, by pasting its link.
+ * Adding a Posting the user found themselves, by pasting its link. Nothing here
+ * imports Next, like everything else under `lib/`.
  *
- * **Nothing here imports Next**, like everything else under `lib/`.
- *
- * Until this existed a Posting could enter the system exactly one way: a Run of
- * a Briefing found it on a Job Board. An advertisement the candidate turned up
- * elsewhere — a company careers page, a board no scout has a tool for, a link a
- * friend sent — could not be tracked, and so could get neither a Cover Letter
- * nor a Tailored Resume, both of which are addressed by `(User, Posting)` and
- * read from `postings.payload`.
- *
- * **There are two ways to retrieve the advertisement, and the cheaper one is
- * tried first.** When the link is to a board whose actor can be handed a single
- * posting — SEEK and Indeed — the board answers with `title`, `company`,
- * `location` and the description as *fields it published*, and no model is
- * involved at all: no extraction to get wrong, no prompt to inject into, nothing
- * to pay for. Everything else goes through the general fetchers and the Posting
- * Extractor. LinkedIn is deliberately in the second group; its actor takes
- * search-results URLs and cannot be given a job page.
+ * **Two retrieval paths, cheaper first.** A board whose actor takes a single
+ * posting — SEEK and Indeed — answers with published fields and no model at all.
+ * Everything else goes through the general fetchers (Tavily, then Apify's
+ * Website Content Crawler once) and the Posting Extractor. LinkedIn is in the
+ * second group: its actor takes search-results URLs, not job pages.
  *
  * ⚠️ **A supported board that fails does not fall through to the general
- * fetchers.** The board path has already spent up to 30 seconds, and a general
- * crawler is the path least likely to get past the board that just refused —
- * `seek-search.ts` records that the scout reached these boards through actors
- * precisely because general retrieval did not. So a board's failure is reported
- * in the board's own words. The general path *does* try a second fetcher: Tavily
- * first, then Apify's Website Content Crawler once, timeouts chosen to leave
- * room for the extractor inside the route's `maxDuration` of 60.
+ * fetchers.** It has already spent up to 30s, and a general crawler is least
+ * likely to get past the board that just refused, so the board's failure is
+ * reported in its own words.
  *
- * **This is the page fetcher `OVERVIEW.md` warns about, and the shape of it is
- * the answer to that warning rather than a way around it.** Three properties,
- * each structural, and each holding on both paths:
+ * Three structural properties, holding on both paths:
  *
- * 1. **Nothing in this process opens a socket to the host the user named.** The
- *    retrieval is a POST to Tavily or to Apify, and they fetch the page — so
- *    there is no SSRF surface, no redirect chain to bound, and no streaming
- *    response to cut off. See `@workspace/agent-tools/page-extract`,
- *    `@workspace/agent-tools/page-extract-apify` and
- *    `@workspace/agent-tools/board-posting`, none of which is a tool.
- * 2. **The page reaches exactly one agent, and that agent has no tools.**
- *    `cover-letter-writer.ts` and `resume-tailor.ts` both say a page fetcher,
- *    when it exists, "goes on a separate agent that never sees the profile, and
- *    hands this one validated data". The Posting Extractor is that agent: it
- *    holds no CV, no instructions and no stored document, and its answer is
- *    schema-validated before anything is written.
- * 3. **Nothing that is not this module handles the URL.** `postingId()` derives
- *    the identity from what the user pasted, and the stored `url` is that same
- *    string. A link copied off the page — an apply button, a related role —
- *    cannot become the Posting's address, and neither can the board's own
- *    canonical form, which is used to check the board's answer and then
- *    discarded. That is `resolve-postings.ts`'s lesson applied to a second path.
+ * 1. **Nothing in this process opens a socket to the host the user named** — the
+ *    retrieval is a POST to Tavily or Apify. No SSRF surface, no redirect chain
+ *    to bound, no streaming response to cut off.
+ * 2. **The page reaches exactly one agent, and that agent has no tools.** The
+ *    Posting Extractor holds no CV, no instructions and no stored document, and
+ *    its answer is schema-validated before anything is written.
+ * 3. **Nothing outside this module handles the URL.** `postingId()` derives the
+ *    identity from what the user pasted; a link copied off the page cannot
+ *    become the Posting's address, and neither can the board's canonical form.
  *
- * Two more properties are about spending nothing when there is nothing to gain:
- * the caller is authorized before the body is touched, and an advertisement
- * already tracked is answered before the fetch and before the model. The order
- * of the steps in {@link createAddByLinkActions} is the design.
+ * The caller is authorized before the body is touched, and an already-tracked
+ * advertisement is answered before the fetch and before the model — the step
+ * order in {@link createAddByLinkActions} is the design.
  */
 
 /**
@@ -100,10 +73,7 @@ const MAX_URL_CHARS = 2_048
 /**
  * ⚠️ **`http` and `https` only, checked here rather than left to `z.url()`.**
  * Zod accepts any scheme a URL parser does, so `file:`, `data:` and
- * `javascript:` all pass it. None of them is something to hand to a fetcher,
- * and refusing them here costs one line — the fact that the fetch happens on
- * somebody else's machine is a reason not to need this check, not a reason not
- * to have it.
+ * `javascript:` all pass it, and none is something to hand to a fetcher.
  */
 const urlSchema = z
   .url()

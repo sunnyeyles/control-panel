@@ -24,35 +24,29 @@ import { loadStoredPosting } from "./load-stored-posting"
  * Scoring Postings against the CV the user already uploaded.
  *
  * **Nothing in this file imports Next**, like `suggest-criteria-actions.ts`
- * beside it and for the same reason: every branch here turns on who is asking,
- * and a session is exactly what a unit test cannot produce. The Next-aware
- * wrapper is `app/(app)/jobs/actions.ts`, which is `"use server"`, supplies the
- * real dependencies and owns the `refresh()`.
+ * beside it: every branch turns on who is asking, and a session is exactly what a
+ * unit test cannot produce. The Next-aware wrapper is `app/(app)/jobs/actions.ts`,
+ * which is `"use server"`, supplies the real dependencies and owns the
+ * `refresh()`.
  *
  * ⚠️ **This runs dashboard-side because it structurally cannot run anywhere
- * else.** The obvious home for it is the briefing worker — a Run already holds
- * the advertisement — but the worker's IAM role grants `prod:briefs` and nothing
- * more, and `infra/aws/tests/vercel_dashboard.tftest.hcl` asserts that its
- * grants and the dashboard's stay disjoint. So the one process that finds a
- * Posting is the one process that cannot read a resume, deliberately, and the
- * consequence is stated plainly in the UI: an overnight briefing leaves its
- * Postings unscored until somebody opens `/jobs`.
+ * else.** The obvious home is the briefing worker — a Run already holds the
+ * advertisement — but the worker's IAM role grants `prod:briefs` and nothing
+ * more, and `infra/aws/tests/vercel_dashboard.tftest.hcl` asserts its grants and
+ * the dashboard's stay disjoint. So the one process that finds a Posting is the
+ * one that cannot read a resume, and an overnight briefing leaves its Postings
+ * unscored until somebody opens `/jobs`.
  *
  * Three properties, none visible from the happy path:
  *
  * 1. **A user with no readable CV costs no model call.** Every refusal below
- *    happens *before* an assessor is constructed, exactly as
- *    `suggest-criteria-actions.ts` does it. The suite asserts the injected
- *    factory was never called, which is the only way that property can be seen.
- * 2. **One posting failing does not cost the others.** They are independent
- *    model calls over independent advertisements, so they run under
- *    `Promise.allSettled` and a rejection costs one row rather than the round.
- * 3. **It is bounded per call, and the caller comes back.** Scoring is one model
- *    call carrying the whole CV per Posting; a briefing that returned forty
- *    advertisements is forty of them. {@link MATCH_BATCH} is what keeps a single
- *    request inside `maxDuration`, and the loop in
- *    `components/jobs/postings/score-pending-matches.tsx` is what eventually
- *    finishes the backlog.
+ *    happens *before* an assessor is constructed; the suite asserts the injected
+ *    factory was never called, which is the only way to see that.
+ * 2. **One posting failing does not cost the others** — independent model calls
+ *    over independent advertisements, under `Promise.allSettled`.
+ * 3. **It is bounded per call, and the caller comes back.** {@link MATCH_BATCH}
+ *    keeps one request inside `maxDuration`; the loop in
+ *    `components/jobs/postings/score-pending-matches.tsx` finishes the backlog.
  */
 
 /**
@@ -70,14 +64,12 @@ export const MATCH_BATCH = 8
  * The assessor ran and what came back could not be used.
  *
  * One message for three distinct causes — the call failed, the final message was
- * empty, or the JSON did not parse against `PostingMatchSchema` — for the reason
- * `EXTRACTION_FAILED` gives in `suggest-criteria-actions.ts`: none of the three
- * is anything the reader can act on differently, and the distinction is in the
- * server log where the person who can do something about it will look.
+ * empty, or the JSON did not parse against `PostingMatchSchema` — because none is
+ * anything the reader can act on differently, and the distinction is in the
+ * server log where the person who can act on it will look.
  *
- * Never reaches the user as a per-posting message. A posting that fails simply
- * stays unscored, which the next round will try again — see
- * {@link ScorePendingMatches}.
+ * Never reaches the user as a per-posting message: a posting that fails stays
+ * unscored, and the next round tries again.
  */
 export const SCORING_FAILED =
   "Some postings could not be scored against your resume. They will be tried again."
@@ -91,10 +83,9 @@ export type ScorePendingMatchesResult =
        * How many of this user's Postings are still not scored against the
        * current resume, counted *after* the writes above.
        *
-       * ⚠️ **Not "how many are left in this batch".** It is the whole backlog,
-       * which is what the caller needs to decide whether to come back — and it
-       * includes rows this call tried and failed, which is why the loop must not
-       * terminate on this number alone.
+       * ⚠️ **Not "how many are left in this batch"** — the whole backlog, which
+       * is what the caller needs to decide whether to come back. It includes rows
+       * this call tried and failed, so the loop must not terminate on it alone.
        */
       remaining: number
     }
@@ -114,13 +105,11 @@ export interface MatchActionsDeps {
   getResumes: () => ResumeStore
   /**
    * The assessor. Defaults to the real agent, which reads `OPENAI_API_KEY` when
-   * constructed — hence a factory **called inside the action**, never at module
-   * scope, so importing this module cannot throw on a missing key and the
-   * refusals above can be reached without ever building a model.
+   * constructed — hence a factory **called inside the action**, so importing this
+   * module cannot throw on a missing key and the refusals above cost no model.
    *
-   * ⚠️ **One factory call per posting.** An agent is cheap to build and the
-   * calls are concurrent; sharing one instance across a batch would be sharing
-   * whatever run state it holds.
+   * ⚠️ **One factory call per posting.** An agent is cheap to build and the calls
+   * are concurrent; sharing one would be sharing whatever run state it holds.
    */
   createMatchAssessor?: () => Agent
   /** Overridden in tests, so an assertion can name the instant recorded. */
@@ -178,14 +167,11 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
     }
 
     try {
-      // ⚠️ **`assertDraftable`, reused rather than restated** — the same trade
-      // `suggest-criteria-actions.ts` documents. A second copy of
-      // `MIN_BACKGROUND_CHARS` and `MAX_BACKGROUND_CHARS` is a bound that has to
-      // move in lockstep with the first and will not, and the question is the
-      // same one: is there enough of this person's own document to judge
-      // against, or would the score be invented? The cost of sharing is a
-      // letter-flavoured sentence reaching a *server log*; nothing the user sees
-      // comes from it.
+      // ⚠️ **`assertDraftable`, reused rather than restated.** A second copy of
+      // `MIN_BACKGROUND_CHARS`/`MAX_BACKGROUND_CHARS` is a bound that has to move
+      // in lockstep with the first and will not, and the question is the same: is
+      // there enough of this person's own document to judge against, or would the
+      // score be invented? The cost is a letter-flavoured sentence in a server log.
       assertDraftable({ background: background.background })
     } catch (error) {
       if (error instanceof UndraftableError) {
@@ -278,15 +264,14 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
    * One posting, scored and recorded. `false` means nothing was written.
    *
    * ⚠️ **The Posting is re-read out of `postings.payload` here**, through the
-   * shared `loadStoredPosting`, rather than being carried down from the listing
-   * query. That is `load-stored-posting.ts`'s rule and it applies unchanged: the
-   * advertisement the model is shown must be the validated one its producer
+   * shared `loadStoredPosting`, rather than carried down from the listing query:
+   * the advertisement the model is shown must be the validated one its producer
    * wrote, addressed by `(session user, posting id)` so there is no ownership to
    * assume.
    *
    * A row that has gone since the list was taken — deleted in another tab —
-   * answers `false` rather than throwing. It is not a failure, and the batch has
-   * no opinion about it.
+   * answers `false` rather than throwing. Not a failure, and the batch has no
+   * opinion about it.
    */
   async function scoreOne(
     prisma: PrismaClient,
@@ -340,16 +325,14 @@ export function createMatchActions(deps: MatchActionsDeps): MatchActions {
  * Why there is nothing to score against, as something to act on.
  *
  * ⚠️ **A third switch over `NoBackgroundReason`, and deliberately not a shared
- * one** — the same argument `suggest-criteria-actions.ts` makes about the
- * second. Every sentence differs where it names what the document was *for*, and
- * a version vague enough to cover a letter, a search and a score would be the
- * message none of the three users can do anything with. What is shared is the
- * union, and the exhaustiveness check below is what makes a new reason a compile
- * error in all three places.
+ * one.** Every sentence differs where it names what the document was *for*, and a
+ * version vague enough to cover a letter, a search and a score would help none of
+ * the three. What is shared is the union, and the exhaustiveness check below is
+ * what makes a new reason a compile error in all three places.
  *
  * Each message names the acceptable formats, because `resumes` accepts more on
- * upload than anything can read — so the user is being refused a document the
- * app already took, and without the sentence the refusal reads as a bug.
+ * upload than anything can read — so without the sentence the refusal reads as a
+ * bug.
  */
 function describeMissingBackground(reason: NoBackgroundReason): string {
   switch (reason) {
@@ -372,11 +355,10 @@ function describeMissingBackground(reason: NoBackgroundReason): string {
 /**
  * The three ways a document can be present and still yield no score.
  *
- * The mirror of `describeUnextractable`, over the same `UndraftableError` the
- * same `assertDraftable` throws. Only the consequence named in each sentence
- * differs, and here it is worth stating: a score read out of a document that
- * says almost nothing is not a cautious score, it is a made-up one — and it is
- * made up in the one place the user is being invited to trust a number.
+ * The mirror of `describeUnextractable`, over the same `UndraftableError`. Only
+ * the consequence differs, and here it is worth stating: a score read out of a
+ * document that says almost nothing is made up, in the one place the user is
+ * invited to trust a number.
  */
 function describeUnscorable(
   error: UndraftableError,

@@ -38,12 +38,10 @@ export type { ScoutSessionLike } from "./scout-pass.ts"
  *
  *     config → scout ⇢ findings → writer → markdown → S3 → artifacts row
  *
- * Two agents in sequence, joined by plain TypeScript rather than by a LangGraph
- * fan-out. The fan-out — several scouts over different sources, merged and
- * ranked — is a later slice, and adding it does not disturb this shape: it
- * replaces what produces `findings` and leaves everything downstream alone.
- * What matters from the start is that the scout hands over *data*, because data
- * is the thing that can be validated between the two halves.
+ * Two agents in sequence, joined by plain TypeScript rather than a LangGraph
+ * fan-out. A later fan-out replaces what produces `findings` and leaves
+ * everything downstream alone; what matters is that the scout hands over
+ * *data*, which is the thing that can be validated between the two halves.
  *
  * Platform-independent, like `run-tick.ts`. It takes the stores it writes
  * through; constructing them is `index.ts`'s job.
@@ -191,19 +189,16 @@ export async function runBriefing(
         /**
          * The retry, and what it is *not* for.
          *
-         * A run that reports nothing has spent its money and produced a briefing
-         * with no postings in it, so one more attempt at a lower price than the
-         * whole run is worth making. It is deliberately not a retry of a
-         * *failure*: a pass whose searches all failed has already thrown above,
-         * and a pass emptied by the title filter is not widened at all — a wider
-         * search finds more of the same roles and the filter eats those too, so
-         * that case gets the warning below instead.
+         * A run that reports nothing has already spent its money, so one cheaper
+         * attempt is worth making. Deliberately not a retry of a *failure*: a
+         * pass whose searches all failed threw above, and a pass emptied by the
+         * title filter is not widened at all — a wider search finds more of the
+         * same roles and the filter eats those too.
          *
-         * `widerPassFailed` is what keeps the property "a second pass can only
-         * make a run better" true. The retry is a bonus, so a board that goes
-         * down between the two passes must not turn a run that honestly found
-         * nothing into a failed one; what went wrong is recorded on the warning
-         * rather than thrown.
+         * `widerPassFailed` keeps "a second pass can only make a run better"
+         * true: a board going down between the passes must not turn a run that
+         * honestly found nothing into a failed one, so it warns rather than
+         * throws.
          */
         let widerPassFailed: string | undefined
 
@@ -288,16 +283,13 @@ export async function runBriefing(
           recordArtifact(slot.runId, stored.key)
         )
 
-        // The findings are what *this* run reported and the next run overwrites;
-        // postings are the cumulative record, which a Posting — and the status a
-        // person set on it — outlives every individual run through. Losing either
-        // is a warning: the brief is the product, and a run that produced one
-        // succeeded whatever happened to the accessory records.
+        // Findings are what *this* run reported and the next run overwrites;
+        // postings are the cumulative record. Losing either is a warning, not a
+        // failure — the brief is the product.
         //
-        // `kept`, not the pre-filter findings. What is stored against the run has
-        // to be what the brief was written from — a `runs.findings` holding
-        // postings the brief never mentions would read as a writer that silently
-        // skipped them.
+        // `kept`, not the pre-filter findings: a `runs.findings` holding
+        // postings the brief never mentions would read as a writer that
+        // silently skipped them.
         const postings = toNewPostings(kept)
         const [findingsNotRecorded, postingsNotRecorded] = await Promise.all([
           softStep(

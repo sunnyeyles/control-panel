@@ -3,11 +3,9 @@
  * signing in — every page served as a fixed fake user from in-memory fixtures,
  * with no database, no AWS credentials and no `NEON_*` variables.
  *
- * **This module is the only reader of the variable.** Six accessors branch on
- * it — `current-user.ts`, `auth/server.ts`, `db.ts`, `storage.ts`, `proxy.ts`,
- * `briefing-runs/invoke-worker.ts` — each before reading any configuration. A
- * second reader elsewhere is a second thing that can be true when this one is
- * false.
+ * ⚠️ **This module is the only reader of the variable.** Six accessors branch on
+ * it, each before reading any configuration; a second reader elsewhere is a
+ * second thing that can be true when this one is false.
  *
  * Named for the dangerous half, not the convenient one: it swaps the data layer
  * too, but what matters in an environment listing is that it opens the app.
@@ -19,11 +17,10 @@ const FLAG = "DEV_AUTH_BYPASS"
  * would let the deployment come up looking healthy while nobody learned a
  * never-deploy variable had been deployed.
  *
- * It fires during `next build`, not at the first request:
- * `app/api/auth/[...path]/route.ts` makes page-data collection evaluate
- * `lib/auth/server.ts` at module scope, under `NODE_ENV=production`. So such a
- * build cannot be produced at all. The local cost: with the flag in
- * `.env.local`, `pnpm build` fails until it is removed. `next dev` is fine.
+ * It fires during `next build`, not at the first request — the auth route makes
+ * page-data collection evaluate `lib/auth/server.ts` at module scope — so such a
+ * build cannot be produced at all. Local cost: `pnpm build` fails while the flag
+ * is in `.env.local`. `next dev` is fine.
  */
 export function devMockEnabled(): boolean {
   const enabled = process.env[FLAG] === "1"

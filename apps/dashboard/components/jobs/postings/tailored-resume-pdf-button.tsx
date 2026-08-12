@@ -14,43 +14,20 @@ const GONE =
 /**
  * Download one Posting's tailored resume as a PDF.
  *
- * ⚠️ **The PDF is made in the browser and never exists on the server.**
- * `exportMarkdownToPdf` (`packages/ui/src/lib/pdf-export.ts`) is a jsPDF
- * renderer that walks marked's token stream and draws text — so this fetches the
- * same `/api/tailored-resumes/[postingId]` the download link and the editor use,
- * and renders the markdown it gets back. There is no PDF route, no server-side
- * renderer and no second stored object; the only thing the server ever holds is
- * the markdown.
+ * ⚠️ The PDF is made in the browser and never exists on the server. This fetches
+ * the same `/api/tailored-resumes/[postingId]` the download link uses and hands
+ * the markdown to `exportMarkdownToPdf`. A route returning `application/pdf`
+ * would mean jsPDF under Node behind a DOM shim, and a second cached
+ * representation of a document whose value is being current.
  *
- * That is worth stating because the alternative looks tidier and is not: a route
- * returning `application/pdf` would mean running jsPDF under Node, which needs a
- * DOM shim, and would put a second representation of the same document in the
- * response cache for a CV whose whole value is being current.
+ * ⚠️ The renderer is imported on click, not shipped with the page: jsPDF and the
+ * markdown parser were a 453 KB chunk of `/jobs`'s first load, for a button most
+ * visits never press. It is requested *alongside* the markdown, not after —
+ * neither depends on the other.
  *
- * ⚠️ **The renderer is fetched on click, not shipped with the page.** jsPDF and
- * the markdown parser behind it were a 453 KB chunk in `/jobs`'s first load —
- * about a third of it — because this component is reached statically from
- * `posting-detail.tsx`, and the table renders one of these per Posting while
- * most visits click none of them. `file-editor-dialog.tsx` imports the same
- * module and costs nothing, because it is already behind a `dynamic()`.
- *
- * ⚠️ **The chunk is requested *alongside* the markdown, not after it.** The two
- * are independent — the renderer does not depend on the bytes and the bytes do
- * not depend on the renderer — so awaiting them in series would put a download
- * behind a download for no reason. The `working` state already renders
- * "Making PDF…" over both, so neither is a button that looks dead.
- *
- * **A real, text-based PDF rather than a screenshot** — the renderer's own
- * comment explains why it avoids html2canvas: canvas capture proved unreliable
- * across browsers and could silently produce blank pages. The text is selectable,
- * which for a resume matters twice over, since applicant-tracking systems read
- * it.
- *
- * ⚠️ **This duplicates a button that already exists inside the editor**, and
- * deliberately. `FileEditorDialog` renders its own "Download PDF" over whatever
- * is in the editor, which is the right answer *while editing*. This one serves
- * the case that has nothing to do with editing: wanting the file, now, without
- * opening a dialog over a document you are not going to change.
+ * ⚠️ This deliberately duplicates `FileEditorDialog`'s own "Download PDF", which
+ * renders unsaved edits. This one serves wanting the file without opening a
+ * dialog over a document you are not going to change.
  */
 export function TailoredResumePdfButton({
   postingId,
@@ -100,12 +77,9 @@ export function TailoredResumePdfButton({
 
       exportMarkdownToPdf(await response.text(), filename)
     } catch (error) {
-      // A dropped connection, a renderer chunk that would not load, or the
-      // renderer throwing on something in the markdown — all three are the same
-      // thing to the user, and all three land here now that the import is one
-      // of the two promises above. Nothing they can act on beyond retrying,
-      // which is what leaving the button released offers. But it must not
-      // fail silently — a button that does nothing reads as a broken page.
+      // A dropped connection, a chunk that would not load, or the renderer
+      // throwing — the same thing to the user, and retrying is all they can do.
+      // It must not fail silently: a dead button reads as a broken page.
       console.error("tailored-resumes: could not export a PDF", error)
       setState({ status: "error", message: FAILED })
     } finally {

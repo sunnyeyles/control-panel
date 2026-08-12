@@ -24,20 +24,16 @@ const OBJECT_KINDS = {
   /**
    * Cover letters drafted for one Posting, in the user's own voice.
    *
-   * Markdown and nothing else, like briefs: this is text the application just
-   * produced, not an upload, so there is exactly one file type to accept.
+   * Markdown and nothing else, like briefs: text the application produced, not
+   * an upload. `inline` for the same reason — these bytes did not arrive from
+   * outside, so the stored-XSS argument behind `resumes`' `attachment` does not
+   * apply.
    *
-   * `inline` for the same reason briefs are — nothing is served from the
-   * bucket's origin, and the app fetches this and renders it. The stored-XSS
-   * argument that makes `resumes` an `attachment` does not apply, because these
-   * bytes did not arrive from outside.
-   *
-   * ⚠️ **Retention is deliberately the resumes posture, not the briefs one.**
-   * A brief is regenerated every day and expiring a year of them is
-   * housekeeping; a letter is written once, in the user's voice, for one
-   * advertisement they may already have relied on. Deleting it is data loss.
-   * The `object_kinds` entry in `infra/aws/modules/user-storage/variables.tf`
-   * therefore sets `expiration_days = null`.
+   * ⚠️ **Retention is deliberately not the briefs posture.** A brief is
+   * regenerated daily and expiring a year of them is housekeeping; a letter is
+   * written once, for one advertisement the user may already have relied on, so
+   * deleting it is data loss. `infra/aws/modules/user-storage/variables.tf`
+   * sets `expiration_days = null` for this kind.
    */
   "cover-letters": {
     contentTypes: {
@@ -49,24 +45,15 @@ const OBJECT_KINDS = {
   /**
    * Resumes rewritten for one Posting, from the candidate's own uploaded CV.
    *
-   * ⚠️ **Not the `resumes` kind, and the distance between them is the reason.**
-   * `resumes` is the shelf uploads go on: seven file types, `attachment`,
-   * addressed by an id this application minted for a file it did not produce.
-   * These are generated markdown addressed by Posting, in the shape a Cover
-   * Letter is — one file type, `inline`, written by this application from a
-   * document the user gave it. Putting them on the same shelf would list them
-   * back to the user as their own uploads and would widen that kind's allowlist
-   * to cover text nobody uploaded.
+   * ⚠️ **Not the `resumes` kind.** That is the shelf uploads go on — seven file
+   * types, `attachment`, addressed by an id minted for a file this application
+   * did not produce. These are generated markdown addressed by Posting, shaped
+   * like a Cover Letter. Sharing a shelf would list them back to the user as
+   * their own uploads and widen that kind's allowlist to text nobody uploaded.
    *
-   * `inline` for the reason `cover-letters` is: nothing is served from the
-   * bucket's origin, and these bytes did not arrive from outside, so the
-   * stored-XSS argument that makes `resumes` an `attachment` does not apply.
-   *
-   * Retention is the letters posture, not the briefs one — `expiration_days =
-   * null` in `infra/aws/modules/user-storage/variables.tf`. A brief is
-   * regenerated daily and expiring a year of them is housekeeping; a tailored
-   * resume is generated once for one advertisement the user may already have
-   * applied to with it. Deleting it is data loss.
+   * `inline` and `expiration_days = null`, both for the `cover-letters`
+   * reasons: the bytes did not arrive from outside, and a tailored resume is
+   * generated once for one advertisement the user may already have applied with.
    */
   "tailored-resumes": {
     contentTypes: {
@@ -113,11 +100,9 @@ export function extensionsFor(kind: ObjectKind): string[] {
 /**
  * The media type an object is stored with.
  *
- * Derived from the extension rather than accepted from the caller, and that is
- * deliberate. A caller-supplied content type is a caller-supplied claim: it
- * lets a `.pdf` be stored as `text/html`, which is the other half of the
- * stored-XSS route the `attachment` disposition guards. Here the extension is
- * the only thing a caller chooses, and the allowlist decides the rest.
+ * Derived from the extension, never accepted from the caller: a supplied
+ * content type is a supplied claim, and it lets a `.pdf` be stored as
+ * `text/html` — the other half of the stored-XSS route `attachment` guards.
  *
  * Returns `undefined` for an extension the kind does not accept; callers turn
  * that into an {@link ../errors.js InvalidObjectKeyError}.

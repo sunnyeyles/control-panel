@@ -22,18 +22,10 @@ export interface DocumentSummary {
 /**
  * Every document a user has, newest first.
  *
- * One indexed query. It used to be an S3 `ListObjectsV2` plus a `HeadObject`
- * per document, eight at a time, because the filename and the Document Type
- * lived in S3 user metadata and `ListObjectsV2` does not carry user metadata at
- * all — and this function is reached from `/documents`, from `/jobs/letters`, and
- * from every cover-letter, tailored-resume and suggest-criteria run. `documents`
- * in Postgres is what removed it.
- *
- * The bucket is no longer consulted here, and nothing on this path can fail
- * per-row: a document either has a row or it does not. That is also the one
- * thing to know when reading this against the git history — the degraded-row
- * handling and its logging are gone because the failure they degraded no longer
- * exists, not because it was decided to be unimportant.
+ * One indexed query. It used to be a `ListObjectsV2` plus a `HeadObject` per
+ * document, because the filename and Document Type lived in S3 user metadata,
+ * which a listing does not carry. The bucket is no longer consulted, so nothing
+ * here can fail per-row — which is why the old degraded-row handling is gone.
  *
  * ⚠️ **`docType` is narrowed by the database, not here.** The column is `NOT
  * NULL` with a CHECK naming the six values, so the cast is the type catching up

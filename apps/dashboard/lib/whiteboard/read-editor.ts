@@ -7,15 +7,13 @@ import { toBoardContext, type BindingLike, type Bounds } from "./simplify"
 /**
  * Read the live canvas into the structured board the agent is sent.
  *
- * Split from `simplify.ts` so that module can stay free of tldraw entirely and
- * be unit-tested against plain objects. Everything tldraw-specific — which
- * methods to call, and in what order — is here; everything with a decision in
- * it is there. The `Editor` import is type-only, so this module still adds
- * nothing to the bundle beyond its own code.
+ * Split from `simplify.ts` so that module can stay free of tldraw and be
+ * unit-tested against plain objects: everything tldraw-specific is here,
+ * everything with a decision in it is there.
  *
- * Called once per turn, at send time rather than on a subscription. The board
- * the agent reasons about must be the board as it was when the user pressed
- * enter, not a snapshot from whenever a render last happened.
+ * Called once per turn, at send time rather than on a subscription — the board
+ * must be as it was when the user pressed enter, not from whenever a render
+ * last happened.
  */
 export function readBoardContext(
   editor: Editor,

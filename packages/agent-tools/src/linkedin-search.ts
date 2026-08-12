@@ -14,36 +14,26 @@ import type { SearchLog } from "./search-log.ts"
 /**
  * LinkedIn job search, via Apify's `curious_coder/linkedin-jobs-scraper` actor.
  *
- * The third board the scout reaches, and the awkward one. Everything that is
- * not about LinkedIn lives in `apify-search.ts` — the token, the run timeout,
- * the clamp, the failure split, the description bound and the rendering — so
- * what is left here is the actor id, the request body it wants, and which of
- * its fields carry what. Two of those are unlike any other board:
+ * Everything not about LinkedIn lives in `apify-search.ts`. Two things here are
+ * unlike any other board:
  *
- * The actor takes a prebuilt *search URL*, not search parameters. So the
- * request body is composed rather than filled in: keywords and location go into
- * the query string, `daysOld` becomes LinkedIn's seconds-based recency filter
- * `f_TPR=r…`, and `workType` becomes its single-letter employment-type code
- * `f_JT`. None of that reaches the schema below. The scout asks all three
- * boards the same five questions and does not know it is talking to a different
- * kind of actor.
+ * The actor takes a prebuilt *search URL*, not search parameters, so the
+ * request body is composed: keywords and location go into the query string,
+ * `daysOld` becomes `f_TPR=r…`, `workType` becomes the single-letter `f_JT`.
+ * None of that reaches the schema — the scout asks all three boards the same
+ * five questions.
  *
- * And `count` has a hard floor of ten: the actor rejects a smaller run outright
- * with `Field input.count must be >= 10` rather than returning fewer items. A
- * floor is an actor's quirk and has no business appearing in the schema a model
- * reads, so `minItemsPerRun` asks for ten and the shared code slices the
- * surplus back off — a `maxResults: 3` search still returns three postings.
+ * And `count` has a hard floor of ten — the actor rejects a smaller run with
+ * `Field input.count must be >= 10` rather than returning fewer items. That
+ * quirk has no business in the schema a model reads, so `minItemsPerRun` asks
+ * for ten and the shared code slices the surplus off; `maxResults: 3` still
+ * returns three.
  *
- * The terms question here is its own decision, not SEEK's carried over.
- * `curious_coder/linkedin-jobs-scraper` is a community scraper and not a
- * LinkedIn product; LinkedIn publishes no jobs search API, and its user
- * agreement prohibits automated collection. There is no compliant option to
- * prefer instead — the partner programme is for posting roles, and every other
- * route on offer wants a personal account's session cookies, which would mean
- * putting a real member account behind every run. This actor needs no account
- * at all, so the reach is read-only, anonymous, and stops at what a signed-out
- * visitor could see. Using it was an explicit product decision taken with that
- * in view, not a technical default.
+ * Terms: this is a community scraper, not a LinkedIn product, and LinkedIn's
+ * user agreement prohibits automated collection. There is no compliant
+ * alternative — every other route wants a member account's session cookies.
+ * This actor needs no account, so the reach is read-only, anonymous, and stops
+ * at what a signed-out visitor could see. An explicit product decision.
  */
 
 const ACTOR_ID = "curious_coder~linkedin-jobs-scraper"

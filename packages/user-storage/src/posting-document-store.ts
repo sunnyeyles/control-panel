@@ -5,22 +5,18 @@ import type { StoredObject, UserObjectStore } from "./user-object-store.ts"
 /**
  * The half a **Posting Document** kind shares with every other one.
  *
- * A Cover Letter and a Tailored Resume are addressed the same way, stored the
- * same way, and carry the same provenance — see the **Posting Document** entry
- * in `CONTEXT.md`. This is that, once. `cover-letter-store.ts` and
- * `tailored-resume-store.ts` stay as the interfaces callers hold, because what
- * they differ by is worth stating in their own words.
+ * A Cover Letter and a Tailored Resume are addressed, stored and provenanced
+ * identically — see **Posting Document** in `CONTEXT.md`. This is that, once;
+ * `cover-letter-store.ts` and `tailored-resume-store.ts` stay as the interfaces
+ * callers hold.
  *
  * ⚠️ **This is not a kind and there is no `posting-documents/` prefix.** Each
- * facade supplies its own {@link ObjectKind}, so the bucket keeps
- * `cover-letters` and `tailored-resumes` separate — a reader listing it should
- * be able to tell which is which, and the two take different retention rules
- * from the Terraform `object_kinds` map.
+ * facade supplies its own {@link ObjectKind}, so the bucket keeps the two
+ * separate — they take different retention rules from Terraform's
+ * `object_kinds` map.
  *
- * ⚠️ **Both facades are markdown-only, and that is baked in here.** The
- * extension is not a parameter, because a Posting Document that was not
- * markdown would not share the read path either: the dashboard renders one in a
- * rich-text editor and downloads it as `.md`.
+ * ⚠️ **Both facades are markdown-only**, so the extension is not a parameter:
+ * a non-markdown Posting Document would not share the read path either.
  */
 
 /** Letters and tailored resumes are Markdown and nothing else. */
@@ -42,15 +38,11 @@ const SOURCE_DOCUMENT = "source-document"
 /**
  * Addresses one Posting Document.
  *
- * ⚠️ **The unit of identity is (user, Posting), and there is no Run in it.**
- * The same advertisement found by two Runs a week apart is one thing a person
- * wants one document for, and `postingId()` in `@workspace/agents` is derived
- * from the Posting's URL precisely so both Runs agree on what to call it. A Run
- * id in the key would mean a second click produced a second object, with the
- * first one orphaned and nothing pointing at it.
- *
- * The Run is still recorded — as metadata, below — because "which Run found
- * this" is worth knowing and is not worth an extra object.
+ * ⚠️ **The unit of identity is (user, Posting), with no Run in it.** The same
+ * advertisement found by two Runs a week apart is one document, and
+ * `postingId()` in `@workspace/agents` derives from the URL precisely so both
+ * Runs agree what to call it. A Run id in the key would orphan the first object
+ * on the second click. The Run is still recorded as metadata below.
  */
 export interface PostingDocumentRef {
   userId: string
@@ -97,14 +89,11 @@ export interface NewPostingDocument extends PostingDocumentRef {
   /**
    * Where it came from.
    *
-   * ⚠️ **Every value here is model- or user-supplied text and is cleaned before
-   * it becomes a header.** `title` and `company` are transcribed by the scout out
-   * of an advertisement whoever paid for it wrote, and `sourceDocument` is an
-   * uploaded filename — so a newline or an em dash in one is ordinary rather
-   * than exotic, and S3 user metadata travels in HTTP headers. {@link
-   * toMetadataRecord} strips each value to printable ASCII and drops anything
-   * that leaves nothing behind. That is the same treatment an uploaded filename
-   * gets in `resume-store.ts`, from the same module.
+   * ⚠️ **Every value here is model- or user-supplied text, cleaned before it
+   * becomes a header.** `title` and `company` are transcribed out of someone
+   * else's advertisement and `sourceDocument` is an uploaded filename, so an em
+   * dash or a newline is ordinary — and S3 metadata travels in HTTP headers.
+   * {@link toMetadataRecord} strips to printable ASCII and drops the remainder.
    */
   provenance?: PostingDocumentProvenance
 }
@@ -122,17 +111,15 @@ export interface StoredPostingDocument extends PostingDocumentRef {
 /**
  * The five operations both kinds perform.
  *
- * A facade over {@link UserObjectStore}, not a second implementation — the same
- * arrangement as `BriefStore` and `ResumeStore`, and for the same reason: it
- * knows the key shape and the single file type so a call site cannot get them
- * wrong.
+ * A facade over {@link UserObjectStore}, like `BriefStore` and `ResumeStore`:
+ * it knows the key shape and the single file type so a call site cannot.
  *
  * **A Posting Document has no database row, deliberately.** `artifacts.run_id`
- * is `NOT NULL` and references `runs`, and writing one is not an execution of a
- * briefing job — minting an ad-hoc Run per click would put rows that are not
- * briefings into a job's history. The key is fully derivable from the user and
- * the Posting, so a row buys no addressability that {@link head} does not
- * already give. Uploaded documents have no row for exactly this reason.
+ * is `NOT NULL`, and writing one is not an execution of a briefing job —
+ * minting an ad-hoc Run per click would put non-briefings into a job's history.
+ * The key is derivable from the user and the Posting, so a row buys no
+ * addressability {@link head} does not. Uploaded documents have none for the
+ * same reason.
  */
 export interface PostingDocumentStore {
   /**
@@ -150,23 +137,17 @@ export interface PostingDocumentStore {
   /**
    * Every document of this kind one user has, oldest key first.
    *
-   * **This is the "which of these have one" question.** The postings table shows
-   * per row whether a document exists; answering that with `head()` cost one
-   * `HeadObject` per visible posting, twenty-five per render, re-issued on every
-   * sort click and every five-second poll. One `ListObjectsV2` answers it for
-   * the whole page, because the last key segment **is** the posting id — see
-   * {@link PostingDocumentRef}.
+   * **This is the "which of these have one" question.** Answering it per row
+   * with `head()` cost one `HeadObject` per visible posting, re-issued on every
+   * sort click and five-second poll. One `ListObjectsV2` answers the whole page,
+   * because the last key segment **is** the posting id — and it is O(this
+   * user's documents) rather than O(postings on the page).
    *
-   * ⚠️ **A listing carries less than `head()` does, and the difference is not a
-   * bug to work around here.** `ListObjectsV2` returns no user metadata, so
-   * {@link StoredPostingDocument.provenance} comes back empty and `writtenAt`
-   * falls back to the object's write time. That is enough for existence and for
-   * "written <when>"; a caller that needs the stored title, company or URL must
-   * `head()` the one document it cares about. Do not reach for this to populate
-   * a filename.
-   *
-   * O(documents this user has) rather than O(postings on the page), so it
-   * degrades slowly where the per-row `head()` degraded immediately.
+   * ⚠️ **A listing carries less than `head()`.** `ListObjectsV2` returns no user
+   * metadata, so {@link StoredPostingDocument.provenance} comes back empty and
+   * `writtenAt` falls back to the object's write time. Enough for existence and
+   * "written <when>"; a caller needing the stored title, company or URL must
+   * `head()` the one document it cares about. Not for populating a filename.
    */
   list(userId: string): Promise<StoredPostingDocument[]>
 }

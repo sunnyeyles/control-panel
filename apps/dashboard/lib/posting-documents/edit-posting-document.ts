@@ -9,49 +9,30 @@ import { BAD_REQUEST, POSTING_ID_PATTERN } from "./posting-document-ref"
 /**
  * Saving an edited **Posting Document** over the stored one, in one call.
  *
- * ## Why this exists
- *
- * Saving a Cover Letter and saving a Tailored Resume performed the same seven
- * steps in the same order, and the second was written by copying the first. Two
- * of the seven are security properties and one is a data-fidelity property, so
- * two copies meant two places to weaken them and a review that had to notice
- * the difference between them.
+ * Shared by the Cover Letter and Tailored Resume saves, which performed the same
+ * seven steps — two of them security properties and one data fidelity, so two
+ * copies meant two places to weaken them.
  *
  * ⚠️ **The order is the property, not an implementation detail.** Who is asking
  * is settled before the body is touched; the id is refused on *shape* before the
- * store is asked anything, so a malformed value cannot be probed with and cannot
- * fill the log with alarms anyone can trigger; and the object must be shown to
- * exist before anything is written. A caller that reordered these would still
- * compile and would still pass a happy-path test.
+ * store is asked anything, so it cannot be probed with or used to fill the log
+ * with alarms; and the object must be shown to exist before anything is written.
+ * A caller that reordered these would still compile and pass a happy-path test.
  *
  * ⚠️ **This is the action that accepts document text from a form, and {@link
  * PostingDocumentEdit} `"not-found"` is what keeps it from being a way to create
- * one.** Neither drafting nor generating takes text from a caller — they carry
- * one identifier and re-read the Posting server-side, which is what stops
- * arbitrary text landing in a document stored in the user's own name. Saving is
- * safe only for as long as it can do nothing but overwrite something the caller
- * already has. Manual creation is a *different* action with a different rule:
- * `createCoverLetter` re-reads the owned Posting before it accepts a first
- * letter, and there is deliberately no resume counterpart.
- *
- * ## What it deliberately does not do
+ * one.** Saving is safe only while it can do nothing but overwrite something the
+ * caller already has. Manual creation is a different action with a different
+ * rule: `createCoverLetter` re-reads the owned Posting first.
  *
  * **It returns a reason, never a sentence** — except where the sentence already
- * has exactly one owner elsewhere (`requireUser`, `storageMessage`,
- * {@link BAD_REQUEST}), in which case it is carried as `"refused"` and the
- * caller passes it straight on. That is the same rule
- * `prepare-posting-document.ts` follows and the same rule the repo follows
- * generally: shared modules return a reason union, feature modules own the
- * sentences. The three reasons returned bare are the three a *feature* has to
- * word, and each names its own document — "the letter is empty" and "the resume
- * is empty" are the same condition told differently.
+ * has one owner (`requireUser`, `storageMessage`, {@link BAD_REQUEST}), carried
+ * as `"refused"`. The three bare reasons are the ones a feature has to word for
+ * its own document. It does not own the length bound either: `maxChars` comes
+ * from the caller, since `MAX_LETTER_CHARS` and `MAX_RESUME_CHARS` are alike by
+ * coincidence of scale.
  *
- * **It does not own the length bound.** {@link EditPostingDocumentOptions.maxChars}
- * comes from the caller, because `MAX_LETTER_CHARS` and `MAX_RESUME_CHARS` are
- * the same number today by coincidence of scale rather than because one implies
- * the other, and the sentence naming the limit is the feature's.
- *
- * **Nothing here imports Next**, which is the rule the whole of `lib/` follows.
+ * Nothing here imports Next, the rule the whole of `lib/` follows.
  */
 
 /** The two fields either save form is allowed to carry. */
@@ -86,18 +67,14 @@ export type PostingDocumentEdit =
 /**
  * The two methods this needs, stated structurally.
  *
- * Both facades satisfy it without being named — the same arrangement
- * `DownloadablePostingDocuments` uses, and for the same reason:
- * `@workspace/user-storage` gains no shared supertype it has no other use for.
+ * Both facades satisfy it without being named, so `@workspace/user-storage`
+ * gains no shared supertype it has no other use for.
  *
- * ⚠️ **`T` is why this is generic rather than a fixed shape.** The facades name
- * the writing instant after what their kind does — `draftedAt` for a letter,
- * `generatedAt` for a resume — and they must keep differing forever, because
- * both names are stamped on objects that already exist and there is no
- * copy-onto-itself to rename them with. Threading the stored type through means
- * this module never has to know which name it is: it hands `head()`'s answer
- * straight back to `put()` with new markdown on it, and whatever the instant is
- * called travels across untouched. See `PostingDocumentStoreOptions.instantKey`.
+ * ⚠️ **`T` is why this is generic.** The facades name the writing instant after
+ * their kind — `draftedAt` vs `generatedAt` — and must keep differing, since
+ * both are already stamped on existing objects. Threading the stored type
+ * through means `head()`'s answer goes straight back to `put()` with new
+ * markdown on it. See `PostingDocumentStoreOptions.instantKey`.
  */
 export interface EditablePostingDocuments<T> {
   /** Metadata only. Its answer is what gets carried across. */
@@ -152,31 +129,17 @@ export async function editPostingDocument<T>(
   })
   if (!parsed.success) return refused(BAD_REQUEST)
 
-  // Normalized before it is measured and before it is stored. Two separate
-  // reasons:
+  // ⚠️ **`\r\n` is for the POST, not for the editor — nothing the UI can do
+  // produces it.** ProseMirror normalizes CRLF as it parses the clipboard and
+  // Turndown emits LF (pinned by `packages/ui/src/lib/markdown.test.ts`), so
+  // this line is unreachable through the UI. It stays because a Server Action is
+  // reachable by direct POST with a FormData nobody typed. Do not read it as
+  // evidence the editor emits CRLF.
   //
-  // ⚠️ **`\r\n` is for the POST, not for the editor — nothing the UI does can
-  // produce it.** ProseMirror normalizes `\r\n` to `\n` as it parses the
-  // clipboard, so a document pasted out of a Windows editor is already LF before
-  // it is a document; Turndown then emits LF, which
-  // `packages/ui/src/lib/markdown.test.ts` pins. Both halves of the only path a
-  // user has are covered, and this line is unreachable through it.
-  //
-  // It stays because a Server Action is reachable by direct POST with a FormData
-  // nobody typed — see `apps/dashboard/CLAUDE.md` — and the store is told
-  // `text/markdown`. Cheaper to normalize than to reason about later. Do not read
-  // it as evidence the editor emits CRLF; comments in the two actions this
-  // replaced had each claimed a source for it that does not hold.
-  //
-  // ⚠️ **Line endings are the only normalization this side does, and the larger
-  // half is not here.** Whether an *unedited* save is a no-op depends on the
-  // markdown dialect the editor round-trips through, which is fixed in
-  // `createMarkdownSerializer()` and asserted there. This cannot check it: by the
-  // time the bytes arrive they are already serialized.
-  //
-  // `trim()` because a document that is only whitespace is an empty one however
-  // much of it there is, and Turndown leaves a trailing newline on nearly
-  // everything.
+  // Line endings are the only normalization this side does; whether an *unedited*
+  // save is a no-op depends on the markdown dialect, fixed and asserted in
+  // `createMarkdownSerializer()`. `trim()` because whitespace-only is empty, and
+  // Turndown leaves a trailing newline on nearly everything.
   const markdown = parsed.data.markdown.replace(/\r\n/g, "\n").trim()
 
   // Measured on the normalized text, so a caller cannot spend the bound on

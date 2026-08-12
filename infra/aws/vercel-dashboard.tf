@@ -1,34 +1,24 @@
-# ---------------------------------------------------------------------------
-# The dashboard's AWS access
-# ---------------------------------------------------------------------------
+# The dashboard's AWS access.
 #
-# The Next.js app on Vercel writes and reads the documents a user uploads. It
-# gets there the same way CI does — a short-lived OIDC token exchanged for
-# temporary credentials — so there is no access key on the Vercel side either,
-# and nothing to rotate.
+# The Next.js app on Vercel reads and writes the documents a user uploads, via a
+# short-lived OIDC token exchanged for temporary credentials — so there is no
+# access key on the Vercel side and nothing to rotate.
 #
 # Two halves in two roots. The **provider** is created by `bootstrap/`, because
-# `bootstrap/deploy-iam.tf` deliberately grants nothing that can create one; the
-# **role** is here, because `control-panel-vercel-dashboard` matches
-# `managed_role_arn_patterns` and so is within what CI may create. The seam
-# between them is a URL, looked up rather than read out of bootstrap's state —
-# that state is a local file on one laptop, the same argument `boundary.tf`
-# makes for resolving the permissions boundary by name.
+# `bootstrap/deploy-iam.tf` grants nothing that can create one; the **role** is
+# here, because `control-panel-vercel-dashboard` matches
+# `managed_role_arn_patterns`. The seam is a URL, looked up rather than read out
+# of bootstrap's state — that state is a local file on one laptop.
 #
-# The whole stack is gated on `var.vercel_dashboard` being non-null. See that
-# variable for why the default creates nothing.
+# The stack is gated on `var.vercel_dashboard` being non-null; see that variable.
 
 locals {
   vercel_dashboard_enabled = var.vercel_dashboard != null
 
-  # `try` throughout, and an empty string rather than null as the fallback.
-  #
-  # Locals are evaluated whether or not anything consumes them, so these are
-  # computed even when the gate above is false and no resource reads them. A
-  # null would then fail the string interpolations below with "cannot include a
-  # null value in a string template" — the whole plan, not just this stack. The
-  # empty string produces derived values that are meaningless and never used,
-  # which is the correct outcome for a stack that creates nothing.
+  # ⚠️ `try` throughout, with an empty string rather than null as the fallback.
+  # Locals are evaluated whether or not anything consumes them, so a null here
+  # fails the interpolations below with "cannot include a null value in a string
+  # template" — failing the whole plan, not just this stack.
   vercel_team_slug    = try(var.vercel_dashboard.team_slug, "")
   vercel_project_name = try(var.vercel_dashboard.project_name, "")
   vercel_environments = try(var.vercel_dashboard.environments, ["production"])
@@ -86,16 +76,14 @@ data "aws_iam_policy_document" "vercel_dashboard_trust" {
 
     # `StringEquals`, and all three of owner, project and environment pinned.
     #
-    # This is the difference between "the dashboard may read user documents" and
-    # "anything this issuer signs a token for may read user documents" — and the
-    # issuer signs one for every project in the team and every deployment of
-    # each. A throwaway project created under the same team would otherwise
-    # assume this role and read every user's uploads.
+    # The issuer signs a token for every project in the team, so this is the
+    # difference between "the dashboard may read user documents" and "anything
+    # this issuer signs for may". A throwaway project under the same team would
+    # otherwise assume this role.
     #
-    # Note the contrast with the GitHub trust in `bootstrap/oidc.tf`, which uses
-    # StringLike. That is a concession to GitHub's subject claim not being
-    # knowable before the first run, not a house style. Here the shape is known
-    # up front, so there is nothing to loosen for.
+    # `bootstrap/oidc.tf` uses StringLike as a concession to GitHub's subject
+    # claim not being knowable before the first run, not as house style — here
+    # the shape is known up front.
     condition {
       test     = "StringEquals"
       variable = "${local.vercel_issuer_host}:sub"
@@ -128,32 +116,20 @@ resource "aws_iam_role" "vercel_dashboard" {
 # rewrite the briefs the worker generates.
 #
 # **Enumerated rather than pattern-matched.** The filter used to be
-# `endswith(key, ":resumes")`, and widening it to a suffix list would keep the
-# same shape while making it one careless `or` away from covering briefs. A set
-# of kind names, joined to the environment, says exactly which grants this role
-# holds and reads as the list it is.
+# `endswith(key, ":resumes")`; a suffix list keeps that shape while sitting one
+# careless `or` away from covering briefs.
 #
-# The two roles' attachments are disjoint by construction, and that disjointness
-# is asserted in `tests/vercel_dashboard.tftest.hcl`: the worker cannot delete
-# someone's CV, and the dashboard cannot forge a briefing. Neither property is
-# obvious from either file alone, which is why it is a check rather than a
-# comment.
-#
-# Both policies are published by the user-storage module — `prod:cover-letters`
-# exists as soon as the kind is in `object_kinds`, which is the same edit that
-# gives it a lifecycle rule. Nothing new is authored here; the policies are only
-# pointed at a principal.
+# The two roles' attachments are disjoint by construction — the worker cannot
+# delete someone's CV, the dashboard cannot forge a briefing — and that is
+# asserted in `tests/vercel_dashboard.tftest.hcl`, because it is not obvious
+# from either file alone. Nothing new is authored here; the user-storage module
+# publishes each policy as soon as the kind is in `object_kinds`.
 locals {
-  # The kinds the dashboard may touch. `briefs` is deliberately absent: the app
-  # holds no grant over what the worker wrote, which is why /jobs renders
-  # the Findings on the run row rather than the Brief itself.
-  #
-  # `tailored-resumes` is here for the same reason `cover-letters` is: the app
-  # generates the object, serves it back, and deletes it with the Posting it
-  # belongs to. It is the *worker* that has no business with it — a tailored
-  # resume is written from a button on a page, never on a schedule, so the two
-  # roles' attachments stay disjoint and the assertion in
-  # `tests/vercel_dashboard.tftest.hcl` still holds.
+  # ⚠️ `briefs` is deliberately absent: the app holds no grant over what the
+  # worker wrote, which is why /jobs renders the Findings on the run row rather
+  # than the Brief itself. `tailored-resumes` is here for the `cover-letters`
+  # reason — the app generates it from a button on a page, never on a schedule,
+  # so the worker has no business with it and the sets stay disjoint.
   vercel_dashboard_kinds = ["resumes", "cover-letters", "tailored-resumes"]
 }
 
@@ -167,35 +143,24 @@ resource "aws_iam_role_policy_attachment" "vercel_dashboard_user_storage" {
   policy_arn = each.value
 }
 
-# ---------------------------------------------------------------------------
-# Asking the worker to run a briefing now
-# ---------------------------------------------------------------------------
+# Asking the worker to run a briefing now.
 #
-# The dashboard's "Run now" button does not run a briefing — it asks the worker
-# to, with an asynchronous invocation naming a `runs` row it has already
-# inserted. This is the grant that lets it ask.
+# The "Run now" button does not run a briefing; it asks the worker to, with an
+# async invocation naming a `runs` row it already inserted.
 #
-# **This does not widen the storage boundary above, and the distinction is the
-# whole reason the button works this way.** The property those attachments
-# protect is that the app which *renders* a briefing cannot *author* one: it
-# holds no `prod:briefs` grant, so it cannot write a Brief, cannot overwrite
-# one, and cannot delete one. Invoking the worker does not change that. The
-# worker reads the job from the database and writes the Brief under its own
-# role, so what the dashboard gains is the ability to *start* work, never to
-# produce or alter its output. `tests/vercel_dashboard.tftest.hcl` asserts both
-# halves — that the storage set is unchanged, and that this grant names one
-# function rather than `*`.
+# **This does not widen the storage boundary above**, which is the whole reason
+# the button works this way: the app that *renders* a briefing still holds no
+# `prod:briefs` grant, so it can start work but never produce or alter its
+# output. `tests/vercel_dashboard.tftest.hcl` asserts both halves — storage set
+# unchanged, and this grant naming one function rather than `*`.
 #
-# An **inline** role policy rather than a managed policy and an attachment.
-# Nothing else can ever want this grant — it names one function in one
-# account — and a managed policy would also land in the `for_each` map that the
-# storage assertion checks by exact key set, making a test about storage fail
-# for a reason that has nothing to do with storage.
+# **Inline** rather than a managed policy: nothing else can want a grant naming
+# one function in one account, and a managed one would land in the `for_each`
+# map the storage assertion checks by exact key set.
 #
-# No boundary change is needed: `bootstrap/boundary.tf` already permits
-# `lambda:InvokeFunction` on `*` (sid `InvokeFunctions`), written for the
-# scheduler role. A boundary is a ceiling, so it is allowed to be wider than any
-# one role's own policy — and this policy is what actually decides.
+# No boundary change needed — `bootstrap/boundary.tf` already permits
+# `lambda:InvokeFunction` on `*` for the scheduler role, and a boundary is a
+# ceiling that may be wider than any one role's policy.
 data "aws_iam_policy_document" "vercel_dashboard_invoke_worker" {
   count = local.vercel_dashboard_enabled ? 1 : 0
 

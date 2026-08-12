@@ -11,42 +11,31 @@ import { postingPayload, type PrismaClient } from "@workspace/db"
  * **Nothing here imports Next**, like everything else these actions are built
  * from.
  *
- * It lived inside `lib/cover-letters/cover-letter-actions.ts` until a second
- * feature — the tailored resume — needed the identical read. What moved with it
- * is the reasoning, because the shape is a security property rather than a
- * convenience:
+ * The shape is a security property rather than a convenience:
  *
  * 1. **The caller supplies one identifier and never a Posting.** A Posting body
- *    arriving in form data would let someone put text of their choosing into a
- *    document stored in the user's own voice. The Posting is re-read here out of
- *    the stored row's `payload` — the validated advertisement as its producer
- *    wrote it, which nothing on the client can write.
- * 2. **It is addressed by (session user, posting id), so there is no ownership
- *    to assume.** `(user_id, posting_id)` is the natural key of `postings` and
- *    the user half comes from the session, so a stranger's advertisement cannot
- *    be *named* from here rather than being named, loaded, and then refused by a
- *    comparison somebody has to remember to write. There is no window between a
- *    check and a read.
+ *    in form data would let someone put text of their choosing into a document
+ *    stored in the user's own voice; it is re-read here from `payload`, which
+ *    nothing on the client can write.
+ * 2. **It is addressed by (session user, posting id)**, the natural key of
+ *    `postings`, so a stranger's advertisement cannot be *named* rather than
+ *    being named, loaded, then refused by a comparison somebody must remember to
+ *    write. No window between a check and a read.
  *
- * ⚠️ **The Posting is read from `postings.payload`, never from `runs.findings`.**
- * Recording Postings and recording Findings are two independent non-fatal steps,
- * so a Run can succeed with its Postings recorded and its `findings` left NULL —
- * threading a run id through would then name a Run holding nothing to read back,
- * and would refuse an advertisement plainly on the screen in front of the user.
- * The Run survives as provenance on the stored document, where "which Run found
- * this" is still worth knowing and is still no part of any key.
+ * ⚠️ **Read from `postings.payload`, never from `runs.findings`.** Recording
+ * Postings and recording Findings are independent non-fatal steps, so a Run can
+ * succeed with `findings` left NULL — a run id in the key would refuse an
+ * advertisement plainly on screen. The Run survives as provenance on the stored
+ * document and is no part of any key.
  *
- * ⚠️ **Shared, so a new caller cannot get it wrong — and equally, so a change
- * here lands on every caller at once.** Both consumers spend a model call
- * downstream of this function; loosening what it accepts loosens what they will
- * write a document from.
+ * ⚠️ **Shared, so a change here lands on every caller at once.** Both consumers
+ * spend a model call downstream; loosening what this accepts loosens what they
+ * will write a document from.
  *
- * **The query itself is `postingPayload` in `@workspace/db`**, shared with
- * `load-posting-detail.ts` — the two had written the same read twice and had
- * already drifted, one spelling it `findFirst` and the other `findUnique`. What
- * stays on this side is everything the database cannot answer: parsing the
- * payload against the schema `@workspace/db` deliberately cannot see, and
- * turning each way that fails into an outcome with a sentence.
+ * The query is `postingPayload` in `@workspace/db`, shared with
+ * `load-posting-detail.ts` (the two had drifted, `findFirst` vs `findUnique`).
+ * What stays here is what the database cannot answer: parsing the payload
+ * against a schema `@workspace/db` cannot see, and naming each failure.
  */
 
 export type StoredPostingResult =

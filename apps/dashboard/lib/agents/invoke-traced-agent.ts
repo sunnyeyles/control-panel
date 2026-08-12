@@ -2,42 +2,25 @@ import type { Agent } from "@workspace/agents"
 import { createLangfuseCallback } from "@workspace/langfuse"
 
 /**
- * One model call from the dashboard, traced, with an answer or a throw.
+ * One model call from the dashboard, traced, with an answer or a throw. Shared by
+ * drafting a Cover Letter, generating a Tailored Resume, and proposing Search
+ * Criteria, which each held an identical copy.
  *
- * ## Why this exists
+ * ⚠️ **Not under `lib/posting-documents/`.** The third caller produces no
+ * document; what the three share is how the dashboard talks to an agent.
  *
- * Three actions — drafting a **Cover Letter**, generating a **Tailored
- * Resume**, and proposing **Search Criteria** — each held their own copy of
- * this, and the copies were identical apart from four string literals that were
- * always the same string. {@link TracedAgentRun.name} is that string, said once.
+ * **The callback is not optional decoration.** Every agent run in this repository
+ * reports to Langfuse, and each caller here has its own reason a lost transcript
+ * hurts: a letter is in the user's own voice, and "did the model invent this
+ * employer, or was it in the CV" is answerable from a trace and nowhere else.
  *
- * ⚠️ **This is not under `lib/posting-documents/`.** The third caller produces
- * no document at all; what the three share is how the dashboard talks to an
- * agent, which is a different thing from what two of them then write.
+ * ⚠️ The shape is `lib/chat-handler.ts`'s: **a handler per invocation** — they
+ * retain run state, so sharing one would mix traces — and the callback is spread
+ * in only when configured, because `callbacks: [undefined]` is not the same as no
+ * callbacks.
  *
- * ## Why the callback is not optional decoration
- *
- * Every agent run in this repository reports to Langfuse — `generate-briefing`
- * from the worker, `chat-response` and `whiteboard-turn` from the dashboard — and
- * one that did not would be the only agent invocation whose prompt and output
- * nobody can inspect after the fact. Each caller has its own reason that is the
- * worst place to lose the transcript: a letter is written in the user's own
- * voice, a tailored resume makes factual claims in their name ("did the model
- * invent this employer, or was it in the CV" is answerable from a trace and
- * nowhere else), and criteria come back subtly wrong with the whole CV as the
- * prompt.
- *
- * The shape is `lib/chat-handler.ts`'s: **a handler per invocation** — they
- * retain run state, so sharing one would mix traces — `langfuseUserId` and
- * `langfuseSessionId` in metadata, and the callback spread in only when Langfuse
- * is configured. It is `undefined` without keys, and `callbacks: [undefined]` is
- * not the same as no callbacks.
- *
- * ## Why `.invoke()` and not `.stream()`
- *
- * None of the three agents carries tools, so each graph is START → model → END
- * and there are no intermediate steps for a stream to be interesting about. The
- * `letter` CLI in the worker makes the same call for the same reason.
+ * `.invoke()` and not `.stream()`: none of the three agents carries tools, so
+ * each graph is START → model → END with no intermediate steps to stream.
  */
 export interface TracedAgentRun {
   /**
@@ -66,12 +49,10 @@ export interface TracedAgentRun {
 /**
  * Run the agent and return its final message, trimmed.
  *
- * **Throws on an empty answer rather than returning `""`.** A model that
- * answered with nothing has told the caller nothing, and every caller would
- * otherwise have to invent the same check — the letters would save an empty
- * object, and the criteria would propose a search for everything. The three
- * actions each catch this and turn it into their own sentence, which is where a
- * user-facing message belongs.
+ * **Throws on an empty answer rather than returning `""`.** Otherwise every
+ * caller invents the same check — the letters would save an empty object, and the
+ * criteria would propose a search for everything. Each action catches this and
+ * turns it into its own sentence.
  */
 export async function invokeTracedAgent(
   agent: Agent,

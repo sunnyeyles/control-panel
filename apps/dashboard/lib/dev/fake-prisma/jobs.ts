@@ -18,18 +18,10 @@ export function createJobDelegate(store: DevStore) {
  * The whole rows, which is the only shape the dashboard asks for — both call
  * sites (`/jobs` and the settings section) select nothing.
  *
- * It used to answer a second shape too, `select: { runs: … }`, for the
- * deleted `lib/briefings/latest-postings.ts`, which read one Run's findings
- * to build the page. Nothing asks that now, so the branch is gone rather than
- * left answering a question nobody puts — and if a caller starts asking
- * again, guard is not what catches it: `select` would be accepted and
- * silently ignored, so the branch has to come back with the caller.
- *
- * `orderBy` is not read; every call site wants `createdAt` descending, which
- * is what this returns. The one place this fake lies rather than throwing —
- * cheap to fix if that changes. findManyPostings is deliberately not like
- * this: its order is chosen from the URL, so ignoring it there would be
- * a wrong-order bug rather than a shortcut.
+ * ⚠️ **`orderBy` is not read** — every call site wants `createdAt` descending,
+ * which is what this returns. The one place this fake lies rather than throwing.
+ * findManyPostings is deliberately not like this: its order comes from the URL,
+ * so ignoring it there would be a wrong-order bug rather than a shortcut.
  */
 function findManyJobs(store: DevStore, query: FindManyJobs): Partial<Job>[] {
   const found = store.jobs
@@ -45,10 +37,9 @@ function findManyJobs(store: DevStore, query: FindManyJobs): Partial<Job>[] {
 /**
  * A Job narrowed to the fields a `select` asked for.
  *
- * The same rule as projectPosting, minus the relation branch: jobs are only
- * ever selected by column here. An unknown field throws by name rather than
- * answering `undefined`, so a select this fake cannot serve fails loudly
- * under `DEV_AUTH_BYPASS` instead of rendering a blank.
+ * The same rule as projectPosting, minus the relation branch. An unknown field
+ * throws by name rather than answering `undefined`, so a select this fake cannot
+ * serve fails loudly instead of rendering a blank.
  */
 function projectJob(job: Job, select: Record<string, boolean>): Partial<Job> {
   const projected: Record<string, unknown> = {}

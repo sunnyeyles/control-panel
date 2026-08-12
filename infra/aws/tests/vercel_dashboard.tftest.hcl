@@ -89,16 +89,11 @@ run "configured" {
   # The narrow grants, and only them. The per-environment policy would also
   # cover briefs.
   #
-  # `keys()` returns them sorted, so `cover-letters` leads. Asserting the exact
-  # set rather than membership is the point: a further kind added to
-  # `local.vercel_dashboard_kinds` has to be argued for here, in a test whose
-  # error message says what widening it costs.
-  #
-  # `tailored-resumes` was argued for and added: the dashboard generates those
-  # objects from a button on `/jobs`, serves them back through
-  # `/api/tailored-resumes/[postingId]`, and deletes them alongside the Posting.
-  # The worker holds no grant over them, which is what keeps the disjointness
-  # asserted below true.
+  # `keys()` returns them sorted. Asserting the exact set rather than membership
+  # is the point: a further kind added to `local.vercel_dashboard_kinds` has to
+  # be argued for here. `tailored-resumes` was — the dashboard generates, serves
+  # and deletes those objects, and the worker holds no grant over them, which
+  # keeps the disjointness asserted below true.
   assert {
     condition     = keys(aws_iam_role_policy_attachment.vercel_dashboard_user_storage) == ["prod:cover-letters", "prod:resumes", "prod:tailored-resumes"]
     error_message = "The dashboard must be attached to exactly the prod:cover-letters, prod:resumes and prod:tailored-resumes policies; anything broader lets it rewrite generated briefs."

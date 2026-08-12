@@ -4,14 +4,13 @@
  * ⚠️ **Most of this is about order.** Nothing here would fail if the steps ran
  * in a different sequence and all still ran, so the assertions are on what did
  * *not* happen: no store call for a refused caller, none for a malformed id,
- * none for a body that was never going to be stored, and no write for a
- * document that is not there.
+ * none for a body that was never going to be stored, and no write for a document
+ * that is not there.
  *
- * **The gates run once and the round trip runs per kind**, which is the split
- * worth keeping: the branch order is one function's and does not vary, while
- * the two facades name their instant differently and this module never learns
- * which name it is holding. Parameterising the gates as well would double
- * thirteen assertions to prove a function it does not branch on.
+ * **The gates run once and the round trip runs per kind.** The branch order is
+ * one function's and does not vary, while the two facades name their instant
+ * differently; parameterising the gates too would double thirteen assertions to
+ * prove a function it does not branch on.
  */
 
 import type { CurrentUser } from "@/lib/auth/current-user"

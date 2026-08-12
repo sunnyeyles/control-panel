@@ -10,22 +10,17 @@ import { Switch } from "@workspace/ui/components/switch"
 /**
  * The on/off control for one briefing.
  *
- * **There is no `<form>` here, and that is deliberate.** A switch is not a
- * submit control, and the two obvious ways of making it behave like one are both
- * subtly wrong:
+ * ⚠️ **There is no `<form>` here.** Both obvious ways of making a switch behave
+ * like a submit control are subtly wrong:
  *
- * 1. Reading the switch's own value. A Radix `Switch` does bubble a hidden
- *    checkbox when given a `name` — unlike `Select`, which does not — but it
- *    inherits checkbox semantics, so *unchecked submits nothing at all* and the
- *    server would see an absent field rather than `"false"`.
- * 2. A hidden input holding "the opposite of what is currently rendered", posted
- *    with `requestSubmit()`. That reads fine and races: between a successful
- *    toggle and the `refresh()` payload landing, the input still describes the
- *    *old* prop, so a quick second click re-posts the value just written.
+ * 1. Reading the switch's own value. A Radix `Switch` given a `name` does bubble
+ *    a hidden checkbox, but with checkbox semantics — *unchecked submits nothing
+ *    at all*, so the server sees an absent field rather than `"false"`.
+ * 2. A hidden input holding the opposite of what is rendered, posted with
+ *    `requestSubmit()`. It races: between a successful toggle and the
+ *    `refresh()` landing, the input still describes the *old* prop.
  *
- * Building the payload from the handler's own `next` has neither problem — the
- * value submitted is the value the user just asked for, with no DOM or state
- * read in between.
+ * Building the payload from the handler's own `next` has neither problem.
  */
 export function JobEnabledSwitch({
   jobId,

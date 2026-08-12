@@ -10,15 +10,11 @@ import { SidebarTrigger } from "@workspace/ui/components/sidebar"
  * A client component reading the pathname, rather than a server component
  * taking a `title` prop.
  *
- * The header moved into `app/(app)/layout.tsx` so it survives navigation
- * instead of being torn down and re-rendered with each page. That move is what
- * forces this: layouts do not re-render on navigation, so a `title` passed from
- * the page would be captured once and then be wrong for every route after the
- * first. `usePathname` is a hook, so it updates on transitions where the layout
- * around it does not.
- *
- * Cheap in bundle terms — `nav-main.tsx` already ships `usePathname` for its
- * active-item highlight.
+ * ⚠️ The header lives in `app/(app)/layout.tsx` so it survives navigation, and
+ * layouts do not re-render — so a `title` passed from the page would be captured
+ * once and be wrong for every route after the first. `usePathname` updates on
+ * transitions where the layout around it does not, and costs nothing extra:
+ * `nav-main.tsx` already ships it.
  */
 export function SiteHeader() {
   const pathname = usePathname()

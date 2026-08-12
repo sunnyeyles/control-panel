@@ -31,14 +31,11 @@ import {
 /**
  * The settings actions' authorization, bounds and ownership branches.
  *
- * Every claim these tickets make is about something invisible from the happy
- * path: that an unauthenticated POST is refused *before the body is read*, that
- * over-length text is refused rather than trimmed, that an over-cap example
- * does not leave a half-applied save behind, that an import cannot reach another
- * user's document, and that a document nobody can parse becomes a message
- * rather than a throw. The factory takes its dependencies through a
- * `createXActions(deps)` seam and imports nothing from Next precisely so all of
- * them are reachable here.
+ * Every claim these tickets make is invisible from the happy path: that an
+ * unauthenticated POST is refused *before the body is read*, that over-length
+ * text is refused rather than trimmed, that an over-cap example leaves no
+ * half-applied save behind, that an import cannot reach another user's document,
+ * and that a document nobody can parse becomes a message rather than a throw.
  *
  * The `@workspace/db` helpers are mocked — there is no database in this suite —
  * but the *document* side is real: `listDocuments`, `parseDocumentFile` and

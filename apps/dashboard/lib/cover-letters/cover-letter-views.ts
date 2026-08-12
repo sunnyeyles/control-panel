@@ -17,14 +17,10 @@ import {
  * `cover_letters` table for it to be a row of. What it projects is an **S3
  * listing**.
  *
- * ⚠️ **Two fields, and the ones that are gone left deliberately.** This used to
- * carry `displayName` and `filename` as well, both derived from the letter's
- * stored provenance. Those come from S3 *object metadata*, which a listing does
- * not return. They are not lost: `displayName` is the Posting's title and
- * `filename` is `coverLetterFilename()` over its title and company, and the
- * table already holds both for every row it renders — so they are computed at
- * the point of use in `components/jobs/postings/posting-detail.tsx` rather than
- * fetched.
+ * ⚠️ **No `displayName` and no `filename`, and that absence is deliberate.**
+ * Both come from S3 object metadata, which a listing does not return — so they
+ * are computed at the point of use in `posting-detail.tsx` from the `PostingView`
+ * the table already holds.
  */
 export interface CoverLetterView {
   postingId: string

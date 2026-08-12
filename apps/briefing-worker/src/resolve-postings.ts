@@ -4,38 +4,22 @@ import type { Findings, ScoutFindings, ScoutPosting } from "@workspace/agents"
  * Which of the scout's postings a search actually returned — and, for the ones
  * it did, the URL the board itself issued.
  *
- * Its own module for the reason `search-results.ts` is: the question is one
- * thing, `run-briefing.ts` asks it once, and the answer decides what reaches
- * the writer. It is the second half of the same guarantee — that file says
+ * Its own module for the reason `search-results.ts` is: `run-briefing.ts` asks
+ * once, and the answer decides what reaches the writer. That file says
  * *something searched*, this one says *this posting came back from it*.
  *
  * ⚠️ **The scout no longer reports URLs, and that is why this is a lookup.**
- * This check began as `text.includes(posting.url)`, over findings in which the
- * scout copied each URL out of a rendered search result. That claim — copied
- * verbatim, never assembled — is one a model cannot actually keep. A LinkedIn
- * URL is not only a posting: it is a posting plus four query parameters
- * LinkedIn stamps per search (`position`, `pageNum`, `refId`, `trackingId`, the
- * last two base64 with `%2B`/`%3D` escapes), and transcribing eighty characters
- * of that without a slip is not something a model reliably does. Measured
- * against production over 2026-08-05/06: seven scheduled runs failed the check,
- * every one of them on a LinkedIn URL, and the failures were a `position=58`
- * copied as `position=59`, an emoji in the slug percent-encoded on the way out,
- * and a URL truncated mid-id. Each was a real posting the run then threw away
- * along with the whole brief.
+ * The check began as `text.includes(posting.url)` over URLs the scout copied
+ * out of rendered search results — a claim a model cannot keep. LinkedIn stamps
+ * four per-search query parameters onto each URL, and over 2026-08-05/06 seven
+ * scheduled runs failed on transcription slips (`position=58` copied as `59`,
+ * an emoji re-encoded, a URL truncated mid-id), each discarding a real posting
+ * and the whole brief with it. A search result now carries only the id, the id
+ * is what the scout reports, and the catalog holds the URL the board issued —
+ * so there is no transcription step left to get wrong.
  *
- * Matching on `postingId()` rather than on bytes fixed those seven, because the
- * decoration was never part of a posting's identity. Not showing the model a URL
- * at all is what makes them unrepeatable: a search result now carries the id and
- * nothing else, the id *is* what the scout reports, and the catalog behind it
- * holds the URL the board issued. There is no transcription step left to get
- * wrong.
- *
- * What survives unchanged is the fabrication gate, and it is stronger for being
- * structural. The Lorikeet URL that failed on 2026-08-06 —
- * `…/jobs/view/senior-software-engineer-at-lorikeet-40288faae871cc95`, an
- * **Indeed** job key grafted onto a LinkedIn slug — was caught because no URL
- * any search returned normalised to it. An invented id is caught for the same
- * reason and with less room for coincidence: nothing put it in the catalog.
+ * The fabrication gate survives and is stronger for being structural: an
+ * invented id is caught because nothing put it in the catalog.
  */
 
 /**
@@ -43,8 +27,7 @@ import type { Findings, ScoutFindings, ScoutPosting } from "@workspace/agents"
  *
  * One method, because one method is all that is called — the same reasoning as
  * `AgentLike` in `run-agent.ts`. It also keeps the worker off a direct
- * dependency on `@workspace/agent-tools`, which it has never needed and does not
- * acquire by resolving an id.
+ * dependency on `@workspace/agent-tools`.
  */
 export interface PostingLookup {
   get(id: string): { url: string } | undefined
@@ -87,9 +70,8 @@ export function resolvePostings(
     }
 
     // The id is dropped rather than carried through: downstream a posting is
-    // identified by `postingId(posting.url)`, which is where this id came from
-    // in the first place. Storing both would be storing the same fact twice, and
-    // inviting the two to disagree.
+    // identified by `postingId(posting.url)`, which is where this id came from.
+    // Carrying both would store the same fact twice and invite disagreement.
     const { id, ...reported } = posting
     void id
 

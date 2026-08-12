@@ -12,16 +12,14 @@ import { executeClaimedBriefing } from "./execute-claimed-briefing.ts"
  * either, so everything AWS-shaped stays in `index.ts`.
  *
  * **It claims no slot and never touches `next_run_at`.** An ad-hoc run occupies
- * no occurrence — that is what `runs.scheduled_for IS NULL` means — so pressing
- * the button neither consumes the next scheduled run nor brings it forward, and
- * it works on a briefing that is turned off. The pipeline it drives is byte for
- * byte the one the tick drives.
+ * no occurrence — that is what `runs.scheduled_for IS NULL` means — so the
+ * button neither consumes nor advances the next scheduled run, and it works on
+ * a briefing that is turned off.
  *
- * The `runs` row already exists when this is called: the dashboard inserts it
- * and hands the id over, so that the moment of the click has a row to show, a
- * second click has something to be refused against, and an invoke that never
- * arrives leaves a record. This function's first job is therefore to *claim*
- * that row rather than create one.
+ * The `runs` row already exists: the dashboard inserts it and hands the id
+ * over, so the click has a row to show, a second click has something to be
+ * refused against, and an invoke that never arrives leaves a record. This
+ * function *claims* that row rather than creating one.
  */
 
 /** One line per ad-hoc run, the counterpart of `TickReport`. */
@@ -56,19 +54,15 @@ export interface AdHocRequest {
 /**
  * Claim the run, execute it, record the outcome.
  *
- * **Returns rather than throws on failure, unlike `runTick`.** The tick rethrows
- * because that throw is what produces the Lambda `Errors` datapoint its alarm
- * watches. A run someone triggered already reports its failure twice over — on
- * the `runs` row, and in the UI that is watching it — and routing it into the
- * alarm as well would spend the only signal that says *the schedule is broken*
- * on something a person can already see. The hourly tick still throws, so a
- * worker that is genuinely broken is still caught within the hour.
+ * **Returns rather than throws on failure, unlike `runTick`.** The tick's throw
+ * is what produces the Lambda `Errors` datapoint its alarm watches; a run
+ * someone triggered already reports its failure on the row and in the UI, and
+ * feeding the alarm too would spend the only *the schedule is broken* signal on
+ * something a person can already see.
  *
- * A claim that comes back empty means another delivery of the same invocation
- * already has this run, or the run is terminal. Both end the same way: do
- * nothing at all. AWS delivers an asynchronous invocation *at least* once, so a
- * duplicate is an expected event rather than a fault, and every duplicate that
- * ran would be a second paid LLM run.
+ * An empty claim means a duplicate delivery already has this run, or the run is
+ * terminal; both do nothing. AWS delivers asynchronous invocations *at least*
+ * once, and every duplicate that ran would be a second paid LLM run.
  */
 export async function runAdHocBriefing(
   prisma: PrismaClient,

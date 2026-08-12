@@ -25,15 +25,14 @@ import {
 /**
  * The document actions, as plain functions over injected dependencies.
  *
- * **Nothing in this file imports Next.** That is what lets the security
- * branches be tested at all: every one of them turns on who is asking, and a
- * session is exactly what a unit test cannot produce. The Next-aware wrapper is
- * `app/(app)/documents/actions.ts`, which is `"use server"`, supplies the real
- * dependencies, and calls `refresh()` — cache invalidation needs a request
- * store, so it stays there rather than here.
+ * **Nothing in this file imports Next**, which is what lets the security
+ * branches be tested: every one turns on who is asking, and a session is what a
+ * unit test cannot produce. The Next-aware wrapper is
+ * `app/(app)/documents/actions.ts` — it supplies the real dependencies and calls
+ * `refresh()`, which needs a request store.
  *
- * The shape mirrors `lib/chat-handler.ts`: a `createXActions(deps)` factory with
- * an injectable `getUser` seam, the auth check before any body handling, and
+ * The shape mirrors `lib/chat-handler.ts`: a `createXActions(deps)` factory, an
+ * injectable `getUser` seam, the auth check before any body handling, and
  * client-facing messages that say less than the server log does.
  */
 
@@ -51,9 +50,8 @@ export interface DocumentActionsDeps {
   /**
    * The database client, resolved per call for the same reason the store is.
    *
-   * A Document is two things written in order — bytes in the bucket, then a row
-   * naming them — so both dependencies are needed on the same path, and this
-   * one is what the read paths now go through exclusively.
+   * A Document is two things written in order — bytes, then a row naming them —
+   * so both are needed on the same path.
    */
   getPrisma: () => PrismaClient
   /**
@@ -70,14 +68,12 @@ export interface DocumentActionsDeps {
 }
 
 /**
- * Shape only. Size and extension go through `checkUpload` so that policy lives
- * in one pure, exhaustively tested function rather than being split between a
- * schema and a function.
+ * Shape only. Size and extension go through `checkUpload` so policy lives in one
+ * pure, exhaustively tested function.
  *
- * Note what is absent: any use of `file.type`. The browser-declared MIME type
+ * ⚠️ Note what is absent: any use of `file.type`. The browser-declared MIME type
  * is a caller-supplied claim, and the storage layer derives the content type
- * from the extension against its own allowlist precisely so that claim never
- * matters.
+ * from the extension so that claim never matters.
  */
 const uploadSchema = z.object({
   file: z.instanceof(File),
@@ -87,25 +83,19 @@ const uploadSchema = z.object({
 /**
  * A stored document's id, as a hidden form field carries it.
  *
- * Untrusted, but never trusted to name a *user* — see `deleteDocument`. The
- * pattern comes from `document-ref.ts`, which is also what the download route
- * parses its path segment with. Why it is as tight as it is is documented
- * there; what matters here is that a malformed field is rejected on this path,
+ * Untrusted, and never trusted to name a *user* — see `deleteDocument`. The
+ * pattern comes from `document-ref.ts`, which documents why it is as tight as it
+ * is; what matters here is that a malformed field is rejected on this path,
  * where the wording fits, rather than deep in the store.
- *
- * The extension used to be a second field beside it and is not any more: the
- * row carries it, so there is one less thing arriving from the browser.
  */
 const documentIdSchema = z.string().regex(DOCUMENT_ID_PATTERN)
 
 /**
  * The label the `<select>` posted, or `other`.
  *
- * `.catch` rather than a rejection, keeping the rule this path has always had:
- * the type is a label, and losing the label is a better outcome than losing the
- * upload. What changed is where an unrecognised value lands — the column is
- * `NOT NULL`, so it lands on `other`, which is the value that exists for
- * exactly this and reads as an honest answer rather than a missing one.
+ * `.catch` rather than a rejection: the type is a label, and losing the label
+ * beats losing the upload. The column is `NOT NULL`, so an unrecognised value
+ * lands on `other` — the value that exists for exactly this.
  *
  * The runtime import of `DOCUMENT_TYPES` is right *here*, on the server, and
  * would be wrong in `document-type-labels.ts` — see the note there.
@@ -126,23 +116,19 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     // eight — which is exactly how the form came to reset itself mid-retry.
     const fail = (message: string) => carryResetKey(state, message)
 
-    // Before the body is touched at all.
-    //
-    // Not belt-and-braces here, unlike on a GET. `proxy.ts` cannot evaluate a
-    // non-GET request — `@neondatabase/auth`'s session fast path is guarded by
-    // `method === "GET"` — so for this POST it degrades to checking that *some*
-    // session cookie substring is present. This is the only real check on the
-    // path, and Next's own documentation says the same thing: a Server Function
-    // is reachable by direct POST, not only through the UI.
+    // ⚠️ Before the body is touched, and not belt-and-braces the way a GET is.
+    // `proxy.ts` cannot evaluate a non-GET request — `@neondatabase/auth`'s
+    // session fast path is guarded by `method === "GET"` — so for a POST it
+    // degrades to checking that *some* session cookie substring is present.
+    // This is the only real check on the path.
     const caller = await requireCaller()
     if (!caller.ok) return fail(caller.message)
 
-    // Before `arrayBuffer()`, so the bytes are not copied a second time. Note
-    // what this does *not* buy: by the time a Server Action runs, Next has
-    // already parsed and buffered the multipart body, so the first copy is
-    // unavoidable here — `serverActions.bodySizeLimit` is what caps it. See
-    // MAX_REQUEST_BYTES for why a client-supplied header is worth consulting at
-    // all, and why only to reject.
+    // Before `arrayBuffer()`, so the bytes are not copied twice. ⚠️ By the time
+    // a Server Action runs Next has already buffered the multipart body, so the
+    // first copy is unavoidable — `serverActions.bodySizeLimit` caps that. See
+    // MAX_REQUEST_BYTES for why a client-supplied header is consulted only to
+    // reject.
     const declared = await deps.getContentLength()
     if (declared !== undefined && declared > MAX_REQUEST_BYTES) {
       return fail("That upload is too large.")
@@ -186,16 +172,13 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
         // prefix, so the check inside the store is a second line rather than
         // the only one.
         userId: caller.userId,
-        // A v4 uuid: 36 characters of [0-9a-f-], starting and ending
-        // alphanumeric, which is what `assertSegment` requires. Minted here
-        // rather than by the database, because it is the object's key segment
-        // and the object is written first. The uploaded filename is never a key
-        // segment.
+        // A v4 uuid, which is what `assertSegment` requires. Minted here rather
+        // than by the database, because it is the object's key segment and the
+        // object is written first; the uploaded filename never is one.
         //
-        // `resumeId` is `ResumeStore`'s field name, not our word for it: that
-        // storage kind is the shelf every upload goes on, not CVs. Ours is
-        // `documentId`, and these three call sites are the only places the
-        // misnomer is allowed — see `NAMING.md` § Known exceptions.
+        // `resumeId` is `ResumeStore`'s field name, not our word — that storage
+        // kind is the shelf every upload goes on, not CVs. These three call
+        // sites are the only places the misnomer is allowed; see `NAMING.md`.
         resumeId: documentId,
         extension: check.extension,
         bytes,
@@ -230,10 +213,9 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     } catch (error) {
       console.error("documents: upload recorded no row", documentId, error)
 
-      // Best effort, and deliberately not reported: the user's upload has
-      // already failed, and a second message about a cleanup they did not ask
-      // for explains nothing. The object is unreachable either way — no row
-      // means no listing, no download and no delete button.
+      // Best effort, deliberately not reported: the upload has already failed,
+      // and the object is unreachable either way — no row means no listing, no
+      // download and no delete button.
       await deps
         .getResumes()
         .delete({
@@ -265,10 +247,8 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     _state: ActionState,
     formData: FormData
   ): Promise<ActionState> {
-    // No `carryResetKey` here, unlike the upload. Nothing keys on a delete's
-    // reset key — the button lives inside the row it deletes, so a success unmounts
-    // it rather than resetting it — and inventing a use for the value would be
-    // symmetry for its own sake.
+    // No `carryResetKey` here, unlike the upload: the button lives inside the
+    // row it deletes, so a success unmounts it rather than resetting it.
     const caller = await requireCaller()
     if (!caller.ok) return { status: "error", message: caller.message }
 
@@ -280,9 +260,8 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
 
     const prisma = deps.getPrisma()
 
-    // The row is what says this document exists and whose it is. `findDocument`
-    // filters on `userId` as well as `id`, so someone else's id is simply not
-    // found — the caller gets one answer for "no such document" and "not
+    // ⚠️ `findDocument` filters on `userId` as well as `id`, so someone else's
+    // id is simply not found — one answer for "no such document" and "not
     // yours", which is what stops this being an existence oracle.
     let document: Awaited<ReturnType<typeof findDocument>>
 

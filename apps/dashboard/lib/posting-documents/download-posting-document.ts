@@ -6,34 +6,25 @@ import { isPostingId } from "./posting-document-ref"
 /**
  * Fetching one stored **Posting Document** for download.
  *
- * **Nothing here imports Next**, which is what makes this testable at all: the
- * property worth asserting is that the object addressed is the *caller's* and
- * can be nothing else, and a session is exactly what a unit test cannot produce.
- * The Next-aware halves are `app/api/cover-letters/[postingId]/route.ts` and
- * `app/api/tailored-resumes/[postingId]/route.ts`, which resolve the session,
- * call this, and turn the result into a `Response` with the headers that make it
- * a download. The split is the one `lib/documents/content-disposition.ts` made
- * for the documents route and for the same reason — a route transitively imports
- * the auth SDK, so anything left inside it is untestable.
+ * **Nothing here imports Next**, which is what makes this testable: the property
+ * worth asserting is that the object addressed is the *caller's* and can be
+ * nothing else, and a session is what a unit test cannot produce. The Next-aware
+ * halves are the two routes under `app/api/`, which transitively import the auth
+ * SDK — so anything left inside them is untestable.
  *
  * ⚠️ **Two things fetch through here, not one.** A route serves the `.md`, and
- * the PDF button in the detail panel fetches the same URL to hand the markdown
- * to `exportMarkdownToPdf` in the browser. That is why the filename comes back
- * beside the bytes rather than being the route's business: the PDF is named by
- * swapping this one's extension, so the two downloads cannot end up called
- * different things.
+ * the PDF button fetches the same URL to hand the markdown to
+ * `exportMarkdownToPdf` in the browser. That is why the filename comes back
+ * beside the bytes: the PDF is named by swapping this one's extension, so the
+ * two downloads cannot end up called different things.
  */
 
-/** What the route has to answer with. */
 /**
- * ⚠️ **`not-found` and `failed` are separate members rather than one with a
- * two-literal discriminant**, so a route can eliminate them one `if` at a time.
+ * What the route has to answer with.
  *
- * `not-found` itself covers "no such document", "someone else's" and "not an
- * address at all", conflated **deliberately** rather than accidentally.
- * Splitting *those* would turn the route into an oracle for whether another
- * user's Posting id exists — the same reasoning `errors.ts` gives for having two
- * error types and the documents download route gives for having one response.
+ * ⚠️ `not-found` conflates "no such document", "someone else's" and "not an
+ * address at all" **deliberately**: splitting them would turn the route into an
+ * oracle for whether another user's Posting id exists.
  */
 export type PostingDocumentDownload =
   | { status: "ok"; markdown: string; filename: string }
@@ -65,16 +56,14 @@ export interface PostingDocumentDownloadOptions {
 /**
  * The document this user has for this Posting.
  *
- * ⚠️ **The key is built from the session's user id.** A caller cannot spell a
- * request that names another user's object, because the only thing they supply
- * is the last segment of the key. The ownership assertion inside
- * `@workspace/user-storage` is a second line of defence rather than the only one.
+ * ⚠️ **The key is built from the session's user id.** A caller supplies only the
+ * last segment, so they cannot spell a request naming another user's object; the
+ * ownership assertion in `@workspace/user-storage` is a second line, not the only
+ * one.
  *
- * The shape check on `postingId` comes first, before the store is touched at
- * all. A value the store would refuse cannot name an object, which from the
- * caller's side is indistinguishable from an object that is not there — and
- * answering "failed" would report a malformed URL as a server fault and fill the
- * log with alarms anyone can trigger from the address bar.
+ * The shape check comes first, before the store is touched: answering "failed"
+ * would report a malformed URL as a server fault and fill the log with alarms
+ * anyone can trigger from the address bar.
  */
 export async function downloadPostingDocument(
   userId: string,

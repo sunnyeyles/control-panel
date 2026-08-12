@@ -5,19 +5,14 @@ import { parseJsonAgainstSchema, schemaDescription } from "./parse-json.ts"
 /**
  * The contract between the profile extractor and whatever runs a search.
  *
- * It lives here, beside the extractor rather than inside it, for the same
- * reason `findings.ts` sits beside the scout: it belongs to neither side. The
- * extractor proposes criteria, a caller stores them and later hands them to a
- * scout, and this module is what says whether what came back is usable. Reading
- * a CV is the one step in the pipeline with no source to check against — there
- * is no URL to click, no advertisement to re-fetch — so the shape of the answer is
- * the only thing that can be verified, and it is verified here.
+ * It lives beside the extractor rather than inside it, like `findings.ts`
+ * beside the scout: it belongs to neither side. Reading a CV is the one step
+ * with no source to check against, so the shape of the answer is the only thing
+ * verifiable — and it is verified here.
  *
- * The extractor has no structured-output channel (the graph binds tools and
- * returns messages), so the hand-off travels as JSON in the final message and
- * is parsed here. `criteriaSchemaDescription` renders this same schema into the
- * extractor's prompt, so what is asked for and what is accepted cannot drift
- * apart.
+ * The extractor has no structured-output channel, so the hand-off travels as
+ * JSON in the final message. `criteriaSchemaDescription` renders this same
+ * schema into the prompt, so asked-for and accepted cannot drift apart.
  *
  * One rule the descriptions below follow that is easy to break by accident:
  * **no double quotes in a `.describe()` string.** They are rendered through
@@ -66,13 +61,11 @@ export const criteriaSchemaDescription: string =
 /**
  * Parse and validate the extractor's final message.
  *
- * Throws rather than degrading, and there is no lenient path on purpose. These
- * criteria become what the system searches for on the user's behalf, on a
- * cadence, without them watching. A half-understood extraction that quietly
- * fills in a search does not announce itself — it comes back as briefs full of
- * the wrong roles, or of nothing at all, with no way to tell that from a quiet
- * market. A visible failure is strictly better: the CV is still there, and the
- * extraction can simply be run again.
+ * Throws rather than degrading, with no lenient path on purpose. These criteria
+ * drive searches run on a cadence with nobody watching, and a half-understood
+ * extraction comes back as briefs full of the wrong roles — indistinguishable
+ * from a quiet market. A visible failure is strictly better; the CV is still
+ * there and the extraction can be run again.
  */
 export function parseSearchCriteria(text: string): SearchCriteria {
   return parseJsonAgainstSchema(SearchCriteriaSchema, text, {
@@ -87,37 +80,21 @@ export function parseSearchCriteria(text: string): SearchCriteria {
  * Two properties this function exists to hold:
  *
  * - **Everything the model may say about the candidate appears here**, because
- *   the extractor has no tools and therefore no second source. What is not in
- *   this string is not available to it.
- * - **The background goes through verbatim.** Not paraphrased, not summarised,
- *   not truncated. Summarising a CV before extracting from it would put this
- *   module in the business of deciding which of the candidate's roles matter —
- *   which is the whole judgement the extractor is being asked to make — and a
- *   silent truncation is worse still: criteria drawn from the first half of a
- *   CV are indistinguishable from criteria drawn from all of it, and the missing
- *   half is usually the earlier career that evidences the seniority.
+ *   the extractor has no tools and therefore no second source.
+ * - **The background goes through verbatim** — never summarised or truncated.
+ *   Summarising would make this module decide which roles matter, which is the
+ *   judgement the extractor is being asked to make; a silent truncation is
+ *   worse, since the dropped half is usually the earlier career that evidences
+ *   the seniority. Bounds are the caller's, enforced upstream.
  *
- * Bounds belong to the caller and are enforced before this is reached, exactly
- * as `assertDraftable` guards `toCoverLetterPrompt`. Over-length text arriving
- * here is a bug upstream, not something to quietly shorten.
+ * The CV is fenced and labelled as quoted material. The fence is a label, not a
+ * security boundary — what contains an injected instruction is the empty tool
+ * set on the agent reading this.
  *
- * The CV is fenced and labelled as quoted material, in the same idiom the
- * search tool uses for an advertisement's description. The fence is not a
- * security boundary — nothing stops a document from writing a fence of its own
- * — it is a label, and what actually contains an injected instruction is the
- * empty tool set on the agent reading this.
- *
- * ⚠️ **The schema is deliberately not repeated here.** It is already in
- * {@link criteriaSchemaDescription} (and therefore in the extractor's system
- * prompt), and `toSearchCriteriaPrompt` says nothing about the shape.
- * Restating it would put the same JSON Schema in the context twice on every
- * call, and would create a second place for it to be stale.
- *
- * The scout no longer needs the arrangement at all: its hand-off is a
- * `submit_findings` tool call, so the provider renders the schema from the
- * tool's arguments and its prompt carries none of it. This agent still answers
- * in a final message, so the schema has to reach it somehow, and once is the
- * answer.
+ * ⚠️ **The schema is deliberately not repeated here.** It already reaches the
+ * model through {@link criteriaSchemaDescription} in the system prompt;
+ * restating it would put the same JSON Schema in context twice per call and
+ * create a second place for it to go stale.
  */
 export function toSearchCriteriaPrompt(background: string): string {
   return [

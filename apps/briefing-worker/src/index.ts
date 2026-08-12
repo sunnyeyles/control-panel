@@ -24,17 +24,14 @@ import { runTick } from "./run-tick.ts"
  */
 
 /**
- * Module scope, so a warm invocation reuses fetched secrets. Lambda freezes the
- * process between invocations rather than tearing it down, which makes module
- * scope the natural cache and holds this to one Secrets Manager call per secret
- * per cold start rather than one per invocation.
+ * Module scope, so a warm invocation reuses fetched secrets: Lambda freezes the
+ * process rather than tearing it down, holding this to one Secrets Manager call
+ * per secret per cold start.
  *
- * Note what is deliberately *not* cached this way: the database client. A
- * secret is a string and stays valid; a socket does not. The gap between ticks
- * is an hour and Neon autosuspends after five minutes, so a cached connection
- * is dead by the next invocation as the default outcome — which is why
- * `createPrismaClient()` is called per invocation below and disconnected in a
- * `finally`.
+ * The database client is deliberately *not* cached this way. A secret is a
+ * string and stays valid; a socket does not. Ticks are an hour apart and Neon
+ * autosuspends after five minutes, so a cached connection is dead by default —
+ * hence `createPrismaClient()` per invocation, disconnected in a `finally`.
  */
 const loaded = new Set<string>()
 
@@ -50,10 +47,8 @@ let secrets: SecretsManagerClient | undefined
  * Put a secret where the code that needs it already looks.
  *
  * Setting an environment variable rather than threading values through
- * constructors is what keeps `@workspace/agents-core` and `@workspace/db` free
- * of any knowledge of where their configuration comes from. From their point of
- * view it is just an environment variable; fetching it is this file's job
- * alone.
+ * constructors keeps `@workspace/agents-core` and `@workspace/db` ignorant of
+ * where their configuration comes from; fetching it is this file's job alone.
  *
  * A no-op when `variable` is already set, which is what makes local invocation
  * work with no AWS credentials.
@@ -120,16 +115,12 @@ async function loadSecrets(): Promise<void> {
 /**
  * What the function can be asked to do.
  *
- * **An absent `kind` is the tick**, permanently, and not a value waiting to be
- * filled in. EventBridge Scheduler sends `{}`, and so does
- * `aws lambda invoke --payload '{}'`; both must keep meaning what they have
- * always meant. That also makes the ad-hoc path opt-in by construction — a
- * malformed or unrecognised payload can never be mistaken for one, because
- * reaching it requires spelling the discriminator exactly.
+ * **An absent `kind` is the tick**, permanently — EventBridge Scheduler and
+ * `aws lambda invoke --payload '{}'` both send `{}`. That also makes the ad-hoc
+ * path opt-in by construction: reaching it requires the exact discriminator.
  *
- * `passthrough()` is deliberate: EventBridge and the console both decorate a
- * payload with fields of their own, and a strict object would reject an
- * invocation over something nothing reads.
+ * The loose object is deliberate: EventBridge and the console decorate payloads
+ * with fields of their own, and a strict object would reject the invocation.
  */
 const adHocPayloadSchema = z.object({
   kind: z.literal("ad-hoc-run"),
@@ -145,26 +136,16 @@ const payloadSchema = z
 /**
  * The entry point, for both ways in.
  *
- * EventBridge Scheduler invokes this **hourly** with an empty payload, and the
- * tick's cadence — not any job's — is what lives in Terraform. That keeps the
- * one thing every job shares reviewable in a diff, while a job's own schedule is
- * a row that costs an INSERT to add rather than an apply.
+ * EventBridge Scheduler invokes this **hourly** with an empty payload; only the
+ * tick's cadence lives in Terraform, so a job's own schedule costs an INSERT
+ * rather than an apply. The dashboard invokes it asynchronously with an
+ * `ad-hoc-run` payload naming a `runs` row it has already inserted, claiming no
+ * slot. The payload is read here and nowhere else, since `run-tick.ts` and
+ * `run-ad-hoc.ts` are platform-independent.
  *
- * The dashboard invokes it asynchronously with an `ad-hoc-run` payload naming a
- * `runs` row it has already inserted. That path claims no slot: it runs one
- * briefing, out of band, without disturbing the schedule.
- *
- * The payload is read *here* and nowhere else. `run-tick.ts` and
- * `run-ad-hoc.ts` are both platform-independent, so the shape AWS delivers is
- * this file's business alone — as the handler signature, the secrets and S3
- * already are.
- *
- * **The two paths differ in what they do with a failure, and deliberately.**
- * The tick rethrows: that throw marks the invocation failed and produces the
- * `Errors` datapoint the alarm watches, so a broken schedule is visible without
- * anyone reading logs. An ad-hoc run records its failure on the row and returns
- * — see `run-ad-hoc.ts` for why polluting a 24-hour latching alarm with
- * failures a person is already watching would cost more than it buys.
+ * **The two paths treat failure differently, deliberately.** The tick rethrows,
+ * producing the `Errors` datapoint the alarm watches. An ad-hoc run records the
+ * failure on the row and returns — see `run-ad-hoc.ts`.
  */
 export const handler = async (event?: unknown): Promise<void> => {
   const payload = payloadSchema.parse(event)
@@ -186,13 +167,12 @@ export const handler = async (event?: unknown): Promise<void> => {
   const prisma = createPrismaClient()
 
   try {
-    // Built here rather than at module scope for the same reason the agents
-    // are factories: constructing the store reads `USER_STORAGE_BUCKET_NAME`
-    // and `USER_STORAGE_ENVIRONMENT`, and a module-level instance would move
-    // that failure to import time. Region comes from the AWS_REGION the
-    // runtime sets. Inside the `try`, because that read throwing must still
-    // reach the `finally` — a client left connected across a freeze is one
-    // Neon keeps accounting for.
+    // Built here rather than at module scope for the same reason the agents are
+    // factories: constructing the store reads `USER_STORAGE_BUCKET_NAME` and
+    // `USER_STORAGE_ENVIRONMENT`, and a module-level instance would move that
+    // failure to import time. Inside the `try` so a throw still reaches the
+    // `finally` — a client left connected across a freeze is one Neon keeps
+    // accounting for.
     const briefs = createBriefStore(createS3UserObjectStore())
 
     if (adHoc.success) {

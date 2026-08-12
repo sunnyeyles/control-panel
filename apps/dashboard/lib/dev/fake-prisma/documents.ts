@@ -3,12 +3,9 @@ import type { DevStore } from "./store"
 import type { DocumentsForUser, DocumentWhere } from "./query-types"
 
 /**
- * The Documents shelf. Four calls, and the two lookups are both scoped by
- * owner because in the real thing that scoping *is* the ownership check —
- * `findDocument` and `deleteDocument` in `@workspace/db` have no other one.
- * A fake that answered from the id alone would let that scoping be dropped
- * without anything here noticing, which is the same argument
- * `posting.findFirst` above makes.
+ * ⚠️ Both lookups are scoped by owner because in the real thing that scoping
+ * *is* the ownership check — `findDocument` and `deleteDocument` have no other
+ * one. Answering from the id alone would let that scoping be dropped unnoticed.
  */
 export function createDocumentDelegate(store: DevStore) {
   return {
@@ -26,11 +23,10 @@ export function createDocumentDelegate(store: DevStore) {
 /**
  * One user's Documents, newest first.
  *
- * The order is the real query's, restated rather than ignored: it is the
- * only order the list has, and `loadCandidateBackground` picks "the newest
- * document labelled resume" by taking the first match out of it. A fake that
- * answered in insertion order would make that choice look arbitrary here and
- * correct in production.
+ * The real query's order, restated rather than ignored: `loadCandidateBackground`
+ * picks "the newest document labelled resume" by taking the first match out of
+ * it, so insertion order would make that choice look arbitrary here and correct
+ * in production.
  */
 function findManyDocuments(store: DevStore, userId: string): Document[] {
   return store.documents

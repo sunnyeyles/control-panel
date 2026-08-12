@@ -10,11 +10,9 @@ import {
  *
  * ⚠️ **There is no `POSTING_ID_PATTERN` here, and that absence is the point.**
  * A tailored resume is addressed by exactly the value a cover letter is, so the
- * shape a form field or a URL segment must have before it can become a key
- * segment is stated once, for both — in
- * `lib/posting-documents/posting-document-ref.ts`, whose own comment explains at
- * length why there is one copy of it. Restating the regex under a second name is
- * precisely the drift that comment exists to prevent.
+ * shape is stated once for both in
+ * `lib/posting-documents/posting-document-ref.ts`. Restating the regex under a
+ * second name is the drift that comment exists to prevent.
  */
 
 /**

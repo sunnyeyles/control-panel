@@ -33,24 +33,15 @@ export type CreateProfileExtractorOptions = ToollessAgentOptions
  * The profile extractor: reads one CV, proposes search criteria, and can do
  * nothing else.
  *
- * Tool-lessness is not a quality preference here, it is the containment, and
- * this is the strongest case for it in the package. The cover-letter writer
- * holds the candidate's CV alongside attacker-influenced posting text; this
- * agent holds the CV and nothing but the CV — the whole document, verbatim,
- * including whatever address, phone number and employment history it carries.
- *
- * An agent that can both read a CV and issue an outbound request can be induced
- * to put one inside the other, and the uploaded file is itself the injection
- * surface: it arrives from outside the system, nothing sanitises it, and a
- * closed signup does not help — a user can be handed a document as easily as
- * they can write one. Having no tools is what makes reading the document
- * verbatim acceptable: injected text can shape a JSON object the user then
- * reviews, and can reach nothing else. **Do not add a tool here.** If this
- * agent ever needs a fact it cannot read off the page, that lookup belongs on a
- * separate agent that never sees the CV.
- *
- * The mechanism — and the structural assertion that no caller can arm it — is
- * `defineToollessAgent`, proven once in `agent-options.test.ts`.
+ * Tool-lessness is the containment, and this is the strongest case in the
+ * package: the agent holds the whole CV verbatim, including whatever address,
+ * phone number and employment history it carries. The uploaded file is itself
+ * the injection surface — nothing sanitises it, and a closed signup does not
+ * help, since a user can be handed a document as easily as write one. With no
+ * tools, injected text can shape a JSON object the user then reviews and reach
+ * nothing else. **Do not add a tool here**; a lookup this agent cannot read off
+ * the page belongs on a separate agent that never sees the CV. The structural
+ * assertion is `defineToollessAgent`, proven in `agent-options.test.ts`.
  *
  * The user prompt that carries the CV is {@link toSearchCriteriaPrompt} in
  * `criteria.ts`, beside the schema it asks the model to fill.

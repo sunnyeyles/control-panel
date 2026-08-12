@@ -7,14 +7,12 @@ import { JOB_SCOUT_SEARCH_TOOL_NAMES } from "@workspace/agents"
  * once: the count in the run report, the "nothing came from a live search" gate,
  * and the warning on a run that recorded nothing all read the answer this gives.
  *
- * ⚠️ **It used to read the transcript, and that was the bug.** A board search
- * that fails comes back to the model as a *sentence* — an actor run that 500s, a
- * timeout, a body that will not parse — and LangChain wraps a returned string as
- * a `status: "success"` ToolMessage, because only a throw sets the error status.
- * So counting non-error tool results counted every failed search as a successful
- * one, and a run whose every actor was down passed the gate that exists to catch
- * exactly that: the scout honestly reported nothing, the brief was written, and
- * the `postings` table went untouched with the run marked `succeeded`.
+ * ⚠️ **It used to read the transcript, and that was the bug.** A failed board
+ * search comes back to the model as a *sentence*, and LangChain wraps a returned
+ * string as a `status: "success"` ToolMessage — only a throw sets the error
+ * status. So counting non-error tool results counted every failed search as a
+ * successful one, and a run whose every actor was down passed the gate that
+ * exists to catch exactly that, marked `succeeded`.
  *
  * What is read instead is the search log the tools write as they run — see
  * `search-log.ts` in `@workspace/agent-tools`, and

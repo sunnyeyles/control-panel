@@ -41,30 +41,22 @@ export type CreatePostingExtractorOptions = ToollessAgentOptions
  * The posting extractor: reads one page, reports one Posting, and can do
  * nothing else.
  *
- * **This is the agent the rest of the package has been deferring to.**
- * `cover-letter-writer.ts` and `resume-tailor.ts` each say, in as many words,
- * that when a page fetcher exists it "goes on a separate agent that never sees
- * the profile, and hands this one validated data". This is that agent, and the
- * separation is the security argument: the fetcher retrieves attacker-written
- * text, and the only agent that reads it holds no CV, no instructions, no
- * stored document, and no tools.
+ * **This is the separate agent `cover-letter-writer.ts` and `resume-tailor.ts`
+ * defer to.** The separation is the security argument: the fetcher retrieves
+ * attacker-written text, and the only agent that reads it holds no CV, no
+ * instructions, no stored document, and no tools.
  *
- * Tool-lessness carries a second weight here that it does not carry elsewhere.
- * The other tool-less agents read text the *user* supplied. This one reads a
- * page fetched from a host the user merely named, which is the least trusted
- * input anywhere in the system — and it reads it verbatim, because summarising
- * a page before extracting from it would be doing the extraction twice. An
- * agent that could both read that page and issue a request could be told to by
- * the page. It cannot, so an injected instruction can shape a JSON object that
- * is then schema-validated, and can reach nothing else. **Do not add a tool
+ * This reads a page from a host the user merely named — the least trusted input
+ * in the system — verbatim, since summarising before extracting would do the
+ * extraction twice. An agent that could read that page *and* issue a request
+ * could be told to by the page. It cannot, so an injected instruction can shape
+ * a schema-validated JSON object and reach nothing else. **Do not add a tool
  * here** — not a fetcher for the "apply" link, not a search to confirm the
- * company exists.
+ * company exists. The structural assertion is `defineToollessAgent`, proven in
+ * `agent-options.test.ts`.
  *
- * The mechanism — and the structural assertion that no caller can arm it — is
- * `defineToollessAgent`, proven once in `agent-options.test.ts`.
- *
- * The schema, the user prompt and the parser live in `posting-extraction.ts`
- * and are re-exported from here so existing imports keep working.
+ * The schema, user prompt and parser live in `posting-extraction.ts`, and are
+ * re-exported from here so existing imports keep working.
  */
 export const createPostingExtractor = defineToollessAgent(
   POSTING_EXTRACTOR_SYSTEM_PROMPT

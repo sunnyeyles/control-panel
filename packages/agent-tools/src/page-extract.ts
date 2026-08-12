@@ -3,27 +3,19 @@ import { requireEnv, searchApiPost } from "./search-http.ts"
 /**
  * Retrieve the page at a link, as markdown.
  *
- * ⚠️ **This is deliberately not a tool, and that is the whole design.** It is a
- * plain function; it is absent from `allTools`; no `createX()` agent factory
- * receives it, and `page-extract.test.ts` asserts both. `OVERVIEW.md` records
- * why a fetcher must not be handed to an agent casually, and
- * `cover-letter-writer.ts` and `resume-tailor.ts` both say in as many words that
- * when a page fetcher exists it "goes on a separate agent that never sees the
- * profile, and hands this one validated data". A caller retrieves the page, and
- * hands the text to an agent that can do nothing with it but answer.
+ * ⚠️ **This is deliberately not a tool, and that is the whole design.** A plain
+ * function, absent from `allTools`, handed to no `createX()` factory —
+ * `page-extract.test.ts` asserts both. Wrapping it in `tool()` would put an
+ * arbitrary URL fetcher in the hands of whichever agent picked it up, including
+ * the general assistant, which carries `allTools`. Do not. A caller retrieves
+ * the page and hands the text to an agent that can do nothing but answer.
  *
- * Adding `tool()` around this would put an arbitrary URL fetcher in the hands of
- * whichever agent picked it up — including the general assistant, which carries
- * `allTools`. Do not.
- *
- * **Retrieval is delegated, and that is a security property rather than a
- * convenience.** The request goes to Tavily, and Tavily fetches the page; this
- * process never opens a socket to a host somebody typed into a form. So there is
- * no SSRF surface to defend, no redirect chain to bound, and no streaming
- * response to cut off — we send one JSON request to one known host and read one
- * JSON reply. What is left is the size of what comes back, which
- * {@link MAX_PAGE_CHARS} bounds, and the fact that the text is written by
- * whoever owns the page, which the reading agent's empty tool set contains.
+ * **Retrieval is delegated, and that is a security property.** Tavily fetches
+ * the page; this process never opens a socket to a host somebody typed into a
+ * form, so there is no SSRF surface, no redirect chain to bound, no streaming
+ * response to cut off. What is left is the size of the reply, which
+ * {@link MAX_PAGE_CHARS} bounds, and the untrusted text itself, which the
+ * reading agent's empty tool set contains.
  */
 
 const TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"

@@ -38,34 +38,23 @@ import { canonicalRoleTitle } from "./role-titles"
  * `app/(app)/jobs/schedules/actions.ts`, which is `"use server"` and supplies
  * the real dependencies.
  *
- * Three properties this module exists to hold, none of which is visible from
- * the happy path:
+ * Three properties, none visible from the happy path:
  *
  * 1. **It persists nothing, and therefore calls no `refresh()`.** The criteria
- *    come back as a value the form renders into its own fields, and the user
- *    then edits them and submits the *create* action — which is where anything
- *    is written. That is what makes "the user reviews the suggestion before it
- *    is saved" a structural fact rather than a promise the UI makes: there is no
- *    write on this path to review *after*. It also means there is no cached
- *    segment to invalidate, which is why the wrapper is the one action in that
- *    file with no `refresh()` and says so.
+ *    come back as a value the form renders into its fields; the *create* action
+ *    is where anything is written. That makes "the user reviews the suggestion
+ *    before it is saved" structural rather than a promise the UI makes.
  * 2. **No form field is read at all.** The CV is found from the session's user
- *    id, through the same `loadCandidateBackground` the cover-letter action
- *    uses, so there is no field a caller could tamper with to make this read
- *    somebody else's document — and nothing from the request reaches the model's
- *    prompt. Both parameters exist only because `useActionState` dictates the
- *    signature.
- * 3. **A user with no readable CV costs no model call.** Every refusal below —
- *    not signed in, nothing labelled Resume, a format with no parser, a document
- *    too thin to read anything out of — happens *before* the extractor is
- *    constructed. The suite asserts the injected factory was never called, which
- *    is the only way that property can be seen.
+ *    id via `loadCandidateBackground`, so no field can make this read somebody
+ *    else's document and nothing from the request reaches the prompt. Both
+ *    parameters exist only because `useActionState` dictates the signature.
+ * 3. **A user with no readable CV costs no model call.** Every refusal below
+ *    happens *before* the extractor is constructed; the suite asserts the
+ *    injected factory was never called, which is the only way to see it.
  *
- * The model is deliberately the one agent in the repository with no tools; see
- * `createProfileExtractor` for why that is containment rather than tuning. It is
- * handed the whole CV verbatim, including whatever address and employment
- * history it carries, and having nowhere to send it is what makes that
- * acceptable.
+ * The model is the one agent in the repository with no tools — it is handed the
+ * whole CV verbatim, and having nowhere to send it is what makes that
+ * acceptable. See `createProfileExtractor`.
  */
 
 /**

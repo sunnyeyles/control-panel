@@ -36,25 +36,17 @@ import {
  * `app/(app)/jobs/letters/actions.ts`, which is `"use server"`, supplies the
  * real dependencies, and calls `refresh()`.
  *
- * Two properties hold across both actions, and neither is visible from the
- * happy path:
+ * Two properties hold across both actions, neither visible from the happy path:
  *
  * 1. **The row is addressed by the session's user id and by nothing else.** No
- *    form field reaches the `where` clause, so there is no way to *name*
- *    another user's settings from here. `importExampleLetter` takes a document
- *    id, and that id is checked against the caller's own listing before it is
- *    read.
- * 2. **Over-length text is refused, never trimmed.** Both caps come from
- *    `@workspace/agents/cover-letter` rather than being restated here, and both
- *    refusals name the count and the limit. A silent trim would save a rule
- *    list ending mid-sentence, or an example letter missing its sign-off, and
- *    say nothing about it — and the letters drafted afterwards would look
- *    perfectly fine.
+ *    form field reaches the `where` clause. `importExampleLetter` takes a
+ *    document id, checked against the caller's own listing before it is read.
+ * 2. **Over-length text is refused, never trimmed.** A silent trim would save a
+ *    rule list ending mid-sentence, or an example missing its sign-off, and say
+ *    nothing — and the letters drafted afterwards would look perfectly fine.
  *
- * The two fields save together in one call, because a save is the whole setting
- * rather than a patch of it (see `saveCoverLetterInstructions`). That is why
- * both are validated before either is written: an over-cap example must not
- * leave a half-applied save behind.
+ * Both fields save in one call, because a save is the whole setting rather than a
+ * patch of it — which is why both are validated before either is written.
  */
 
 /**
@@ -128,11 +120,9 @@ export function createLetterInstructionsActions(
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    // Before the body is touched at all. For a Server Action this is not a
-    // second layer: `proxy.ts` cannot evaluate a POST session — the auth SDK's
-    // fast path is guarded by `method === "GET"` — so it degrades to checking
-    // that some session-cookie substring is present. This is the only real
-    // check on the path.
+    // ⚠️ Before the body is touched, and the only real check on the path:
+    // `proxy.ts` cannot evaluate a POST session, so it degrades to a cookie
+    // presence check.
     const caller = await requireCaller()
     if (!caller.ok) return fail(caller.message)
 
@@ -193,10 +183,8 @@ export function createLetterInstructionsActions(
     let documents: DocumentSummary[]
     try {
       // ⚠️ **The ownership check, and it is structural.** `listDocuments` takes
-      // the session's userId, so the rows it returns are the caller's own and
-      // nothing else. A document id belonging to someone else is simply absent
-      // from it, which is why the refusal below cannot tell the two apart even
-      // in principle.
+      // the session's userId, so someone else's document id is simply absent —
+      // which is why the refusal below cannot tell the two apart in principle.
       documents = await listDocuments(caller.userId, deps.getPrisma())
     } catch (error) {
       return fail(storageMessage("cover-letters: list failed", error))
@@ -211,10 +199,9 @@ export function createLetterInstructionsActions(
     if (!document) return fail(DOCUMENT_NOT_FOUND)
 
     if (!isReadableProfileExtension(document.extension)) {
-      // Named rather than lumped in, because `resumes` accepts more on upload
-      // than anything can read: the user is being refused a document this app
-      // already took, and without the extension in the sentence that reads as a
-      // bug. Same gap `describeMissingBackground` covers on the draft path.
+      // Named rather than lumped in: `resumes` accepts more on upload than
+      // anything can read, so the user is being refused a document this app
+      // already took — without the extension in the sentence that reads as a bug.
       return fail(describeUnreadableFormat(document))
     }
 

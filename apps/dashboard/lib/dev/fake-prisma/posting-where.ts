@@ -9,17 +9,13 @@ import type {
 /**
  * ⚠️ **Throws on a filter it does not understand, rather than ignoring it.**
  *
- * The whole file's principle, and nowhere does it matter more than here: this
- * predicate decides what `deleteMany` removes, so a clause quietly dropped
- * would not merely widen a listing — it would delete every Posting the dev user
- * has, in the one environment the delete is built in.
+ * This predicate decides what `deleteMany` removes, so a dropped clause would
+ * not merely widen a listing — it would delete every Posting the dev user has,
+ * in the one environment the delete is built in.
  *
- * Module-level and exported rather than a method, because
- * `lib/postings/posting-actions.test.ts` builds its own `posting` double and had
- * copied this rule out. Two spellings of "which rows does this `where` name" is
- * one more than the number that can be wrong without anyone noticing — sharing
- * the predicate is not code thrift, it is the only way a divergence shows up as
- * a failing test rather than as a fake that agrees with nothing.
+ * Exported rather than a method because `posting-actions.test.ts` builds its own
+ * `posting` double and had copied this rule out. Sharing it is what makes a
+ * divergence a failing test rather than a fake that agrees with nothing.
  */
 export function matchesPostingWhere(
   row: PostingKey,
@@ -84,15 +80,13 @@ function matchesUnscored(
  * Whether a row's normalised title carries any of the excluded patterns.
  *
  * ⚠️ **A plain substring test, and that is the *real* rule rather than a
- * simplification of it.** Both sides are space-padded and punctuation-flattened
- * — `titleMatchPattern()` on one side, the `title_normalized` generated column
- * on the other — which is exactly what turns whole-word matching into
- * `contains`. Reimplementing word boundaries here would make this fake stricter
- * than Postgres and hide the case the padding exists to handle.
+ * simplification.** Both sides are space-padded and punctuation-flattened —
+ * `titleMatchPattern()` and the `title_normalized` column — which is what turns
+ * whole-word matching into `contains`. Reimplementing word boundaries here would
+ * make the fake stricter than Postgres and hide the case padding handles.
  *
- * Throws on a row with no `titleNormalized` rather than admitting it: under the
- * flag that means a fixture missing the field, and quietly keeping the row would
- * make the filter look broken in the one environment it is built in.
+ * Throws on a row with no `titleNormalized`: that is a fixture missing the
+ * field, and keeping the row would make the filter look broken locally.
  */
 function matchesAnyTitlePattern(
   row: PostingKey,
@@ -117,10 +111,9 @@ function matchesAnyTitlePattern(
 /**
  * Delete in place and answer with the rows that went, in the order they sat in.
  *
- * Splices out of the caller's array rather than handing back a new one, because
- * every holder of a `posting` double keeps its rows in a `readonly` field that
- * the rest of the double reads through — a reassignment would leave the other
- * methods looking at rows that are supposed to be gone.
+ * Splices in place rather than handing back a new array: every holder keeps its
+ * rows in a `readonly` field the rest of the double reads through, so a
+ * reassignment would leave the other methods looking at deleted rows.
  */
 export function removeMatchingPostings<Row extends PostingKey>(
   rows: Row[],

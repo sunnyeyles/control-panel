@@ -18,29 +18,22 @@ import { postingSource, type PostingSource } from "./posting-source"
 /**
  * One page of the Postings table.
  *
- * **Nothing here imports Next**, for the reason `lib/jobs/job-actions.ts` gives:
- * which rows a user can reach, and what a page past the end does, are exactly
- * the behaviours a page component cannot be tested for. The client arrives as
- * an argument rather than through `getPrisma()` for the same reason.
+ * **Nothing here imports Next**, and the client arrives as an argument rather
+ * than through `getPrisma()`: which rows a user can reach, and what a page past
+ * the end does, are behaviours a page component cannot be tested for.
  *
- * This replaced `lib/briefings/latest-postings.ts`, and the difference is the
- * whole feature: that module read one Run's `findings` and a Posting the next
- * Run did not re-find simply vanished. This reads the `postings` table, which
- * accumulates — every advertisement any of the user's briefings has ever found,
- * once each, carrying the status the user set.
+ * Reads the `postings` table, which accumulates — every advertisement any of the
+ * user's briefings has ever found, once each, carrying the status the user set.
  */
 
 /**
  * One Posting, flattened to what the table renders.
  *
  * ⚠️ **`summary`, `matchReason` and `highlights` are deliberately not here.**
- * They are the expanded row's content, they are the largest fields a Posting
- * has, and at most one row is expanded at a time — so carrying them for all
- * twenty-five put roughly a page's worth of prose nobody was reading into the
- * RSC payload of every sort click. They now come from
- * `load-posting-detail.ts` when a row is actually opened. Everything below is
- * what the compact row, the delete dialog and the letter controls read, and it
- * is all short.
+ * They are the largest fields a Posting has and at most one row is expanded at a
+ * time, so carrying them for all twenty-five put a page of unread prose into the
+ * RSC payload of every sort click. `load-posting-detail.ts` supplies them when a
+ * row is opened.
  */
 export interface PostingView {
   /**
@@ -55,51 +48,44 @@ export interface PostingView {
   url: string
   status: PostingStatus
   /**
-   * What the Posted cell shows: the parsed `postings.posted_at` formatted, or —
-   * when that is NULL because the advertisement stated a date the write path
-   * would not read as one — the advertisement's own words, verbatim.
+   * What the Posted cell shows: `postings.posted_at` formatted, or — when that
+   * is NULL because the write path could not read the stated date — the
+   * advertisement's own words. Absent only when it said nothing at all.
    *
-   * Absent only when it said nothing at all.
-   *
-   * ⚠️ **The two cases are deliberately one field, and the fallback is not a
-   * mistake.** A row that says "3 days ago" keeps saying it rather than
-   * degrading to an em-dash, and the column orders NULLs last so such a row sits
-   * at the bottom under either direction. A phrase is visibly not a date, so the
-   * value on screen and the order it sits in cannot appear to contradict each
-   * other. See {@link toView}.
+   * ⚠️ **The fallback is not a mistake.** A row that says "3 days ago" keeps
+   * saying it rather than degrading to an em-dash; NULLs order last in both
+   * directions, and a phrase is visibly not a date, so the value on screen and
+   * the order it sits in cannot appear to contradict each other. See
+   * {@link toView}.
    */
   postedAt?: string
   /**
    * Which job board this came from, derived from {@link PostingView.url} rather
    * than stored — see `posting-source.ts` for why there is no column.
    *
-   * Absent only when the stored URL will not parse, which is a different thing
-   * from a host no board claims: that still answers, with the hostname.
+   * Absent only when the stored URL will not parse; a host no board claims still
+   * answers, with the hostname.
    */
   source?: PostingSource
   /**
    * How well this advertisement matches the user's resume, 0–100.
    *
-   * Absent when nobody has scored it yet, which is every Posting until the
-   * scoring loop on this page reaches it — see
+   * Absent until the scoring loop on this page reaches it — see
    * `components/jobs/postings/score-pending-matches.tsx`. Absent is a state the
    * column renders rather than a fault: an unscored Posting is not a
    * badly-matched one, and the order puts it last either way.
    *
    * ⚠️ **The number and nothing else.** The reason behind it and the gaps it
-   * names arrive with `load-posting-detail.ts` when a row is opened, for the
-   * reason the docblock above gives about `summary`: they are prose, and
-   * carrying them for twenty-five rows to serve the one that gets expanded is
-   * what that split exists to stop.
+   * names arrive with `load-posting-detail.ts` when a row is opened — they are
+   * prose, and the split exists to stop twenty-five rows carrying them.
    */
   matchScore?: number
   /**
    * How long ago this advertisement was first found, as "3 weeks ago".
    *
-   * Relative rather than absolute because the question the detail panel is
-   * asked is *is this stale*, and a UTC stamp makes the reader do the
-   * subtraction. {@link firstSeenExact} is the stamp, carried alongside for the
-   * `title` attribute rather than instead of this.
+   * Relative because the question the detail panel is asked is *is this stale*,
+   * and a UTC stamp makes the reader do the subtraction. {@link firstSeenExact}
+   * carries the stamp for the `title` attribute.
    */
   firstSeen: string
   /** The same instant, formatted, UTC, with the zone named. */
@@ -112,11 +98,9 @@ export interface PostingView {
    * The name of the Briefing that most recently found this advertisement —
    * `lastSeenRun.job.name`, read through the relation.
    *
-   * A plain string, like every other field here, because it crosses into a
-   * client component and the dialog renders it verbatim. **This table is
+   * A plain string because it crosses into a client component. **This table is
    * cumulative across every Briefing a user has**, so without it someone with
-   * three of them cannot tell which one surfaced a given row — the superseded
-   * Posting card got that for free from the heading of the card it sat in.
+   * three of them cannot tell which one surfaced a given row.
    *
    * Never empty: a relation that could not name one degrades to
    * {@link UNKNOWN_BRIEFING} rather than costing the row. See
@@ -126,16 +110,12 @@ export interface PostingView {
 }
 
 /**
- * ⚠️ **`lastSeenRunId` is deliberately not on {@link PostingView}, even though
- * {@link PostingView.briefing} is resolved through that very column.** The
- * column is real provenance, but nothing this page renders needs the *id*: its
- * only reader was `DraftCoverLetterButton`, back when drafting re-read the
- * Posting out of `runs.findings` and had to name a Run. It reads
- * `postings.payload` now — and reads the run id off the row itself, server-side,
- * to record on the letter — so carrying the value out to a client component
- * would put an identifier on the wire that nothing sends back. The Briefing's
- * *name* is the opposite kind of thing: it is the label a person reads, so it is
- * resolved here and no client is ever handed a run id to make sense of.
+ * ⚠️ **`lastSeenRunId` is deliberately not on {@link PostingView}**, though
+ * {@link PostingView.briefing} is resolved through that column. Nothing rendered
+ * needs the *id* — drafting reads `postings.payload` and takes the run id off the
+ * row server-side — so carrying it out to a client component would put an
+ * identifier on the wire that nothing sends back. The *name* is the label a
+ * person reads, so it is resolved here instead.
  */
 
 export interface PostingPage {
@@ -150,9 +130,8 @@ export interface PostingPage {
    *
    * ⚠️ **The page is expected to say this out loud.** A filter that quietly
    * shrinks a table is indistinguishable from briefings that stopped finding
-   * anything, and the row is not there to be noticed — so the count is the only
-   * thing standing between a working filter and a bug report. `0` when nothing
-   * is filtered, which is the usual case.
+   * anything, so the count is the only thing standing between a working filter
+   * and a bug report. `0` when nothing is filtered.
    */
   hidden: number
   /** The page actually rendered, which is not always the one asked for. */
@@ -166,18 +145,16 @@ export interface PostingPage {
  *
  * ⚠️ **The query is `listPostingPage` in `@workspace/db`, and everything about
  * *reading* a page belongs to it** — the `userId` scoping that is the ownership
- * check rather than a filter in front of one, the count issued alongside the
- * page, the clamp against the real page count and the re-fetch when a requested
- * page overshot, the `postingId` tie-break that stops a row appearing on two
- * pages, and NULLS LAST on `postedAt` in both directions. The reasoning for each
- * is there, next to the SQL it is about, and `stores.test.ts` exercises it
- * against a real Postgres — which is the point: those are properties of an index
- * and a planner, and a hand-written fake could only agree with whoever wrote it.
+ * check rather than a filter in front of one, the count, the clamp against the
+ * real page count, the `postingId` tie-break that stops a row appearing on two
+ * pages, NULLS LAST on `postedAt`. The reasoning sits next to the SQL, and
+ * `stores.test.ts` exercises it against a real Postgres — those are properties
+ * of an index and a planner, which a hand-written fake could only agree with.
  *
- * What stays here is everything the database has no opinion about: mapping the
- * URL's sort vocabulary onto the column vocabulary, parsing `payload` against a
- * schema `@workspace/db` deliberately cannot see, formatting every instant on
- * the server, and deciding what a row that answered nothing degrades to.
+ * What stays here is what the database has no opinion about: mapping the URL's
+ * sort vocabulary onto the column vocabulary, parsing `payload` against a schema
+ * `@workspace/db` deliberately cannot see, formatting every instant on the
+ * server, and deciding what a row that answered nothing degrades to.
  *
  * ⚠️ **Two clamps, two owners.** `MAX_PAGE` in `posting-query.ts` bounds the
  * app's first untrusted GET input before anything has been counted; the clamp
@@ -189,9 +166,8 @@ export async function listPostings(
   query: PostingQuery
 ): Promise<PostingPage> {
   // ⚠️ **Serial, and it has to be**: the patterns are an argument to the page
-  // query, so there is nothing to overlap it with. One indexed primary-key
-  // lookup, and the alternative — caching it across requests — would mean a
-  // save that does not take effect until something expires.
+  // query. One indexed primary-key lookup, and caching it across requests would
+  // mean a save that does not take effect until something expires.
   //
   // ⚠️ **Words become patterns here, and only here.** `@workspace/db` is handed
   // `" senior "` rather than `"senior"` because it filters and does not
@@ -213,9 +189,8 @@ export async function listPostings(
     }
   )
 
-  // One instant for the whole page, read once rather than per row, so twenty-five
-  // sightings a few milliseconds apart cannot be described relative to twenty-five
-  // slightly different "now"s.
+  // One instant for the whole page, so twenty-five sightings a few milliseconds
+  // apart cannot be described relative to twenty-five slightly different "now"s.
   const now = new Date()
 
   let unreadable = 0
@@ -223,10 +198,8 @@ export async function listPostings(
   const postings = rows.map((row) => {
     // ⚠️ **Parsed here and handed down, rather than asked of the view
     // afterwards.** The count used to be `view.summary === undefined`, which
-    // worked only while `summary` came from the payload and lived on
-    // `PostingView`; it comes from `load-posting-detail.ts` now. Doing the
-    // parse in this one place keeps the reporting honest without parsing every
-    // payload twice.
+    // broke when `summary` moved to `load-posting-detail.ts`. One parse, in one
+    // place, keeps the reporting honest.
     const parsed = StoredPostingSchema.safeParse(row.payload)
 
     if (!parsed.success) unreadable += 1
@@ -242,10 +215,9 @@ export async function listPostings(
 
   if (unreadable > 0) {
     // Once per page rather than once per row: a payload the schema stopped
-    // matching is a contract drift, and one line naming how many rows it hit is
-    // the signal. The rows still render — from their projected columns — so
-    // without this line the drift is invisible until someone opens one of them
-    // and is told the detail could not be read.
+    // matching is contract drift, and the rows still render from their projected
+    // columns — so without this line the drift is invisible until someone opens
+    // one and is told the detail could not be read.
     console.error(
       "postings: could not read the stored payload for",
       unreadable,
@@ -256,11 +228,9 @@ export async function listPostings(
   }
 
   if (unnamed > 0) {
-    // Counted once per page for the reason above, and reported separately: an
-    // unreadable payload is the stored JSON drifting from the schema, while
-    // this is the relation itself answering nothing — a `select` that stopped
-    // asking for it, or a fake database that ignored the one it was handed.
-    // Different causes, so a single line covering both would name neither.
+    // Reported separately from the payload count: that is stored JSON drifting
+    // from the schema, this is the relation itself answering nothing. Different
+    // causes, so a single line covering both would name neither.
     console.error(
       "postings: could not read which briefing last found",
       unnamed,
@@ -279,10 +249,8 @@ export async function listPostings(
  * ⚠️ **Two enums, and the mapping between them is the point.**
  * `POSTING_SORTS` in `posting-query.ts` is how a *URL* spells a sort;
  * `PostingOrder` in `@workspace/db` is what the query orders by. Keeping them
- * separate is what stops an address bar from naming a database column — a value
- * arriving from outside has to survive this table, rather than being handed to
- * the query because it happened to parse. Two of the four differ in spelling for
- * exactly that reason.
+ * separate stops an address bar from naming a database column — two of the four
+ * differ in spelling for exactly that reason.
  *
  * A `satisfies`-checked record rather than a switch, so a sort added to either
  * enum without the other fails to compile.
@@ -300,30 +268,26 @@ const ORDER_FOR = {
  *
  * ⚠️ **An unreadable `payload` degrades to the projected columns rather than
  * dropping the row.** `title`, `company`, `location` and `url` are real columns
- * written by the same statement that wrote the payload, so a payload the
- * schema no longer matches costs the detail — the summary, the highlights, the
- * match reason — and not the advertisement itself. Dropping the row would make
- * a contract drift look like a Posting nobody ever found.
+ * written by the same statement that wrote the payload, so drift costs the
+ * detail and not the advertisement itself. Dropping the row would make contract
+ * drift look like a Posting nobody ever found.
  *
- * `parsed` arrives as an argument rather than being computed here, because the
- * caller counts the failures for its once-per-page report and neither of them
- * should pay for the parse twice. The payload is read for exactly one field
- * now — see `postedAt` below.
+ * `parsed` arrives as an argument because the caller counts the failures for its
+ * once-per-page report and neither should pay for the parse twice.
  *
- * Every `Date` becomes a string here, on the server. A `Date` crossing into a
+ * Every `Date` becomes a string here, on the server: a `Date` crossing into a
  * client component is formatted with the browser's locale and timezone, and
  * React reports the disagreement as a hydration mismatch rather than as the
- * timezone bug it is — the same boundary `components/documents/document-list.tsx`
- * describes.
+ * timezone bug it is.
  */
 function toView(
   row: PostingListRow,
   parsed: ReturnType<typeof StoredPostingSchema.safeParse>,
   now: Date
 ): PostingView {
-  // Independent of the parse, deliberately: `url` is a projected column
-  // written by the same statement as the payload, so a Posting whose payload
-  // the schema no longer matches still knows which board it came from.
+  // Independent of the parse, deliberately: `url` is a projected column, so a
+  // Posting whose payload the schema no longer matches still knows which board
+  // it came from.
   const source = postingSource(row.url)
 
   return {
@@ -335,9 +299,9 @@ function toView(
     status: toStatus(row.status),
     ...(source ? { source } : {}),
     // Nullish rather than `=== null`, for the reason `toMatchRow` in
-    // `@workspace/db` gives: a client that answered less than it was asked
-    // would otherwise put `matchScore: undefined` on the view, which the cell
-    // renders as a blank rather than as the absent score it is.
+    // `@workspace/db` gives: a client that answered less than it was asked would
+    // put `matchScore: undefined` on the view, which the cell renders as a blank
+    // rather than as the absent score it is.
     ...(row.matchScore == null ? {} : { matchScore: row.matchScore }),
     firstSeen: formatSeenAgo(row.firstSeenAt, now),
     firstSeenExact: formatUtcDateTime(row.firstSeenAt),
@@ -346,15 +310,13 @@ function toView(
     briefing:
       briefingName(row.briefing) ??
       (row.addedByLink ? ADDED_BY_LINK : UNKNOWN_BRIEFING),
-    // The column when the write path could read a date out of the
-    // advertisement, the advertisement's own words when it could not, and
-    // nothing when it said nothing. See {@link PostingView.postedAt} for why
-    // the second case is kept rather than blanked.
+    // The column when the write path could read a date, the advertisement's own
+    // words when it could not, nothing when it said nothing — see
+    // {@link PostingView.postedAt} for why the second case is kept.
     //
-    // No time and no zone name, unlike {@link formatUtcDateTime}: the source is a
-    // date the advertisement stated, so any time of day in it is an artefact
-    // of the ISO string rather than something the page said, and printing
-    // "00:00 UTC" beside every row would be precision the value does not have.
+    // No time and no zone name, unlike {@link formatUtcDateTime}: any time of day
+    // here is an artefact of the ISO string, and "00:00 UTC" beside every row
+    // would be precision the value does not have.
     ...(row.postedAt
       ? { postedAt: formatCalendarDate(row.postedAt) }
       : parsed.success && parsed.data.postedAt
@@ -369,11 +331,10 @@ const UNKNOWN_BRIEFING = "Unknown briefing"
 /**
  * What it shows instead when there was never a Briefing to name.
  *
- * ⚠️ **Distinct from {@link UNKNOWN_BRIEFING}, and the distinction is the whole
- * reason `addedByLink` is carried out of `@workspace/db`.** Both are a `null`
- * briefing; one is a Posting the user added themselves and the other is a fault.
- * Rendering them the same word would tell somebody their own paste had lost its
- * provenance.
+ * ⚠️ **Distinct from {@link UNKNOWN_BRIEFING}, which is why `addedByLink` is
+ * carried out of `@workspace/db`.** Both are a `null` briefing; one is the user's
+ * own paste and the other is a fault, and one word for both would tell somebody
+ * their paste had lost its provenance.
  */
 const ADDED_BY_LINK = "Added by link"
 
@@ -381,21 +342,15 @@ const ADDED_BY_LINK = "Added by link"
  * The Briefing's name as the row carries it, or `undefined` when it has none.
  *
  * ⚠️ **A display rule, which is why it stayed here** when the relation walk
- * moved into `listPostingPage`. That function flattens `lastSeenRun.job.name`
- * to `string | null` and stops there; **blank counting as no answer is this
- * side's judgement** — `jobs.name` has no emptiness constraint, and an empty
- * string renders as a missing value rather than as one. A database has no view
- * about that.
+ * moved into `listPostingPage`. That function flattens `lastSeenRun.job.name` to
+ * `string | null` and stops there; **blank counting as no answer is this side's
+ * judgement** — `jobs.name` has no emptiness constraint, and an empty string
+ * renders as a missing value rather than as one.
  *
  * Deliberately pure — no logging — because {@link listPostings} reports these
- * once per page rather than once per row, and it needs this same rule to count
- * them.
- *
- * ⚠️ **The caller degrades rather than drops.** The row keeps its place with
- * {@link UNKNOWN_BRIEFING} in place of the name, for the reason {@link toView}
- * gives about an unreadable payload: which Briefing found an advertisement is
- * provenance, and the advertisement is what the user came for. Losing the label
- * must not look like a Posting nobody ever found.
+ * once per page and needs this same rule to count them. The caller degrades to
+ * {@link UNKNOWN_BRIEFING} rather than dropping the row: losing the label must
+ * not look like a Posting nobody ever found.
  */
 function briefingName(briefing: string | null): string | undefined {
   return briefing === null || briefing === "" ? undefined : briefing
@@ -404,15 +359,11 @@ function briefingName(briefing: string | null): string | undefined {
 /**
  * The stored status, narrowed to the four the app knows.
  *
- * `postings_status_check` makes a fifth value impossible, so this is not a
- * defensive branch against the database — it is the branch that fires if a
- * fifth status is ever added to the schema and this app is deployed before the
- * label map catches up. `new` is the honest fallback: it is what a Posting
- * nobody has touched is, and the alternative is an empty cell.
- *
- * The window it covers is real and was widened by `not-interested`: a
- * migration reaches production on merge to `main`, and the deployment that
- * knows the new word lands separately.
+ * `postings_status_check` makes a fifth value impossible, so this is not defence
+ * against the database — it is the branch that fires when a fifth status reaches
+ * the schema before the deployment that knows the word. That window is real and
+ * was widened by `not-interested`: a migration reaches production on merge to
+ * `main`, and the deployment lands separately. `new` is the honest fallback.
  */
 function toStatus(status: string): PostingStatus {
   const known = POSTING_STATUSES.find((candidate) => candidate === status)
@@ -428,12 +379,10 @@ function toStatus(status: string): PostingStatus {
 /**
  * The largest unit worth describing a gap in, longest first.
  *
- * Each entry is the length of one of that unit in milliseconds; the first whose
- * unit is smaller than the gap wins. Months and years are the usual approximate
- * lengths, which is the right kind of wrong for a phrase like "2 months ago" —
- * the reader is being told an order of magnitude, and
- * {@link PostingView.lastSeenExact} carries the real instant for anyone who
- * needs it.
+ * Each entry is one of that unit in milliseconds; the first smaller than the gap
+ * wins. Months and years are the usual approximate lengths, which is the right
+ * kind of wrong for "2 months ago" — {@link PostingView.lastSeenExact} carries
+ * the real instant.
  */
 const RELATIVE_UNITS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 365 * 24 * 60 * 60 * 1000],
@@ -458,14 +407,11 @@ const RELATIVE_FORMAT = new Intl.RelativeTimeFormat("en-AU", {
  * A sighting as "3 weeks ago", relative to a caller-supplied instant.
  *
  * ⚠️ **`now` is an argument and not `new Date()`.** A function that reads the
- * clock cannot be asserted against — every expectation would have to be written
- * relative to the moment the test happened to run — and {@link listPostings}
- * wants one instant for a whole page besides. This is the same reason
- * `lib/briefing-runs/` takes its clock as a parameter.
+ * clock cannot be asserted against, and {@link listPostings} wants one instant
+ * for a whole page besides.
  *
  * A future date formats as "in 3 weeks" rather than being clamped. It should not
- * happen — both columns are written by a Run that has already finished — but a
- * clock skew between the worker and the web host is a real thing, and silently
+ * happen, but clock skew between the worker and the web host is real, and
  * rendering a future sighting as "just now" would hide it.
  */
 export function formatSeenAgo(date: Date, now: Date): string {

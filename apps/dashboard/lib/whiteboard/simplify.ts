@@ -12,22 +12,15 @@ import { kindForShape } from "./shape-kinds"
 /**
  * Turn the live tldraw board into the small structured thing the agent reads.
  *
- * Every import here is type-only, deliberately. tldraw's runtime touches the
- * DOM on import, and this module is the one piece of the client side worth
- * unit-testing — what gets sent up, what gets left out, and where the cap
- * falls. Taking only the shapes of the records means a test can drive it with
- * plain objects and no browser.
+ * ⚠️ **Every import here is type-only, deliberately.** tldraw's runtime touches
+ * the DOM on import, and this is the one piece of the client side worth
+ * unit-testing — what goes up, what is left out, where the cap falls. Taking
+ * only the record shapes lets a test drive it with plain objects and no browser.
  *
- * Two things it is careful about:
- *
- * - **Nothing raw goes up.** A tldraw record carries `props`, `meta`,
- *   `parentId`, `index`, `opacity`, `rotation` and `typeName`; roughly ten
- *   times the bytes, and none of the difference is something the model can act
- *   on. What survives is position, size, label, colour.
- * - **The board is capped, and says so when it is.** Everything outside a
- *   generous margin around the viewport collapses to a count and a bounding
- *   box, which the prompt turns into one line telling the model the board
- *   continues and how to ask for the rest.
+ * Nothing raw goes up: a tldraw record carries `props`, `meta`, `parentId` and
+ * more, roughly ten times the bytes and none of it something the model can act
+ * on. And the board is capped — everything outside a generous viewport margin
+ * collapses to a count and a bounding box the prompt turns into one line.
  */
 
 /** How far past the viewport a shape still counts as "what the user is doing". */
@@ -206,13 +199,11 @@ export function toBoardContext(input: ToBoardContextInput): BoardContext {
   const visible = new Set(kept.map(({ shape }) => shape.id))
 
   /**
-   * An arrow becomes a connection only when both of its terminals are bound to
-   * shapes the model can see.
-   *
-   * A loose arrow the user dragged between two empty points connects nothing
-   * nameable, and reporting it as a connection would be a claim the model would
-   * then reason from — "the ingester already talks to the store" — about a
-   * relationship that does not exist.
+   * An arrow becomes a connection only when both terminals are bound to shapes
+   * the model can see. A loose arrow between two empty points connects nothing
+   * nameable, and reporting it would be a claim the model reasons from — "the
+   * ingester already talks to the store" — about a relationship that does not
+   * exist.
    */
   const connections: BoardConnection[] = []
   for (const [arrowId, arrow] of arrows) {

@@ -32,20 +32,15 @@ export interface NewBrief {
    * The slot this brief is for — `runs.scheduled_for` — which decides the key's
    * partition day.
    *
-   * Separate from {@link NewBrief.generatedAt} on purpose, and the whole reason
-   * this interface carries two Dates. It makes the object key derivable from
-   * the run row alone, without knowing when the run happened to finish, so
-   * "which day is this brief for" has exactly one answer in both places.
+   * Separate from {@link NewBrief.generatedAt} on purpose — it makes the key
+   * derivable from the run row alone, so "which day is this brief for" has one
+   * answer in both places. An ad-hoc run has no occurrence; pass its trigger
+   * instant.
    *
-   * An ad-hoc run has no scheduled occurrence; pass the instant it was
-   * triggered.
-   *
-   * Note the consequence of the day being computed in UTC: a 09:00
-   * `Australia/Sydney` briefing fires at 23:00 UTC the previous day and lands
-   * in the previous UTC day's folder. That is intended — the key is a storage
-   * partition, not a date display, and keeping it UTC means a key stays
-   * interpretable without its job row. Dates shown to a person come from
-   * `runs.scheduled_for`.
+   * ⚠️ The day is UTC, so a 09:00 `Australia/Sydney` briefing fires at 23:00
+   * UTC and lands in the previous UTC day's folder. Intended: the key is a
+   * storage partition that stays interpretable without its job row. Dates shown
+   * to a person come from `runs.scheduled_for`.
    */
   occurrence: Date
   /**

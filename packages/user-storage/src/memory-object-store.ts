@@ -12,22 +12,17 @@ import type {
  * An in-memory {@link UserObjectStore} that builds real keys and raises real
  * errors.
  *
- * The one test double this package publishes, deliberately: this package's
- * own facade suite and the dashboard's Posting-Document suites each carried a
- * private copy, and the private copies had diverged in exactly the two ways
- * that matter —
+ * The one test double this package publishes. Private copies here and in the
+ * dashboard had diverged in the two ways that matter:
  *
- * - **`buildObjectKey` rather than a template string**, so a change to the
- *   key layout — or to the segment rule that layout depends on — fails in the
- *   suite rather than quietly producing a test that agrees with itself.
- * - **`ObjectNotFoundError` rather than a bare `Error`**, because that is
- *   what the S3 store raises and callers branch on the code to tell "nothing
- *   written yet" apart from "the bucket is unreachable". A plain throw sends
- *   the missing-object case down the outage path, and a refusal a suite is
- *   asserting passes for the wrong reason.
+ * - **`buildObjectKey`, not a template string**, so a change to the key layout
+ *   fails the suite instead of producing a test that agrees with itself.
+ * - **`ObjectNotFoundError`, not a bare `Error`**, because callers branch on
+ *   the code to tell "nothing written yet" from "the bucket is unreachable". A
+ *   plain throw sends the missing-object case down the outage path.
  *
- * A workspace-private package shipping a fake in `dist/` is the accepted
- * cost; it is what lets every consumer run the *real* facades over it.
+ * Shipping a fake in `dist/` is the accepted cost of every consumer running the
+ * *real* facades over it.
  */
 
 export interface MemoryObjectStoreOptions {

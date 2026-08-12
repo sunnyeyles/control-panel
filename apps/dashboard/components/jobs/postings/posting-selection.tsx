@@ -12,29 +12,25 @@ import {
 /**
  * The empty selection, as one value rather than a fresh `Set` per clear.
  *
- * ⚠️ **Shared so that clearing an already-empty selection is a real no-op.**
- * React bails out of a re-render only when the next state is `Object.is` the
- * current one, and `new Set()` never is — so a `clear()` that minted its own
- * would re-render, hand every consumer new callback identities, and let an
- * effect keyed on one of them call `clear()` again, forever. That loop is
- * currently unreachable by luck rather than by design; this is the half of the
- * fix that does not depend on how a caller writes its dependencies.
+ * ⚠️ **Shared so clearing an already-empty selection is a real no-op.** React
+ * bails out only when the next state is `Object.is` the current one, and
+ * `new Set()` never is — so a `clear()` minting its own would re-render, hand
+ * out new callback identities, and let an effect keyed on one call `clear()`
+ * again forever. Unreachable today by luck; this is the half of the fix that
+ * does not depend on how a caller writes its dependencies.
  */
 const NOTHING: ReadonlySet<string> = new Set()
 
 /**
  * Which Postings are ticked, for the bulk bar and the row checkboxes to share.
  *
- * A context rather than state in `PostingTableBody`, and the reason is where
- * the bar sits: above the `<Table>`, outside the body, in a server component
- * that must stay one. Lifting the state into a provider that wraps both is what
- * lets `posting-table.tsx` keep rendering its shell on the server while two
- * client leaves inside it agree on a selection.
+ * ⚠️ A context rather than state in `PostingTableBody` because the bulk bar
+ * sits above the `<Table>`, outside the body, in a server component that must
+ * stay one. The provider wrapping both is what lets `posting-table.tsx` render
+ * its shell on the server while two client leaves agree on a selection.
  *
- * Deliberately **not** in the URL, for the reason `posting-table-body.tsx`
- * gives about the expanded row: a `?selected=` parameter would make every tick
- * a navigation, and the sort headers and pagination links exist to keep those
- * expensive and rare.
+ * Deliberately not in the URL: a `?selected=` parameter would make every tick a
+ * navigation.
  */
 interface PostingSelection {
   /**
@@ -49,11 +45,10 @@ interface PostingSelection {
    */
   selected: readonly string[]
   /**
-   * Answered from {@link PostingSelection.selected} and not from the underlying
-   * set, so there is one membership rule here rather than two. Reading the raw
-   * set would agree with it today only because a row is rendered for a visible
-   * id — an accident of the caller, not a property of this module, and the
-   * intersection above is too load-bearing to hold in only one of two places.
+   * Answered from {@link PostingSelection.selected}, not the underlying set, so
+   * there is one membership rule rather than two. The raw set would agree today
+   * only by an accident of the caller, and the intersection above is too
+   * load-bearing to live in one of two places.
    */
   isSelected: (postingId: string) => boolean
   toggle: (postingId: string) => void
@@ -90,11 +85,10 @@ export function PostingSelectionProvider({
     [ids, ticked]
   )
 
-  // The three mutators are stable because each takes the functional updater
-  // form and so needs to close over nothing. `clear` in particular is handed to
-  // `DeletePostingsDialog` as `onDeleted` and kept across renders; nothing
-  // reads it from an effect today, and holding the identity steady is what
-  // keeps that free to change.
+  // Stable because each takes the functional updater form and closes over
+  // nothing. `clear` is handed to `DeletePostingsDialog` as `onDeleted` and
+  // kept across renders; a steady identity keeps that free to move into an
+  // effect later.
   const toggle = useCallback((postingId: string) => {
     setTicked((current) => {
       const next = new Set(current)

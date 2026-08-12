@@ -34,20 +34,16 @@ import {
 /**
  * The generate action's authorization, spending and provenance branches.
  *
- * Every claim worth making about this feature is a claim about something that
- * cannot be seen from the happy path: that a form-supplied Posting is ignored,
- * that another user's Posting can neither be generated for nor told apart from
- * one nobody has, that a user with no readable CV costs no model call, that
- * re-generating overwrites one object, and that saving cannot mint one. The
- * action takes its dependencies through a `createXActions(deps)` seam and
- * imports nothing from Next precisely so all of them are reachable here.
+ * Every claim worth making here is invisible from the happy path: that a
+ * form-supplied Posting is ignored, that another user's Posting can neither be
+ * generated for nor told apart from one nobody has, that a user with no readable
+ * CV costs no model call, that re-generating overwrites one object, and that
+ * saving cannot mint one.
  *
- * The storage side is the **real** `createTailoredResumeStore` over an
- * in-memory `UserObjectStore`, not a stub that records a key someone typed into
- * the test. The key assertions therefore exercise the facade and
- * `buildObjectKey` together, which is what makes "writes the expected key" mean
- * anything — and in particular what proves this kind does not collide with the
- * cover letter's.
+ * The storage side is the **real** `createTailoredResumeStore` over an in-memory
+ * `UserObjectStore`, so the key assertions exercise the facade and
+ * `buildObjectKey` together — which is what makes "writes the expected key" mean
+ * anything, and what proves this kind does not collide with the cover letter's.
  */
 
 const NOW = new Date("2026-08-06T04:15:00.000Z")
@@ -84,9 +80,8 @@ const POSTING_ID = postingId(POSTING)
  * A stand-in for the tailor.
  *
  * Cast to `Agent` rather than built with `createResumeTailor`, which would need
- * a LangChain chat model this app does not depend on. What the real agent does
- * with a prompt is asserted in `packages/agents`; what matters here is *which*
- * prompt reaches it, and whether it is reached at all.
+ * a LangChain chat model this app does not depend on. What matters here is
+ * *which* prompt reaches it, and whether it is reached at all.
  */
 class FakeTailor {
   readonly prompts: string[] = []

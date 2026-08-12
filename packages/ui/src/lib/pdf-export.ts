@@ -2,11 +2,10 @@ import { jsPDF } from "jspdf"
 import { marked, type Token, type Tokens } from "marked"
 
 /**
- * Generates a real, text-based PDF directly from markdown using jsPDF's
- * native text API. No HTML rasterization (html2canvas) is involved: canvas
- * capture proved unreliable across browsers/embedding contexts and could
- * silently produce blank pages. This renderer is deterministic, produces
- * selectable text, and creates small files.
+ * A text-based PDF straight from markdown via jsPDF's native text API. No HTML
+ * rasterization: html2canvas proved unreliable across browsers and embedding
+ * contexts and could silently produce blank pages. This is deterministic, and
+ * the text stays selectable.
  */
 
 // A4 in points
@@ -39,12 +38,9 @@ const ENTITIES: Record<string, string> = {
  * a literal `&lt;`, and unescaping `&amp;` first would hand `&lt;` to the next
  * replace, which would turn it into `<`.
  *
- * ⚠️ **Called at the leaves only.** It used to run in `flattenInline` over that
- * call's whole result — including the runs a recursive call had already
- * unescaped — so the same `&amp;lt;` inside `**bold**` went through twice and
- * came out as `<`, which is the very thing the single pass exists to prevent.
- * Every `runs.push` below either unescapes its own text or pushes runs that
- * already have been; nothing unescapes a run it did not create.
+ * ⚠️ **Called at the leaves only.** Running it in `flattenInline` over a whole
+ * result put already-unescaped runs through a second time, so `&amp;lt;` inside
+ * `**bold**` came out as `<`. Nothing below unescapes a run it did not create.
  */
 const unescapeEntities = (text: string): string =>
   text.replace(

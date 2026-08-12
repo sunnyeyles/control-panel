@@ -15,27 +15,21 @@ import { z } from "zod"
 /**
  * The whiteboard turn: messages and a board in, prose and canvas ops out.
  *
- * Deliberately a near-copy of `lib/chat-handler.ts` rather than a
- * generalisation of it. The two differ in the one place that matters — this
- * route takes a board with the request and streams a third channel back — and
- * a shared abstraction over that difference would have to be parameterised by
- * both, which is more moving parts than the duplication costs. If a third
- * agent route appears, that is the moment to reconsider.
- *
- * The differences from the chat handler, each load-bearing:
+ * Deliberately a near-copy of `lib/chat-handler.ts` rather than a generalisation
+ * of it: the two differ in the one place that matters, and an abstraction over
+ * that would have to be parameterised by both. A third agent route is the moment
+ * to reconsider. The differences, each load-bearing:
  *
  * - **The board arrives in the request body, every turn.** The browser owns the
- *   canvas; this handler is told what it looks like and does not remember. That
- *   is what makes drift self-healing and what keeps the board out of the
- *   message history, where a stale snapshot per turn would accumulate.
- * - **`"custom"` joins the stream modes.** It is the channel the canvas tools
- *   write ops to. `"values"` and `"messages"` stay first and stay paired for
- *   the reason the chat handler documents.
+ *   canvas; this handler is told what it looks like and does not remember, which
+ *   is what makes drift self-healing and keeps stale snapshots out of history.
+ * - **`"custom"` joins the stream modes** — the channel the canvas tools write
+ *   ops to. `"values"` and `"messages"` stay first and stay paired.
  * - **The agent is built per request**, because its system prompt contains the
- *   board. There is nothing here to cache between turns, by construction.
+ *   board. Nothing here can be cached between turns, by construction.
  *
- * Nothing in this module imports Next, which is what lets Vitest cover the
- * authorization and validation branches at all.
+ * Nothing here imports Next, which is what lets Vitest cover the authorization
+ * and validation branches at all.
  */
 
 /**

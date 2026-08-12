@@ -19,38 +19,23 @@ import { BAD_REQUEST, POSTING_ID_PATTERN } from "./posting-document-ref"
 
 /**
  * Everything that has to be true before a model is asked to write a **Posting
- * Document**, in one call.
- *
- * ## Why this exists
- *
- * Drafting a Cover Letter and generating a Tailored Resume performed the same
- * five steps in the same order, and each of the five is a decision rather than
- * plumbing — the order in particular. Two copies meant two places to weaken
- * them, and the second was written by copying the first.
+ * Document**, in one call. Shared by the Cover Letter and the Tailored Resume.
  *
  * ⚠️ **The order is the security and spending property, not an implementation
  * detail.** Who is asking is settled before the body is touched; the Posting is
  * re-read server-side rather than accepted from the form; and *every* refusal
  * happens before an agent is constructed, so a user with nothing to write from
- * costs no model call. A caller that reordered these would still compile, and
- * would still pass a happy-path test.
- *
- * ## What it deliberately does not do
+ * costs no model call. A caller that reordered these would still compile and
+ * still pass a happy-path test.
  *
  * **It returns a reason, never a sentence** — except where the sentence already
- * has exactly one owner elsewhere (`requireUser`, `storedPostingMessage`,
- * `storageMessage`, {@link BAD_REQUEST}), in which case it is carried as
- * {@link RefusedDocument} and the caller passes it straight on. The two reasons a
- * *feature* has to word are the two returned bare: nothing to write from, and not
- * enough to write from. `suggest-criteria-actions.ts` argues at length why those
- * must not be shared — a letter with no CV and a resume with no CV are the same
- * condition told differently, because the next thing to do about them differs —
- * and this module is what lets them stay separate switches over one union.
+ * has one owner elsewhere (`requireUser`, `storedPostingMessage`,
+ * `storageMessage`, {@link BAD_REQUEST}), carried as {@link RefusedDocument}. The
+ * two a *feature* must word stay bare: nothing to write from, and not enough to
+ * write from. See `suggest-criteria-actions.ts` on why those must not be shared.
  *
- * **It does not parse the request.** `CoverLetterRequestSchema` and
- * `TailoredResumeRequestSchema` are separate types in `@workspace/agents` and
- * stay that way; this returns the validated Posting and the extracted
- * background, and each feature composes its own request from them.
+ * **It does not parse the request.** Each feature composes its own from the
+ * validated Posting and the extracted background.
  *
  * **Nothing here imports Next**, which is the rule the whole of `lib/` follows.
  */
@@ -85,11 +70,11 @@ export interface PreparedPostingDocument {
 /**
  * A refusal whose wording is already owned somewhere else.
  *
- * `requireUser` owns `NOT_AUTHORIZED`, `storedPostingMessage` owns the three
- * Posting outcomes, `storageMessage` owns the outage sentence, and
- * {@link BAD_REQUEST} names a Posting rather than a document. A feature that
- * re-worded any of these would be re-opening a decision made for it — and in two
- * of the four cases the identity of the string is a security property.
+ * `requireUser` owns `NOT_AUTHORIZED`, `storedPostingMessage` the three Posting
+ * outcomes, `storageMessage` the outage sentence, {@link BAD_REQUEST} the
+ * unidentifiable Posting. Re-wording any re-opens a decision made for the
+ * feature — and in two of the four the identity of the string is a security
+ * property.
  */
 interface RefusedDocument {
   ok: false
@@ -148,17 +133,16 @@ export async function preparePostingDocument(
     message,
   })
 
-  // Before the body is touched at all. For a Server Action this is not a second
-  // layer: `proxy.ts` cannot evaluate a POST session — the auth SDK's fast path
-  // is guarded by `method === "GET"` — so it degrades to checking that some
-  // session-cookie substring is present. This is the only real check on the path.
+  // ⚠️ Before the body is touched, and the only real check on the path:
+  // `proxy.ts` cannot evaluate a POST session, so it degrades to a cookie
+  // presence check.
   const caller = await requireUser(deps.getUser, kind)
   if (!caller.ok) return refused(caller.message)
 
   // ⚠️ **Only this one field is read, and that is the security property.**
   // `formData` may well carry a `posting` — both suites submit one — and nothing
-  // here looks at it. A Posting body accepted from a form would be arbitrary
-  // text stored in a document written in the user's own name.
+  // looks at it. A Posting body from a form would be arbitrary text stored in a
+  // document written in the user's own name.
   const parsed = requestSchema.safeParse({
     postingId: formData.get("postingId"),
   })
@@ -173,9 +157,8 @@ export async function preparePostingDocument(
   if (stored.status !== "found") return refused(storedPostingMessage(stored))
 
   // Before any agent is constructed, so a user with nothing to write from spends
-  // nothing. This is also where a PDF or a DOCX is parsed — still on this side of
-  // the model call, which is what keeps the bound below applying to the text that
-  // was actually extracted.
+  // nothing. A PDF or DOCX is parsed here too, which is what keeps the bound
+  // below applying to the text actually extracted.
   let background
   try {
     background = await loadCandidateBackground(
@@ -192,10 +175,8 @@ export async function preparePostingDocument(
   }
 
   try {
-    // Still before the model call. The question is the same for both kinds — is
-    // there enough of this person's own document to work from? — so
-    // `assertDraftable` is shared rather than restated; it takes a structural
-    // `{ background }` for exactly that. A document written from too little is
+    // Still before the model call. Shared rather than restated because the
+    // question is the same for both kinds; a document written from too little is
     // not a thin one, it is a fabricated one.
     assertDraftable({ background: background.background })
   } catch (error) {

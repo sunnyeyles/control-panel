@@ -28,12 +28,10 @@ import { staleBefore } from "./staleness"
  * the partial unique index that makes scheduled slots at-most-once deliberately
  * does not cover it.
  *
- * ⚠️ **The row is written here and the work happens elsewhere.** This inserts
- * the `runs` row and then asks the worker to pick it up; the worker claims it
- * and runs the pipeline. Writing the row first is what gives the click
- * something to render immediately, gives a second click something to be refused
- * against, and leaves a record when the invoke itself fails — none of which
- * exist if the worker is left to insert on arrival, several seconds later.
+ * ⚠️ **The row is written here and the work happens elsewhere.** Writing it
+ * before the invoke gives the click something to render immediately, gives a
+ * second click something to be refused against, and leaves a record when the
+ * invoke itself fails — none of which exist if the worker inserts on arrival.
  */
 
 /**
@@ -80,9 +78,9 @@ export function createRunActions(deps: RunActionsDeps) {
   ): Promise<ActionState> {
     const fail = (message: string) => carryResetKey(state, message)
 
-    // Before the body is touched at all. `proxy.ts` cannot evaluate a non-GET
-    // request, so for this POST it degrades to checking that *some* session
-    // cookie substring is present — this is the only real check on the path.
+    // ⚠️ Before the body is touched, and the only real check on the path:
+    // `proxy.ts` cannot evaluate a POST session, so it degrades to a cookie
+    // presence check.
     const caller = await requireUser(deps.getUser, "briefings")
     if (!caller.ok) return fail(caller.message)
 
@@ -117,10 +115,8 @@ export function createRunActions(deps: RunActionsDeps) {
     } catch (error) {
       console.error("briefings: could not reach the worker", error)
 
-      // The row exists and says `running`, so leaving it would show a spinner
-      // for a run that will never begin — until the staleness bound cleared it
-      // fifteen minutes later. Closing it here is what makes a refused invoke
-      // look like the immediate failure it is.
+      // The row says `running`, so leaving it shows a spinner for a run that will
+      // never begin — until the staleness bound clears it fifteen minutes later.
       await failRun(prisma, runId, {
         message: "The worker could not be reached.",
       }).catch(() => undefined)

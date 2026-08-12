@@ -46,23 +46,16 @@ module "briefing_worker" {
 
 # Joins the worker to the user-storage stack.
 #
-# That module creates no roles on purpose, and publishes policy ARNs for exactly
-# this. Attaching from here rather than passing this role's name into its
-# `attach_to_role_names` keeps the dependency one-way — the worker knows about
-# storage, storage knows about nothing.
+# That module creates no roles on purpose and publishes policy ARNs for exactly
+# this. Attaching from here, rather than passing this role's name into its
+# `attach_to_role_names`, keeps the dependency one-way.
 #
-# Take the **narrow** grant. That module publishes both a per-environment set
-# and a per-(environment, kind) set, and the worker wants the latter: it writes
-# briefs, and a grant that also covers a user's uploaded documents is authority
-# it has no use for. In practice that means `prod:briefs`, not `prod`.
-#
-# The filter is what keeps the grant narrow: `kind_access_policy_arns` is keyed
-# `<environment>:<kind>`, and only the `:briefs` entries are taken. Every
-# environment's briefs policy is attached rather than a named one, so this
-# survives a second environment being declared without an edit here — which
-# environment the worker writes to is `USER_STORAGE_ENVIRONMENT` on the
-# function (the module's `user_storage_environment`), not something decided at
-# attachment time.
+# Take the **narrow** grant: `prod:briefs`, not `prod`. The worker writes briefs,
+# and a grant covering a user's uploaded documents is authority it has no use
+# for. `kind_access_policy_arns` is keyed `<environment>:<kind>`, and every
+# environment's `:briefs` entry is taken rather than a named one — which
+# environment is actually written to is `USER_STORAGE_ENVIRONMENT` on the
+# function, not something decided at attachment time.
 resource "aws_iam_role_policy_attachment" "worker_user_storage" {
   for_each = {
     for key, arn in module.user_storage.kind_access_policy_arns :

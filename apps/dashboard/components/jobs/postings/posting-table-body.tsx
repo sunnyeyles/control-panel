@@ -36,38 +36,19 @@ import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 /**
  * The table's body, and the client boundary that owns which posting is open.
  *
- * Headers, sorting and pagination stay on the server — they are `<Link>`s that
- * must not remount with every disclosure. Expansion is local state: one id at
- * a time, never the URL, so opening and closing a detail does not fight the
- * query string the rest of the table uses for sort and page.
+ * Expansion is local state, one id at a time, never the URL: a `?posting=`
+ * parameter would make every open and close a navigation, losing the page,
+ * sort and scroll position the sort headers work to keep cheap.
  *
- * **Expansion state is here rather than in the URL** because closing must return
- * to the same page of the same sort at the same scroll position, and a
- * `?posting=` parameter would make every open and close a navigation — the one
- * thing the sort headers and the pagination links are careful to keep cheap.
- * Opening a different posting collapses the previous one, because there is a
- * single expanded id.
+ * ⚠️ `letters` and `tailoredResumes` are passed straight through and never read
+ * here. `use()` suspends its caller, so reading either would hold the whole
+ * table behind the page's S3 round trips; only the leaves read them.
  *
- * ⚠️ **`letters` and `tailoredResumes` are passed straight through and never
- * read here.** Both are promises, and `use()` suspends whatever component calls
- * it — reading either in this component would hold the entire table behind the
- * page's S3 round trips and undo the reason the page stopped awaiting them. Only
- * the leaves read them, each behind its own boundary. See `cover-letter-cell.tsx`
- * and `use-tailored-resume.ts`.
- *
- * ⚠️ **This component is the table's single subscriber, and {@link PostingRow}
- * is memoized behind it.** Three unrelated things re-render it — a checkbox tick
- * (the selection context hands out a new value object), an expand, and a
- * detail fetch resolving — and each used to re-render all twenty-five rows plus
- * whichever detail panel was open. Every prop below is now either referentially
- * stable across such a render or a boolean that changes for the one or two rows
- * it concerns, so `memo` actually bites: a tick re-renders one row, an expand
- * two, a resolved detail one.
- *
- * That is why {@link usePostingSelection} is read *here* rather than in the row,
- * and why the two handlers take a posting id rather than being closed over one.
- * A fresh `() => warm(posting.id)` per row per render would defeat `memo` on its
- * own, whatever else were stable.
+ * ⚠️ This component is the table's single subscriber and {@link PostingRow} is
+ * memoized behind it, so every prop below must stay referentially stable across
+ * a tick/expand/fetch re-render. That is why {@link usePostingSelection} is read
+ * here rather than in the row, and why the handlers take a posting id rather
+ * than closing over one.
  */
 export function PostingTableBody({
   postings,
@@ -124,21 +105,12 @@ export function PostingTableBody({
  * The detail for every row that has been opened or pointed at, kept for as long
  * as the page is.
  *
- * ⚠️ **The cache is what makes an on-demand fetch acceptable.** Closing and
- * reopening a row, or opening the same one twice while comparing it against
- * another, must not be a second request — and this state lives in the body,
- * which outlives any one row's expansion.
+ * The cache is what makes an on-demand fetch acceptable: reopening a row must
+ * not be a second request, and this state outlives any one row's expansion.
  *
- * ⚠️ **`asked` is a ref, not state, and that is deliberate.** It guards against
- * a second request for a row already being fetched — hover then click is the
- * ordinary case, and both call {@link warm} — and it must be consulted and
- * updated within one synchronous call. A `useState` set would not be visible to
- * the click that follows the hover in the same tick, and the row would ask
- * twice.
- *
- * A failure removes its entry from `asked`, so pointing at the row again
- * retries. Nothing else does: there is no retry button, because the gesture that
- * opened the panel is the gesture that retries it.
+ * ⚠️ `asked` is a ref, not state: hover then click both call {@link warm} in one
+ * tick, and a `useState` set would not be visible to the click, so the row would
+ * ask twice. A failure removes its entry, so the reopening gesture retries.
  */
 function usePostingDetails() {
   const [details, setDetails] = useState<Record<string, PostingDetailState>>({})
@@ -191,10 +163,9 @@ function usePostingDetails() {
 /**
  * A row nobody has asked about yet reads as `loading`.
  *
- * Not a fourth state, deliberately: the only way a detail is looked at is by
- * expanding the row, and expanding it asks. "Never asked" and "asked, waiting"
- * are the same thing from the panel's side, and a distinct `idle` would be a
- * branch in `posting-detail.tsx` that nothing could ever render.
+ * Not a fourth state: expanding a row is what asks, so "never asked" and
+ * "waiting" are the same thing from the panel's side and an `idle` branch in
+ * `posting-detail.tsx` could never render.
  */
 const PENDING: PostingDetailState = { status: "loading" }
 
@@ -202,43 +173,23 @@ const PENDING: PostingDetailState = { status: "loading" }
  * One advertisement as a compact row, plus its expanded detail when open.
  *
  * Takes only strings — every `Date` was formatted in
- * `lib/postings/list-postings.ts`. See `components/documents/document-list.tsx`
- * for why that boundary matters: a `Date` formatted in the browser uses the
- * browser's locale and timezone, and React reports the disagreement as a
- * hydration mismatch rather than as the timezone bug it is.
+ * `lib/postings/list-postings.ts`. Formatting a `Date` in the browser uses the
+ * browser's locale and timezone, which React reports as a hydration mismatch
+ * rather than as the timezone bug it is.
  *
- * The compact row carries only what is worth scanning. Both sighting times, the
- * summary, the highlights, the match reason and all three cover letter controls
- * live in the detail row the chevron discloses. The whole `PostingView` goes
- * down as props — the page already holds every field, so opening the detail
- * costs no query.
+ * Status shows on the row but its control does not: the value is a scanning aid,
+ * the `Select` is a wide control nobody wants twenty-five of.
  *
- * **Status is on the row and the control for it is not**, which is the one place
- * those two come apart: the value is a scanning aid and belongs in a column,
- * while the `Select` that sets it is a wide control nobody wants twenty-five of.
- * See `posting-status-badge.tsx`.
+ * The whole `<tr>` toggles the detail, and its handler ignores clicks that came
+ * from inside the checkbox, chevron or delete trigger — one guard instead of a
+ * `stopPropagation` in each, and it still holds for a fourth control.
  *
- * **The whole row is the target, and the controls inside it handle themselves.**
- * The `<tr>` toggles the detail, so aiming at the company or the date works as
- * well as aiming at the chevron. The row shares that space with three real
- * controls — the selection checkbox, the chevron, and the delete trigger — each
- * of which keeps its own `onClick`, and the row's handler ignores any click that
- * came from inside one. That single guard is what a `stopPropagation` on every
- * control would otherwise have to do, in one place instead of three, and it
- * still holds when a fourth control lands in the row.
+ * Local to this file because it renders a pair of sibling `<tr>`s and splitting
+ * it out put the detail row's `colSpan` away from the headers it must match.
  *
- * Local to this file rather than a module of its own. It renders a pair of
- * sibling `<tr>`s and is the only thing that ever will, and splitting it out is
- * what previously put the detail row's `colSpan` in a different file from the
- * headers it had to agree with.
- *
- * ⚠️ **Memoized, and it stays worth memoizing only while every prop stays
- * cheap to compare.** A row carries a Suspense boundary, a delete dialog and a
- * handful of icons, and there are twenty-five of them; before this, ticking one
- * checkbox re-rendered all of it. The parent is what keeps the props stable —
- * see {@link PostingTableBody}. Adding a prop built inline at the call site (an
- * object literal, an array, a closure over `posting`) silently turns this back
- * into a plain function.
+ * ⚠️ Memoized, and only worth it while every prop stays cheap to compare — see
+ * {@link PostingTableBody}. A prop built inline at the call site (object
+ * literal, array, closure over `posting`) silently undoes it.
  */
 const PostingRow = memo(function PostingRow({
   posting,
@@ -257,21 +208,16 @@ const PostingRow = memo(function PostingRow({
   /** This row's fetched detail, or where that fetch has got to. */
   detail: PostingDetailState
   /**
-   * Whether this row is ticked, resolved by the parent against the visible page
-   * — see `posting-selection.tsx` for why that intersection is the answer.
-   *
-   * A boolean rather than this row reading the context itself, so a tick on
-   * some other row does not re-render this one.
+   * Whether this row is ticked, resolved by the parent against the visible page.
+   * A boolean rather than this row reading the context, so a tick elsewhere does
+   * not re-render it.
    */
   selected: boolean
   /** Tick or untick this row. Stable, and takes the id for that reason. */
   onToggleSelect: (postingId: string) => void
   /**
-   * Start fetching the detail without opening anything.
-   *
-   * Bound to pointer-enter and focus, so the request for a row someone is about
-   * to click is usually finished before they click it. Idempotent — see
-   * `usePostingDetails` — so a row hovered five times is fetched once.
+   * Start fetching the detail without opening anything. Bound to pointer-enter
+   * and focus, and idempotent — a row hovered five times is fetched once.
    */
   onWarm: (postingId: string) => void
   expanded: boolean
@@ -288,27 +234,19 @@ const PostingRow = memo(function PostingRow({
   return (
     <>
       {/*
-        The click target is the whole row, so aiming at the company or the date
-        opens the detail exactly as aiming at the chevron does. `TableRow`
-        already carries `hover:bg-muted/50`, so only the cursor is missing.
-        `data-state` rather than a class of our own: the shared `TableRow`
-        already styles `data-[state=selected]:bg-muted`, and `TableCell` already
-        tightens the padding of a cell holding a checkbox.
+        The click target is the whole row. `data-state` rather than a class of
+        our own — the shared `TableRow` already styles
+        `data-[state=selected]:bg-muted`.
 
-        Two gestures must not toggle, and both are handled here rather than by a
+        Two gestures must not toggle, both handled here rather than by a
         `stopPropagation` in each control:
 
-        ⚠️ **A click that landed on a control belongs to that control.** The
-        checkbox and the delete trigger both render as `<button>`s *inside* this
-        `<tr>`, so without this guard ticking a row for deletion, or opening its
-        confirmation, would also expand the detail underneath it. `closest`
-        rather than a check on `currentTarget`, because the click lands on the
-        icon inside the button as often as on the button itself.
+        ⚠️ A click that landed on the checkbox or the delete trigger belongs to
+        it — `closest`, not `currentTarget`, since the click often lands on the
+        icon inside the button.
 
-        Selecting text is the other: releasing a drag fires a click on the row,
-        and having the panel open every time someone highlights a company name
-        to copy it makes the table hostile to read. A collapsed selection is a
-        click; anything else is a drag.
+        ⚠️ Releasing a text-selection drag also fires a click on the row. A
+        collapsed selection is a click; anything else is a drag.
       */}
       <TableRow
         data-state={selected ? "selected" : undefined}
@@ -321,15 +259,10 @@ const PostingRow = memo(function PostingRow({
         */
         className={cn("cursor-pointer", POSTING_ROW_HEIGHT)}
         /*
-          Warming the detail, not opening it. Expanding a row costs one small
-          request now — see `lib/postings/load-posting-detail.ts` — and this is
-          what usually hides it: by the time a click lands, the reply is in.
-
-          Both events, because they are different people. `onPointerEnter` is
-          the mouse; `onFocusCapture` is a keyboard tabbing through the row's
-          controls, which never fires a pointer event and would otherwise be the
-          only user who watches the skeleton. Capture rather than bubble because
-          focus does not bubble.
+          Warming the detail, not opening it, so the reply is usually in by the
+          time a click lands. Both events because they are different users: a
+          keyboard tab fires no pointer event. Capture, since focus does not
+          bubble.
         */
         onPointerEnter={warmThis}
         onFocusCapture={warmThis}
@@ -353,12 +286,9 @@ const PostingRow = memo(function PostingRow({
         </TableCell>
 
         {/*
-          The disclosure control, and the row's accessibility in one place: it
-          is the focusable thing, it names what it does, and it is what a screen
-          reader is told about. It keeps its own `onClick`: the row's handler
-          ignores clicks that came from inside a control, so the chevron — a
-          control like the two beside it — has to answer for its own, and that
-          is also what makes Enter and Space on the focused button work.
+          The disclosure control, and the row's accessibility in one place. It
+          keeps its own `onClick` because the row's handler ignores clicks from
+          inside a control, and that is also what makes Enter and Space work.
 
           ⚠️ `aria-expanded` has to stay on a control *inside* the row: the
           shared `TableRow` highlights an open row with
@@ -389,45 +319,26 @@ const PostingRow = memo(function PostingRow({
         </TableCell>
 
         {/*
-          Plain text. It was a `variant="link"` button, which underlined on
-          hover — and an underline means "this navigates", which it never did:
-          it expanded the row underneath, exactly as every other cell now does.
-          `whitespace-normal` is what the removed button was supplying, and it
-          is still needed: `TableCell` defaults to `whitespace-nowrap`, so a
-          long advertisement title would otherwise spill out of its column
-          rather than wrap inside it.
+          Plain text, not a link button: an underline would promise navigation
+          that never happens. `whitespace-normal` is still needed — `TableCell`
+          defaults to `nowrap`, so a long title would spill out of its column.
         */}
         <TableCell className="font-medium whitespace-normal">
           {/*
-            ⚠️ **Two lines, and the clamp is on a child rather than the cell.**
-            `line-clamp-2` sets `display: -webkit-box`, which on a `<td>` would
-            take the element out of the table's own layout.
-
-            The `title` attribute is what keeps a clipped third line readable on
-            a desktop — and it is a hover tooltip, so on a touch screen it is
-            nothing. Below `md` this column is about 170px wide and most real
-            advertisement titles clip, which is why `posting-detail.tsx` repeats
-            the title in full at that width and only at that width. Above it the
-            panel still does not, because this cell is showing it.
+            ⚠️ The clamp is on a child, not the cell: `line-clamp-2` sets
+            `display: -webkit-box`, which on a `<td>` leaves the table's layout.
+            `title` rescues a clipped line on desktop only, which is why
+            `posting-detail.tsx` repeats the title in full below `md`.
           */}
           <span className="line-clamp-2" title={posting.title}>
             {posting.title}
           </span>
 
           {/*
-            ⚠️ **The company, where its own column is not being rendered.** Below
-            `md` the Company column is gone — 17% of a 358px table is 61px, and
-            61px of an employer name is "Meri…" — so it stacks here instead,
-            which is the width the title already has. Above `md` the column is
-            back and this would be it twice, so it hides on the same breakpoint
-            the column appears on.
-
-            ⚠️ **Not `aria-hidden`, and the two spellings never coexist.**
-            `hidden md:table-cell` on the cell below is `display: none` *under*
-            `md`, which removes it from the accessibility tree as well as the
-            layout — so on a phone this span is the only copy a screen reader
-            has, and hiding it would drop the employer from the row entirely.
-            Above `md` this one is gone instead. Exactly one, at every width.
+            ⚠️ The company, only below `md` where its own column is not
+            rendered. Not `aria-hidden`: the cell below is `display: none` under
+            `md`, so this span is the only copy a screen reader has there.
+            Exactly one of the two exists at every width.
           */}
           <span className="line-clamp-1 text-xs text-muted-foreground md:hidden">
             {posting.company}
@@ -447,12 +358,9 @@ const PostingRow = memo(function PostingRow({
         </TableCell>
 
         {/*
-          ⚠️ **The three cells below stop being rendered on a narrow viewport,
-          and `posting-detail.tsx` is where they go.** The classes are the same
-          constants the header row and the skeleton use — see
-          `PostingColumn.visibility` for why nine columns do not fit on a phone,
-          and the "Where and when" section of the detail panel for where these
-          facts stay reachable.
+          ⚠️ The three cells below stop being rendered on a narrow viewport;
+          `posting-detail.tsx`'s "Where and when" section is where they go. Same
+          constants as the header row and the skeleton.
         */}
         <TableCell
           className={cn(
@@ -521,10 +429,8 @@ const PostingRow = memo(function PostingRow({
           `lib/postings/posting-source.ts`.
 
           The outline variant is not decoration: it marks a host no board in
-          `JOB_BOARDS` claimed, and the label beside it is that hostname. This
-          page is where a board missing from the registry becomes visible, so
-          the two states have to look different. An em-dash means the stored URL
-          would not parse at all, which is a third thing again.
+          `JOB_BOARDS` claimed, which is how a missing registry entry becomes
+          visible. An em-dash is a third state — the URL would not parse.
         */}
         <TableCell className={cn("truncate", POSTING_HIDE_BELOW_LG)}>
           {posting.source ? (
@@ -543,15 +449,9 @@ const PostingRow = memo(function PostingRow({
         </TableCell>
 
         {/*
-          ⚠️ **The value, not the control.** `PostingStatusSelect` stays in the
-          detail panel and is still the only way to change a status — see
-          `posting-status-badge.tsx` for why a `Select` repeated down the page
-          is the thing that was removed, and why showing the value is not the
-          same trade.
-
-          No `truncate` and no `title`: the cell holds a badge rather than text,
-          the three labels are all short, and the column is sized against the
-          longest of them. See the `status` entry in `POSTING_COLUMNS`.
+          The value, not the control — `PostingStatusSelect` stays in the detail
+          panel. No `truncate` or `title`: a badge, not text, and the column is
+          sized against the longest of the three labels.
         */}
         <TableCell className={POSTING_HIDE_BELOW_MD}>
           <PostingStatusBadge status={posting.status} />

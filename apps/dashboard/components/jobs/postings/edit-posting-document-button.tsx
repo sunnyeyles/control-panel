@@ -52,27 +52,18 @@ type SaveAction = (
 /**
  * Open one Posting Document in the shared markdown editor.
  *
- * **The body is fetched when the button is clicked, never rendered into the
- * page.** Listing metadata carries no markdown: server-rendering every body
- * into every card would pull the user's whole shelf out of object storage on
- * each page load.
+ * **The body is fetched on click, never rendered into the page** — otherwise
+ * every page load pulls the user's whole shelf out of object storage.
  *
- * ⚠️ **The fetch finishes *before* the dialog opens, and that ordering is
- * load-bearing.** `FileEditorDialog` loads a file into the editor from an
- * effect keyed on the active file's **id**, with content deliberately absent
- * from the dependencies — content changes are normally the editor's own output
- * coming back around, and re-running on them would fight the user's typing. So
- * filling in the body of a file the editor is already showing changes nothing
- * on screen. Opening only once the bytes are in hand means the editor always
- * mounts over a complete file.
+ * ⚠️ **The fetch finishes *before* the dialog opens.** `FileEditorDialog` loads
+ * a file from an effect keyed on the file's **id**, with content deliberately
+ * out of the dependencies (content changes are usually the editor's own output
+ * coming back, and re-running would fight the user's typing) — so filling in
+ * the body of a file it already shows changes nothing on screen.
  *
- * **The dialog is mounted only while it is open**, so a plain `postingId` is a
- * sufficient file id: every open builds a new editor over freshly fetched
- * bytes, and there is no stale content for a changing id to defeat.
- *
- * Refetching every time rather than caching follows from the same idea: the
- * stored document is the thing being edited, and a cached copy would show the
- * user their own unsaved edit after a save had failed.
+ * The dialog is mounted only while open, so a plain `postingId` suffices as a
+ * file id, and refetching every time is deliberate: a cached copy would show
+ * the user their own unsaved edit after a save had failed.
  */
 export function EditPostingDocumentButton({
   postingId,

@@ -31,11 +31,10 @@ export function RunNowButton({
   /**
    * Whether a run is already going.
    *
-   * Disables the button, but is **not** the guard — the action re-checks
-   * server-side, because this prop is a render of state that was true when the
-   * page was built and a POST does not have to come from this form at all.
-   * What it prevents is the honest case: someone clicking again because a run
-   * that is already going has not visibly finished.
+   * ⚠️ Disables the button but is **not** the guard: this is state that was
+   * true when the page was built, and a POST need not come from this form at
+   * all, so the action re-checks server-side. It prevents the honest case —
+   * clicking again because a running briefing has not visibly finished.
    */
   running?: boolean
 }) {

@@ -1,11 +1,9 @@
 # The shell only.
 #
-# There is no aws_secretsmanager_secret_version here on purpose, and adding one
-# would undo the property this whole arrangement exists for: a value passed
-# through Terraform appears in plan output, in the state file, and in the log of
-# whatever ran the apply. The value is set once by hand, exactly as the Key
-# Vault secret it replaces was, so the pipeline provisions a container it can
-# never read.
+# ⚠️ No `aws_secretsmanager_secret_version` here on purpose: a value passed
+# through Terraform appears in plan output, in state, and in the apply log. The
+# value is set once by hand, so the pipeline provisions a container it can never
+# read.
 #
 #   aws secretsmanager put-secret-value \
 #     --secret-id briefing-worker/openai-api-key \
@@ -24,10 +22,9 @@ resource "aws_secretsmanager_secret" "openai" {
 
   tags = var.tags
 
-  # The value is the one thing here Terraform did not create and cannot put
-  # back: after the recovery window it is gone, and the replacement comes from
-  # the OpenAI dashboard rather than from an apply. Destroying this secret must
-  # take an edit to this file.
+  # ⚠️ The value is the one thing Terraform did not create and cannot put back:
+  # after the recovery window the replacement comes from the OpenAI dashboard,
+  # not from an apply. Destroying this must take an edit to this file.
   lifecycle {
     prevent_destroy = true
   }
@@ -35,14 +32,11 @@ resource "aws_secretsmanager_secret" "openai" {
 
 # The Postgres connection string, on the same terms and for the same reason.
 #
-# A connection string carries a password, so it is exactly the kind of value the
-# arrangement above exists to keep out of plan output, out of state, and out of
-# the apply log. There is no aws_secretsmanager_secret_version here either.
+# A connection string carries a password, so no version resource here either.
 #
 # The **pooled** endpoint — `DATABASE_URL`, the PgBouncer one — because that is
 # what a runtime consumer wants. Migrations need the direct endpoint and are not
-# run by this function: every cold start would race every other one for a schema
-# it does not need.
+# run by this function; every cold start would race every other one.
 #
 #   aws secretsmanager put-secret-value \
 #     --secret-id briefing-worker/database-url \

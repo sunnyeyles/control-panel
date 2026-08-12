@@ -37,22 +37,13 @@ export type CreateMatchAssessorOptions = ToollessAgentOptions
  * The match assessor: scores one posting against one resume, and can do nothing
  * else.
  *
- * ⚠️ **Tool-lessness is the containment, and the case is the cover-letter
- * writer's exactly.** This agent holds the candidate's CV in its context and the
- * Posting beside it is attacker-influenced text — anyone who can pay to place an
- * advertisement writes it, and `highlights` carries that text into the prompt
- * *verbatim* rather than laundered through a paraphrase, so an instruction
- * hidden in a bullet point survives intact.
- *
- * An agent that can both read a CV and issue an outbound request can be induced
- * to put one inside the other. Having no tools is what makes copying the
- * advertisement acceptable: injected text can move a number the user then reads
- * beside the advertisement that moved it, and can reach nothing else. **Do not
- * add a tool here** — not a fetcher for the full description, not a search to
- * find out what the company is like.
- *
- * The mechanism — and the structural assertion that no caller can arm it — is
- * `defineToollessAgent`, proven once in `agent-options.test.ts`.
+ * ⚠️ **Tool-lessness is the containment**, on the cover-letter writer's
+ * argument exactly: the CV sits beside `highlights`, which reach the prompt
+ * verbatim from whoever paid to place the advertisement. With no tools, injected
+ * text can move a number the user reads beside the advertisement that moved it,
+ * and reach nothing else. **Do not add a tool here** — not a fetcher for the
+ * full description, not a search about the company. The structural assertion is
+ * `defineToollessAgent`, proven in `agent-options.test.ts`.
  *
  * A factory rather than an instance, like every agent here: building one
  * constructs a model, which reads `OPENAI_API_KEY` and throws without it.

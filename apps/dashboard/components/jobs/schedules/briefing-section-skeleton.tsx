@@ -3,28 +3,20 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
 /**
  * Stands in for {@link BriefingSection} while it loads.
  *
- * Shaped against the real markup rather than drawn freehand — `BriefingSection`
- * opens `<section className="flex flex-col gap-4">` with an `<h2>` and a
- * paragraph, then a run of bordered briefing cards, then the closing note about
- * the worker being off duty. The measurements follow from that: `h-6` is the
- * heading, `h-4` is `text-sm`, and `h-36` is a card carrying a name, a schedule,
- * a next-run line and the interval form beneath them.
+ * Measured against the real markup: `h-6` is the heading, `h-4` is `text-sm`,
+ * and `h-36` is a card carrying a name, a schedule, a next-run line and the
+ * interval form.
  *
- * **Unlike `CoverLetterSectionSkeleton` this one does reserve a heading**, and
- * the difference is real rather than an oversight: `/jobs/letters` lost its
- * `<h2>` when it became a page of its own, while this section still renders
- * "Briefings" above its cards because it is one section among several the page
- * could grow.
+ * **Unlike `CoverLetterSectionSkeleton` this one reserves a heading**, because
+ * this section still renders "Briefings" above its cards while `/jobs/letters`
+ * lost its `<h2>` on becoming a page of its own.
  *
  * **A file of its own because two things draw it**: the page's `<Suspense>`
- * fallback, and `loading.tsx` — which has to match the page exactly, and cannot
- * import a function declared inside it. It was previously inline in
- * `loading.tsx` alone, which is why the page had no fallback to use and awaited
- * its query instead.
+ * fallback and `loading.tsx`, which must match the page exactly and cannot
+ * import a function declared inside it.
  *
- * `cards` stays a parameter for the reason `CoverLetterSectionSkeleton` gives.
- * Two is the default a caller should pass: most users have one or two, and an
- * empty column would read as "no briefings" a moment before the real answer.
+ * Two is the `cards` value a caller should pass — an empty column reads as "no
+ * briefings" a moment before the real answer.
  */
 export function BriefingSectionSkeleton({ cards }: { cards: number }) {
   return (

@@ -10,15 +10,11 @@ import type { TraceAgent, TraceToolCall, Tracer } from "./trace.ts"
 /**
  * Drive one agent, watching it work.
  *
- * The whole reason this file exists is the difference between `.invoke()` and
- * `.stream()`. `.invoke()` runs the graph to completion and hands back the
- * final state, discarding every intermediate step — the queries the scout tried,
- * what came back, how many turns it burned getting there. `.stream()` yields the
- * same run one superstep at a time, so the transcript can be observed as it
- * happens and the final state is still returned unchanged.
- *
- * That is the entire change. The agents, the graph, and `@workspace/agents-core`
- * are untouched: this is a different way of *reading* the same run.
+ * This file exists for the difference between `.invoke()` and `.stream()`.
+ * `.invoke()` hands back the final state and discards every intermediate step;
+ * `.stream()` yields the same run one superstep at a time, so the transcript is
+ * observable and the final state is still returned unchanged. The agents, the
+ * graph and `@workspace/agents-core` are untouched.
  */
 
 /**
@@ -53,12 +49,11 @@ export interface AgentOutcome {
 /**
  * Both stream modes at once, and neither is redundant.
  *
- * `updates` carries only what a node just returned, which is what makes an
- * event emittable the moment it happens. `values` carries the whole state after
- * each superstep, so the final chunk *is* the final state — reducers already
- * applied by LangGraph rather than re-implemented here. Accumulating messages
- * by hand from `updates` alone would mean this file quietly owning a copy of
- * `AgentState`'s reducer semantics, and drifting the day one changes.
+ * `updates` carries only what a node just returned, so an event is emittable the
+ * moment it happens. `values` carries the whole state after each superstep, so
+ * the final chunk *is* the final state, with LangGraph's reducers already
+ * applied — accumulating from `updates` alone would mean owning a drifting copy
+ * of `AgentState`'s reducer semantics.
  */
 const STREAM_MODES: ["updates", "values"] = ["updates", "values"]
 

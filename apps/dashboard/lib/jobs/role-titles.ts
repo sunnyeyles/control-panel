@@ -4,48 +4,27 @@ import { normalizeTitle } from "@workspace/job-search/title-exclusions"
  * The role titles the new-briefing form completes against, and the rule that
  * matches them.
  *
- * ## Why a checked-in list rather than a lookup
+ * A checked-in list rather than a lookup: a title becomes a literal query
+ * string handed to SEEK, Indeed and LinkedIn, and the completion has to answer
+ * on the keystroke — a round trip to `iad1` lags behind typing.
  *
- * A role title becomes a literal query string handed to SEEK, Indeed and
- * LinkedIn. `sw eng` returns nothing, and a briefing built on it arrives every
- * morning looking exactly like a quiet market. The completion exists to make
- * the difference between a title a board recognises and one it does not
- * visible *before* the briefing is saved, which means it has to answer on the
- * keystroke — a round trip to `iad1` and back would put a completion behind
- * the user's typing, and a completion that lags is one nobody waits for.
+ * ⚠️ **The import is `@workspace/job-search/title-exclusions`, never the
+ * package root.** The root barrel re-exports `job-search-config.ts`, which
+ * imports `@workspace/agents`; reaching this module through the barrel from a
+ * client component would pull LangChain into the `/jobs/schedules` chunk.
  *
- * ## Why it can be bundled to the client
- *
- * ⚠️ **Nothing here imports a value from anywhere but
- * `@workspace/job-search/title-exclusions`, and that subpath is chosen rather
- * than the package root.** The root barrel re-exports `job-search-config.ts`,
- * which imports `@workspace/agents`, which carries LangChain; a client
- * component importing this module through the barrel would pull the whole
- * agent runtime into the `/jobs/schedules` chunk. `title-exclusions.ts` itself
- * imports nothing. The same care `lib/documents/document-type-labels.ts`
- * documents about `import type` and Prisma, one package over.
- *
- * ## The list is a starting point, not a taxonomy
- *
- * The field always accepts free text, and it must: no list covers "Staff
- * Platform Engineer (Payments)". Nothing here filters, ranks or validates what
- * a user types — a title absent from this file searches exactly as well as one
- * in it. Correcting a bad entry is a one-line diff, and adding a family is a
- * block.
- *
- * Written in blocks by family so it can be reviewed as structure rather than as
- * eight hundred loose strings. The seniority ladder is applied rather than
- * spelled out for the same reason, and only to the titles that actually carry
- * one — "Senior Chief Technology Officer" is not a role.
+ * A starting point, not a taxonomy — the field always accepts free text, and
+ * nothing here filters or validates what a user types. Written in blocks by
+ * family, with the seniority ladder applied rather than spelled out and only to
+ * the titles that carry one.
  */
 
 /**
  * Prefixes that combine with {@link LADDERED_TITLES}.
  *
- * Ordered as a career, not alphabetically, because that is the order they are
- * generated in and a diff of this list should read as the ladder it is. The
- * unprefixed title is included by the generator, so "Software Engineer" needs
- * no entry here.
+ * Ordered as a career, not alphabetically, so a diff reads as the ladder it is.
+ * The generator includes the unprefixed title, so "Software Engineer" needs no
+ * entry here.
  */
 const SENIORITY_LADDER = [
   "Graduate",
@@ -60,10 +39,9 @@ const SENIORITY_LADDER = [
 /**
  * Titles a seniority prefix makes sense in front of.
  *
- * Kept deliberately short. Every entry here becomes eight strings, and a
- * completion list is only useful while the top few results are the likely ones
- * — padding it with "Graduate Solutions Architect" pushes the real answers off
- * the end of the eight rows the field shows.
+ * Kept deliberately short: every entry becomes eight strings, and padding the
+ * list with "Graduate Solutions Architect" pushes the real answers off the end
+ * of the eight rows the field shows.
  */
 const LADDERED_TITLES = [
   "Software Engineer",
@@ -668,10 +646,9 @@ const ROLE_TITLE_TOKENS: readonly (readonly string[])[] = ROLE_TITLES.map(
 /**
  * A title as a list of words, under the same rule the **Title Filter** uses.
  *
- * `normalizeTitle` is reused rather than reimplemented so that "Node.js
- * Developer" and "Full-Stack Engineer" tokenise here exactly as they do where a
- * posting is matched against an exclusion. A second normalisation would be a
- * second answer to "what are the words in this title", and the two would drift.
+ * `normalizeTitle` is reused rather than reimplemented so "Node.js Developer"
+ * tokenises here exactly as it does where a posting is matched against an
+ * exclusion; a second normalisation would drift from the first.
  */
 function titleTokens(title: string): string[] {
   const normalized = normalizeTitle(title).trim()
@@ -690,22 +667,14 @@ const BY_NORMALIZED: ReadonlyMap<string, string> = new Map(
  * A title as this list spells it, when the list has an opinion.
  *
  * **For the model's suggestions, not the user's typing.** Two agents propose
- * role titles here — the profile extractor and the role-title suggester — and
- * nothing constrains either to a shared vocabulary. One returning "Full Stack
- * Developer" while the other returns "Full-Stack Developer" gives the user two
- * buttons for one role; clicking both spends two searches of three boards on
- * the same advertisements, out of a budget of three titles.
+ * titles and nothing constrains them to a shared vocabulary; "Full Stack" vs
+ * "Full-Stack" gives the user two buttons for one role, spending two sweeps of
+ * three boards out of a budget of three titles. Snapping can only change
+ * punctuation and case — `normalizeTitle` flattens both — and a title the list
+ * has never heard of comes back as given.
  *
- * Snapping to the list is what collapses them, and it can only ever change
- * *punctuation and case*: `normalizeTitle` flattens both, so a title that
- * matches an entry differs from it in nothing else. A title the list has never
- * heard of comes back exactly as it was given — the field takes free text, and
- * an agent proposing a role this file does not know about is the list being
- * incomplete rather than the agent being wrong.
- *
- * ⚠️ **Never applied to what the user typed.** They meant what they wrote, and
- * a field that quietly rewrote a title as it was submitted would be an
- * autocomplete that could not be declined.
+ * ⚠️ **Never applied to what the user typed.** A field that quietly rewrote a
+ * title on submit would be an autocomplete that could not be declined.
  */
 export function canonicalRoleTitle(title: string): string {
   return BY_NORMALIZED.get(normalizeTitle(title)) ?? title.trim()
@@ -721,19 +690,13 @@ const MIN_FRAGMENT_CHARS = 2
 /**
  * Whether `fragment`'s words appear, in order, as prefixes of `title`'s words.
  *
- * **In order, and that is the whole feel of the thing.** `software en` finds
- * "Software Engineer" and "Software Engineering Manager"; `en software` finds
- * neither, because nobody typing a title types its words backwards, and a rule
- * that matched anyway would put "Software Engineer" under a fragment the user
- * was clearly steering somewhere else.
- *
- * Words rather than a whole-string prefix, so `engineer` reaches "Data
- * Engineer" — the specialism is usually the word a person is least sure how to
- * spell out and most likely to type first.
+ * **In order**: `software en` finds "Software Engineer"; `en software` finds
+ * nothing, because nobody types a title's words backwards. Words rather than a
+ * whole-string prefix, so `engineer` reaches "Data Engineer".
  *
  * Returns the index of the title word the *first* fragment word matched, or
- * `-1` for no match. The index is the ranking signal: a fragment that matched
- * at word 0 is a better answer than the same fragment matching at word 3.
+ * `-1`. That index is the ranking signal — a match at word 0 beats one at
+ * word 3.
  */
 function matchPosition(
   fragmentTokens: readonly string[],
@@ -765,20 +728,13 @@ function matchPosition(
 /**
  * The titles worth offering for what has been typed so far.
  *
- * Deterministic in the strong sense: same fragment, same list, every time, with
- * no model, no network and no scoring heuristic that could be tuned into
- * something surprising. That is the property the feature is *for* — the AI
- * suggestions beside this field are the other half, and they are allowed to be
+ * Deterministic by design — no model, no network, no tunable heuristic. The AI
+ * suggestions beside this field are the other half, and they get to be
  * inventive precisely because this half never is.
  *
- * Ranking, in order:
- *
- * 1. The fragment matched from the first word of the title, before a title it
- *    matched in the middle of.
- * 2. Shorter titles first, so "Data Engineer" precedes "Data Platform
- *    Engineer".
- * 3. Alphabetically, which is free — {@link ROLE_TITLES} is already sorted, and
- *    a stable sort keeps that order among equals.
+ * Ranked by match position, then by title length ("Data Engineer" before "Data
+ * Platform Engineer"), then alphabetically — free, since {@link ROLE_TITLES} is
+ * sorted and the sort is stable.
  */
 export function matchRoleTitles(fragment: string, limit = 8): string[] {
   const tokens = titleTokens(fragment)
@@ -818,21 +774,14 @@ export interface RoleTitleCompletion {
  * The completions for a comma-separated field, as whole replacement values.
  *
  * ⚠️ **A `<datalist>` matches its options against the *entire* input value, not
- * against the word being typed.** That is the whole reason this is not simply
- * {@link matchRoleTitles}: a list of bare titles matches nothing the moment the
- * field holds `"Software Engineer, "`, because the browser compares
- * `"Software Engineer, sof"` against `"Software Engineer"` and finds no prefix.
- * So each option carries the full string the field *becomes* — the text up to
- * the last comma, plus the candidate — and picking one is a replacement rather
- * than an append.
+ * the word being typed.** Bare titles match nothing once the field holds
+ * `"Software Engineer, "` — the browser compares the whole value against the
+ * option. So each option carries the full string the field *becomes*, and
+ * picking one is a replacement rather than an append. The bare title travels
+ * alongside as the label, which is what Firefox displays.
  *
- * The bare title travels alongside as the option's label, which is what Firefox
- * displays; Chrome and Safari show the value. Both are truthful about what the
- * field will hold.
- *
- * Separated from the component so the awkward part is testable at all. This is
- * string arithmetic over a caret position, and getting it wrong produces a
- * completion that silently offers nothing — not an error anybody sees.
+ * Separated from the component so the caret arithmetic is testable: getting it
+ * wrong offers nothing rather than raising an error.
  */
 export function roleTitleCompletions(
   value: string,

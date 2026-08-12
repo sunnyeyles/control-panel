@@ -21,23 +21,17 @@ import { coverLetterInstructions } from "@workspace/db"
  * `lib/jobs/briefing-summary.ts` for why that boundary matters.
  */
 export async function CoverLetterSection({ userId }: { userId: string }) {
-  // ⚠️ **Started together, awaited once.** Two unrelated indexed reads — the
-  // saved instructions row and the user's documents — and neither supplies the
-  // other, so issuing them one after the next paid two round trips in series for
-  // no dependency at all. This function is deployed away from its database (see
-  // the region note in the repo's memory of it), so a needless serial query is a
-  // needless ~200ms.
+  // ⚠️ **Started together, awaited once.** Neither read supplies the other, and
+  // this function is deployed away from its database, so a needless serial
+  // query is a needless ~200ms.
   //
-  // ⚠️ **The `.catch()` is attached now, not at the `await`.** A rejection
-  // before anything is awaiting is an unhandled rejection, which in Node is a
-  // process-level event rather than this component's problem to survive. Same
-  // shape, and the same reason, as `app/(app)/jobs/page.tsx`.
+  // ⚠️ **The `.catch()` is attached now, not at the `await`** — a rejection
+  // before anything awaits is an unhandled rejection, a process-level event in
+  // Node. Same shape as `app/(app)/jobs/page.tsx`.
   //
-  // A failure listing documents costs the import picker and nothing else —
-  // `null` rather than an empty list so the two are still distinguishable here.
-  // The instructions must still reach the form, because a page that cannot list
-  // documents must still be able to save them: the same degradation
-  // `app/(app)/documents/page.tsx` makes for the same reason.
+  // A failure listing documents costs the import picker and nothing else, so
+  // `null` keeps it distinguishable from an empty list; the instructions must
+  // still reach the form.
   const savedPromise = coverLetterInstructions(getPrisma(), userId)
   const listedPromise = listDocuments(userId, getPrisma()).catch((error) => {
     console.error(
@@ -64,12 +58,9 @@ export async function CoverLetterSection({ userId }: { userId: string }) {
   return (
     <section className="flex flex-col gap-4">
       {/*
-        No heading of its own. This used to be one section of `/settings` under
-        an `<h1>Settings</h1>`, so it needed an `<h2>` to say which; it is now
-        the whole of `/jobs/letters`, and `SiteHeader` already renders
-        "Cover letters" as the `<h1>` off the same `lib/nav.ts` entry the
-        sidebar and the tab bar read. A second one here would have repeated the
-        page title immediately beneath itself.
+        No heading of its own: this is the whole of `/jobs/letters`, and
+        `SiteHeader` already renders "Cover letters" as the `<h1>` from the same
+        `lib/nav.ts` entry, so a second would repeat the page title beneath it.
       */}
       <p className="text-sm text-muted-foreground">
         What you write here is applied to every letter drafted from a posting,
@@ -77,12 +68,9 @@ export async function CoverLetterSection({ userId }: { userId: string }) {
       </p>
 
       {/*
-        ⚠️ **The writer's real system prompt, rendered verbatim — not a summary
-        of it.** The point of showing the fixed rules is that the user is
-        extending something visible instead of guessing what is already covered,
-        and a hand-written paraphrase would drift away from the constant the
-        moment either changed, with nothing failing to say so. Splitting on
-        blank lines is the whole of the formatting.
+        ⚠️ The writer's real system prompt, verbatim — not a summary. The user
+        is extending something visible rather than guessing what is covered, and
+        a paraphrase would drift from the constant with nothing to say so.
       */}
       <details className="rounded-lg border p-4">
         <summary className="cursor-pointer text-sm font-medium">

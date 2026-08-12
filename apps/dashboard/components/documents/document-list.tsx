@@ -68,18 +68,12 @@ export function DocumentList({ documents }: { documents: DocumentSummary[] }) {
 
               <TableCell>
                 {/*
-                  The label lookup needs no `??` fallback, and one would be dead
-                  code. `noUncheckedIndexedAccess` does not apply to it — a
-                  `Record<DocumentType, string>` over a literal union is a
-                  mapped type with declared properties, not an index signature,
-                  so the lookup is `string`. The runtime half is covered by the
-                  CHECK on `documents.doc_type`: a value outside the six could
-                  not have been written.
-
-                  There used to be an em-dash branch beside this for an
-                  unlabelled document. `doc_type` is NOT NULL, so there is no
-                  such state any more — an upload whose posted label was not
-                  recognised lands on `other`.
+                  ⚠️ No `??` fallback, and one would be dead code.
+                  `noUncheckedIndexedAccess` does not apply: a
+                  `Record<DocumentType, string>` over a literal union is a mapped
+                  type, not an index signature. At runtime the CHECK on
+                  `documents.doc_type` covers it, and `doc_type` is NOT NULL —
+                  an unrecognised label lands on `other`.
                 */}
                 <Badge variant="secondary">
                   {DOCUMENT_TYPE_LABELS[document.documentType]}

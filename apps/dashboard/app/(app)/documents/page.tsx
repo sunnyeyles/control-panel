@@ -23,12 +23,10 @@ export const dynamic = "force-dynamic"
 export const maxDuration = 30
 
 /**
- * ⚠️ **This component awaits the session and nothing else, and keeping it that
- * way is the point.** The listing is inside a `<Suspense>` below, in a child
- * that awaits it — so the uploader, which needs no data at all, is on screen as
- * soon as the session resolves off its cookie rather than after Postgres
- * answers. Moving the query back up here would put the whole page behind it
- * again. Same arrangement as `/jobs` and `/jobs/letters`.
+ * ⚠️ **This component awaits the session and nothing else.** The listing sits in
+ * a `<Suspense>` child that awaits it, so the uploader is on screen as soon as
+ * the cookie resolves rather than after Postgres answers. Moving the query up
+ * here puts the whole page behind it again.
  */
 export default async function DocumentsPage() {
   const user = await requirePageUser()
@@ -72,11 +70,9 @@ export default async function DocumentsPage() {
 /**
  * The listing, and the only thing on this page that waits on a query.
  *
- * A database outage degrades this to "your documents could not be loaded"
- * rather than replacing the page with an error boundary — the user can still
- * read what the page is for, still upload, and the upload form's own error
- * handling takes over from there. The `try`/`catch` lives here rather than in
- * the page so that degradation stays inside the boundary it belongs to.
+ * A database outage degrades this to a message rather than replacing the page
+ * with an error boundary — the user can still upload. The `try`/`catch` lives
+ * here rather than in the page so the degradation stays inside its boundary.
  */
 async function DocumentsSection({ userId }: { userId: string }) {
   let documents: DocumentSummary[] = []
