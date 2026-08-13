@@ -1,11 +1,11 @@
 import { carryResetKey, type ActionState } from "@/lib/actions/action-state"
 import { requireUser } from "@/lib/actions/require-user"
 import type { CurrentUser } from "@/lib/auth/current-user"
-import { extractPageViaApify } from "@workspace/agent-tools/page-extract-apify"
+import { extractPageViaApify } from "@workspace/agent-tools/pages/page-extract-apify"
 import {
   extractPage,
   type PageExtractResult,
-} from "@workspace/agent-tools/page-extract"
+} from "@workspace/agent-tools/pages/page-extract"
 import type { Agent } from "@workspace/agents"
 import {
   fetchPostingByUrl,

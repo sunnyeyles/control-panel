@@ -1,4 +1,4 @@
-import type { BoardContext } from "@workspace/agent-tools/canvas-schema"
+import type { BoardContext } from "@workspace/whiteboard-schema"
 import type { WhiteboardSession } from "@workspace/agents/whiteboard"
 import { describe, expect, it, vi } from "vitest"
 

@@ -9,7 +9,7 @@ import {
 } from "@/lib/test-support/identities"
 import type { Agent } from "@workspace/agents"
 import type { PostingFetch } from "@workspace/agents/board-fetch"
-import type { PageExtractResult } from "@workspace/agent-tools/page-extract"
+import type { PageExtractResult } from "@workspace/agent-tools/pages/page-extract"
 import type { PrismaClient } from "@workspace/db"
 import { describe, expect, it, vi } from "vitest"
 

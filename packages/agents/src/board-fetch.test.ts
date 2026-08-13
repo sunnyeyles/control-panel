@@ -12,7 +12,7 @@ import { StoredPostingSchema } from "./stored-posting.ts"
 /**
  * Which board answers a pasted link, and what it is allowed to answer with.
  *
- * The wiring is the subject here — `board-posting.test.ts` in
+ * The wiring is the subject here — `by-url.test.ts` in
  * `@workspace/agent-tools` covers what an actor run does with its reply. What
  * this suite is for is the three joins that only exist in this module: host to
  * board, board to actor, and the board's answer to the platform's own Posting

@@ -3,17 +3,31 @@
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Shared tool catalog. One tool per module, importable individually.",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "description": "Shared tool catalog, grouped by domain. One tool per module, importable individually; there is no barrel.",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./time": {
+      "types": "./dist/time.d.ts",
+      "default": "./dist/time.js"
     },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "default": "./dist/*.js"
+    "./web-search": {
+      "types": "./dist/web-search.d.ts",
+      "default": "./dist/web-search.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "default": "./dist/env.js"
+    },
+    "./boards/*": {
+      "types": "./dist/boards/*.d.ts",
+      "default": "./dist/boards/*.js"
+    },
+    "./whiteboard/*": {
+      "types": "./dist/whiteboard/*.d.ts",
+      "default": "./dist/whiteboard/*.js"
+    },
+    "./pages/*": {
+      "types": "./dist/pages/*.d.ts",
+      "default": "./dist/pages/*.js"
     },
     "./package.json": "./package.json"
   },
@@ -31,6 +45,7 @@
   },
   "dependencies": {
     "@langchain/core": "^1.2.3",
+    "@workspace/whiteboard-schema": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {

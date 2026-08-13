@@ -483,10 +483,11 @@ search-results page, a careers index, an article or a sign-in wall come back as
 `not-a-posting` with a reason the user is shown. Returning a Posting assembled
 out of a page that contains none is the failure that branch exists to prevent.
 
-The page reaches it through `extractPage` in `@workspace/agent-tools`, which is
-**deliberately not a tool** — a plain function, absent from `allTools`, carried
-by no agent. Retrieval is delegated to Tavily, so nothing in this system opens a
-socket to a host somebody typed into a form.
+The page reaches it through `extractPage` in `@workspace/agent-tools/pages/`,
+which is **deliberately not a tool** — a plain function, carried by no agent, in
+the one directory where `NAMING.md` R9 forbids a tool outright. Retrieval is
+delegated to Tavily, so nothing in this system opens a socket to a host somebody
+typed into a form.
 
 **It is not reached at all for a link a Job Board can answer.** SEEK's and
 Indeed's actors take a single advertisement's URL and return its fields, so

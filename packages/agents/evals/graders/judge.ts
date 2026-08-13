@@ -21,7 +21,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages"
-import { renderBoard } from "@workspace/agent-tools/board-render"
+import { renderBoard } from "@workspace/agent-tools/whiteboard/render"
 import type { ChatModelLike } from "@workspace/agents-core"
 import * as z from "zod"
 

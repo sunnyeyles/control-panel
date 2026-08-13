@@ -26,6 +26,7 @@
     "@workspace/langfuse": "workspace:*",
     "@workspace/ui": "workspace:*",
     "@workspace/user-storage": "workspace:*",
+    "@workspace/whiteboard-schema": "workspace:*",
     "ai": "^7.0.37",
     "lucide-react": "^1.26.0",
     "mammoth": "^1.12.0",

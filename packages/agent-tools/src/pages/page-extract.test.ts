@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest"
 
-import { allTools } from "./index.ts"
 import { extractPage, MAX_PAGE_CHARS } from "./page-extract.ts"
 import {
   fakeFetch,
   jsonResponse,
   requestBody,
   type Capture,
-} from "./test-support/search-fakes.ts"
+} from "../test-support/search-fakes.ts"
 
 const API_KEY = "tvly-test-key"
 const URL = "https://boards.example.com/jobs/senior-backend-engineer"
@@ -140,19 +139,16 @@ describe("extractPage", () => {
 /**
  * The containment this module exists to keep.
  *
- * `extractPage` retrieves an arbitrary URL. `allTools` is what the general
- * assistant carries, so a `tool()` wrapper around this reaching that array
+ * `extractPage` retrieves an arbitrary URL, so a `tool()` wrapper around it
  * would hand a chat agent a fetcher — which is the thing `OVERVIEW.md` says
  * must not happen casually. This is a structural assertion, not a style one.
+ *
+ * The half of it that used to live here — "absent from `allTools`" — is now
+ * `naming.test.ts`'s R9: no module under `src/pages/` may call `tool()` at all.
+ * That is the stronger form, because it cannot be satisfied by a tool that
+ * merely stays out of one array.
  */
 describe("the fetcher is not a tool", () => {
-  it("is absent from allTools", () => {
-    expect(allTools.map((carried) => carried.name)).toEqual([
-      "get_current_time",
-      "web_search",
-    ])
-  })
-
   it("is a plain function with no tool interface on it", () => {
     expect(typeof extractPage).toBe("function")
     expect(extractPage).not.toHaveProperty("name", "page_extract")

@@ -18,7 +18,7 @@ import type {
   BoardContext,
   BoardShape,
   Viewport,
-} from "./canvas-schema.ts"
+} from "@workspace/whiteboard-schema"
 
 export interface RenderBoardInput {
   shapes: BoardShape[]

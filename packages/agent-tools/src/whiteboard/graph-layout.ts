@@ -6,9 +6,10 @@
  * twelve positions it produces one that overlaps, and it cannot see the result
  * to correct it. Unlike `arrange_shapes`, this layout respects the arrows.
  *
- * **It imports nothing, deliberately** — not even zod. Everything here is
- * arithmetic over `{key, w, h}` and `{from, to}`, so the one intricate
- * algorithm in this package is testable without a board, session or model.
+ * **It imports nothing, deliberately** — not `@workspace/whiteboard-schema`, so
+ * not zod either. Everything here is arithmetic over `{key, w, h}` and
+ * `{from, to}`, so the one intricate algorithm in this package is testable
+ * without a board, session or model.
  *
  * The algorithm is Sugiyama's, in the reduced form a box diagram needs:
  *

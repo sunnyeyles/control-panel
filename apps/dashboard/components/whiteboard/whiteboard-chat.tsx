@@ -7,7 +7,7 @@ import {
   canvasOpEventSchema,
   type BoardContext,
   type CanvasOp,
-} from "@workspace/agent-tools/canvas-schema"
+} from "@workspace/whiteboard-schema"
 import {
   Conversation,
   ConversationContent,

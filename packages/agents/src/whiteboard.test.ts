@@ -11,7 +11,7 @@
 
 import { AIMessage } from "@langchain/core/messages"
 import type { ToolCall } from "@langchain/core/messages/tool"
-import type { BoardContext } from "@workspace/agent-tools/canvas-schema"
+import type { BoardContext } from "@workspace/whiteboard-schema"
 import { describe, expect, it } from "vitest"
 
 import {

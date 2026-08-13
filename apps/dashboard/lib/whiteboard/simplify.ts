@@ -4,8 +4,8 @@ import type {
   BoardShape,
   ShapeColor,
   Viewport,
-} from "@workspace/agent-tools/canvas-schema"
-import { TLDRAW_SHAPE_ID_PREFIX } from "@workspace/agent-tools/canvas-schema"
+} from "@workspace/whiteboard-schema"
+import { TLDRAW_SHAPE_ID_PREFIX } from "@workspace/whiteboard-schema"
 
 import { kindForShape } from "./shape-kinds"
 

@@ -1,4 +1,4 @@
-import type { BoardPostingDeps } from "@workspace/agent-tools/board-posting"
+import type { BoardPostingDeps } from "@workspace/agent-tools/boards/by-url"
 import * as z from "zod"
 
 import { findExperienceStatement } from "./experience.ts"
@@ -9,13 +9,14 @@ import { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
 /**
  * Ask the board that serves a link for the advertisement behind it.
  *
- * **This layer exists because neither of the two below it may reach the other.**
- * `@workspace/agent-tools` holds the actors and must not depend on this package
- * — `posting-catalog.ts` states that rule and takes `idFor` as an injection for
- * exactly this reason — while `boardForHost` and `postingId` live here and are
- * the platform's single answers to "which board is this?" and "which posting is
- * this?". This module is where the two meet, and it is the only place they are
- * wired together.
+ * **This layer exists because the package below may not reach up into this
+ * one.** `@workspace/agent-tools` holds the actors, the board registry and
+ * `boardForHost`, and must not depend on this package — `posting-catalog.ts`
+ * states that rule and takes `idFor` as an injection for exactly this reason.
+ * `postingId` is what it may not reach: the platform's single answer to "which
+ * posting is this?", which lives here because it is a fact about our storage
+ * rather than about any board. This module is where the two meet, and it is the
+ * only place they are wired together.
  *
  * ⚠️ **The board path skips the model entirely, and that is the point of
  * having it.** A Posting fetched here is assembled from fields the board itself
@@ -24,7 +25,7 @@ import { StoredPostingSchema, type StoredPosting } from "./stored-posting.ts"
  * {@link StoredPostingSchema} before it leaves — an actor is a community scraper
  * and its output is no more trusted for being structured.
  *
- * The general fetcher in `@workspace/agent-tools/page-extract` remains the path
+ * The general fetcher in `@workspace/agent-tools/pages/page-extract` remains the path
  * for everything else, and "everything else" is most of the world: a Greenhouse
  * link, a Lever link, a company careers page and — because its actor takes
  * search-results URLs only — LinkedIn. A caller handles {@link

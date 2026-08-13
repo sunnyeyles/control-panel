@@ -1,4 +1,4 @@
-import type { BoardContext } from "@workspace/agent-tools/canvas-schema"
+import type { BoardContext } from "@workspace/whiteboard-schema"
 import type { Editor } from "tldraw"
 
 import { drainRecentEdits } from "./recent-edits"

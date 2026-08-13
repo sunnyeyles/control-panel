@@ -15,7 +15,7 @@ import {
   jsonResponse,
   requestBody,
   type Capture,
-} from "./test-support/search-fakes.ts"
+} from "../test-support/search-fakes.ts"
 
 /**
  * The board-independent half of a search tool, driven by a spec that belongs to

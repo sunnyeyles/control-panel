@@ -1,7 +1,7 @@
 import { toBaseMessages, toUIMessageStream } from "@ai-sdk/langchain"
 import { requireUser } from "@/lib/actions/require-user"
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/current-user"
-import { boardContextSchema } from "@workspace/agent-tools/canvas-schema"
+import { boardContextSchema } from "@workspace/whiteboard-schema"
 import { createWhiteboardAgent as defaultWhiteboardAgent } from "@workspace/agents/whiteboard"
 import type { WhiteboardSession } from "@workspace/agents/whiteboard"
 import { createLangfuseCallback } from "@workspace/langfuse"

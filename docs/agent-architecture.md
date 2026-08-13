@@ -32,6 +32,7 @@ flowchart TD
     end
 
     LF["@workspace/langfuse<br/>Langfuse over OpenTelemetry"]
+    WB["@workspace/whiteboard-schema<br/>the canvas wire contract, zod only"]
 
     DASH --> AGENTS
     WORK --> AGENTS
@@ -40,6 +41,9 @@ flowchart TD
 
     AGENTS --> CORE
     AGENTS --> TOOLS
+
+    DASH --> WB
+    TOOLS --> WB
 
     TOOLS -. "NO dependency edge.<br/>AgentTool = StructuredToolInterface,<br/>so they line up structurally" .- CORE
 ```
@@ -52,17 +56,31 @@ Three things this picture is making explicit:
   catalog works with any caller and the runtime ships no tools at all
   (`createAgent({ tools })` defaults to none).
 - **The worker declares only `@workspace/agents` and `@workspace/langfuse`.**
-  The dashboard additionally declares `@workspace/agent-tools`, because the
-  whiteboard UI imports canvas schema and board-session helpers directly rather
-  than only through an agent factory. `agents-core` still arrives transitively
-  for both.
+  The dashboard additionally declares `@workspace/agent-tools`, for the two page
+  fetchers behind add-by-link, and `@workspace/whiteboard-schema`. `agents-core`
+  still arrives transitively for both.
 - **`@workspace/langfuse` has no edge to the stack in either direction.** It is a
   composition-root concern, which is why `@langfuse/*` and `@opentelemetry/*`
   stay out of the runtime entirely.
+- **`@workspace/whiteboard-schema` is below the stack rather than in it**, and
+  is the one package a browser bundle imports directly. Both ends of the canvas
+  wire need it — the tools and the dashboard's client components — so it depends
+  on zod and nothing else, and anything added to it is added to a browser
+  bundle. It was `canvas-schema.ts` inside `agent-tools` until that meant the
+  dashboard's client bundle waiting on the tool catalog's build for a type.
 
-Only `agents` and `agent-tools` expose wildcard `./*` subpaths. `agents-core`
-and `langfuse` expose `"."` alone — which is why every consumer imports those two
-from the root.
+`agents` exposes wildcard `./*` subpaths. `agent-tools` exposes three directory
+patterns and two root modules — `boards/*`, `whiteboard/*`, `pages/*`, `./time`,
+`./web-search`, `./env` — and deliberately nothing else, so `internal/` stays
+private and has no consumers to break. `agents-core`, `langfuse` and
+`whiteboard-schema` expose `"."` alone, which is why every consumer imports
+those three from the root.
+
+**There is no `@workspace/agent-tools` root export at all.** It held `allTools`,
+which claimed to be "every tool in the catalog" while holding two, for the
+structural reason that every tool added since is a `createX(catalog, log)`
+factory bound to one run. Removing the barrel rather than correcting it means
+the claim cannot come back.
 
 ---
 
@@ -222,14 +240,14 @@ than module singletons, because each is bound to one run's catalog.
 | `createResumeTailor`      | `[]`                                                           | The Letter Writer's case, unchanged: the same CV, the same advertisement copied verbatim beside it                                                                                                                                                                                                                                                                                                                              |
 | `createProfileExtractor`  | `[]`                                                           | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                                                                                                          |
 | `createPostingExtractor`  | `[]`                                                           | Reads one page fetched from a host the user merely named — the least trusted input in the system — verbatim. It is the "separate agent" the two writers below defer to, and holds no CV, no instructions and no way to reach the page's own links                                                                                                                                                                               |
-| `createAssistant`         | `allTools` + `extraTools`                                      | The one genuinely general-purpose agent                                                                                                                                                                                                                                                                                                                                                                                         |
-| `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Nine verbs over one in-memory board session for the turn; no board search, no fetch, no S3. The dashboard imports the canvas schema and session helpers from `@workspace/agent-tools` so the UI and the agent agree on the board shape                                                                                                                                                                                          |
+| `createAssistant`         | `ASSISTANT_TOOLS` + `extraTools`                               | The one genuinely general-purpose agent. Its set is two module singletons — `get_current_time`, `web_search` — named in `assistant.ts` and pinned by `assistant.test.ts`, because widening it widens what a chat agent can do for anyone who can reach the chat                                                                                                                                                                 |
+| `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Nine verbs over one in-memory board session for the turn; no board search, no fetch, no S3. The session helpers come from `@workspace/agent-tools/whiteboard/`, and the schema both ends agree on from `@workspace/whiteboard-schema`                                                                                                                                                                                           |
 
 ### Why the whiteboard agent does not compute coordinates
 
 `draw_diagram` is the largest of the nine tools and the one the prompt steers
 everything past two boxes toward. It takes nodes and arrows and **no positions
-at all**; `packages/agent-tools/src/graph-layout.ts` ranks them by those arrows
+at all**; `packages/agent-tools/src/whiteboard/graph-layout.ts` ranks them by those arrows
 — cycle break, longest-path layering, barycentre ordering, then a separation
 pass — and returns a position per node.
 
@@ -256,12 +274,14 @@ wording — a shape labelled like an instruction is a shape with a strange label
 ### The page fetchers, and why none is in the catalog
 
 They exist for **adding a Posting by pasting its link**, and each is a plain
-function rather than a `tool()`, absent from `allTools` and carried by no
-agent — `page-extract.test.ts` and `board-posting.test.ts` each assert it for
-their module, because the alternative is a general chat agent acquiring a
-fetcher the first time somebody tidies the catalog.
+function rather than a `tool()`, carried by no agent — because the alternative
+is a general chat agent acquiring a fetcher the first time somebody tidies the
+catalog. It is enforced two ways. The Tavily pair lives under `pages/`, where
+`NAMING.md` R9 forbids a tool outright and `naming.test.ts` checks it by
+importing every module in the directory; `by-url.ts` sits among tools in
+`boards/`, so R9 cannot reach it and `by-url.test.ts` asserts it locally.
 
-**`fetchBoardPosting`** (`packages/agent-tools/src/board-posting.ts`) is tried
+**`fetchBoardPosting`** (`packages/agent-tools/src/boards/by-url.ts`) is tried
 first. Where the link belongs to a board whose actor takes a single
 advertisement's URL — SEEK and Indeed, through a `byUrl` entry on their existing
 `ApifyBoardSpec` — the board answers with `title`, `company`, `location` and the
@@ -279,18 +299,21 @@ is how pasting a search page stores one arbitrary role as though somebody had
 chosen it.
 
 The routing lives one layer up, in `packages/agents/src/board-fetch.ts`, because
-`agent-tools` may not depend on `@workspace/agents` — `boardForHost` and
-`postingId` both live there, and `board-posting.ts` takes `idFor` as an injection
-for the same reason `posting-catalog.ts` does.
+`agent-tools` may not depend on `@workspace/agents` — `postingId` lives there,
+and `by-url.ts` takes `idFor` as an injection for the same reason
+`posting-catalog.ts` does. `boardForHost` and the board registry it reads are
+_not_ up there: they moved down beside the specs they name, so adding a board is
+one file in `boards/` and one row in `boards/registry.ts` rather than a matching
+edit in two packages. `@workspace/agents/job-boards` re-exports them.
 
-**`extractPage`** (`packages/agent-tools/src/page-extract.ts`) is the first try
+**`extractPage`** (`packages/agent-tools/src/pages/page-extract.ts`) is the first try
 for every link no board can answer — a Greenhouse link, a company careers page,
 and LinkedIn, whose actor accepts search-results URLs only. The dashboard's
 action calls it, bounds what comes back, and hands the text to
 `createPostingExtractor`, which has no tools. So the untrusted page and the
 ability to act on it are never held by the same thing.
 
-**`extractPageViaApify`** (`packages/agent-tools/src/page-extract-apify.ts`) is
+**`extractPageViaApify`** (`packages/agent-tools/src/pages/page-extract-apify.ts`) is
 the same general path's second try: Apify's `website-content-crawler`, once,
 when Tavily returns `failed`. Same result shape, same bound, still not a tool.
 Its timeout is 20 seconds — shorter than the board-by-URL path — because Tavily
@@ -371,12 +394,14 @@ three.
 
 ### Two notes on the catalog
 
-- **The board tools are not in `allTools`.** `allTools` is
-  `[getCurrentTime, webSearch]`, and each board tool is reached only through its
-  wildcard subpath — `@workspace/agent-tools/seek-search` and its two neighbours,
-  which is how `job-scout.ts` imports them. So the assistant, which carries
-  `allTools`, cannot search any job board. Worth knowing before reading
-  `allTools`' docstring, which still calls itself "every tool in the catalog".
+- **There is no catalog-wide tool list, and there deliberately is not one.**
+  `allTools` used to be it: `[getCurrentTime, webSearch]`, calling itself "every
+  tool in the catalog" while every tool added after it was a
+  `createX(catalog, log)` factory bound to one run, which a module-level array
+  cannot hold. The barrel is gone. Each agent names its own set —
+  `ASSISTANT_TOOLS` in `assistant.ts`, `JOB_BOARDS.map(b => b.createSearch(…))`
+  in `job-scout.ts` — so the assistant still cannot search a job board, and now
+  nothing claims otherwise.
 - **Agents are `createX()` factories, never instances.** Building one constructs
   a model, which reads `OPENAI_API_KEY` and throws without it. A module-level
   instance would move that failure to import time and break any consumer that
@@ -585,9 +610,11 @@ down with it.
 
 ---
 
-## Where things live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+## Where things live |
+
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/agents`      | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `posting-extractor`, `whiteboard`, plus the schema contracts — `findings` (Scout → Brief Writer), `criteria` (Profile Extractor → whoever stores them) and `stored-posting` (what a `postings.payload` may hold) — and `cover-letter`, `tailored-resume`, `posting-id`, `posted-at`, `job-boards` and `board-fetch` (host → board → actor, the one place the registry meets the tool catalog). Also `evals/`, the scored whiteboard harness, which is outside `src/` and outside `pnpm test` |
-| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `packages/agent-tools` | `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`; `posting-details.ts`; `web-search.ts`, `time.ts`; `page-extract.ts`, `page-extract-apify.ts` and `board-posting.ts` (the fetchers, and none a tool); `canvas.ts` / `canvas-schema.ts` / `board-session.ts` / `board-render.ts` / `graph-layout.ts`; and `index.ts` with `allTools`                                                                                                                                                                                                                 |
-| `packages/langfuse`    | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `packages/agents` | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `posting-extractor`, `whiteboard`, plus the schema contracts — `findings` (Scout → Brief Writer), `criteria` (Profile Extractor → whoever stores them) and `stored-posting` (what a `postings.payload` may hold) — and `cover-letter`, `tailored-resume`, `posting-id`, `posted-at`, `job-boards` and `board-fetch` (host → board → actor, the one place the registry meets the tool catalog). Also `evals/`, the scored whiteboard harness, which is outside `src/` and outside `pnpm test` |
+| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts` |
+| `packages/agent-tools` | Grouped by domain, no barrel. `boards/`: `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`, plus `posting-catalog.ts`, `posting-details.ts`, `search-log.ts`, `by-url.ts` (a fetcher, not a tool) and `registry.ts`. `whiteboard/`: `canvas.ts` / `session.ts` / `layout.ts` / `render.ts` / `graph-layout.ts`. `pages/`: `page-extract.ts` and `page-extract-apify.ts`, where R9 forbids a tool. `internal/http.ts` is unexported; `time.ts`, `web-search.ts` and `env.ts` sit at the root |
+| `packages/whiteboard-schema` | `index.ts` alone — the canvas wire contract, zod and nothing else, imported by the tools above and by the dashboard's client components |
+| `packages/langfuse` | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse` |

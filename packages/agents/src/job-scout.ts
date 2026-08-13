@@ -1,12 +1,12 @@
 import {
   createPostingCatalog,
   type PostingCatalog,
-} from "@workspace/agent-tools/posting-catalog"
-import { createPostingDetails } from "@workspace/agent-tools/posting-details"
+} from "@workspace/agent-tools/boards/posting-catalog"
+import { createPostingDetails } from "@workspace/agent-tools/boards/posting-details"
 import {
   createSearchLog,
   type SearchAttempt,
-} from "@workspace/agent-tools/search-log"
+} from "@workspace/agent-tools/boards/search-log"
 import { createAgent, type Agent } from "@workspace/agents-core"
 
 import type { ExtraToolsAgentOptions } from "./agent-options.ts"

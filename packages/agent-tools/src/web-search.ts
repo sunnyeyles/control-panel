@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools"
 import * as z from "zod"
 
-import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
+import { clampMaxResults, requireEnv, searchApiPost } from "./internal/http.ts"
 
 /**
  * Web search, via Tavily's REST API.
@@ -10,8 +10,9 @@ import { clampMaxResults, requireEnv, searchApiPost } from "./search-http.ts"
  * same reason the agents are factories: that package's `TavilySearch` reads
  * `TAVILY_API_KEY` in its **constructor** and throws without one, so a
  * module-level `export const webSearch = new TavilySearch()` would move the
- * failure to import time and take `allTools` — and every consumer that merely
- * imports the catalog — down with it. Reading the key inside the call keeps
+ * failure to import time and take every consumer that merely imports this
+ * module down with it — including `ASSISTANT_TOOLS` in `@workspace/agents`,
+ * which holds this exact singleton. Reading the key inside the call keeps
  * importing this module free, and keeps the package's dependencies to
  * `@langchain/core` and `zod`.
  */

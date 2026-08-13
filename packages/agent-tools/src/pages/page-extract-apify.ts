@@ -2,18 +2,18 @@ import {
   actorRunUrl,
   requireApifyToken,
   type ApifyHttpDeps,
-} from "./apify-search.ts"
+} from "../boards/apify-search.ts"
 import { bound, type PageExtractResult } from "./page-extract.ts"
-import { searchApiPost } from "./search-http.ts"
+import { searchApiPost } from "../internal/http.ts"
 
 /**
  * Retrieve the page at a link via Apify's Website Content Crawler, as markdown.
  *
  * ⚠️ **This is deliberately not a tool**, for the same reason
- * `page-extract.ts` gives at greater length: a plain function, absent from
- * `allTools`, handed to no agent. It sits beside that module as a second
- * general fetcher for when Tavily cannot read the page — not as a board
- * scraper, and not as something an agent may call.
+ * `page-extract.ts` gives at greater length: a plain function, handed to no
+ * agent, and under `pages/`, where `NAMING.md` R9 forbids one. It sits beside
+ * that module as a second general fetcher for when Tavily cannot read the page
+ * — not as a board scraper, and not as something an agent may call.
  *
  * **Retrieval is still delegated.** The request goes to Apify and Apify
  * fetches the page; this process never opens a socket to a host somebody typed
@@ -45,7 +45,7 @@ interface CrawlerItem {
  * `undefined` for a blank or non-string, so a field the actor returned as `""`
  * or as a number is treated as absent rather than stored.
  *
- * Same posture as `board-posting.ts`: a dataset item is JSON off a scraper, so
+ * Same posture as `by-url.ts`: a dataset item is JSON off a scraper, so
  * the declared shape is a description of what was observed, not a guarantee.
  */
 function text(value: unknown): string | undefined {

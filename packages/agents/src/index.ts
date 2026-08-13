@@ -156,4 +156,4 @@ export type { Agent } from "@workspace/agents-core"
  * gets back without importing `@workspace/agent-tools` for a type — the same
  * courtesy `Agent` gets above.
  */
-export type { SearchAttempt } from "@workspace/agent-tools/search-log"
+export type { SearchAttempt } from "@workspace/agent-tools/boards/search-log"

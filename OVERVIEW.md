@@ -15,30 +15,31 @@ employment opportunity, which is a **Posting**. To a user a job is a
 
 ## Where it lives
 
-| Stage                                        | Owner                                                                                                                                                                                                                               |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dashboard — chat, documents, briefings       | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                                                                                                                                                   |
-| Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                                                                                                                                             |
-| A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                                                                                                                          |
-| One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                                                                                                                          |
-| What `jobs.config` means                     | `packages/job-search/src/job-search-config.ts`                                                                                                                                                                                      |
-| Words that rule a Posting out by its title   | `packages/job-search/src/title-exclusions.ts`, stored by `packages/db/src/posting-filters.ts`, enforced in `apps/briefing-worker/src/run-briefing.ts` and `packages/db/src/postings.ts`                                             |
-| The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                                                                                                                         |
-| The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                                                                                                                   |
-| The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                                                                                                                   |
-| The posting↔resume match contract            | `packages/agents/src/match.ts`, produced by `match-assessor.ts`                                                                                                                                                                     |
-| Scoring Postings against the resume          | `apps/dashboard/lib/postings/match-actions.ts`, driven by `apps/dashboard/components/jobs/postings/score-pending-matches.tsx`                                                                                                       |
-| Proposing criteria from a resume             | `apps/dashboard/lib/jobs/suggest-criteria-actions.ts`, reading through `apps/dashboard/lib/cover-letters/candidate-background.ts`                                                                                                   |
-| Suggesting adjacent role titles              | `packages/agents/src/role-title-suggester.ts`, run from the same action; the completion list beside it is `apps/dashboard/lib/jobs/role-titles.ts`                                                                                  |
-| Editing an existing briefing's criteria      | `apps/dashboard/lib/jobs/job-actions.ts` → `updateJobConfig` in `packages/db/src/jobs.ts`                                                                                                                                           |
-| The tool catalog                             | `packages/agent-tools/src/` — one tool per module                                                                                                                                                                                   |
-| Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                                                                                                                         |
-| Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                                                                                                                                       |
-| Every Posting ever found, and its status     | `packages/db/src/postings.ts`, projected from findings by `apps/briefing-worker/src/postings.ts`, read by `apps/dashboard/lib/postings/`                                                                                            |
-| Adding a Posting by pasting its link         | `apps/dashboard/lib/postings/add-by-link-actions.ts`, over `@workspace/agents/board-fetch` first and `@workspace/agent-tools/page-extract` (then `page-extract-apify` on failure) + `@workspace/agents/posting-extractor` otherwise |
-| S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts` / `cover-letter-store.ts`, never import the AWS SDK elsewhere                                                                                            |
-| Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                                                                                                                       |
-| EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                                                                                                                       |
+| Stage                                        | Owner                                                                                                                                                                                                                                           |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard — chat, documents, briefings       | `apps/dashboard/` (Next.js 16 App Router, Vercel)                                                                                                                                                                                               |
+| Lambda entrypoint + hourly tick              | `apps/briefing-worker/src/` (`index.ts`, `run-tick.ts`)                                                                                                                                                                                         |
+| A run someone triggered from the UI          | `apps/briefing-worker/src/run-ad-hoc.ts`, asked for by `apps/dashboard/lib/briefing-runs/`                                                                                                                                                      |
+| One briefing run                             | `apps/briefing-worker/src/run-briefing.ts`                                                                                                                                                                                                      |
+| What `jobs.config` means                     | `packages/job-search/src/job-search-config.ts`                                                                                                                                                                                                  |
+| Words that rule a Posting out by its title   | `packages/job-search/src/title-exclusions.ts`, stored by `packages/db/src/posting-filters.ts`, enforced in `apps/briefing-worker/src/run-briefing.ts` and `packages/db/src/postings.ts`                                                         |
+| The named agents                             | `packages/agents/src/` — one `createX()` factory per module                                                                                                                                                                                     |
+| The scout↔writer contract                    | `packages/agents/src/findings.ts`                                                                                                                                                                                                               |
+| The search-criteria contract                 | `packages/agents/src/criteria.ts`                                                                                                                                                                                                               |
+| The posting↔resume match contract            | `packages/agents/src/match.ts`, produced by `match-assessor.ts`                                                                                                                                                                                 |
+| Scoring Postings against the resume          | `apps/dashboard/lib/postings/match-actions.ts`, driven by `apps/dashboard/components/jobs/postings/score-pending-matches.tsx`                                                                                                                   |
+| Proposing criteria from a resume             | `apps/dashboard/lib/jobs/suggest-criteria-actions.ts`, reading through `apps/dashboard/lib/cover-letters/candidate-background.ts`                                                                                                               |
+| Suggesting adjacent role titles              | `packages/agents/src/role-title-suggester.ts`, run from the same action; the completion list beside it is `apps/dashboard/lib/jobs/role-titles.ts`                                                                                              |
+| Editing an existing briefing's criteria      | `apps/dashboard/lib/jobs/job-actions.ts` → `updateJobConfig` in `packages/db/src/jobs.ts`                                                                                                                                                       |
+| The tool catalog                             | `packages/agent-tools/src/` — one tool per module, grouped `boards/`, `whiteboard/`, `pages/`                                                                                                                                                   |
+| The whiteboard wire contract                 | `packages/whiteboard-schema/src/` — zod only; imported by both the canvas tools and the dashboard's client components                                                                                                                           |
+| Orchestrator graph, state, model             | `packages/agents-core/src/`                                                                                                                                                                                                                     |
+| Jobs, runs, artifacts                        | `packages/db/src/` (Prisma Client + domain helpers) and `packages/db/prisma/`                                                                                                                                                                   |
+| Every Posting ever found, and its status     | `packages/db/src/postings.ts`, projected from findings by `apps/briefing-worker/src/postings.ts`, read by `apps/dashboard/lib/postings/`                                                                                                        |
+| Adding a Posting by pasting its link         | `apps/dashboard/lib/postings/add-by-link-actions.ts`, over `@workspace/agents/board-fetch` first and `@workspace/agent-tools/pages/page-extract` (then `pages/page-extract-apify` on failure) + `@workspace/agents/posting-extractor` otherwise |
+| S3 read/write                                | `packages/user-storage/src/` — extend `brief-store.ts` / `resume-store.ts` / `cover-letter-store.ts`, never import the AWS SDK elsewhere                                                                                                        |
+| Langfuse tracing                             | `packages/langfuse/src/`, wired in each runtime's entry point                                                                                                                                                                                   |
+| EventBridge schedule, bucket, IAM, lifecycle | `infra/aws/` (`briefing-worker.tf`, `user-storage.tf`, `vercel-dashboard.tf`)                                                                                                                                                                   |
 
 **There are three page fetchers, and none is a tool.**
 `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` each query one job
@@ -52,16 +53,17 @@ tool set (`canvas.ts`) that mutates an in-memory board session rather than
 reaching the network.
 
 The fetchers exist for **adding a Posting by pasting its link**, and each is a
-plain function: absent from `allTools`, carried by no agent, and asserted to be
-both for the board and Tavily paths.
+plain function: carried by no agent, and asserted to be so on both the board and
+Tavily paths. The Tavily one is under `pages/`, where `NAMING.md` R9 forbids a
+tool outright and a test enforces it by importing every module there.
 
-- `board-posting.ts` asks the board that issued the link for the advertisement
+- `boards/by-url.ts` asks the board that issued the link for the advertisement
   behind it, through the same actor a search uses — SEEK and Indeed only, via a
   `byUrl` entry on their spec. **It skips the model entirely**: the board
   publishes `title`, `company`, `location` and the description as fields, so
   there is no reading to be done and nothing to get wrong. `board-fetch.ts` in
-  `@workspace/agents` is where `boardForHost` and `postingId` meet it, because
-  `agent-tools` may not depend on that package.
+  `@workspace/agents` is where `postingId` meets it, because `agent-tools` may
+  not depend on that package.
 - `page-extract.ts` retrieves the page at an arbitrary URL via Tavily and is the
   first try for everything else — a Greenhouse link, a company careers page, and
   LinkedIn, whose actor takes search-results URLs and cannot be handed a job page.
@@ -87,8 +89,9 @@ and the four hazards are answered structurally rather than promised:
   it, so the hazard does not arise.
 
 The scout carries the three board tools plus `get_posting_details` and nothing
-else; the dashboard's assistant carries `allTools`, which is `get_current_time`
-and `web_search` — neither the board tools nor any fetcher are in it.
+else; the dashboard's assistant carries `ASSISTANT_TOOLS`, which is
+`get_current_time` and `web_search` — neither the board tools nor any fetcher
+are in it, and a test pins that list.
 
 ## Rules
 

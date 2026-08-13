@@ -1,14 +1,17 @@
-import { requireEnv, searchApiPost } from "./search-http.ts"
+import { requireEnv, searchApiPost } from "../internal/http.ts"
 
 /**
  * Retrieve the page at a link, as markdown.
  *
  * ⚠️ **This is deliberately not a tool, and that is the whole design.** A plain
- * function, absent from `allTools`, handed to no `createX()` factory —
- * `page-extract.test.ts` asserts both. Wrapping it in `tool()` would put an
- * arbitrary URL fetcher in the hands of whichever agent picked it up, including
- * the general assistant, which carries `allTools`. Do not. A caller retrieves
- * the page and hands the text to an agent that can do nothing but answer.
+ * function, handed to no `createX()` factory. Wrapping it in `tool()` would put
+ * an arbitrary URL fetcher in the hands of whichever agent picked it up,
+ * including the general assistant. Do not. A caller retrieves the page and
+ * hands the text to an agent that can do nothing but answer.
+ *
+ * **Enforced by living in `pages/`.** `NAMING.md` R9 forbids a tool anywhere in
+ * this directory, and `naming.test.ts` imports every module here and refuses
+ * anything with a tool's shape.
  *
  * **Retrieval is delegated, and that is a security property.** Tavily fetches
  * the page; this process never opens a socket to a host somebody typed into a

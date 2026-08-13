@@ -1,10 +1,10 @@
 import {
   createBoardSession,
   type BoardSession,
-} from "@workspace/agent-tools/board-session"
-import { renderBoardContext } from "@workspace/agent-tools/board-render"
-import { createCanvasTools } from "@workspace/agent-tools/canvas"
-import type { BoardContext } from "@workspace/agent-tools/canvas-schema"
+} from "@workspace/agent-tools/whiteboard/session"
+import { renderBoardContext } from "@workspace/agent-tools/whiteboard/render"
+import { createCanvasTools } from "@workspace/agent-tools/whiteboard/canvas"
+import type { BoardContext } from "@workspace/whiteboard-schema"
 import { createAgent, createModel, type Agent } from "@workspace/agents-core"
 
 import type { ExtraToolsAgentOptions } from "./agent-options.ts"

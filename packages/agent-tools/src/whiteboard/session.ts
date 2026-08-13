@@ -24,7 +24,7 @@
  * fixes, per the convention set in `web-search.ts`.
  */
 
-import { computeLayout, round } from "./board-layout.ts"
+import { computeLayout, round } from "./layout.ts"
 import {
   DEFAULT_GAP,
   DEFAULT_SHAPE_HEIGHT,
@@ -37,7 +37,7 @@ import {
   type Layout,
   type ShapeColor,
   type ShapeKind,
-} from "./canvas-schema.ts"
+} from "@workspace/whiteboard-schema"
 import {
   boundsOf,
   findFreeOrigin,

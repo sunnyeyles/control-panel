@@ -117,9 +117,11 @@ pnpm test        # turbo test
 `@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools`,
 `@workspace/agents-core`, `@workspace/agents`, `@workspace/briefing-worker` and
 `@workspace/ui`. Vitest is a devDependency of those alone; `turbo test` is a
-no-op in the other three. Do not assume a package is covered because the command
-exits 0. Adding tests to another workspace means adding `vitest` to it and a
-`test` script — the `test` task in `turbo.json` is already there.
+no-op in the other five — `eslint-config`, `typescript-config`, `langfuse`,
+`job-search` and `whiteboard-schema`. (This used to say "the other three",
+which was already wrong before `whiteboard-schema` existed: `job-search` has
+never had tests.) Do not assume a package is covered because the command exits 0. Adding tests to another workspace means adding `vitest` to it and a `test`
+script — the `test` task in `turbo.json` is already there.
 
 In the six that emit `dist/` the same arrangement repeats and is deliberate:
 `src/**/*.test.ts` is excluded from `tsconfig.json` so tests never reach
@@ -206,9 +208,10 @@ partial unique index were exercised — only CI, with a database, exercises thos
 
 - **`agents-core` ships no tools and no agents.** It is the runtime only, and `createAgent({ tools })` defaults to none. Keeping concrete tools out of it means a project can take the runtime and supply its own.
 - **`agent-tools` does not depend on `agents-core`.** Tools are plain LangChain tools (`StructuredToolInterface`), so they work with any caller. `AgentTool` in the runtime is a type alias for that same interface — the two line up structurally, not by dependency.
-- **Both new packages use wildcard subpath exports** (`./*` → `./dist/*.js`). Adding `src/weather.ts` makes `@workspace/agent-tools/weather` importable with no config change — same spirit as the UI package's one-file-per-subpath rule, no barrel to update.
+- **`agent-tools` is grouped by domain, and its exports map is a boundary rather than a convention.** `boards/`, `whiteboard/`, `pages/` and two root modules are exported; `internal/` and `test-support/` are not, so the shared HTTP transport can be refactored without breaking a consumer. It was a bare `./*` until that published every file in the package. Adding `src/boards/monster-search.ts` makes `@workspace/agent-tools/boards/monster-search` importable with no config change — a subpath pattern's `*` spans slashes — but a **new top-level directory needs a new entry**. See `packages/agent-tools/README.md`.
 - **Agents are exported as `createX()` factories, never as instances.** Building one constructs a model, which reads `OPENAI_API_KEY` and throws without it; a module-level instance would move that failure to import time and break any consumer that merely imports the module.
-- **Prefer per-tool imports over `allTools`.** A model picks worse as the tool list grows, so give an agent the tools its job needs.
+- **An agent names its own tools, and there is no `allTools`.** There was, and it was a lie: it held two tools while calling itself the whole catalog, because every tool added after it is a `createX(catalog, log)` factory bound to one run and a module-level array cannot hold one. A model picks worse as the tool list grows, so the set is chosen per agent in `@workspace/agents` — `ASSISTANT_TOOLS` is the general assistant's, and it is pinned by a test because widening it widens what a chat agent can do for anyone who can reach the chat.
+- **The whiteboard wire contract is a fifth package**, `@workspace/whiteboard-schema`, and not part of this stack. Both ends of the wire import it — the canvas tools and the dashboard's client components — so it depends on zod and nothing else. Anything added to it is added to a browser bundle.
 
 `docs/agent-architecture.md` draws all of this — the layering above, the compiled graph inside `createAgent`, which agent carries which tools and why that is containment rather than tuning, the three entry points, and how a run is traced.
 
