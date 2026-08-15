@@ -1,5 +1,11 @@
-name: Preview auth domain
+name: Preview resources
 
+# The per-PR Neon resources the integration creates and never collects: the
+# trusted auth domain a preview needs to sign in, and the database branch it
+# reads. Both are opened when a pull request opens and are nobody's job to close.
+#
+# ## The trusted domain
+#
 # Sign-in on a preview deployment, which nothing else in this repo covers.
 #
 # Neon Auth checks `callbackURL` against a trusted-domain allowlist *before* it
@@ -29,6 +35,22 @@ name: Preview auth domain
 # segment (`https://*.example.com`) and Vercel varies the hash *inside* the first
 # label, so the only pattern that matches is `https://*.vercel.app` — every
 # Vercel site on the internet, trusted as a redirect target.
+#
+# ## The database branch
+#
+# The integration creates `preview/<git branch>` when the preview first deploys
+# — `migrate.yml` exists to apply the PR's migrations to it — and leaves it
+# behind when the pull request closes. 120 branches got a preview deployment in
+# the sixteen days after the store was created in July 2026.
+#
+# **A suspended branch is nearly free, and deleting it is still worth doing.**
+# Neon branches are copy-on-write: a child shares its parent's pages and is
+# billed only for the delta it writes, so a hundred idle branches are not a
+# hundred databases' worth of storage. What each one is, is another endpoint
+# something can wake — and a wake is billed at a five-minute minimum however
+# short the query. This job removes wake targets, not stored bytes. The compute
+# bill is dominated by how often things wake, which is why the hourly tick in
+# `infra/aws/modules/briefing-worker/schedule.tf` outweighs everything here.
 #
 # The ids below are committed rather than held in repository variables, for the
 # reason `migrate.yml` gives: the value CI uses should be the value in the diff.
@@ -198,4 +220,78 @@ jobs:
                 --branch "$NEON_AUTH_BRANCH"
               echo "Added $ORIGIN — sign-in will work on this branch's preview."
             fi
+          fi
+
+  # Deliberately a second job rather than a step on `sync`, because the two
+  # cleanups fail independently and this is the one that costs money to skip.
+  # `sync` cannot start without resolving the branch alias from Vercel, and on a
+  # `closed` event that lookup is exactly the one most likely to come back empty
+  # — deployments expire after 30 days, so a long-lived pull request closes with
+  # nothing left for Vercel to answer with. Hanging branch deletion off that step
+  # would mean the database survives precisely the pull requests that ran
+  # longest. This job needs no alias, no `VERCEL_TOKEN` and no deployment.
+  branch:
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    concurrency:
+      group: preview-neon-branch-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Check the NEON_API_KEY secret is set
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -z "${NEON_API_KEY:-}" ]; then
+            echo "::error::NEON_API_KEY is not set. This workflow deletes the Neon"
+            echo "branch this pull request's preview read, and cannot authenticate"
+            echo "without it. Add it under Settings → Secrets and variables →"
+            echo "Actions."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install neonctl
+        run: npm install -g neonctl@${{ env.NEONCTL_VERSION }}
+
+      # Absent is success. The integration collects the branch itself when it
+      # gets round to it, a pull request that touched no schema may never have
+      # had one, and a closed-then-reopened-then-closed pull request runs this
+      # twice — none of which is a problem worth a red check on a merge. Read the
+      # list first for the same reason `sync` does, rather than letting `delete`
+      # decide what "already gone" means.
+      - name: Delete this pull request's Neon branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          # An empty head ref would name the branch `preview/`, which matches
+          # nothing and would delete nothing — but assert it rather than rely on
+          # that, because the failure mode of a prefix bug here is deleting a
+          # branch someone still reads.
+          if [ -z "${HEAD_REF:-}" ]; then
+            echo "::error::The pull request has no head ref, so there is no Neon"
+            echo "branch name to derive. Refusing to guess."
+            exit 1
+          fi
+
+          # Same construction as the `preview` job in `migrate.yml`. If one of
+          # them ever changes, both must.
+          name="preview/$HEAD_REF"
+
+          if neon branches list --project-id "$NEON_PROJECT_ID" --output json \
+            | jq -e --arg n "$name" 'any(.[]; .name == $n)' > /dev/null; then
+            neon branches delete "$name" --project-id "$NEON_PROJECT_ID"
+            echo "Deleted $name — the pull request is closed."
+          else
+            echo "::notice::No Neon branch $name; nothing to delete."
           fi
