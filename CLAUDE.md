@@ -64,14 +64,40 @@ value; re-pull it.
 
 **A preview reaches its own auth instance through the integration's variables, not ours.** Neon provisions an auth instance and a copy-on-write database branch per pull request, and Vercel's Neon integration writes `storage_NEON_AUTH_BASE_URL` and `storage_DATABASE_URL` as `integration-store-secret` references it resolves per deployment. `requiredFromIntegration()` in `apps/dashboard/lib/auth/server.ts` and `required()` in `packages/db/src/config.ts` read the bare name first and fall back to the prefixed one, so production and `.env.local` are unaffected. **Do not add a plain `NEON_AUTH_BASE_URL` or `DATABASE_URL` to Vercel's Preview environment** — it shadows the reference and pins every preview to whichever branch it names, which is what made preview sign-in depend on main's allowlist, and what left `migrate.yml` applying each pull request's migrations to a `preview/<branch>` the deployed app never connected to.
 
-**The trusted-domain list is maintained by CI, not by hand** —
-`.github/workflows/preview-auth-domain.yml` adds a pull request's Vercel branch
-alias when it opens and removes it when it closes, against `main`'s auth
-instance, which is the one Vercel's Preview environment points every preview at.
-Sign-in on a preview is impossible without that entry: Neon Auth checks
-`callbackURL` against the list _before_ it checks the provider and answers
-`403 INVALID_CALLBACKURL`. It needs a `VERCEL_TOKEN` secret alongside
-`NEON_API_KEY`. See `apps/dashboard/CLAUDE.md`.
+**A pull request's Neon resources are collected by CI, not by hand** —
+`.github/workflows/preview-auth-domain.yml` (the workflow is named "Preview
+resources"; the filename predates its second job) runs two independent jobs
+against the integration's leftovers.
+
+`sync` adds a pull request's Vercel branch alias to the trusted-domain list when
+it opens and removes it when it closes, against `main`'s auth instance, which is
+the one Vercel's Preview environment points every preview at. Sign-in on a
+preview is impossible without that entry: Neon Auth checks `callbackURL` against
+the list _before_ it checks the provider and answers `403 INVALID_CALLBACKURL`.
+It needs a `VERCEL_TOKEN` secret alongside `NEON_API_KEY`. See
+`apps/dashboard/CLAUDE.md`.
+
+`branch` deletes the `preview/<git branch>` database on `closed`. **It is a
+separate job on purpose**: `sync` cannot start without resolving the branch alias
+from Vercel, and a pull request open longer than the 30-day deployment
+expiration closes with no deployment left to read it from — so hanging deletion
+off that step would leak the database for exactly the longest-lived pull
+requests. Absent is a skip, not a failure, since the integration sometimes
+collects the branch first. **Nothing collects the branches that closed before
+this job existed**; `neon branches list --project-id sparkling-paper-60637779`
+is how to find them — 120 git branches got a preview deployment in the sixteen
+days after the store was created.
+
+**What a leftover branch costs is not storage.** Neon branches are
+copy-on-write, so a child shares its parent's pages and is billed only for the
+delta it writes; a hundred idle ones are not a hundred databases' worth of
+bytes. Each is another compute endpoint something can wake, and a wake bills a
+five-minute minimum however short the query — so the compute line tracks how
+often things wake, not how many branches exist. The hourly tick in
+`infra/aws/modules/briefing-worker/schedule.tf` is the biggest single waker:
+24 a day against `main`, a floor of roughly 2 CU-hours a day with nobody using
+the app. Lowering it is not the fix — see that module's README on why hourly is
+the resolution of the whole scheduling system.
 
 **`NEON_AUTH_COOKIE_SECRET` is ours, not Neon's**, so `env pull` does not
 supply it. Generate with `openssl rand -base64 32`; the SDK requires 32+
