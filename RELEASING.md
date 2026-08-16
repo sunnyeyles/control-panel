@@ -133,11 +133,14 @@ terraform -chdir=infra/aws apply -var="schedule_enabled=false"
 
 ## 4. The other two deploy surfaces
 
-**The database.** Nothing to do: `.github/workflows/migrate.yml` applies
-migrations on every push to `main`, and confirms afterwards that production is
-level with the repo. It is unfiltered by path on purpose — `migrate deploy`
+**The database.** There is no database. The Neon project was deleted on
+2026-08-15 and `.github/workflows/migrate.yml` went with it, so nothing applies
+migrations on a push to `main` any more.
+
+It used to, on every push, unfiltered by path on purpose — `migrate deploy`
 against an up-to-date database is a no-op, while a path filter that fails to
-match is how production silently falls behind.
+match is how production silently falls behind. Worth restoring in that shape if
+a replacement database ever lands.
 
 To apply by hand anyway — a failed run, or a database the workflow does not
 know about — use the direct endpoint:

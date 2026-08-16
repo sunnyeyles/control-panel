@@ -88,12 +88,12 @@ socket is dead by the next invocation as the default outcome.
 
 ## Migrations
 
-**CI applies these** — `.github/workflows/migrate.yml`, on every push to `main`,
-plus the PR's own Neon preview branch and a check that fails a PR when
-production is behind what is already merged. Adding a migration means committing
-it; there is no manual step to remember afterwards.
-
-By hand, when the workflow could not do it:
+**CI used to apply these** — `.github/workflows/migrate.yml`, on every push to
+`main`, plus the PR's own Neon preview branch and a check that failed a PR when
+production was behind what was already merged. That workflow was deleted with
+the Neon project on 2026-08-15, so **committing a migration no longer applies it
+anywhere**. Until a replacement database and workflow exist, by hand is the only
+route:
 
 ```bash
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate

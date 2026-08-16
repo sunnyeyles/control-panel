@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ The database is gone — most of this file describes a system that no longer runs
+
+On 2026-08-15 the Neon project `sparkling-paper-60637779` was deleted, together
+with its Vercel Marketplace store. That took every row, every Neon Auth account,
+and all 120 preview branches with it. `migrate.yml` and `preview-auth-domain.yml`
+were removed in the same pass, so **nothing in CI touches a database any more** —
+the three remaining workflows are `test.yml`, `deploy-infra.yml` and `evals.yml`.
+
+The deployed dashboard cannot authenticate, and the briefing worker has no
+database to read. Neither runs.
+
+Everything below about Neon, Neon Auth, migrations in CI, preview branches and
+the `storage_` variables is **kept as a record, not as instructions**. Re-pointing
+the app at a new Postgres would follow much the same shape, which is why it has
+not been deleted — but none of it is currently true. Check against reality before
+acting on any of it.
+
 ## Next.js 16 — read the local docs first
 
 This repo runs Next.js **16.2.6**, which has breaking changes relative to most training data. Before writing or changing any Next.js code, read the relevant guide under `node_modules/next/dist/docs/` (start at `index.md`; app-router material is under `01-app/`). Heed deprecation notices there over remembered conventions. This rule also lives in `AGENTS.md`.
@@ -22,11 +39,11 @@ Terraform for deployment. See `apps/briefing-worker/README.md` and
 `infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
 cover it.
 
-Database migrations are outside Turborepo, and **CI applies them** —
-`.github/workflows/migrate.yml`, on every push to `main`. The same workflow
-applies a PR's migrations to that PR's Neon preview branch, and fails a PR when
-production is behind what is already merged. Running one by hand is the escape
-hatch, not the routine:
+Database migrations are outside Turborepo. **CI used to apply them** —
+`.github/workflows/migrate.yml`, on every push to `main`, which also applied a
+PR's migrations to that PR's Neon preview branch and failed a PR when production
+was behind what was already merged. That workflow is deleted, so running one by
+hand is now the only route rather than the escape hatch:
 
 ```bash
 DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
@@ -42,7 +59,9 @@ Migrations are forward-only. See `packages/db/README.md`.
 the SQL is valid and ordered and knows nothing about any long-lived database.
 Drift belongs to the environment, not to the migration set, and the Vercel build
 never opens a connection — so a missing table stays invisible until a request
-renders the page that reads it. That is what `migrate.yml` is for.
+renders the page that reads it. That is what `migrate.yml` was for, and with it
+gone nothing catches drift automatically. Any replacement database needs that
+job rebuilt, or the same 500 returns.
 
 Authentication is Neon Auth (Managed Better Auth), configured from the Neon CLI
 rather than from anything in this repo. The workspace is linked to a project and
@@ -64,12 +83,13 @@ value; re-pull it.
 
 **A preview reaches its own auth instance through the integration's variables, not ours.** Neon provisions an auth instance and a copy-on-write database branch per pull request, and Vercel's Neon integration writes `storage_NEON_AUTH_BASE_URL` and `storage_DATABASE_URL` as `integration-store-secret` references it resolves per deployment. `requiredFromIntegration()` in `apps/dashboard/lib/auth/server.ts` and `required()` in `packages/db/src/config.ts` read the bare name first and fall back to the prefixed one, so production and `.env.local` are unaffected. **Do not add a plain `NEON_AUTH_BASE_URL` or `DATABASE_URL` to Vercel's Preview environment** — it shadows the reference and pins every preview to whichever branch it names, which is what made preview sign-in depend on main's allowlist, and what left `migrate.yml` applying each pull request's migrations to a `preview/<branch>` the deployed app never connected to.
 
-**A pull request's Neon resources are collected by CI, not by hand** —
-`.github/workflows/preview-auth-domain.yml` (the workflow is named "Preview
-resources"; the filename predates its second job) runs two independent jobs
-against the integration's leftovers.
+**A pull request's Neon resources were collected by CI** —
+`.github/workflows/preview-auth-domain.yml`, deleted along with the project it
+acted on. It ran two independent jobs against the integration's leftovers, and
+both are described here because the failure each prevented is a property of the
+Vercel–Neon integration rather than of this repo, and would recur on any rebuild.
 
-`sync` adds a pull request's Vercel branch alias to the trusted-domain list when
+`sync` added a pull request's Vercel branch alias to the trusted-domain list when
 it opens and removes it when it closes, against `main`'s auth instance, which is
 the one Vercel's Preview environment points every preview at. Sign-in on a
 preview is impossible without that entry: Neon Auth checks `callbackURL` against
@@ -77,16 +97,20 @@ the list _before_ it checks the provider and answers `403 INVALID_CALLBACKURL`.
 It needs a `VERCEL_TOKEN` secret alongside `NEON_API_KEY`. See
 `apps/dashboard/CLAUDE.md`.
 
-`branch` deletes the `preview/<git branch>` database on `closed`. **It is a
+`branch` deleted the `preview/<git branch>` database on `closed`. **It was a
 separate job on purpose**: `sync` cannot start without resolving the branch alias
 from Vercel, and a pull request open longer than the 30-day deployment
 expiration closes with no deployment left to read it from — so hanging deletion
 off that step would leak the database for exactly the longest-lived pull
-requests. Absent is a skip, not a failure, since the integration sometimes
-collects the branch first. **Nothing collects the branches that closed before
-this job existed**; `neon branches list --project-id sparkling-paper-60637779`
-is how to find them — 120 git branches got a preview deployment in the sixteen
-days after the store was created.
+requests.
+
+**The lesson worth carrying forward: the integration never collects a preview
+branch on its own.** 120 git branches got a preview deployment in the sixteen
+days after the store was created, and Neon reported exactly 120 branches in the
+project — not one had ever been removed. That mattered more than the compute it
+cost, because Neon's Free plan caps a project at 10 branches, so the sprawl is
+what pinned the project to the paid Launch plan. Any rebuild on Neon needs this
+job from day one, not after the bill arrives.
 
 **What a leftover branch costs is not storage.** Neon branches are
 copy-on-write, so a child shares its parent's pages and is billed only for the
