@@ -28,7 +28,7 @@ const FENCE = /^ {0,3}(?:`{3,}|~{3,})[ \t]*([^\s`]*)/gm
  * touch both delimiters: a `$` opening one may not be followed by whitespace,
  * and the `$` closing it may not be preceded by any. Without that second half
  * "Between $5 and $10 per month." reads as an equation — which is not a rare
- * shape in an app about job postings, and it would fetch KaTeX on a salary.
+ * shape in a chat about prices, and it would fetch KaTeX on one.
  *
  * A `$` inside a code fence still counts, so a message about shell scripts can
  * pull KaTeX it never renders. That is the harmless direction — an unnecessary

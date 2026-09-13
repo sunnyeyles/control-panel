@@ -67,9 +67,9 @@ function getTavilyApiKey(): string {
 /**
  * One result per stanza, URL on its own line.
  *
- * The URL is the whole point of the traceability requirement — a brief that
- * cites a posting it cannot link to is not much of a brief — so it is given its
- * own line rather than buried in prose the model has to re-extract.
+ * The URL is what makes an answer traceable — a claim the model cannot link to
+ * is one the user cannot check — so it is given its own line rather than
+ * buried in prose the model has to re-extract.
  */
 function formatResults(query: string, results: TavilyResult[]): string {
   if (results.length === 0) {
@@ -100,7 +100,7 @@ function formatResults(query: string, results: TavilyResult[]): string {
  * Two classes of failure, handled differently on purpose. A missing or rejected
  * key is a deployment fault that no amount of rephrasing fixes, so it throws:
  * the registry turns that into an error tool result, and the run fails loudly
- * rather than producing a confident brief built on nothing. Everything else —
+ * rather than producing a confident answer built on nothing. Everything else —
  * rate limits, upstream 5xx, a body that will not parse — comes back as a
  * helpful string, matching `get_current_time`'s posture, so one bad search does
  * not sink a run that has other searches to make.
@@ -145,12 +145,7 @@ export async function tavilySearch(
   return formatResults(query, body.results)
 }
 
-/**
- * Search the web for pages matching a query.
- *
- * Deliberately not named for job postings: it is a general search tool, and the
- * agent that carries it supplies the job-search intent through its prompt.
- */
+/** Search the web for pages matching a query. */
 export const webSearch = tool(
   async (input: WebSearchInput) => tavilySearch(input),
   {
@@ -161,7 +156,7 @@ export const webSearch = tool(
       query: z
         .string()
         .describe(
-          'What to search for, phrased as a search query rather than a question, e.g. "senior backend engineer Sydney remote".'
+          'What to search for, phrased as a search query rather than a question, e.g. "typescript 5.9 release notes".'
         ),
       maxResults: z
         .number()
@@ -176,13 +171,13 @@ export const webSearch = tool(
         .enum(["day", "week", "month", "year"])
         .optional()
         .describe(
-          'Only return pages published within this window. Use "month" or narrower when recency matters, such as for job postings.'
+          'Only return pages published within this window. Use "month" or narrower when recency matters, such as for news.'
         ),
       includeDomains: z
         .array(z.string())
         .optional()
         .describe(
-          'Restrict the search to these domains, e.g. ["seek.com.au"]. Omit to search the whole web.'
+          'Restrict the search to these domains, e.g. ["developer.mozilla.org"]. Omit to search the whole web.'
         ),
     }),
   }

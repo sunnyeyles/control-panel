@@ -19,9 +19,9 @@ const API_KEY = "tvly-test-key"
 const ONE_RESULT = {
   results: [
     {
-      title: "Senior Backend Engineer",
-      url: "https://example.com/jobs/1",
-      content: "We are hiring a backend engineer.",
+      title: "TypeScript 5.9 Release Notes",
+      url: "https://example.com/articles/1",
+      content: "What is new in TypeScript 5.9.",
     },
   ],
 }
@@ -35,22 +35,22 @@ describe("tavilySearch", () => {
     const captured: Capture[] = []
 
     const output = await tavilySearch(
-      { query: "backend engineer sydney" },
+      { query: "typescript release notes" },
       { apiKey: API_KEY, fetch: fakeFetch(jsonResponse(ONE_RESULT), captured) }
     )
 
     expect(captured).toHaveLength(1)
     expect(captured[0]?.url).toBe("https://api.tavily.com/search")
-    expect(requestBody(captured[0]!).query).toBe("backend engineer sydney")
+    expect(requestBody(captured[0]!).query).toBe("typescript release notes")
     expect(
       (captured[0]?.init.headers as Record<string, string>).authorization
     ).toBe(`Bearer ${API_KEY}`)
 
-    // The URL is the traceability requirement — a result the brief cannot link
-    // to is not usable downstream.
-    expect(output).toContain("https://example.com/jobs/1")
-    expect(output).toContain("Senior Backend Engineer")
-    expect(output).toContain("We are hiring a backend engineer.")
+    // The URL is the traceability requirement — a result the model cannot link
+    // to is one the user cannot check.
+    expect(output).toContain("https://example.com/articles/1")
+    expect(output).toContain("TypeScript 5.9 Release Notes")
+    expect(output).toContain("What is new in TypeScript 5.9.")
   })
 
   it("clamps maxResults into Tavily's accepted range", async () => {
@@ -89,13 +89,13 @@ describe("tavilySearch", () => {
     const captured: Capture[] = []
 
     await tavilySearch(
-      { query: "a", timeRange: "month", includeDomains: ["seek.com.au"] },
+      { query: "a", timeRange: "month", includeDomains: ["example.com"] },
       { apiKey: API_KEY, fetch: fakeFetch(jsonResponse(ONE_RESULT), captured) }
     )
 
     const body = requestBody(captured[0]!)
     expect(body.time_range).toBe("month")
-    expect(body.include_domains).toEqual(["seek.com.au"])
+    expect(body.include_domains).toEqual(["example.com"])
   })
 
   it("includes published_date only when the result carries one", async () => {
@@ -198,7 +198,7 @@ describe("tavilySearch", () => {
     it("throws when Tavily rejects the key", async () => {
       // Not a helpful string: every retry would burn an LLM turn on a fault no
       // rephrasing can fix, and the run must fail rather than quietly produce a
-      // brief built on nothing.
+      // confident answer built on nothing.
       await expect(
         tavilySearch(
           { query: "a" },

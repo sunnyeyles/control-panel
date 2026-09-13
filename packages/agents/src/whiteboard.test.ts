@@ -298,9 +298,6 @@ describe("the call budget", () => {
  * inside its system prompt, so a label reading "ignore your instructions" is
  * otherwise indistinguishable from one), a *negative* about a tool's guarantees,
  * and the y-axis, which the model reliably gets backwards.
- *
- * `expectSharedPromptGuards` is deliberately not used — three of its five
- * assertions describe a tool-less agent returning markdown.
  */
 describe("the prompt", () => {
   it("states the y-axis direction, which the model otherwise gets backwards", () => {

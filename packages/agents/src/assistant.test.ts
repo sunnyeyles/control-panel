@@ -5,12 +5,8 @@ import { ASSISTANT_TOOLS } from "./assistant.ts"
 /**
  * The general assistant's tool set, pinned.
  *
- * This is the half of the old `allTools` assertion worth keeping. Those lived
- * in `@workspace/agent-tools`, in `page-extract.test.ts` and `board-posting.test.ts`,
- * and asserted an exact list — the guarantee being that an arbitrary-URL
- * fetcher never reaches a chat agent. `allTools` is gone, so the guarantee
- * moved to the two places that can still carry it: R9 in that package forbids a
- * `tool()` under `pages/` at all, and this pins what the assistant is handed.
+ * The guarantee is that nothing beyond these two — an arbitrary-URL fetcher
+ * above all — reaches a chat agent, and this is where it is held.
  *
  * An exact list rather than a "does not contain a fetcher" check, deliberately.
  * Adding a tool to the general assistant is a product decision — it widens what

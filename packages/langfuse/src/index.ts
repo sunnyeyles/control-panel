@@ -126,11 +126,10 @@ export async function runWithLangfuseTrace<T>(
  * Deliver all queued spans before a short-lived runtime can freeze or exit.
  *
  * The three `disable()` calls undo what `register()` set globally. Without
- * them a warm Lambda container is left pointing at the shut-down provider:
- * the next invocation's `initializeLangfuse` builds a fresh provider, but
+ * them a process that initializes again is left pointing at the shut-down
+ * provider: the next `initializeLangfuse` builds a fresh provider, but
  * `registerGlobal` in `@opentelemetry/api` refuses to replace a global that
- * is already set, so anything reading the OTel globals keeps the dead one
- * from the previous invocation.
+ * is already set, so anything reading the OTel globals keeps the dead one.
  */
 export async function shutdownLangfuse(): Promise<void> {
   if (!provider) return

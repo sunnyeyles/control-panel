@@ -13,10 +13,7 @@ import * as agents from "./index.ts"
  * The rule is worth a test because the failures are silent. A prompt constant
  * that is declared but not exported, or exported from its module but missing
  * from `index.ts`, breaks nothing and compiles fine — it just means the one
- * place a reader would look for an agent's prompt does not have it. Three had
- * drifted that way before this existed: `BRIEF_WRITER_SYSTEM_PROMPT` was
- * module-private, and `PROFILE_EXTRACTOR_SYSTEM_PROMPT` and
- * `JOB_SCOUT_SYSTEM_PROMPT` never reached the barrel.
+ * place a reader would look for an agent's prompt does not have it.
  *
  * Discovery is by export rather than by filename. `Object.keys` of the package
  * gives the factories; each one names the agent, and the agent names the other
@@ -26,13 +23,13 @@ import * as agents from "./index.ts"
 
 const SRC = fileURLToPath(new URL(".", import.meta.url))
 
-/** `createCoverLetterWriter` → `CoverLetterWriter`. */
+/** `createWhiteboardAgent` → `WhiteboardAgent`. */
 function agentOf(factory: string): string {
   return factory.slice("create".length)
 }
 
 /**
- * `CoverLetterWriter` → `COVER_LETTER_WRITER_SYSTEM_PROMPT`.
+ * `MeetingScheduler` → `MEETING_SCHEDULER_SYSTEM_PROMPT`.
  *
  * A trailing `Agent` is dropped: it is a category noun rather than part of the
  * agent's name, and it is in `createWhiteboardAgent` only because
@@ -61,8 +58,8 @@ const barrel = readFileSync(join(SRC, "index.ts"), "utf8")
 
 describe("R3 — every agent module has one fixed surface", () => {
   it("found the agents", () => {
-    expect(factories.length).toBeGreaterThanOrEqual(9)
-    expect(factories).toContain("createBriefWriter")
+    expect(factories.length).toBeGreaterThanOrEqual(2)
+    expect(factories).toContain("createAssistant")
     expect(factories).toContain("createWhiteboardAgent")
   })
 
@@ -89,27 +86,17 @@ describe("R3 — every agent module has one fixed surface", () => {
 
 describe("the derivation the rule rests on", () => {
   it("turns a factory name into its prompt constant", () => {
-    expect(promptNameFor(agentOf("createCoverLetterWriter"))).toBe(
-      "COVER_LETTER_WRITER_SYSTEM_PROMPT"
+    expect(promptNameFor(agentOf("createAssistant"))).toBe(
+      "ASSISTANT_SYSTEM_PROMPT"
     )
-    expect(promptNameFor(agentOf("createJobScout"))).toBe(
-      "JOB_SCOUT_SYSTEM_PROMPT"
+    expect(promptNameFor(agentOf("createMeetingScheduler"))).toBe(
+      "MEETING_SCHEDULER_SYSTEM_PROMPT"
     )
     expect(promptNameFor(agentOf("createWhiteboardAgent"))).toBe(
       "WHITEBOARD_SYSTEM_PROMPT"
     )
   })
 })
-
-/**
- * Factories here that do not build an agent.
- *
- * `createSubmitFindings` builds the LangChain tool the scout hands its results
- * back through. It is `job-scout.ts`'s own dependency and has no business in the
- * package's public surface, so it is named here rather than exported to satisfy
- * a rule about agents.
- */
-const NOT_AGENT_FACTORIES = new Set(["createSubmitFindings"])
 
 describe("every agent module is reachable from index.ts", () => {
   /**
@@ -126,9 +113,7 @@ describe("every agent module is reachable from index.ts", () => {
     const source = readFileSync(join(SRC, name), "utf8")
     const declared = [
       ...source.matchAll(/^export (?:const|function) (create[A-Z]\w*)/gm),
-    ]
-      .map((match) => match[1] as string)
-      .filter((factory) => !NOT_AGENT_FACTORIES.has(factory))
+    ].map((match) => match[1] as string)
 
     for (const factory of declared) {
       expect(exported.has(factory), `${factory} never reaches index.ts`).toBe(

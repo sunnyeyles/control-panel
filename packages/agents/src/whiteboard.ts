@@ -15,8 +15,7 @@ import type { ExtraToolsAgentOptions } from "./agent-options.ts"
  * It sits at a whiteboard the user is also drawing on, and it edits that board
  * through nine structured tools rather than by generating any kind of drawing
  * code. What it can do to a canvas is exactly those nine verbs — a containment
- * boundary the prompt cannot talk it out of, in the same spirit as the scout's
- * inability to write anything outside its own run.
+ * boundary the prompt cannot talk it out of.
  *
  * **The most important of the nine is `draw_diagram`, and the prompt is built
  * around reaching for it.** The rest of the set lets the model name a position,
@@ -93,8 +92,8 @@ export const WHITEBOARD_SYSTEM_PROMPT = [
 /**
  * One whiteboard agent, and the board its tools write into.
  *
- * Returned together for the same reason `createJobScout` returns its catalog:
- * the agent alone cannot drive a turn. The caller needs the session too — to
+ * Returned together because the agent alone cannot drive a turn. The caller
+ * needs the session too — to
  * seed it from the request, and because the ops the tools recorded are how the
  * browser learns what to draw.
  */

@@ -17,17 +17,9 @@
       "types": "./dist/env.d.ts",
       "default": "./dist/env.js"
     },
-    "./boards/*": {
-      "types": "./dist/boards/*.d.ts",
-      "default": "./dist/boards/*.js"
-    },
     "./whiteboard/*": {
       "types": "./dist/whiteboard/*.d.ts",
       "default": "./dist/whiteboard/*.js"
-    },
-    "./pages/*": {
-      "types": "./dist/pages/*.d.ts",
-      "default": "./dist/pages/*.js"
     },
     "./package.json": "./package.json"
   },

@@ -19,10 +19,10 @@ export type CreateAssistantOptions = ExtraToolsAgentOptions
  * agent carries is the agent's business, and the other agents in this package
  * already choose theirs the same way.
  *
- * Adding to it is a product decision, not a wiring one. In particular a page
- * fetcher must not appear: `extractPage` retrieves an arbitrary URL, and
- * `OVERVIEW.md` sets out why that may not go to a chat agent. `assistant.test.ts`
- * pins the list for that reason.
+ * Adding to it is a product decision, not a wiring one. In particular it must
+ * never carry a tool that fetches an arbitrary URL: that hands untrusted page
+ * content to a chat agent anyone at the chat can steer, which is prompt
+ * injection and SSRF in one. `assistant.test.ts` pins the list for that reason.
  */
 export const ASSISTANT_TOOLS: readonly StructuredToolInterface[] = [
   getCurrentTime,

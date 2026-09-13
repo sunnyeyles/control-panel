@@ -5,36 +5,33 @@ can import exactly the tools it needs.
 
 ```ts
 import { getCurrentTime } from "@workspace/agent-tools/time"
-import { createSeekSearch } from "@workspace/agent-tools/boards/seek-search"
+import { createCanvasTools } from "@workspace/agent-tools/whiteboard/canvas"
 ```
 
 **There is no barrel and no `allTools`.** There used to be one of each, and it
 had been wrong for a long time: it held two tools and called itself "every tool
-in the catalog", because every tool added since is a `createX(catalog, log)`
-factory bound to one run and a module-level array structurally cannot hold one.
-Which tools an agent carries is the agent's decision — a model picks worse as
-the tool list grows — so it is made in `@workspace/agents`, where each agent
-names its own set. `ASSISTANT_TOOLS` there is the general assistant's.
+in the catalog", because a tool bound to one turn is a `createX(…)` factory and
+a module-level array structurally cannot hold one. Which tools an agent carries
+is the agent's decision — a model picks worse as the tool list grows — so it is
+made in `@workspace/agents`, where each agent names its own set.
+`ASSISTANT_TOOLS` there is the general assistant's.
 
 ## Layout
 
-Four directories, and the split is by domain rather than by whether something is
-a tool. A tool is a thin wrapper; what makes a board or a whiteboard work is the
-support code beside it, and separating the two would put every feature in two
-places.
+The split is by domain rather than by whether something is a tool. A tool is a
+thin wrapper; what makes a whiteboard work is the support code beside it, and
+separating the two would put every feature in two places.
 
-| Directory     | Holds                                                                   |
-| ------------- | ----------------------------------------------------------------------- |
-| `boards/`     | job-board search, the posting catalog, the by-URL fetcher, the registry |
-| `whiteboard/` | the nine canvas tools, the turn's board session, layout and rendering   |
-| `pages/`      | the two general page fetchers — **and never a tool**, see R9            |
-| `internal/`   | the shared JSON-POST transport. Not exported; refactor it freely        |
+| Directory     | Holds                                                                 |
+| ------------- | --------------------------------------------------------------------- |
+| `whiteboard/` | the nine canvas tools, the turn's board session, layout and rendering |
+| `internal/`   | the shared JSON-POST transport. Not exported; refactor it freely      |
 
 `time.ts`, `web-search.ts` and `env.ts` sit at the root because they belong to
 no domain.
 
 **The exports map is the boundary, not a convention.** It lists `./time`,
-`./web-search`, `./env` and the three directory patterns, so `internal/` and
+`./web-search`, `./env` and the `./whiteboard/*` pattern, so `internal/` and
 `test-support/` cannot be imported from outside this package at all. It used to
 be a bare `./*`, which published every file and made any rename of a private
 helper a breaking change to a surface nobody meant to have. ESLint cannot
@@ -54,8 +51,8 @@ dependency into every consumer of the runtime.
 
 Create `src/<domain>/<name>.ts` exporting one tool. The subpath pattern for that
 directory already covers it, so `@workspace/agent-tools/<domain>/<name>` works
-with no config change. Then give it to the agent that needs it, in
-`@workspace/agents`.
+with no config change — a new top-level directory needs its own entry in the
+exports map. Then give it to the agent that needs it, in `@workspace/agents`.
 
 ```ts
 // src/weather.ts
@@ -87,42 +84,13 @@ this package's `dependencies` and import it in that tool's module only. A tool
 that needs an environment variable declares it in `src/env.ts`; `env.test.ts`
 reads every `requireEnv` call in `src/` and fails on one that is missing.
 
-## Adding a job board
+## Tools bound to a turn
 
-One file under `src/boards/` and one row in `src/boards/registry.ts`.
-
-Everything that is not about the board — the token, the run timeout, the clamp,
-the split between faults that throw and faults that come back as a sentence, the
-teaser bound, the rendering — is in `apify-search.ts`. What a board supplies is
-an `ApifyBoardSpec`: an actor id, the request body that actor wants, which of
-its fields carry the title, the company and the URL, and optionally a `byUrl`
-for fetching one named advertisement.
-
-The registry row adds the facts the platform needs on top of that — the hosts
-the board answers under, the query parameters it stamps per search, and its
-search factory. `postingId` in `@workspace/agents` reads the first two; nothing
-else has to be told the board exists.
-
-`spec-contract.test.ts` then covers the new board for free: unique tool name,
-bounds a clamp can satisfy, `toPosting({})` surviving an empty actor item, and —
-the one that matters — no search field on the by-URL body, which is how one link
-becomes a crawl.
-
-## Tools bound to a run
-
-Not every tool can be a module singleton. The board searches and
-`get_posting_details` share a `PostingCatalog` — one search writes into it and
-the other reads out of it, so the pair only makes sense per run — and each is
-exported as a `createXSearch(catalog)` factory rather than a ready-made tool. A
-module-level instance would carry one run's postings into the next, and on a warm
-Lambda container that is not hypothetical. `whiteboard/session.ts` is the same
-arrangement for one turn of one board.
-
-`boards/posting-catalog.ts` states the shape and takes the id function from its
-caller. It does not know how a posting id is derived, deliberately: the platform
-already has exactly one answer (`postingId` in `@workspace/agents`), and this
-package must not depend on that one — a second hash of a URL down here would be
-a second identity for the same advertisement.
+Not every tool can be a module singleton. The canvas tools all write into one
+`BoardSession`, so they are exported as a `createCanvasTools(session, …)`
+factory rather than as ready-made tools, and `whiteboard/session.ts` is built
+fresh for each turn. A module-level instance would carry one user's board into
+the next request, and on a warm serverless container that is not hypothetical.
 
 ## Build
 

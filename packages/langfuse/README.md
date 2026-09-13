@@ -21,7 +21,7 @@ and every entry point decides for itself whether runs are traced.
 
 ```
 apps/dashboard          instrumentation-node.ts → initializeLangfuse
-apps/briefing-worker    index.ts → initialize + shutdown per invocation
+packages/agents         evals/run.ts → initialize + shutdown around one eval run
         ↓
 @workspace/langfuse     this package
 ```

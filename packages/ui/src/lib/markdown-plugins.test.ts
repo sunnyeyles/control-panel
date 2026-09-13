@@ -59,7 +59,7 @@ describe("detectMarkdownPlugins", () => {
   })
 
   it("does not read loose dollar signs as math", () => {
-    // Salaries, in an app about job postings. remark-math would not render
+    // Prices, which a chat is full of. remark-math would not render
     // these either — the `$` closing an expression may not follow whitespace.
     expect(detect("It costs $5 to start.")).toEqual([])
     expect(detect("Between $5 and $10 per month.")).toEqual([])
