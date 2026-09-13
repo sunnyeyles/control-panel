@@ -6,9 +6,3 @@ export class DevPrismaError extends Error {
     this.name = "DevPrismaError"
   }
 }
-
-export function notFound(): Error & { code: string } {
-  return Object.assign(new Error("Record to update not found."), {
-    code: "P2025",
-  })
-}

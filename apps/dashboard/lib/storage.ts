@@ -1,20 +1,12 @@
 import { S3Client } from "@aws-sdk/client-s3"
-import {
-  getDevCoverLetterStore,
-  getDevResumeStore,
-  getDevTailoredResumeStore,
-} from "@/lib/dev/fake-stores"
+import { getDevResumeStore } from "@/lib/dev/fake-stores"
 import { devMockEnabled } from "@/lib/dev/mode"
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider"
 import {
-  createCoverLetterStore,
   createResumeStore,
   createS3UserObjectStore,
-  createTailoredResumeStore,
   readUserStorageConfig,
-  type CoverLetterStore,
   type ResumeStore,
-  type TailoredResumeStore,
   type UserObjectStore,
   type UserStorageConfig,
 } from "@workspace/user-storage"
@@ -39,8 +31,6 @@ import {
  */
 let objects: UserObjectStore | undefined
 let resumes: ResumeStore | undefined
-let coverLetters: CoverLetterStore | undefined
-let tailoredResumes: TailoredResumeStore | undefined
 
 /**
  * The role the memoized client assumes, or `undefined` for the default chain.
@@ -70,49 +60,10 @@ export function getResumeStore(): ResumeStore {
 }
 
 /**
- * Cover letters this app drafts.
- *
- * A second facade over the **same** client and credentials. The grant does not
- * include `prod:briefs`, which is why `/jobs` renders the Findings on the Run
- * row rather than the Brief.
- *
- * ⚠️ **The grant is Terraform, not TypeScript.** A kind declared in
- * `packages/user-storage/src/kinds.ts` without the matching `object_kinds` entry
- * and role attachment in `infra/aws/` gets no retention rule and 403s on the
- * first write — surfacing as nothing more specific than "Document storage is
- * unavailable".
- */
-export function getCoverLetterStore(): CoverLetterStore {
-  if (devMockEnabled()) return getDevCoverLetterStore()
-
-  const store = getObjectStore()
-  coverLetters ??= createCoverLetterStore(store)
-  return coverLetters
-}
-
-/**
- * Resumes this app rewrites for one Posting.
- *
- * A third facade over the **same** client and credentials.
- *
- * ⚠️ **The grant is Terraform, not TypeScript** — the same warning as the
- * letters above, and not hypothetical here: until
- * `terraform -chdir=infra/aws apply` has run for this kind, the first **Generate
- * tailored resume** click 403s as "Document storage is unavailable".
- */
-export function getTailoredResumeStore(): TailoredResumeStore {
-  if (devMockEnabled()) return getDevTailoredResumeStore()
-
-  const store = getObjectStore()
-  tailoredResumes ??= createTailoredResumeStore(store)
-  return tailoredResumes
-}
-
-/**
  * The one client every facade shares.
  *
- * Shared so the facades cannot each build their own `S3Client`, connection pool,
- * and opportunity to be pinned to a stale credential branch.
+ * Shared so a facade cannot build its own `S3Client`, connection pool, and
+ * opportunity to be pinned to a stale credential branch.
  */
 function getObjectStore(): UserObjectStore {
   // ⚠️ **The credential source is recomputed every call; only the client is
@@ -132,12 +83,10 @@ function getObjectStore(): UserObjectStore {
     })
     builtFor = roleArn
 
-    // ⚠️ The facades close over the client, so a rebuild must invalidate them
-    // too. **Every facade above needs a line here** — one left out keeps
+    // ⚠️ The facade closes over the client, so a rebuild must invalidate it
+    // too. **Any facade added above needs a line here** — one left out keeps
     // assuming the previous role for the life of the instance, silently.
     resumes = undefined
-    coverLetters = undefined
-    tailoredResumes = undefined
   }
 
   return objects

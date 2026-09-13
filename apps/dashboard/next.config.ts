@@ -8,29 +8,6 @@ import {
 const nextConfig: NextConfig = {
   transpilePackages: ["@workspace/ui"],
 
-  /**
-   * The Jobs section used to be `/briefings`, and these keep the old URLs
-   * working — a bookmark, a link in a run report, an open tab.
-   *
-   * ⚠️ **The only two `/briefings` strings left in the repo on purpose.** A
-   * sweep that renames them to `/jobs` turns each into a redirect to itself.
-   *
-   * Query values are forwarded automatically, so writing a query string into
-   * `destination` would duplicate them. `source` is path-anchored, so
-   * `/briefings` cannot swallow `/briefings/jobs`. `permanent: false` because a
-   * 308 cached forever on your own hostname is a debugging trap.
-   */
-  async redirects() {
-    return [
-      {
-        source: "/briefings/jobs",
-        destination: "/jobs/schedules",
-        permanent: false,
-      },
-      { source: "/briefings", destination: "/jobs", permanent: false },
-    ]
-  },
-
   experimental: {
     serverActions: {
       /**

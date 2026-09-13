@@ -1,7 +1,6 @@
 import {
   FileTextIcon,
   MessageSquareIcon,
-  NewspaperIcon,
   PresentationIcon,
   Settings2Icon,
   type LucideIcon,
@@ -24,60 +23,8 @@ export interface NavLink {
   icon: LucideIcon
 }
 
-/**
- * A child of a {@link NavGroup}, deliberately without an `icon`.
- *
- * `SidebarMenuSubButton` renders text only — the indent and the rule down the
- * left are what say these belong to the item above.
- */
-interface NavChild {
-  title: string
-  url: string
-}
-
-/**
- * A parent that toggles a submenu and goes nowhere.
- *
- * **No `url`, and that is structural.** The trigger is a `CollapsibleTrigger`,
- * so a destination here would be one nothing could navigate to; the union below
- * stops one being written. The corollary: a group carries its own reachable
- * children — `/jobs` is in the sidebar because **Postings** is a child.
- */
-export interface NavGroup {
-  title: string
-  icon: LucideIcon
-  items: readonly NavChild[]
-}
-
-export type NavItem = NavLink | NavGroup
-
-/**
- * **The group is named for what the user is doing, not for the machinery.**
- * "Jobs" here means a job search — three routes sharing a tab bar
- * (`components/jobs/job-tabs.tsx`): the **Postings** their briefings found, the
- * **Schedules** those briefings run on, and the **Cover letters** settings.
- *
- * ⚠️ **That does not licence calling a Posting a "job" anywhere.** `CONTEXT.md`
- * reserves the word for a row in `jobs`. A *section* called Jobs containing a
- * table of Postings breaks no rule: the label is a heading, not a row. The old
- * URLs had `/briefings` listing postings while `/briefings/jobs` configured
- * briefings, which read backwards; `next.config.ts` redirects both.
- *
- * ⚠️ **A second briefing kind arrives as a sibling group, not a fourth child
- * here** — a topic or news watcher is not "Jobs" by any reading. `config.kind`
- * has to stop being JSONB the moment a page filters on it; none of these do.
- */
-export const navMain: readonly NavItem[] = [
+export const navMain: readonly NavLink[] = [
   { title: "Assistant", url: "/", icon: MessageSquareIcon },
-  {
-    title: "Jobs",
-    icon: NewspaperIcon,
-    items: [
-      { title: "Postings", url: "/jobs" },
-      { title: "Schedules", url: "/jobs/schedules" },
-      { title: "Cover letters", url: "/jobs/letters" },
-    ],
-  },
   { title: "Documents", url: "/documents", icon: FileTextIcon },
   { title: "Whiteboard", url: "/whiteboard", icon: PresentationIcon },
 ]
@@ -90,18 +37,12 @@ export const navSecondary: readonly NavLink[] = [
  * The heading for a pathname, falling back to the app name.
  *
  * Exact match rather than a prefix match: `startsWith` on `"/"` would make every
- * page "Assistant". Groups are flattened away first — a group has no `url` and
- * its children no other way to be found, so without it `/jobs/schedules` falls
- * through to "Control Panel". Only children reach the header, so "Jobs" is a
- * sidebar label and never a page title.
+ * page "Assistant".
  */
 export function titleForPathname(pathname: string): string {
-  const links: readonly (NavLink | NavChild)[] = [
-    ...navMain,
-    ...navSecondary,
-  ].flatMap((item) => ("items" in item ? item.items : [item]))
-
-  const match = links.find((link) => link.url === pathname)
+  const match = [...navMain, ...navSecondary].find(
+    (link) => link.url === pathname
+  )
 
   return match?.title ?? "Control Panel"
 }

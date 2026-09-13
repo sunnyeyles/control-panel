@@ -38,8 +38,7 @@ export default async function DocumentsPage() {
           <div>
             <h2 className="text-lg font-medium">Upload a document</h2>
             <p className="text-sm text-muted-foreground">
-              CVs, cover letters and anything else worth keeping alongside your
-              job search.
+              CVs, cover letters and anything else worth keeping in one place.
             </p>
           </div>
           {/*

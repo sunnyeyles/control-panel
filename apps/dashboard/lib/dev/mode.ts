@@ -3,7 +3,7 @@
  * signing in — every page served as a fixed fake user from in-memory fixtures,
  * with no database, no AWS credentials and no `NEON_*` variables.
  *
- * ⚠️ **This module is the only reader of the variable.** Six accessors branch on
+ * ⚠️ **This module is the only reader of the variable.** Five accessors branch on
  * it, each before reading any configuration; a second reader elsewhere is a
  * second thing that can be true when this one is false.
  *

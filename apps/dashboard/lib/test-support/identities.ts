@@ -28,9 +28,6 @@ export const USER_ID = "11111111-2222-4333-8444-555555555555"
 /** Someone else, for every "and not another user's" assertion. */
 export const OTHER_USER_ID = "99999999-8888-4777-8666-555555555555"
 
-/** The Run a Posting's provenance names. */
-export const RUN_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-
 /** What `carryResetKey` threads through an `ActionState`. */
 export const RESET_KEY = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
 

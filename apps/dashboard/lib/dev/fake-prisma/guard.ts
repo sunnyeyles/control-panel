@@ -16,7 +16,7 @@ const PASS_THROUGH = new Set([
 ])
 
 /**
- * Applied to the models as well as the client: `prisma.job` exists, so the
+ * Applied to the models as well as the client: `prisma.document` exists, so the
  * likelier mistake is a missing *method* on a model that is present.
  */
 export function guard(

@@ -6,7 +6,7 @@ import * as agents from "@workspace/agents"
 import { describe, expect, it } from "vitest"
 
 /**
- * `NAMING.md` R1, R2, R5 and R8, asserted against the source tree.
+ * `NAMING.md` R2, R5 and R8, asserted against the source tree.
  *
  * **This has to be a test rather than a lint rule.** `eslint-plugin-only-warn`
  * is in `packages/eslint-config/base.js`, so every rule in the repo is
@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest"
  * be silently skipped — green, and never run.
  *
  * Every assertion reads the tree with `node:fs` and matches on text. Coarse,
- * deliberately: it costs nothing, needs no parser, and the four properties it
+ * deliberately: it costs nothing, needs no parser, and the three properties it
  * pins are all lexical. Whether a name is *good* is the reviewer's job.
  */
 
@@ -36,43 +36,8 @@ const AGENT_FACTORIES = new Set(
   Object.keys(agents).filter((name) => name.startsWith("create"))
 )
 
-/**
- * Modules that legitimately deal in `jobs` rows — the cadence rows, which is
- * what `CONTEXT.md` reserves the word for.
- *
- * **The allowlist is the documentation.** R1 has no way to tell a correct `job`
- * from a Posting called one, so it asks instead that every file using the word
- * be a file somebody decided should. Adding an entry is a one-line diff a
- * reviewer sees; the alternative — no rule — is how `scoreOne` came to take a
- * parameter called `job` that held a Posting.
- */
-const JOBS_ALLOWLIST = [
-  "lib/jobs/",
-  "lib/briefing-runs/",
-  // Matches both the assembler (`fake-prisma.ts`) and its domain delegates
-  // (`fake-prisma/*.ts`) — the prefix has no trailing `.ts` on purpose.
-  "lib/dev/fake-prisma",
-  "lib/dev/fixtures.ts",
-  "components/jobs/job-tabs.tsx",
-  // Reads `jobs` rows directly — `getPrisma().job.findMany` — and maps them to
-  // Briefing summaries. The word is the schema's here.
-  "components/jobs/schedules/briefing-section.tsx",
-]
-
 /** Directories under `components/` that are not route segments. */
 const SHARED_COMPONENT_GROUPS = new Set(["forms"])
-
-/**
- * The one subdirectory a section may have that is not a child route: what its
- * own index page is made of.
- *
- * `/jobs` *is* the Postings table, so `components/jobs/postings/` has no
- * `app/(app)/jobs/postings/` to mirror. The alternative was twenty-nine files
- * loose at `components/jobs/` beside two subdirectories, which is the layout the
- * eye cannot scan. One entry per section, declared, so the escape hatch cannot
- * quietly become a second convention.
- */
-const SECTION_INDEX_GROUPS: Record<string, string> = { jobs: "postings" }
 
 function walk(dir: string, extensions: string[]): string[] {
   const entries = readdirSync(join(APP, dir), { withFileTypes: true })
@@ -113,11 +78,13 @@ describe("R2 — an agent seam is named after the agent's exported factory", () 
   it("finds the seams at all, so a passing suite is not an empty one", () => {
     const found = sources.flatMap((path) => seamsIn(read(path)))
 
-    expect(found.length).toBeGreaterThanOrEqual(7)
+    // `ChatHandlerDeps.createAssistant` and
+    // `WhiteboardHandlerDeps.createWhiteboardAgent`.
+    expect(found.length).toBeGreaterThanOrEqual(2)
   })
 
   it("has agent factories to check against", () => {
-    expect(AGENT_FACTORIES.size).toBeGreaterThanOrEqual(9)
+    expect(AGENT_FACTORIES.size).toBeGreaterThanOrEqual(2)
   })
 
   it.each(sources)("%s", (path) => {
@@ -126,85 +93,6 @@ describe("R2 — an agent seam is named after the agent's exported factory", () 
     )
 
     expect(offenders, `not exported by @workspace/agents`).toEqual([])
-  })
-})
-
-describe("R1 — `job` names a row in `jobs`, never a Posting", () => {
-  /**
-   * ⚠️ **R1 is about identifiers, and only identifiers.**
-   *
-   * Prose uses the word constantly and correctly: `CONTEXT.md` defines a Posting
-   * as "one open job advertisement", so "Paste the link to a single job
-   * advertisement" is the glossary's own phrasing rather than a violation. Route
-   * strings are the same — `/jobs` is the URL the Postings table lives on, and
-   * changing it is a product decision. So comments, string literals and JSX text
-   * are blanked out before anything is matched, leaving the positions where the
-   * word would be a *name*.
-   *
-   * The blanking is regex-shaped and therefore approximate, deliberately: a
-   * false negative costs one identifier the reviewer still sees, where a parser
-   * would cost a dependency and a maintenance burden for the same rule.
-   */
-  function code(source: string): string {
-    return (
-      source
-        // Block comments, including the `{/* … */}` form JSX uses.
-        .replace(/\/\*[\s\S]*?\*\//g, " ")
-        .replace(/\/\/[^\n]*/g, " ")
-        // String and template literals. Template substitutions go with them,
-        // which loses a little coverage and no correctness.
-        .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
-        .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
-        .replace(/`(?:[^`\\]|\\.)*`/g, "``")
-        // JSX text: anything between a `>` and the next `<` that is not markup.
-        .replace(/>[^<>{}]+</g, "><")
-    )
-  }
-
-  /** `job` or `jobs` as a name — not `.job`, not part of a longer word. */
-  const IDENTIFIER = /(?<![\w.$])jobs?(?![\w$])/
-
-  const sources = [
-    ...walk("lib", [".ts"]),
-    ...walk("components", [".tsx", ".ts"]),
-  ]
-    .filter((path) => !path.endsWith(".test.ts"))
-    .filter(
-      (path) => !JOBS_ALLOWLIST.some((allowed) => path.startsWith(allowed))
-    )
-
-  it("checks a meaningful number of files", () => {
-    expect(sources.length).toBeGreaterThan(50)
-  })
-
-  it.each(sources)("%s", (path) => {
-    const offenders = code(read(path))
-      .split("\n")
-      .map((line, index) => [index + 1, line] as const)
-      .filter(([, line]) => IDENTIFIER.test(line))
-      .map(([number, line]) => `${number}: ${line.trim()}`)
-
-    expect(
-      offenders,
-      "add the module to JOBS_ALLOWLIST if it really handles `jobs` rows"
-    ).toEqual([])
-  })
-
-  it("still catches a Posting called a job", () => {
-    const offending = `async function scoreOne(job: { postingId: string }) {}`
-
-    expect(IDENTIFIER.test(code(offending))).toBe(true)
-  })
-
-  it("does not catch the glossary's own prose, or the route", () => {
-    const fine = [
-      `const COPY = "Paste the link to a single job advertisement"`,
-      `redirect("/jobs")`,
-      `// one job's runs, on the Jobs section`,
-      `<p>Paste the link to a single job advertisement</p>`,
-    ].join("\n")
-
-    expect(IDENTIFIER.test(code(fine))).toBe(false)
   })
 })
 
@@ -219,10 +107,10 @@ describe("R5 — a `Row` does not cross into a client component", () => {
    * boundary or a browser formats it in the visitor's own locale.
    *
    * ⚠️ **The module specifier is matched first, and that filter is
-   * load-bearing.** `document-list.tsx` and `posting-table.tsx` both import
-   * `TableRow` from `@workspace/ui/components/table`, which is a `<tr>` and not
-   * a row of anything. The rule is about our own data crossing the boundary, so
-   * it looks only at `@/lib/…` and `@workspace/db`.
+   * load-bearing.** `document-list.tsx` imports `TableRow` from
+   * `@workspace/ui/components/table`, which is a `<tr>` and not a row of
+   * anything. The rule is about our own data crossing the boundary, so it looks
+   * only at `@/lib/…` and `@workspace/db`.
    */
   const DATA_MODULE = /^(@\/lib\/|@workspace\/db$)/
 
@@ -252,7 +140,7 @@ describe("R5 — a `Row` does not cross into a client component", () => {
       .filter((statement) => DATA_MODULE.test(statement.from))
 
     // A parse that stopped matching would otherwise pass by finding nothing.
-    expect(fromData.length).toBeGreaterThan(20)
+    expect(fromData.length).toBeGreaterThanOrEqual(18)
   })
 
   it.each(sources)("%s", (path) => {
@@ -271,7 +159,7 @@ describe("R5 — a `Row` does not cross into a client component", () => {
   })
 
   it("still catches a Row reaching a component", () => {
-    const offending = `import type { CoverLetterRow } from "@/lib/cover-letters/cover-letter-views"`
+    const offending = `import type { DocumentRow } from "@/lib/documents/list-documents"`
 
     expect(
       namedImports(offending)[0]?.names.some((name) => name.endsWith("Row"))
@@ -306,31 +194,31 @@ describe("R8 — `components/` mirrors the route tree", () => {
   })
 
   /**
-   * The nested half of the rule: `components/jobs/schedules/` is legal because
-   * `app/(app)/jobs/schedules/` exists. Without this, the first half would be
-   * satisfied by putting every component in one directory named after a route.
+   * The nested half of the rule: `components/<section>/<segment>/` is legal only
+   * where `app/(app)/<section>/<segment>/` exists. Without this, the first half
+   * would be satisfied by putting every component in one directory named after
+   * a route.
+   *
+   * One test rather than `it.each`: there are no nested directories today, and
+   * an empty table would run nothing.
    */
-  it.each(
-    componentDirs
+  it("nests only under child routes that exist", () => {
+    const offenders = componentDirs
       .filter((name) => routeSegments.has(name))
       .flatMap((section) =>
         readdirSync(join(APP, "components", section), { withFileTypes: true })
           .filter((entry) => entry.isDirectory())
-          .map((entry) => [section, entry.name] as const)
+          .map((entry) => `${section}/${entry.name}`)
       )
-  )("components/%s/%s", (section, segment) => {
-    if (SECTION_INDEX_GROUPS[section] === segment) return
+      .filter((path) => {
+        try {
+          statSync(join(APP, "app/(app)", path))
+          return false
+        } catch {
+          return true
+        }
+      })
 
-    let isRoute = true
-    try {
-      statSync(join(APP, "app/(app)", section, segment))
-    } catch {
-      isRoute = false
-    }
-
-    expect(
-      isRoute,
-      `app/(app)/${section}/${segment} does not exist, and ${segment} is not ${section}'s declared index group`
-    ).toBe(true)
+    expect(offenders, `no matching segment under app/(app)/`).toEqual([])
   })
 })

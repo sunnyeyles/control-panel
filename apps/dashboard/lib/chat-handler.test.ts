@@ -47,8 +47,8 @@ describe("createChatHandler", () => {
       getUser: async () => ({
         status: "ok",
         userId: "22222222-2222-4222-8222-222222222222",
-        email: "candidate@example.test",
-        name: "Candidate",
+        email: "alice@example.test",
+        name: "Alice",
       }),
     })
 

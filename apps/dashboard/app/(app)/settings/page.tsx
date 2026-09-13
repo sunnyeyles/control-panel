@@ -8,9 +8,7 @@ export const dynamic = "force-dynamic"
 /**
  * The app's global settings, which for now is how it looks.
  *
- * **No `maxDuration`, and its absence is deliberate.** The ceiling was here for
- * the Cover letters section, which moved to `/jobs/letters` and took it along.
- * What is left renders from the session alone.
+ * **No `maxDuration`** — everything here renders from the session alone.
  *
  * ⚠️ **`requirePageUser()` is this page's own authorization check and is not
  * inherited** — `app/(app)/layout.tsx`'s `getCurrentUser()` renders the sidebar

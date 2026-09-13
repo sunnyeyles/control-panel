@@ -90,9 +90,8 @@ describe("listDocuments", () => {
       ])
     )
 
-    // The index's order, not a sort here. `loadCandidateBackground` takes the
-    // first match out of this list to decide which CV is *the* CV, so the
-    // order is load-bearing rather than cosmetic.
+    // The index's order, not a sort here. The page renders the list exactly as
+    // given, so a sort added here would hide a wrong `orderBy` upstream.
     expect(documents.map((d) => d.documentId)).toEqual([
       "newest",
       "middle",

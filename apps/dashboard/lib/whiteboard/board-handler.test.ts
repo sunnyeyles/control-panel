@@ -12,8 +12,8 @@ const signedIn = async () =>
   ({
     status: "ok",
     userId: USER_ID,
-    email: "candidate@example.test",
-    name: "Candidate",
+    email: "alice@example.test",
+    name: "Alice",
   }) as const
 
 function request(body: string): Request {

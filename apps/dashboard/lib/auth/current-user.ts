@@ -14,7 +14,7 @@ import { ensureUserForAuth } from "@workspace/db"
  * `null` makes the caller guess. The chat route turns both into 401.
  *
  * ⚠️ **`userId` is `users.id`, a uuid this repo generates — never the upstream
- * Neon Auth id.** It is what `jobs.user_id` references and what becomes the
+ * Neon Auth id.** It is what `documents.user_id` references and what becomes the
  * `userId` segment of every S3 key, which `assertSegment()` in
  * `@workspace/user-storage` treats as the ownership boundary. A third party's
  * identifier there would put someone else in charge of that boundary.
