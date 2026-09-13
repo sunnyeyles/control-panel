@@ -4,11 +4,9 @@ import { contentTypeFor, isObjectKind, type ObjectKind } from "./kinds.ts"
 /**
  * The parts of a stored object's address, in the order they appear in the key.
  *
- * `segments` is the kind-specific tail, and it is where the two kinds diverge:
- * a brief is date-partitioned (`["2026", "07", "28", "morning"]`) because it is
- * generated on a schedule, while a resume is not (`["backend-2026"]`) because
- * it is uploaded and replaced. Everything to the left of it is common, which is
- * what lets one implementation serve both.
+ * `segments` is the kind-specific tail — a resume's is its id
+ * (`["backend-2026"]`). Everything to the left of it is common to every kind,
+ * which is what lets one implementation serve them all.
  */
 export interface ObjectKeyParts {
   /** Deployment environment, e.g. `dev` or `prod`. */
@@ -34,7 +32,7 @@ export interface ObjectKeyParts {
  * expressible.
  *
  * ⚠️ What that costs: S3 **lifecycle** filters are literal prefixes with no
- * wildcards, so "expire every user's briefs" is not expressible here. Every
+ * wildcards, so "expire every user's resumes" is not expressible here. Every
  * object is therefore also tagged with its kind and the lifecycle rules filter
  * on the tag. See `infra/aws/modules/user-storage`.
  */
@@ -53,11 +51,11 @@ const SEGMENT_PATTERN =
 /**
  * Whether a string may stand as one segment of an object key.
  *
- * Exported so a package that *mints* segment-shaped identifiers — the Posting
- * id in `@workspace/agents` is the first — asserts against this rule instead of
- * restating the pattern; a restated one drifts, and the id would look fine
- * everywhere except the moment a key is built from it. A predicate rather than
- * the regex, so nobody composes a variant that means something slightly else.
+ * Exported so code that *mints* segment-shaped identifiers asserts against
+ * this rule instead of restating the pattern; a restated one drifts, and the id
+ * would look fine everywhere except the moment a key is built from it. A
+ * predicate rather than the regex, so nobody composes a variant that means
+ * something slightly else.
  */
 export function isObjectKeySegment(value: string): boolean {
   return typeof value === "string" && SEGMENT_PATTERN.test(value)
@@ -79,36 +77,6 @@ export function isObjectKeySegment(value: string): boolean {
 export const EXTENSION_SOURCE = "\\.[a-z0-9]{1,16}"
 
 const EXTENSION_PATTERN = new RegExp(`^${EXTENSION_SOURCE}$`)
-
-const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
-
-/**
- * Whether a `YYYY-MM-DD` string names a real calendar date.
- *
- * `new Date("2026-02-30")` does not fail — it rolls forward to 2 March. Only
- * rebuilding the date from its own digits via `Date.UTC` and comparing back
- * rejects an impossible day, and it is timezone-independent by construction.
- *
- * Exported so the technique isn't restated — see `parsePostedAt` in
- * `apps/briefing-worker/src/postings.ts`.
- */
-export function isRealCalendarDate(value: string): boolean {
-  const match = DATE_PATTERN.exec(value)
-  if (!match) return false
-
-  const [, year, month, day] = match as unknown as [
-    string,
-    string,
-    string,
-    string,
-  ]
-
-  const rebuilt = new Date(
-    Date.UTC(Number(year), Number(month) - 1, Number(day))
-  )
-
-  return rebuilt.toISOString().slice(0, 10) === value
-}
 
 /**
  * Build the key an object is stored under.
@@ -185,27 +153,6 @@ export function parseObjectKey(key: string): ObjectKeyParts {
 }
 
 /**
- * The `YYYY-MM-DD` a `Date` falls on in UTC.
- *
- * UTC and not local time, so the same instant files under the same date
- * wherever the worker happens to run — a scheduled job that moves region must
- * not silently start writing to yesterday.
- */
-export function toGeneratedOn(instant: Date): string {
-  if (Number.isNaN(instant.getTime())) {
-    throw new InvalidObjectKeyError("generatedAt is an invalid Date.")
-  }
-
-  return instant.toISOString().slice(0, 10)
-}
-
-/** Split a `YYYY-MM-DD` into the three key segments a date-partitioned kind uses. */
-export function dateSegments(generatedOn: string): [string, string, string] {
-  const { year, month, day } = assertCalendarDate(generatedOn)
-  return [year, month, day]
-}
-
-/**
  * The key prefix holding everything a user owns, across every kind.
  *
  * This is the string an IAM `s3:prefix` condition is written against, so it
@@ -265,31 +212,4 @@ function assertSegment(value: string, field: string): string {
   }
 
   return value
-}
-
-function assertCalendarDate(value: string): {
-  year: string
-  month: string
-  day: string
-} {
-  const match = DATE_PATTERN.exec(value ?? "")
-
-  if (!match) {
-    throw new InvalidObjectKeyError(
-      `Date must be a UTC calendar date as YYYY-MM-DD (got ${JSON.stringify(value)}).`
-    )
-  }
-
-  const [, year, month, day] = match as unknown as [
-    string,
-    string,
-    string,
-    string,
-  ]
-
-  if (!isRealCalendarDate(value)) {
-    throw new InvalidObjectKeyError(`"${value}" is not a real calendar date.`)
-  }
-
-  return { year, month, day }
 }

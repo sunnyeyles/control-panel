@@ -22,8 +22,8 @@ export interface UserStorageConfig {
  * one.
  *
  * Credentials are deliberately absent. The AWS SDK resolves those itself
- * through the default provider chain — the Lambda execution role in
- * production, `AWS_PROFILE` or SSO locally — so there is no code path here
+ * through the default provider chain — an attached role in production,
+ * `AWS_PROFILE` or SSO locally — so there is no code path here
  * that could accept a hard-coded key.
  */
 export function readUserStorageConfig(

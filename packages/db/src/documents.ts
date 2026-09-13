@@ -80,8 +80,7 @@ export async function listDocumentsForUser(
  * One Document, or `undefined` if this user has no such document.
  *
  * **`userId` in the `where` is the ownership check**, not a shortcut past one,
- * and it is the same argument {@link deleteDocument} and `setPostingStatus`
- * make: one statement closes the TOCTOU window a load-then-compare would leave
+ * and it is the same argument {@link deleteDocument} makes: one statement closes the TOCTOU window a load-then-compare would leave
  * open, and the caller gets one answer for "no such document" and "someone
  * else's" rather than a distinction that tells a stranger the row exists.
  *
@@ -101,8 +100,8 @@ export async function findDocument(
 /**
  * Remove a Document. `false` means this user has no such document.
  *
- * `deleteMany` rather than `delete` for the reason `deletePostings` gives: a
- * guarded write whose row count is the answer. `delete` throws on no match,
+ * `deleteMany` rather than `delete`: a guarded write whose row count is the
+ * answer. `delete` throws on no match,
  * which would turn an ordinary miss into an error.
  *
  * Deleting the row does not delete the object — the caller does that next, and

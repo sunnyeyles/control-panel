@@ -24,9 +24,8 @@ export interface NewObject extends ObjectRef {
   /**
    * The bytes.
    *
-   * A `string` is encoded as UTF-8; bytes are stored verbatim — a brief is text
-   * this process produced, a resume is an opaque upload that must survive
-   * byte-for-byte. Note what is *not* here: a content type. That is derived
+   * A `string` is encoded as UTF-8; bytes are stored verbatim — a resume is an
+   * opaque upload that must survive byte-for-byte. Note what is *not* here: a content type. That is derived
    * from the extension, because a caller-supplied media type is a claim.
    */
   body: string | Uint8Array
@@ -63,8 +62,8 @@ export interface FetchedObject extends StoredObject {
  * be swapped or faked without a caller changing. `createS3UserObjectStore` is
  * the only implementation and the only module here importing the AWS SDK.
  *
- * This is the generic core; prefer the narrower facades (`createBriefStore`,
- * `createResumeStore`), which know their kind's key shape and file types.
+ * This is the generic core; prefer the narrower facade (`createResumeStore`),
+ * which knows its kind's key shape and file types.
  *
  * Every method rejects with a `UserStorageError` — never a raw SDK error.
  */

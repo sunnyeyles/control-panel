@@ -1,26 +1,17 @@
 # @workspace/db
 
-Postgres for **scheduling and provenance** — jobs, their runs, and pointers to
-what those runs produced — plus the records a person writes into: the cumulative
-`postings` table and the status they set on each Posting, the `documents`
-metadata shelf, the whiteboard `boards` snapshot, and cover-letter instructions.
-Neon behind Prisma Client, with domain helpers for the claim and schedule
-invariants that the model API cannot express alone.
+Postgres for the records a person writes into — the platform `users` row behind
+each auth identity, the `documents` metadata shelf, and the whiteboard `boards`
+snapshot. Neon behind Prisma Client, with domain helpers for the invariants the
+model API cannot express alone.
 
 ## The seam
 
 ```
 types.ts       domain aliases over generated Prisma models
-errors.ts      the typed error union
+errors.ts      isUniqueViolation
 config.ts      reads the environment
-schedule.ts    computeNextRunAt — pure, and where the bugs are
 users.ts       ensureUserForAuth
-cover-letter-instructions.ts
-               read / upsert one user's letter-writing preferences
-jobs.ts        create / claim / due / schedule helpers
-runs.ts        finish / fail / startAdHoc / recordFindings
-artifacts.ts   record / latest helpers
-postings.ts    recordPostings / setPostingStatus / recordPostingMatch — the cumulative tracker
 documents.ts   list / find / create / delete Document metadata rows
 boards.ts      load / save one whiteboard snapshot per user
 client.ts      createPrismaClient() — adapter + pooled URL
@@ -31,10 +22,10 @@ Two rules keep the package replaceable:
 
 1. **`client.ts` is the only file that constructs a Prisma Client** (and the
    only place the `pg` adapter is wired).
-2. **Concurrency-sensitive writes are helpers, not free-form SQL at call sites.**
-   `claimJob` owns the partial-index `ON CONFLICT` target; `finishRun` /
-   `failRun` own the `WHERE status = 'running'` guard; `recordPostings` owns the
-   `DO UPDATE SET` list that decides what a Run may overwrite.
+2. **Writes with an invariant are helpers, not free-form queries at call
+   sites.** `ensureUserForAuth` owns the race on a first request;
+   `findDocument` and `deleteDocument` own the `user_id` filter that is the
+   ownership check.
 
 ## Using it
 
@@ -43,48 +34,32 @@ constructing it reads configuration, and an instance at module scope would move
 that failure to _import_ time.
 
 ```ts
-import { claimJob, createPrismaClient, dueJobs, finishRun } from "@workspace/db"
+import {
+  createPrismaClient,
+  ensureUserForAuth,
+  listDocumentsForUser,
+} from "@workspace/db"
 
 const prisma = createPrismaClient()
 
-try {
-  for (const job of await dueJobs(prisma)) {
-    const slot = await claimJob(prisma, job)
-    if (!slot) continue // someone else holds it — skip entirely
-
-    try {
-      // …produce something…
-      await finishRun(prisma, slot.runId)
-    } catch (error) {
-      // failRun(prisma, slot.runId, …)
-      throw error
-    }
-  }
-} finally {
-  await prisma.$disconnect()
-}
+const user = await ensureUserForAuth(prisma, authUserId)
+const documents = await listDocumentsForUser(prisma, user.id)
 ```
 
-Ordinary reads and writes use Prisma Client directly (`prisma.job.findMany`,
-`prisma.user.findUnique` via `ensureUserForAuth`, …). `@workspace/db/schedule`
-is importable on its own and pulls in no driver.
+Ordinary reads and writes use Prisma Client directly. `@workspace/db/types` is
+importable on its own and pulls in no driver.
 
 ## Connections
 
-| Consumer         | Endpoint   | Variable                | Lifecycle          |
-| ---------------- | ---------- | ----------------------- | ------------------ |
-| Lambda worker    | pooled     | `DATABASE_URL`          | one per invocation |
-| Vercel dashboard | pooled     | `DATABASE_URL`          | short-lived, many  |
-| Migrations       | **direct** | `DATABASE_URL_UNPOOLED` | one per run        |
+| Consumer         | Endpoint   | Variable                | Lifecycle         |
+| ---------------- | ---------- | ----------------------- | ----------------- |
+| Vercel dashboard | pooled     | `DATABASE_URL`          | short-lived, many |
+| Migrations       | **direct** | `DATABASE_URL_UNPOOLED` | one per run       |
 
 Migrations need the direct endpoint and it is not interchangeable: the pooled
 endpoint fronts PgBouncer in transaction mode. `prisma.config.ts` points the
 CLI at `DATABASE_URL_UNPOOLED`; runtime always uses the pooled URL through the
 driver adapter.
-
-**One Prisma Client per Lambda invocation, `$disconnect()` at the end.** The gap
-between ticks is an hour and Neon autosuspends after five minutes, so a cached
-socket is dead by the next invocation as the default outcome.
 
 ## Migrations
 
@@ -100,15 +75,16 @@ DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate
 ```
 
 That runs `prisma migrate deploy` against the schema under `prisma/`. Forward-
-only.
+only, and hand-authored: `0001`–`0012` built the job-search tables and
+`0013_drop_job_search` removed them, so a fresh database replays both and ends
+with `users`, `documents` and `boards`.
 
 Note what `stores.test.ts` does and does not tell you: it replays every
 migration into a throwaway schema, so a green suite means the SQL is valid and
 correctly ordered. It says nothing about whether any deployed database has run
 it — a from-scratch schema has no history to drift from. That gap is the
-workflow's job, not this suite's. Partial indexes and CHECK constraints that Prisma's schema DSL cannot
-express live in the SQL of `prisma/migrations/0001_init/` — do not tidy them
-into full unique constraints.
+workflow's job, not this suite's. CHECK constraints that Prisma's schema DSL
+cannot express live in the SQL of `prisma/migrations/0007_documents/`.
 
 Generate the client:
 
@@ -138,132 +114,20 @@ hand. This is the same arrangement as every other package here, whose tests need
 pnpm turbo test --filter=@workspace/db
 ```
 
-Two suites, split by whether the thing under test needs Postgres to _be_
-Postgres:
-
-- **`schedule.test.ts` needs nothing.** DST boundaries across IANA zones, missed
-  slots, the UTC partition day.
-- **`stores.test.ts` needs a real database** and **skips when
-  `DATABASE_URL_UNPOOLED` is unset**. It asserts the claim race, unlimited
-  ad-hoc runs beside unique scheduled ones, the `object_key` CHECK, the refusal
-  to walk a terminal run back to `running`, and every property of the `postings`
-  upsert — above all that a status a person set survives a later Run. It
-  migrates into a schema it creates and drops, so it cannot touch data it did
-  not write.
+**`stores.test.ts` needs a real database** and **skips when
+`DATABASE_URL_UNPOOLED` is unset**. It asserts the race-safe auth identity link,
+the `documents` CHECKs and ownership filter, the one-board-per-user key, and the
+`RESTRICT` / `CASCADE` split below. It migrates into a schema it creates and
+drops, so it cannot touch data it did not write.
 
 ## Schema notes worth not undoing
 
-- **`next_run_at IS NULL` means "not scheduled"**, covering both paused and
-  retired. That is why there is no `enabled` column and no `retired_at`.
-- **`scheduled_for IS NULL` means ad-hoc**, and is itself the manual/scheduled
-  test — an `is_manual` boolean would be a second place for the same fact.
-- **`runs_job_scheduled_for_key` is a partial unique index**, so unlimited
-  ad-hoc runs are legal while scheduled slots stay unique. Every `ON CONFLICT`
-  against it must repeat `WHERE scheduled_for IS NOT NULL`.
-- **Transitions are enforced by `UPDATE … WHERE status = 'running'`**, not by a
-  CHECK — a CHECK cannot see the old row.
-- **`runs.findings` is a payload, and the exception is deliberate.** The rule is
-  that Postgres holds object keys and never payloads; `failure` and
-  `jobs.config` were already JSON, and a Run's findings sit beside them so the
-  record a brief was written from can be read back without cloud credentials.
-  It has no lifecycle rule and will accumulate — known, and accepted because a
-  forward-only migration is easier to add than to withdraw.
-- **`on delete restrict` everywhere provenance is involved.** The exceptions are
-  the settings rows — `cover_letter_instructions`, `posting_filters` and
-  `boards`.
-- **`cover_letter_instructions` cascades from `users`, and so do the other two
-  settings rows.** The rule elsewhere is restrict, because deleting a user who
-  owns jobs — or a job with runs — should fail loudly rather than silently erase
-  provenance. These rows record no such thing: they are preferences with no
-  independent existence, and restricting on one would make a user undeletable
-  for the sake of a settings row. Any new table gets `restrict` unless it can
-  make the same argument.
-  Its two text columns default to `''` rather than being nullable, so "nothing
-  set" has one representation. They stay two columns rather than one because
-  the prompt built from them fences each differently — rules are followed, an
-  example letter is imitated and never mined for facts — and one column could
-  not express that distinction.
-- **A Posting may have no Run at either end, and NULL is what says so.**
-  `first_seen_run_id` and `last_seen_run_id` are nullable as of `0009`: pasting
-  an advertisement's link on `/jobs` adds a Posting directly, and minting a
-  synthetic `jobs` row and `runs` row to satisfy a foreign key would put an
-  execution in the database that never executed. There is no `source` column and
-  there must not be one — the fact is already on the row, and a second copy can
-  drift. Same idiom as `next_run_at IS NULL` and `scheduled_for IS NULL`.
-- **`recordLinkedPosting` is `ON CONFLICT DO NOTHING`, and that is the whole
-  reason it is a second function rather than a flag on `recordPostings`.** A
-  link may create a Posting and may never revise one. Every update it could make
-  destroys something: `status` is the one column a person writes; overwriting
-  `last_seen_run_id` with the NULL this path carries erases which Run last found
-  the advertisement; and a Run-written `payload` carries a `matchReason` a
-  pasted link has none of. A `false` return means "already tracked", which is an
-  ordinary answer rather than a failure.
-- **A Posting's identity is `(user_id, posting_id)`, with no Run in it.**
-  `posting_id` is the id `postingId()` derives from the advertisement's
-  normalised URL — the same value a stored cover letter is keyed on, so the two
-  agree by construction. The same advertisement found by two Runs a week apart
-  is one row; the Runs are recorded as `first_seen_run_id` / `last_seen_run_id`,
-  which is provenance and not identity.
-- **Adding `status` to `recordPostings`' `DO UPDATE SET` list is silent data
-  loss.** `status`, `status_changed_at`, `first_seen_at` and `first_seen_run_id`
-  are absent from it deliberately. `status` is the only column in this schema a
-  person writes, and adding it "for symmetry" — or rewriting the upsert as
-  DELETE + INSERT — reverts every Posting marked `applied` the next time a Run
-  re-finds it, on a schedule, with no error. The `first_seen_*` pair answers
-  "when did this first appear", which a second sighting cannot change.
-- **The five `match_*` columns are absent from that list for the same reason,
-  and are the second set a Run must not write.** A match is a model call against
-  the user's resume, which the worker cannot even read — its IAM role grants the
-  `briefs` shelf alone — so there is no value for `EXCLUDED` to carry but NULL.
-  Adding any of them would blank a score every time a Briefing re-found the
-  advertisement it belongs to, which for a live search is nightly, and
-  `postings_match_complete_check` would not catch it because all five would go
-  together. `recordPostingMatch` is the only writer, and it updates rather than
-  inserts: a statement that could insert would let a caller mint a Posting out
-  of a score, with no title, no URL and no sighting.
-- **`match_resume_id` is a plain UUID and deliberately not a foreign key.**
-  `RESTRICT` would make a Document undeletable the moment anything scored
-  against it, and `SET NULL` would violate the all-five-or-none CHECK. What it
-  is for is one comparison — a value other than the user's current resume means
-  the score is for a document they have replaced — and `unmatchedAgainst()`
-  spells that predicate out as an `OR` rather than relying on a `not` filter's
-  null handling, because a bare inequality would silently exclude every row
-  nobody has scored yet.
-- **The upsert's trailing `WHERE EXCLUDED.last_seen_at >= postings.last_seen_at`
-  is what makes the write order-independent**, so a backfill walking Runs
-  oldest-first can race live traffic without dragging `last_seen_at` backwards
-  or leaving `last_seen_run_id` naming a Run that is not the most recent.
-  `recordPostings` also dedupes its own batch, because Postgres raises `21000`
-  when one statement affects a row twice and two links to the same
-  advertisement in one findings list is the ordinary case.
-- **`postings.title_normalized` is `GENERATED ALWAYS … STORED`, and nothing may
-  write it.** It is `title` lowercased, with runs of non-alphanumerics flattened
-  to single spaces and a space at each end — `' senior staff engineer remote '`.
-  The padding is what turns the whole-word title filter into an ordinary
-  `LIKE '%…%'`, which is the only reason a paginated query can answer it at all;
-  without it the exclusion would need a regex `where` Prisma cannot express, or
-  a rewrite of `listPostingPage` into raw SQL. Generated rather than maintained
-  by the write path so it cannot drift from the title however a row is written,
-  and both posting inserts are raw SQL with explicit column lists, so neither
-  had to learn about it. **The rule is stated twice** — here in SQL and as
-  `normalizeTitle()` in `@workspace/job-search` — exactly as `0006`'s date regex
-  restates `parsePostedAt()`, and the two must agree. A `prisma migrate dev`
-  would try to re-derive the column as a plain one; migrations here are
-  hand-authored and forward-only, and that is why.
-- **`posting_filters` is per user and read by this package, unlike
-  `jobs.config`.** The platform stores a config and never looks inside it, but
-  `listPostingPage` _filters_ on these terms — so they are a real `text[]` with a
-  cardinality CHECK rather than an opaque blob. What it is handed is a
-  **pattern** (`' senior '`) and not the word a user typed: deciding what a word
-  means belongs to `@workspace/job-search`, and this package filtering on a rule
-  it also interpreted would be two owners for one rule.
-- **`postings.posting_id` has a CHECK, and it is not a duplicated validation.**
-  `apps/dashboard/lib/cover-letters/cover-letter-ref.ts` keeps the one copy of
-  the rule for _untrusted input_. This one says the database must not hold a
-  value that cannot be an object key segment, exactly as
-  `artifacts_object_key_check` refuses a URL.
-- **`object_key` holds an S3 key and the CHECK enforces it** — no scheme prefix,
-  no leading slash.
+- **`documents` restricts on `users`; `boards` cascades.** A Document row is a
+  pointer at bytes in a bucket, so deleting the user out from under it would
+  leave objects nothing names. A board is work in progress with nothing outside
+  the database to orphan, so restricting would make a user undeletable for the
+  sake of a drawing. Any new table gets `restrict` unless it can make the
+  board's argument.
 - **`documents.id` is supplied by the caller, and it is the only id here that
   is.** Every other table defaults to `gen_random_uuid()`. This one cannot: the
   uuid is the S3 key segment in `{environment}/{user_id}/resumes/{id}{extension}`,

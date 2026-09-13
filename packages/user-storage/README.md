@@ -1,7 +1,6 @@
 # @workspace/user-storage
 
-Per-user object storage — Markdown briefs the worker generates, cover letters the
-dashboard drafts, documents the user uploads. S3 behind an interface.
+Per-user object storage — documents the user uploads. S3 behind an interface.
 
 ## The seam
 
@@ -12,70 +11,45 @@ errors.ts              the typed error union                                  no
 config.ts              reads the environment                                  no AWS import
 user-object-store.ts   the UserObjectStore interface                          no AWS import
 metadata.ts            cleaning a value a header can carry                    no AWS import
-brief-store.ts         BriefStore facade                                      no AWS import
-cover-letter-store.ts  CoverLetterStore facade                                no AWS import
-tailored-resume-store.ts  TailoredResumeStore facade                          no AWS import
 resume-store.ts        ResumeStore facade                                     no AWS import
+memory-object-store.ts in-memory UserObjectStore for tests                    no AWS import
 s3-user-object-store.ts  createS3UserObjectStore()                            the only AWS import
 ```
 
 One generic core does the S3 work, key validation, ownership checks and error
-mapping. Four thin facades sit on top and know their own kind's key shape and
-file types, so a call site does not have to restate them — and cannot get them
-wrong.
+mapping. A thin facade sits on top and knows its kind's key shape and file
+types, so a call site does not have to restate them — and cannot get them wrong.
 
-`metadata.ts` is shared by three of them and is not decoration: **S3 user-metadata
-values travel in HTTP headers**, so a value carrying a newline is header
-injection and a non-ASCII one is silently mangled. An uploaded filename, a cover
-letter's provenance and a tailored resume's are all text from outside, so all go
-through `toMetadataValue`.
-
-⚠️ **`list()` carries no user metadata.** ListObjectsV2 does not return it, so
-every listed entry comes back with empty provenance and a date taken from the
-object's own write time — anything that needs a filename or a company must
-`get()` or `head()` the one object it is showing. `CoverLetterStore`,
-`TailoredResumeStore` and `ResumeStore` all expose `list()`; the cover-letter
-table on `/jobs` uses that listing once per render rather than a `HeadObject`
-per visible Posting.
+`metadata.ts` is not decoration: **S3 user-metadata values travel in HTTP
+headers**, so a value carrying a newline is header injection and a non-ASCII one
+is silently mangled. An uploaded filename and a Document Type are both text from
+outside, so both go through `toMetadataValue`.
 
 Compose once, at the composition root:
 
 ```ts
 import {
-  createS3UserObjectStore,
-  createBriefStore,
-  createCoverLetterStore,
   createResumeStore,
-  createTailoredResumeStore,
+  createS3UserObjectStore,
 } from "@workspace/user-storage"
 
 const objects = createS3UserObjectStore()
-const briefs = createBriefStore(objects)
 const resumes = createResumeStore(objects)
-const coverLetters = createCoverLetterStore(objects)
-const tailoredResumes = createTailoredResumeStore(objects)
 ```
 
 Everything downstream takes the narrow type:
 
 ```ts
-import type { BriefStore } from "@workspace/user-storage"
+import type { ResumeStore } from "@workspace/user-storage"
 
-async function persist(
-  briefs: BriefStore,
-  scheduledFor: Date,
-  markdown: string
-) {
-  return briefs.put({
+async function upload(resumes: ResumeStore, bytes: Uint8Array) {
+  return resumes.put({
     userId: "alice",
-    briefId: "morning",
-    // The slot this brief is for, which decides the key's UTC partition day.
-    occurrence: scheduledFor,
-    // When it was actually produced. Metadata only — it no longer decides the
-    // key, so a 23:30 slot finishing after midnight still files under its own
-    // day rather than the next one.
-    generatedAt: new Date(),
-    markdown,
+    // Minted by the application, never the uploaded filename.
+    resumeId: crypto.randomUUID(),
+    extension: ".pdf",
+    bytes,
+    originalFilename: "My CV.pdf",
   })
 }
 ```
@@ -91,9 +65,10 @@ async function persist(
 `terraform -chdir=infra/aws output` prints the first and third.
 
 **Credentials are not on that list, and there is no way to pass them.** The AWS
-SDK resolves them through its default provider chain — the Lambda execution
-role in production, `AWS_PROFILE` or an SSO session locally.
-`createS3UserObjectStore` accepts a `config` and a `client`, and nothing else.
+SDK resolves them through its default provider chain — or, in the dashboard, a
+`client` built with Vercel's OIDC provider — and `AWS_PROFILE` or an SSO session
+locally. `createS3UserObjectStore` accepts a `config` and a `client`, and
+nothing else.
 
 Configuration is read by a **call**, not at import time. Importing this package
 never throws, so a build, a typecheck, or a consumer that only wants the key
@@ -105,8 +80,6 @@ helpers does not need a bucket to point at. This mirrors `getOpenAIApiKey` in
 ```
 {environment}/{userId}/{kind}/…tail.{ext}
 
-prod/alice/briefs/2026/07/28/morning.md
-prod/alice/cover-letters/0f1e2d3c4b5a6978.md
 prod/alice/resumes/backend-2026.pdf
 ```
 
@@ -117,12 +90,8 @@ single prefix rather than one per kind. Kind comes third so an IAM policy can
 still narrow to a category: IAM resource ARNs take wildcards, so
 `…/prod/*/resumes/*` is expressible.
 
-The tail differs per kind, which is the whole reason the core is generic.
-Briefs are date-partitioned because they are generated on a schedule; resumes
-are not, because they are uploaded and replaced. A cover letter's tail is the
-**Posting** id and nothing else, so the unit of identity is (user, Posting) —
-re-drafting the same advertisement overwrites one object rather than
-accumulating, and the Run that found it lives in metadata instead.
+The tail is the kind's business, which is the reason the core is generic. A
+resume's is a flat id, because it is uploaded and replaced.
 
 `environment` is **not** part of any ref. It comes from the store's own config,
 so a caller cannot reach into another environment however it is called — the
@@ -131,14 +100,12 @@ same boundary the IAM policy draws.
 ### What this layout costs
 
 S3 **lifecycle** filters match a literal prefix and accept no wildcards, so
-with `userId` in the middle there is no prefix meaning "every user's briefs".
+with `userId` in the middle there is no prefix meaning "every user's resumes".
 Retention could not differ per kind on prefixes alone.
 
 So every object is **tagged** `kind=<kind>` at write time and the lifecycle
-rules filter on that tag. It is the only reason briefs, resumes and cover
-letters can be retained differently — briefs expire after a year, the other two
-never do. Adding a kind to `kinds.ts` without a matching entry in
-the Terraform `object_kinds` map leaves it with no retention policy at all.
+rules filter on that tag. Adding a kind to `kinds.ts` without a matching entry
+in the Terraform `object_kinds` map leaves it with no retention policy at all.
 
 ## Ownership and validation
 
@@ -166,16 +133,13 @@ caller.** A caller-supplied content type is a caller-supplied claim; it would
 let a `.pdf` be stored as `text/html`. Each kind declares an allowlist in
 `kinds.ts`, and an extension outside it is rejected before any request is made.
 
-| Kind               | Extensions                           | Disposition  |
-| ------------------ | ------------------------------------ | ------------ |
-| `briefs`           | `.md`                                | `inline`     |
-| `cover-letters`    | `.md`                                | `inline`     |
-| `tailored-resumes` | `.md`                                | `inline`     |
-| `resumes`          | `.pdf .doc .docx .odt .rtf .txt .md` | `attachment` |
+| Kind      | Extensions                           | Disposition  |
+| --------- | ------------------------------------ | ------------ |
+| `resumes` | `.pdf .doc .docx .odt .rtf .txt .md` | `attachment` |
 
 `attachment` on uploaded documents matters: those bytes arrived from outside,
 and a browser rendering an uploaded file inline on the bucket's origin is the
-standard stored-XSS route. **This is load-bearing now**, not belt-and-braces:
+standard stored-XSS route. **This is load-bearing**, not belt-and-braces:
 `apps/dashboard/app/api/documents/[file]/route.ts` serves these bytes back to a
 browser, and it passes the stored disposition and content type straight through
 alongside `X-Content-Type-Options: nosniff`. Nothing is served directly from S3
@@ -217,10 +181,9 @@ six IAM policies to label one shelf of documents.
 ⚠️ **`list()` returns no user metadata at all.** ListObjectsV2 does not carry
 it, so every listed object has `metadata: {}` — meaning `originalFilename` is
 always `undefined` from a listing, while `key`, `size` and `storedAt` are real.
-This used to force a `head()` per object on every render of the Documents page;
-it no longer does, because that listing is a query. What `list()` answers now is
-"what is actually in the bucket", which is the question a reconciliation or a
-backfill asks rather than the one a page does.
+The Documents page does not use it: that listing is a query. What `list()`
+answers is "what is actually in the bucket", which is the question a
+reconciliation or a backfill asks rather than the one a page does.
 
 ## Errors
 
@@ -233,8 +196,8 @@ Every method rejects with a `UserStorageError` — never a raw SDK error.
 | `ObjectOwnershipError`    | `object_ownership`    | Exists, belongs to someone else           |
 | `StorageUnavailableError` | `storage_unavailable` | The store refused or could not be reached |
 
-Branch on `code`, not `instanceof`. A bundled worker can end up with two copies
-of this package, and `instanceof` silently stops matching across them.
+Branch on `code`, not `instanceof`. A bundled consumer can end up with two
+copies of this package, and `instanceof` silently stops matching across them.
 
 `AccessDenied` maps to `storage_unavailable`, not `object_not_found` — a policy
 that forbids the read is the store being unavailable. `NoSuchBucket` maps there
@@ -244,10 +207,10 @@ it looking for the wrong thing.
 
 ## IAM
 
-Grants are per environment **and** per kind, so "the worker can write briefs"
-and "the worker can delete a user's CV" are not the same grant.
-`infra/aws/README.md` §Least privilege has the rendered policies and the
-reasoning; `infra/aws/modules/user-storage` emits them and exports the ARNs.
+Grants are per environment **and** per kind, so reading a user's CV and deleting
+one are not the same grant. `infra/aws/README.md` §Least privilege has the
+rendered policies and the reasoning; `infra/aws/modules/user-storage` emits them
+and exports the ARNs.
 
 The one thing to carry back into this package: **`PutObjectTagging` is not
 optional.** Every `put` here tags the object with its kind, so the write 403s
@@ -265,6 +228,6 @@ pnpm turbo lint      --filter=@workspace/user-storage
 Tests are Vitest, beside the code they cover, and excluded from the build's
 `tsconfig.json` so they never reach `dist/`. `typecheck` runs twice — once for
 `src`, once via `tsconfig.test.json` for the tests, because Vitest transpiles
-without typechecking. The facades are tested against an in-memory
+without typechecking. The facade is tested against an in-memory
 `UserObjectStore` and the S3 adapter against a fake client; no test in this
 package makes a network call.

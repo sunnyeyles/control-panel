@@ -24,10 +24,11 @@ const CONFIG: UserStorageConfig = {
   environment: "test",
 }
 
-const BRIEF_REF: ObjectRef = {
+/** A text upload, so the string-body path has something to encode. */
+const NOTES_REF: ObjectRef = {
   userId: "alice",
-  kind: "briefs",
-  segments: ["2026", "07", "28", "morning"],
+  kind: "resumes",
+  segments: ["notes-2026"],
   extension: ".md",
 }
 
@@ -38,7 +39,7 @@ const RESUME_REF: ObjectRef = {
   extension: ".pdf",
 }
 
-const BRIEF_KEY = "test/alice/briefs/2026/07/28/morning.md"
+const NOTES_KEY = "test/alice/resumes/notes-2026.md"
 const RESUME_KEY = "test/alice/resumes/backend-2026.pdf"
 
 /**
@@ -47,7 +48,7 @@ const RESUME_KEY = "test/alice/resumes/backend-2026.pdf"
  * count and character count differ, which is exactly what a Content-Length
  * computed from `.length` would get wrong.
  */
-const MARKDOWN = "# Brief — café\n\n日本語 🎉\n"
+const MARKDOWN = "# Notes — café\n\n日本語 🎉\n"
 
 /** A PDF header followed by bytes that are not valid UTF-8. */
 const PDF_BYTES = new Uint8Array([
@@ -111,7 +112,7 @@ function bodyOf(bytes: Uint8Array) {
 
 const OWNED = {
   "user-id": "alice",
-  kind: "briefs",
+  kind: "resumes",
   environment: "test",
 }
 
@@ -126,36 +127,36 @@ function store(client: S3Client = s3.asClient) {
 }
 
 describe("put", () => {
-  it("writes a brief under environment/user/kind/date", async () => {
-    const stored = await store().put({ ...BRIEF_REF, body: MARKDOWN })
+  it("writes under environment/user/kind/tail", async () => {
+    const stored = await store().put({ ...RESUME_REF, body: PDF_BYTES })
 
     const [put] = s3.sent as [PutObjectCommand]
     expect(put.input.Bucket).toBe("user-storage-test")
-    expect(put.input.Key).toBe(BRIEF_KEY)
-    expect(stored.key).toBe(BRIEF_KEY)
-    expect(stored.kind).toBe("briefs")
+    expect(put.input.Key).toBe(RESUME_KEY)
+    expect(stored.key).toBe(RESUME_KEY)
+    expect(stored.kind).toBe("resumes")
   })
 
-  it("writes a resume under the same user prefix, different kind", async () => {
-    await store().put({ ...RESUME_REF, body: PDF_BYTES })
+  it("writes every object under its owner's prefix", async () => {
+    await store().put({ ...NOTES_REF, body: MARKDOWN })
 
     const [put] = s3.sent as [PutObjectCommand]
-    expect(put.input.Key).toBe(RESUME_KEY)
-    // Both kinds share one user prefix — the reason userId sits above kind.
+    expect(put.input.Key).toBe(NOTES_KEY)
+    // The reason userId sits above kind: one prefix is the whole user.
     expect(put.input.Key?.startsWith("test/alice/")).toBe(true)
   })
 
   it("derives the content type from the extension, not from the caller", async () => {
-    await store().put({ ...BRIEF_REF, body: MARKDOWN })
+    await store().put({ ...NOTES_REF, body: MARKDOWN })
     await store().put({ ...RESUME_REF, body: PDF_BYTES })
 
-    const [brief, resume] = s3.sent as [PutObjectCommand, PutObjectCommand]
-    expect(brief.input.ContentType).toBe("text/markdown; charset=utf-8")
+    const [notes, resume] = s3.sent as [PutObjectCommand, PutObjectCommand]
+    expect(notes.input.ContentType).toBe("text/markdown; charset=utf-8")
     expect(resume.input.ContentType).toBe("application/pdf")
   })
 
   it("encodes a string body as UTF-8 with a byte-accurate length", async () => {
-    await store().put({ ...BRIEF_REF, body: MARKDOWN })
+    await store().put({ ...NOTES_REF, body: MARKDOWN })
 
     const [put] = s3.sent as [PutObjectCommand]
     const body = put.input.Body as Buffer
@@ -178,15 +179,16 @@ describe("put", () => {
     expect(put.input.ContentLength).toBe(PDF_BYTES.byteLength)
   })
 
-  it("marks uploaded documents as attachments", async () => {
+  it("marks every upload as an attachment, whatever its type", async () => {
     await store().put({ ...RESUME_REF, body: PDF_BYTES })
-    await store().put({ ...BRIEF_REF, body: MARKDOWN })
+    await store().put({ ...NOTES_REF, body: MARKDOWN })
 
-    const [resume, brief] = s3.sent as [PutObjectCommand, PutObjectCommand]
+    const [resume, notes] = s3.sent as [PutObjectCommand, PutObjectCommand]
     // Bytes that arrived from outside must not be rendered on the bucket's
-    // origin. Briefs are generated here and only ever fetched as text.
+    // origin. The kind decides the disposition, so a text upload gets no
+    // exemption.
     expect(resume.input.ContentDisposition).toBe("attachment")
-    expect(brief.input.ContentDisposition).toBe("inline")
+    expect(notes.input.ContentDisposition).toBe("attachment")
   })
 
   it("tags the object with its kind, which is what lifecycle rules filter on", async () => {
@@ -199,28 +201,26 @@ describe("put", () => {
   })
 
   it("encrypts at rest and records the owner in metadata", async () => {
-    await store().put({ ...BRIEF_REF, body: MARKDOWN })
+    await store().put({ ...RESUME_REF, body: PDF_BYTES })
 
     const [put] = s3.sent as [PutObjectCommand]
     expect(put.input.ServerSideEncryption).toBe("AES256")
     expect(put.input.Metadata).toMatchObject({
       "user-id": "alice",
-      kind: "briefs",
+      kind: "resumes",
       environment: "test",
     })
   })
 
   it("keeps caller metadata alongside the reserved fields", async () => {
     await store().put({
-      ...BRIEF_REF,
-      body: MARKDOWN,
-      metadata: { "generated-at": "2026-07-28T09:00:00.000Z" },
+      ...RESUME_REF,
+      body: PDF_BYTES,
+      metadata: { "original-filename": "cv.pdf" },
     })
 
     const [put] = s3.sent as [PutObjectCommand]
-    expect(put.input.Metadata?.["generated-at"]).toBe(
-      "2026-07-28T09:00:00.000Z"
-    )
+    expect(put.input.Metadata?.["original-filename"]).toBe("cv.pdf")
   })
 
   /**
@@ -231,7 +231,11 @@ describe("put", () => {
   it("refuses to let caller metadata overwrite the ownership field", async () => {
     for (const key of ["user-id", "USER-ID", "kind", "environment"]) {
       await expect(
-        store().put({ ...BRIEF_REF, body: MARKDOWN, metadata: { [key]: "x" } })
+        store().put({
+          ...RESUME_REF,
+          body: PDF_BYTES,
+          metadata: { [key]: "x" },
+        })
       ).rejects.toThrow(InvalidObjectKeyError)
     }
 
@@ -240,7 +244,7 @@ describe("put", () => {
 
   it("never issues a request for an identifier that would escape the prefix", async () => {
     await expect(
-      store().put({ ...BRIEF_REF, userId: "../admin", body: MARKDOWN })
+      store().put({ ...RESUME_REF, userId: "../admin", body: PDF_BYTES })
     ).rejects.toThrow(InvalidObjectKeyError)
 
     expect(s3.sent).toHaveLength(0)
@@ -257,9 +261,9 @@ describe("put", () => {
   it("reports a missing bucket as unavailable rather than a missing object", async () => {
     s3.reply(s3Error("NoSuchBucket", 404))
 
-    await expect(store().put({ ...BRIEF_REF, body: MARKDOWN })).rejects.toThrow(
-      StorageUnavailableError
-    )
+    await expect(
+      store().put({ ...RESUME_REF, body: PDF_BYTES })
+    ).rejects.toThrow(StorageUnavailableError)
   })
 })
 
@@ -271,16 +275,16 @@ describe("get", () => {
       ContentType: "text/markdown; charset=utf-8",
     })
 
-    const fetched = await store().get(BRIEF_REF)
+    const fetched = await store().get(NOTES_REF)
 
     expect(fetched.text()).toBe(MARKDOWN)
-    expect(fetched.key).toBe(BRIEF_KEY)
+    expect(fetched.key).toBe(NOTES_KEY)
   })
 
   it("returns binary bytes intact", async () => {
     s3.reply({
       Body: bodyOf(PDF_BYTES),
-      Metadata: { ...OWNED, kind: "resumes" },
+      Metadata: OWNED,
       ContentType: "application/pdf",
     })
 
@@ -290,35 +294,33 @@ describe("get", () => {
 
   it("hides the reserved fields from the metadata it returns", async () => {
     s3.reply({
-      Body: bodyOf(Buffer.from(MARKDOWN)),
-      Metadata: { ...OWNED, "generated-at": "2026-07-28T09:00:00.000Z" },
+      Body: bodyOf(PDF_BYTES),
+      Metadata: { ...OWNED, "original-filename": "cv.pdf" },
     })
 
-    const fetched = await store().get(BRIEF_REF)
+    const fetched = await store().get(RESUME_REF)
 
-    expect(fetched.metadata).toEqual({
-      "generated-at": "2026-07-28T09:00:00.000Z",
-    })
+    expect(fetched.metadata).toEqual({ "original-filename": "cv.pdf" })
   })
 
   it("rejects an object whose metadata names another owner", async () => {
     s3.reply({
-      Body: bodyOf(Buffer.from(MARKDOWN)),
+      Body: bodyOf(PDF_BYTES),
       Metadata: { ...OWNED, "user-id": "bob" },
     })
 
-    await expect(store().get(BRIEF_REF)).rejects.toThrow(ObjectOwnershipError)
+    await expect(store().get(RESUME_REF)).rejects.toThrow(ObjectOwnershipError)
   })
 
   it("rejects an object with no owner metadata at all", async () => {
-    s3.reply({ Body: bodyOf(Buffer.from(MARKDOWN)), Metadata: undefined })
+    s3.reply({ Body: bodyOf(PDF_BYTES), Metadata: undefined })
 
-    await expect(store().get(BRIEF_REF)).rejects.toThrow(ObjectOwnershipError)
+    await expect(store().get(RESUME_REF)).rejects.toThrow(ObjectOwnershipError)
   })
 
   it("maps NoSuchKey to ObjectNotFoundError", async () => {
     s3.reply(s3Error("NoSuchKey", 404))
-    await expect(store().get(BRIEF_REF)).rejects.toThrow(ObjectNotFoundError)
+    await expect(store().get(RESUME_REF)).rejects.toThrow(ObjectNotFoundError)
   })
 
   it("maps AccessDenied to unavailable, not to not-found", async () => {
@@ -327,14 +329,14 @@ describe("get", () => {
     // A policy that forbids the read is the store being unavailable. Calling
     // it not-found would tell a caller the object does not exist, which is a
     // different and wrong thing.
-    await expect(store().get(BRIEF_REF)).rejects.toThrow(
+    await expect(store().get(RESUME_REF)).rejects.toThrow(
       StorageUnavailableError
     )
   })
 
   it("maps NoSuchBucket to unavailable, though it is also a 404", async () => {
     s3.reply(s3Error("NoSuchBucket", 404))
-    await expect(store().get(BRIEF_REF)).rejects.toThrow(
+    await expect(store().get(RESUME_REF)).rejects.toThrow(
       StorageUnavailableError
     )
   })
@@ -343,7 +345,7 @@ describe("get", () => {
     const cause = new Error("socket hang up")
     s3.reply(cause)
 
-    await expect(store().get(BRIEF_REF)).rejects.toMatchObject({
+    await expect(store().get(RESUME_REF)).rejects.toMatchObject({
       code: "storage_unavailable",
       cause,
     })
@@ -362,7 +364,7 @@ describe("head", () => {
 
   it("checks ownership too", async () => {
     s3.reply({ Metadata: { ...OWNED, "user-id": "bob" } })
-    await expect(store().head(BRIEF_REF)).rejects.toThrow(ObjectOwnershipError)
+    await expect(store().head(RESUME_REF)).rejects.toThrow(ObjectOwnershipError)
   })
 })
 
@@ -370,7 +372,7 @@ describe("delete", () => {
   it("heads before deleting", async () => {
     s3.reply({ Metadata: OWNED }, {})
 
-    await store().delete(BRIEF_REF)
+    await store().delete(RESUME_REF)
 
     expect(s3.names).toEqual(["HeadObjectCommand", "DeleteObjectCommand"])
   })
@@ -380,14 +382,16 @@ describe("delete", () => {
     // head, deleting a typo would be reported as done.
     s3.reply(s3Error("NotFound", 404))
 
-    await expect(store().delete(BRIEF_REF)).rejects.toThrow(ObjectNotFoundError)
+    await expect(store().delete(RESUME_REF)).rejects.toThrow(
+      ObjectNotFoundError
+    )
     expect(s3.names).toEqual(["HeadObjectCommand"])
   })
 
   it("does not delete an object belonging to someone else", async () => {
     s3.reply({ Metadata: { ...OWNED, "user-id": "bob" } })
 
-    await expect(store().delete(BRIEF_REF)).rejects.toThrow(
+    await expect(store().delete(RESUME_REF)).rejects.toThrow(
       ObjectOwnershipError
     )
 
@@ -457,7 +461,7 @@ describe("environment scoping", () => {
       client: s3.asClient,
     })
 
-    await prod.put({ ...BRIEF_REF, body: MARKDOWN })
+    await prod.put({ ...RESUME_REF, body: PDF_BYTES })
 
     const [put] = s3.sent as [PutObjectCommand]
     expect(put.input.Key?.startsWith("prod/")).toBe(true)

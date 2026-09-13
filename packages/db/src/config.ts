@@ -23,8 +23,8 @@ const DATABASE_URL_UNPOOLED = "DATABASE_URL_UNPOOLED"
  *
  * A function rather than a module-level constant, mirroring
  * `readUserStorageConfig()` and for the same reason: importing this package
- * must never throw. A build, a typecheck, or a consumer that only wants
- * `computeNextRunAt` has no database to point at and should not need one.
+ * must never throw. A build, a typecheck, or a consumer that only wants a type
+ * has no database to point at and should not need one.
  */
 export function readDatabaseConfig(
   env: NodeJS.ProcessEnv = process.env

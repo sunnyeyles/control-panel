@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Per-user object storage — generated briefs and uploaded documents. S3 behind an interface.",
+  "description": "Per-user object storage — uploaded documents. S3 behind an interface.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

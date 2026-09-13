@@ -11,8 +11,8 @@ import {
 describe("isUserStorageError", () => {
   const errors = [
     new InvalidObjectKeyError("bad"),
-    new ObjectNotFoundError("prod/a/briefs/2026/07/28/b.md"),
-    new ObjectOwnershipError("prod/a/briefs/2026/07/28/b.md", "alice", "bob"),
+    new ObjectNotFoundError("prod/a/resumes/b.pdf"),
+    new ObjectOwnershipError("prod/a/resumes/b.pdf", "alice", "bob"),
     new StorageUnavailableError("down"),
   ]
 
@@ -75,7 +75,7 @@ describe("error shape", () => {
 
   it("does not print 'undefined' when there is no owner metadata", () => {
     const error = new ObjectOwnershipError(
-      "prod/a/briefs/b.md",
+      "prod/a/resumes/b.pdf",
       "alice",
       undefined
     )

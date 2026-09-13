@@ -51,8 +51,8 @@ export default defineConfig({
     },
     // The integration suite talks to a real Postgres and skips itself when
     // DATABASE_URL_UNPOOLED is unset, so this ceiling only bites where a
-    // database exists. A claim race that deadlocks should fail the run rather
-    // than hang it.
+    // database exists. A race that deadlocks should fail the run rather than
+    // hang it.
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },
