@@ -5,19 +5,19 @@
  * importing a tool module never throws and a missing variable surfaces as a
  * failed call instead of a failed deploy — which is the right trade, and also
  * the reason the demand is invisible. Nothing about `@workspace/agent-tools`'s
- * surface says it wants an Apify token; you find out when a scout run fails at
- * three in the morning.
+ * surface says it wants a Tavily key; you find out when a search fails.
  *
  * So the demands are listed here, and `env.test.ts` asserts the list is
- * complete by reading every `requireEnv("…")` call in `src/`. Two variables is
- * a thin list. The point is not today's two: it is that the next tool cannot
- * add a third without either declaring it or failing the suite.
+ * complete by reading every `requireEnv("…")` call in `src/`. One variable is
+ * a thin list. The point is not today's one: it is that the next tool cannot
+ * add a second without either declaring it or failing the suite.
  *
  * ⚠️ **Declaring a variable here does not make it reach a task.** Turborepo
  * runs in strict env mode, so a variable absent from `turbo.json` is removed
  * from the process environment rather than merely unhashed. This list is what a
- * deployer checks `globalEnv` and the Lambda's configuration *against*; it does
- * not supply anything itself. See the strict-env note in the root `CLAUDE.md`.
+ * deployer checks `globalEnv` and the deployment's configuration *against*; it
+ * does not supply anything itself. See the strict-env note in the root
+ * `CLAUDE.md`.
  */
 
 export interface RequiredEnvVar {
@@ -29,13 +29,7 @@ export interface RequiredEnvVar {
 
 export const REQUIRED_ENV: Record<string, RequiredEnvVar> = {
   TAVILY_API_KEY: {
-    purpose:
-      "Tavily's REST API, for general web search and for retrieving the page at a link.",
-    readBy: ["web-search.ts", "pages/page-extract.ts"],
-  },
-  APIFY_TOKEN: {
-    purpose:
-      "Apify's synchronous actor-run endpoint, behind every job-board search and the by-URL advertisement fetcher.",
-    readBy: ["boards/apify-search.ts"],
+    purpose: "Tavily's REST API, for general web search.",
+    readBy: ["web-search.ts"],
   },
 }

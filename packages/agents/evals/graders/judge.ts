@@ -35,15 +35,14 @@ const MAX_RATING = 5
 /** Below this the drawing is not a near miss, it is the wrong answer. */
 const PASS_RATING = 4
 
-export const verdictSchema = z.object({
+const verdictSchema = z.object({
   faithfulness: z.number().min(MIN_RATING).max(MAX_RATING),
   readability: z.number().min(MIN_RATING).max(MAX_RATING),
   reply: z.number().min(MIN_RATING).max(MAX_RATING),
   justification: z.string().min(1),
 })
-export type Verdict = z.infer<typeof verdictSchema>
 
-export const JUDGE_SYSTEM_PROMPT = [
+const JUDGE_SYSTEM_PROMPT = [
   "You are grading one turn of an assistant that draws on a shared whiteboard with a user. You are given what the user asked for, the board as it stands afterwards, and what the assistant said. Score the turn.",
   "",
   "Score three things from 1 to 5, where 3 is adequate and 5 is what a careful engineer would have drawn by hand:",

@@ -1,30 +1,19 @@
 name: Deploy infra
 
-# One workflow, not two: infra and worker code go up together. The zip reaches
-# Lambda through Terraform's `filename` + `source_code_hash` rather than a
-# separate `aws lambda update-function-code`, so one apply deploys both and
-# there is no window where the function and its schedule disagree.
+# Terraform only. Nothing here builds application code: the one workload this
+# root used to package and ship went with the job search, and the dashboard
+# deploys to Vercel from git on its own.
 on:
   push:
     branches: [main]
-    # Path-scoped rather than relying on `turbo --filter` to no-op: a
-    # dashboard-only or UI-only push does not start this workflow at all, which
-    # is both stronger and cheaper than starting it and doing nothing.
+    # Path-scoped rather than unfiltered: a dashboard-only or UI-only push does
+    # not start this workflow at all, which is both stronger and cheaper than
+    # starting it and doing nothing.
     paths:
-      - "apps/briefing-worker/**"
-      - "packages/agents-core/**"
-      - "packages/agents/**"
-      - "packages/agent-tools/**"
-      - "packages/whiteboard-schema/**"
       - "infra/**"
       - ".github/workflows/deploy-infra.yml"
   pull_request:
     paths:
-      - "apps/briefing-worker/**"
-      - "packages/agents-core/**"
-      - "packages/agents/**"
-      - "packages/agent-tools/**"
-      - "packages/whiteboard-schema/**"
       - "infra/**"
       - ".github/workflows/deploy-infra.yml"
   # Deliberately unfiltered — a manual run should always run.
@@ -52,23 +41,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          # Matches engines.node in the worker and the nodejs22.x runtime.
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Explicit rather than implied: build.dependsOn ["^build"] is what
-      # compiles agents-core and agent-tools ahead of the worker, and a failure
-      # here is attributable to the build rather than to a deployment step.
-      - name: Build worker
-        run: pnpm turbo build typecheck lint --filter=@workspace/briefing-worker
-
       # Pinned, and matching the version used locally. `fmt -check` and the
       # test framework both move between minor releases, so a floating CLI can
       # fail a pull request on a tree nobody touched.
@@ -91,10 +63,11 @@ jobs:
 
       # The real check, and the reason this job is worth having on a pull
       # request. `validate` catches type errors; these run a mocked plan and
-      # assert on what it produces — retries actually zero, every object kind
-      # actually retained, the missed-run alarm actually gated on the schedule.
-      # No credentials, no network, no state. `init` above installs the modules
-      # the run blocks target.
+      # assert on what it produces — every object kind actually retained, the
+      # dashboard attached to exactly the storage kinds it is meant to hold,
+      # an unconfigured dashboard stack actually creating nothing. No
+      # credentials, no network, no state. `init` above installs the modules the
+      # run blocks target.
       - name: Terraform test
         run: terraform -chdir=infra/aws test
 
@@ -114,7 +87,7 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-      # No TF_VAR_* here any more. Stack configuration lives in the committed
+      # No TF_VAR_* here. Stack configuration lives in the committed
       # infra/aws/terraform.tfvars, which Terraform auto-loads — so the values
       # CI applies are the values in the diff, rather than repository variables
       # that can be changed without a commit and are invisible in review.
@@ -148,22 +121,6 @@ jobs:
           fi
 
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Before Terraform, and not merely for speed. `filebase64sha256` reads the
-      # zip at *plan* time, so a plan on a tree without one fails with a
-      # file-not-found that reads like a Terraform bug.
-      - name: Build and package worker
-        run: pnpm turbo zip --filter=@workspace/briefing-worker
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4

@@ -47,8 +47,3 @@ a client component as it stands.
 ```bash
 pnpm turbo build --filter=@workspace/whiteboard-schema
 ```
-
-⚠️ **The worker bundles this transitively.** `apps/briefing-worker` reaches it
-through `@workspace/agents`, so `packages/whiteboard-schema/**` is in
-`deploy-infra.yml`'s path filter. A change here that is not in that list would
-not redeploy the worker.

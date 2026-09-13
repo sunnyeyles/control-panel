@@ -50,8 +50,8 @@ const RESERVED_METADATA_KEYS: ReadonlySet<string> = new Set(
  *
  * Not redundant with the key. S3 lifecycle filters are literal prefixes with no
  * wildcards, and with `kind` below `userId` no prefix means "every user's
- * briefs" — so lifecycle rules filter on this tag. It is the only reason briefs
- * and resumes can have different retention.
+ * resumes" — so lifecycle rules filter on this tag. It is the only way two kinds
+ * could have different retention.
  */
 const KIND_TAG = "kind"
 

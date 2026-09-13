@@ -1,10 +1,10 @@
 /**
  * The transport half of every outbound call in this package: a JSON POST behind
- * a bearer token, shared by Tavily and by every Apify actor run.
+ * a bearer token. Tavily is the one caller today.
  *
  * The failure split lives here so it cannot drift per service. A missing or
  * rejected credential is a deployment fault no rephrasing fixes, so it throws
- * and the run fails loudly rather than producing a confident brief built on
+ * and the run fails loudly rather than producing a confident answer built on
  * nothing. Everything else — a transport fault, an upstream error status, a
  * body that will not parse — comes back as a sentence the model can work
  * around, so one bad search does not sink a run that has other searches to
@@ -12,13 +12,6 @@
  *
  * What stays with each caller is what genuinely differs: building the request
  * body, and deciding whether the parsed body has the shape of a result list.
- *
- * **Not every caller is answering a model.** `page-extract.ts` answers a person
- * who pasted a link, and a sentence ending "continue with what you already
- * have" would be nonsense to them — which is why `retryAdvice` and
- * `fallbackAdvice` exist. Both default to the model-facing wording every search
- * tool wants, so a caller that says nothing gets exactly the sentences it got
- * before either field existed.
  */
 
 /**
@@ -38,6 +31,9 @@ export function clampMaxResults(requested: number, limit: number): number {
   return Math.min(Math.max(Math.trunc(requested), 1), limit)
 }
 
+/** How every failure sentence closes. */
+const FALLBACK_ADVICE = "Continue with what you already have."
+
 export interface SearchApiPostOptions {
   fetch: typeof globalThis.fetch
   url: string
@@ -46,29 +42,23 @@ export interface SearchApiPostOptions {
   /** Serialised as the JSON request body. */
   body: Record<string, unknown>
   /**
-   * How messages to the model name this search, e.g. `The SEEK search for
+   * How messages to the model name this search, e.g. `The search for
    * "typescript"` — it leads every sentence a failure comes back as.
    */
   subject: string
   /**
-   * What the HTTP-error sentence suggests varying, e.g. `different criteria`.
+   * What the HTTP-error sentence suggests varying, e.g. `a different query`.
    * Omit where there is nothing useful to vary — the sentence then closes on
-   * {@link fallbackAdvice} alone rather than on an empty suggestion.
+   * the fallback advice alone rather than on an empty suggestion.
    */
   retryAdvice?: string
-  /**
-   * How every failure sentence closes. Defaults to the model-facing
-   * `Continue with what you already have.`; a caller answering a person passes
-   * its own.
-   */
-  fallbackAdvice?: string
   /** The names the credential-rejected throw is composed from. */
   auth: {
-    /** The service, as prose spells it: `Apify`. */
+    /** The service, as prose spells it: `Tavily`. */
     service: string
-    /** What the service calls the secret: `API token`. */
+    /** What the service calls the secret: `API key`. */
     credential: string
-    /** The env var a deployer has to fix: `APIFY_TOKEN`. */
+    /** The env var a deployer has to fix: `TAVILY_API_KEY`. */
     envVar: string
   }
 }
@@ -89,8 +79,6 @@ export async function searchApiPost(
   options: SearchApiPostOptions
 ): Promise<SearchApiResult> {
   const { subject } = options
-  const fallback =
-    options.fallbackAdvice ?? "Continue with what you already have."
 
   let response: Response
   try {
@@ -106,7 +94,7 @@ export async function searchApiPost(
     const message = error instanceof Error ? error.message : String(error)
     return {
       ok: false,
-      message: `${subject} could not be sent: ${message}. ${fallback}`,
+      message: `${subject} could not be sent: ${message}. ${FALLBACK_ADVICE}`,
     }
   }
 
@@ -119,8 +107,8 @@ export async function searchApiPost(
 
   if (!response.ok) {
     const advice = options.retryAdvice
-      ? `Try again with ${options.retryAdvice}, or ${lowerFirst(fallback)}`
-      : fallback
+      ? `Try again with ${options.retryAdvice}, or ${lowerFirst(FALLBACK_ADVICE)}`
+      : FALLBACK_ADVICE
 
     return {
       ok: false,
@@ -134,7 +122,7 @@ export async function searchApiPost(
   } catch {
     return {
       ok: false,
-      message: `${subject} returned a response that could not be read. ${fallback}`,
+      message: `${subject} returned a response that could not be read. ${FALLBACK_ADVICE}`,
     }
   }
 

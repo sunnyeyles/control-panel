@@ -16,11 +16,6 @@ export function NavSecondary({
   items,
   ...props
 }: {
-  /**
-   * Links only. This group draws a flat list, so a `NavGroup` reaching it would
-   * render as a dead item with no way to open — the narrowed type is what makes
-   * that a compile error rather than a bug someone finds in the sidebar.
-   */
   items: readonly NavLink[]
 } & React.ComponentPropsWithoutRef<typeof SidebarGroup>) {
   return (

@@ -14,8 +14,8 @@ output "access_policy_arns" {
     object kind in that environment.
 
     This is the broad grant. Prefer `kind_access_policy_arns` for a workload
-    that only touches one category — the scheduled worker writes briefs and has
-    no business deleting a user's CV.
+    that only touches one category — a grant over every kind is also a grant
+    over whichever kind is added next.
   EOT
   value       = { for environment, policy in aws_iam_policy.access : environment => policy.arn }
 }
@@ -23,7 +23,7 @@ output "access_policy_arns" {
 output "kind_access_policy_arns" {
   description = <<-EOT
     Per-(environment, kind) IAM policy ARNs, keyed `<environment>:<kind>` —
-    e.g. `prod:briefs`. The narrow grant, and the one to reach for first.
+    e.g. `prod:resumes`. The narrow grant, and the one to reach for first.
 
     No role is created here on purpose, so the two stacks never contend over
     one. Attach the ARN to the workload's execution role from its own stack.

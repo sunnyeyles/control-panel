@@ -3,10 +3,9 @@ import type { DocumentType } from "@workspace/db"
 /**
  * What each Document Type is called in the interface.
  *
- * One copy, read by the uploader's `<Select>`, the list's badge and the settings
- * picker. There were three, none tied to the canonical set, so a new type
- * rendered as its raw slug and was unofferable in the form — typechecking and
- * tests all green.
+ * One copy, read by the uploader's `<Select>` and the list's badge. There used
+ * to be several, none tied to the canonical set, so a new type rendered as its
+ * raw slug and was unofferable in the form — typechecking and tests all green.
  *
  * ⚠️ **The import is `import type`, and that is load-bearing.** This module is
  * reached from a client component and `@workspace/db` carries the Prisma client
@@ -15,7 +14,6 @@ import type { DocumentType } from "@workspace/db"
  * exhaustive. Restating the keys is the price: importing `DOCUMENT_TYPES` as a
  * *value* would single-source them but rest the guarantee on a bundler
  * continuing to resolve a subpath that happens not to reach the driver.
- * `lib/postings/posting-status-labels.ts` is the same arrangement.
  */
 export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   resume: "Resume",

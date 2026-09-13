@@ -10,8 +10,9 @@
 # Cross-cutting
 # ---------------------------------------------------------------------------
 
-# Every alarm from every stack lands here. The SNS subscription needs one click
-# in the confirmation mail AWS sends before anything is delivered.
+# Any alarm from any stack lands here — none raises one today, but the topic
+# and its subscription are kept (see alerting.tf). The SNS subscription needs
+# one click in the confirmation mail AWS sends before anything is delivered.
 alert_email = "sunnyeyles@gmail.com"
 
 # ---------------------------------------------------------------------------
@@ -25,10 +26,6 @@ user_storage = {
   # abandoning the old one's contents — `prevent_destroy` on the bucket will
   # stop the apply rather than let that happen quietly.
   bucket_name = "control-panel-user-storage-650694420748"
-}
-
-briefing_worker = {
-  function_name = "briefing-worker"
 }
 
 # The dashboard's access to the user-storage bucket, via Vercel OIDC.

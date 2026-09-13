@@ -3,7 +3,7 @@
 # Root-level runs, because this stack is root-level resources rather than a
 # module — `alerting.tf` and `boundary.tf` are the same shape. That means every
 # run configures the whole root, which is why the `variables` block below names
-# the other two stacks as well; `terraform test` does not auto-load
+# the user-storage stack as well; `terraform test` does not auto-load
 # terraform.tfvars.
 #
 # Scope, same honesty as user_storage.tftest.hcl: `aws_iam_policy_document` is a
@@ -15,21 +15,9 @@
 # decoded `VERCEL_OIDC_TOKEN` and is called out in DEPLOYING.md.
 
 mock_provider "aws" {
-  # `override_during = plan` so the worker's ARN is known while these run
-  # blocks plan. Without it the invoke policy's `resources` is unknown until
-  # apply, and the assertion that it is not a wildcard — the one worth having —
-  # cannot be evaluated at all.
-  override_during = plan
-
   mock_data "aws_iam_policy_document" {
     defaults = {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
-    }
-  }
-
-  mock_resource "aws_lambda_function" {
-    defaults = {
-      arn = "arn:aws:lambda:ap-southeast-2:000000000000:function:briefing-worker"
     }
   }
 
@@ -57,10 +45,6 @@ variables {
     bucket_name = "control-panel-user-storage-test"
   }
 
-  briefing_worker = {
-    lambda_zip_path = "./tests/fixtures/lambda.zip"
-  }
-
   vercel_dashboard = {
     team_slug = "acme"
   }
@@ -86,67 +70,14 @@ run "configured" {
     error_message = "The role must carry the workload permissions boundary; iam:CreateRole is conditioned on it."
   }
 
-  # The narrow grants, and only them. The per-environment policy would also
-  # cover briefs.
+  # The narrow grant, and only it. The per-environment policy would also cover
+  # whatever kind is added to the bucket next.
   #
-  # `keys()` returns them sorted. Asserting the exact set rather than membership
-  # is the point: a further kind added to `local.vercel_dashboard_kinds` has to
-  # be argued for here. `tailored-resumes` was — the dashboard generates, serves
-  # and deletes those objects, and the worker holds no grant over them, which
-  # keeps the disjointness asserted below true.
+  # Asserting the exact set rather than membership is the point: a further kind
+  # added to `local.vercel_dashboard_kinds` has to be argued for here.
   assert {
-    condition     = keys(aws_iam_role_policy_attachment.vercel_dashboard_user_storage) == ["prod:cover-letters", "prod:resumes", "prod:tailored-resumes"]
-    error_message = "The dashboard must be attached to exactly the prod:cover-letters, prod:resumes and prod:tailored-resumes policies; anything broader lets it rewrite generated briefs."
-  }
-
-  # Stated separately from the set above, because this is the property and that
-  # is only today's spelling of it. A grant over `briefs` would let the app that
-  # renders a briefing also author one.
-  assert {
-    condition     = !contains(local.vercel_dashboard_kinds, "briefs")
-    error_message = "The dashboard must hold no grant over briefs; the worker writes those and the app must not be able to forge one."
-  }
-
-  # The property neither file states on its own: the dashboard cannot forge a
-  # briefing, and the worker cannot delete someone's CV. Both attachments filter
-  # the same map by suffix, so this stays true only as long as nobody widens
-  # either filter — which is exactly the edit worth failing a test.
-  assert {
-    condition = length(setintersection(
-      toset(keys(aws_iam_role_policy_attachment.vercel_dashboard_user_storage)),
-      toset(keys(aws_iam_role_policy_attachment.worker_user_storage)),
-    )) == 0
-    error_message = "The dashboard's and the worker's storage grants must be disjoint."
-  }
-
-  # The dashboard may *start* a briefing run and still not author one. That is
-  # only true while this grant stays what it says it is, so both halves are
-  # asserted: that it exists at all, and that it names one function.
-  assert {
-    condition     = length(aws_iam_role_policy.vercel_dashboard_invoke_worker) == 1
-    error_message = "The dashboard needs lambda:InvokeFunction to start an ad-hoc run."
-  }
-
-  # A wildcard here would let the app invoke anything in the account — including
-  # a future function with grants of its own — which is the confused-deputy
-  # shape this whole stack is arranged to avoid.
-  assert {
-    condition = alltrue([
-      for statement in data.aws_iam_policy_document.vercel_dashboard_invoke_worker[0].statement :
-      !contains(statement.resources, "*")
-    ])
-    error_message = "The invoke grant must name the worker's ARN, never `*`."
-  }
-
-  # Stated separately because it is the property, not its spelling: invoking is
-  # not writing. If someone ever adds an `s3:` action to this document, the
-  # storage assertions above would still pass and this is what would not.
-  assert {
-    condition = alltrue([
-      for statement in data.aws_iam_policy_document.vercel_dashboard_invoke_worker[0].statement :
-      alltrue([for action in statement.actions : startswith(action, "lambda:")])
-    ])
-    error_message = "The invoke policy must grant nothing but lambda: actions; storage access belongs to the per-kind policies, which deliberately exclude briefs."
+    condition     = keys(aws_iam_role_policy_attachment.vercel_dashboard_user_storage) == ["prod:resumes"]
+    error_message = "The dashboard must be attached to exactly the prod:resumes policy; a further kind has to be argued for in this test."
   }
 
   # A wildcard smuggled into a StringEquals value does not match broadly — it
@@ -201,20 +132,6 @@ run "unconfigured_creates_nothing" {
   assert {
     condition     = length(aws_iam_role_policy_attachment.vercel_dashboard_user_storage) == 0
     error_message = "An unconfigured vercel_dashboard must attach no policy."
-  }
-
-  # Gated on the same `count` as the role it would attach to. A policy created
-  # without one fails the apply rather than the plan, which is a worse place to
-  # find out.
-  assert {
-    condition     = length(aws_iam_role_policy.vercel_dashboard_invoke_worker) == 0
-    error_message = "An unconfigured vercel_dashboard must create no invoke policy."
-  }
-
-  # The other two stacks are untouched by the gate.
-  assert {
-    condition     = length(aws_iam_role_policy_attachment.worker_user_storage) == 1
-    error_message = "Gating the dashboard stack must not affect the worker's grant."
   }
 }
 

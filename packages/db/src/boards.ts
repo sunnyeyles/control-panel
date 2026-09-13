@@ -31,7 +31,7 @@ export async function loadBoard(
 /**
  * Write this user's board, creating the row on the first save.
  *
- * An upsert, like `saveCoverLetterInstructions`: there is at most one row per
+ * An upsert: there is at most one row per
  * user and nothing calls this before the user exists, so the first save and the
  * ten-thousandth are the same operation. The snapshot is replaced whole — a
  * board is a picture, not a patch of one.

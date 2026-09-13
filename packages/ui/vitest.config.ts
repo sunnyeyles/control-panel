@@ -8,9 +8,9 @@ import { defineConfig } from "vitest/config"
  * `tsconfig.json` already covers these files and `typecheck` reaches them free.
  *
  * **`src/lib/` rather than `src/components/`, and that boundary is the point.**
- * `components/` is React over a DOM, which would mean a browser environment and
- * ProseMirror. What is worth pinning is string-to-string and was moved out of
- * the editor so it could be reached without any of that — see `src/lib/markdown.ts`.
+ * `components/` is React over a DOM, which would mean a browser environment.
+ * What is worth pinning is string-to-string and lives in `lib/` so it can be
+ * reached without one — see `src/lib/markdown-plugins.ts`.
  */
 export default defineConfig({
   test: {

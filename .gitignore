@@ -24,14 +24,11 @@ dist
 # turbo
 .turbo
 
-# briefing-worker local harness output: briefs it generated and the traces of
-# the runs that made them. Real model output against real search results, so it
-# is per-machine and disposable — see apps/briefing-worker/README.md §Watching.
+# legacy local output from the removed job search. The code that wrote these is
+# gone, but checkouts that ran it may still hold generated briefs, run traces
+# and cover letters drafted from a candidate's own CV — the last things that
+# should land in a shared repository. Kept ignored until nobody has them.
 .briefings/
-
-# briefing-worker local harness output: cover letters drafted by `letter`. A
-# letter is written in a candidate's voice from their own CV, so it is the last
-# thing that should land in a shared repository.
 .letters/
 
 # misc
@@ -50,12 +47,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
-# lambda deploy artifact (built from dist/ on demand)
+# legacy local output from the removed job search: the Lambda deploy artifact
+# its worker was packaged into. Kept ignored for checkouts that still hold one.
 lambda.zip
-# ...except the tiny fixture the terraform tests plan against. filebase64sha256
-# reads the zip at plan time, so the suite needs *a* file there and must not
-# need a build first.
-!infra/aws/tests/fixtures/lambda.zip
 
 # terraform: provider binaries and modules, per-machine
 .terraform/
@@ -72,7 +66,7 @@ crash.*.log
 *.tfvars
 *.tfvars.json
 # ...except the root's own, which is configuration rather than resolved values:
-# a bucket name, a function name and the alerting address, none of them secret
+# a bucket name, a Vercel team slug and the alerting address, none of them secret
 # and all of them already in the READMEs. Committed so that `terraform apply`
 # needs no flags and a half-configured apply is not expressible. If this
 # repository ever becomes public, drop alert_email from it and pass

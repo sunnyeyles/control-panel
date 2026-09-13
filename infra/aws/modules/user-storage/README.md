@@ -1,8 +1,8 @@
 # user-storage
 
-A private, encrypted, versioned S3 bucket for per-user data — generated briefs
-and uploaded documents — plus least-privilege IAM policies per environment and
-per kind.
+A private, encrypted, versioned S3 bucket for per-user data — today, documents
+the user uploaded — plus least-privilege IAM policies per environment and per
+kind.
 
 Self-contained on purpose: it creates the bucket and its guards and nothing
 else, so it can be dropped into whatever root eventually owns the AWS stack.
@@ -24,22 +24,22 @@ Grant a workload access to one kind only — the narrow form, and the one to
 reach for first:
 
 ```hcl
-resource "aws_iam_role_policy_attachment" "briefs" {
-  role       = aws_iam_role.worker.name
-  policy_arn = module.user_storage.kind_access_policy_arns["prod:briefs"]
+resource "aws_iam_role_policy_attachment" "resumes" {
+  role       = aws_iam_role.workload.name
+  policy_arn = module.user_storage.kind_access_policy_arns["prod:resumes"]
 }
 ```
 
 ## Inputs
 
-| Name                   | Type                | Default             | Description                                                     |
-| ---------------------- | ------------------- | ------------------- | --------------------------------------------------------------- |
-| `bucket_name`          | `string`            | —                   | Globally unique. Validated against S3's naming rules.           |
-| `environments`         | `list(string)`      | — (required)        | One key prefix and one IAM policy each.                         |
-| `object_kinds`         | `map(object)`       | `briefs`, `resumes` | Categories and their retention. See below.                      |
-| `kms_key_arn`          | `string`            | `null`              | Null uses SSE-S3. Set only when a key you rotate is required.   |
-| `attach_to_role_names` | `map(list(string))` | `{}`                | Roles to attach each environment's policy to. Creates no roles. |
-| `tags`                 | `map(string)`       | `{}`                | Applied verbatim; this module adds none of its own.             |
+| Name                   | Type                | Default      | Description                                                     |
+| ---------------------- | ------------------- | ------------ | --------------------------------------------------------------- |
+| `bucket_name`          | `string`            | —            | Globally unique. Validated against S3's naming rules.           |
+| `environments`         | `list(string)`      | — (required) | One key prefix and one IAM policy each.                         |
+| `object_kinds`         | `map(object)`       | `resumes`    | Categories and their retention. See below.                      |
+| `kms_key_arn`          | `string`            | `null`       | Null uses SSE-S3. Set only when a key you rotate is required.   |
+| `attach_to_role_names` | `map(list(string))` | `{}`         | Roles to attach each environment's policy to. Creates no roles. |
+| `tags`                 | `map(string)`       | `{}`         | Applied verbatim; this module adds none of its own.             |
 
 `environments` has **no default**. The caller's root declares one — and passing
 `null` to a module input does not fall back to a module default, so a default
@@ -57,7 +57,6 @@ Keys must match the kinds declared in `packages/user-storage/src/kinds.ts`.
 
 ```hcl
 object_kinds = {
-  briefs  = { expiration_days = 365,  noncurrent_version_expiration_days = 30 }
   resumes = { expiration_days = null, noncurrent_version_expiration_days = 365 }
 }
 ```
@@ -66,6 +65,9 @@ object_kinds = {
 resumes on purpose: silently deleting a document the user uploaded themselves
 is data loss, not housekeeping. When it is null no `expiration` block is
 emitted at all — the absence is the guarantee, rather than a very large number.
+
+A kind that should age out sets a number instead, and gets an `expiration`
+block on its rule.
 
 ## How per-kind retention actually works
 
@@ -84,12 +86,12 @@ policies can be expressed as `…/{environment}/*/{kind}/*`.
 
 ## Outputs
 
-| Name                      | Description                                                       |
-| ------------------------- | ----------------------------------------------------------------- |
-| `bucket_name`             | Set as `USER_STORAGE_BUCKET_NAME`.                                |
-| `bucket_region`           | Set as `AWS_REGION`.                                              |
-| `access_policy_arns`      | Per environment, every kind. The broad grant.                     |
-| `kind_access_policy_arns` | Per `<environment>:<kind>`, e.g. `prod:briefs`. The narrow grant. |
+| Name                      | Description                                                        |
+| ------------------------- | ------------------------------------------------------------------ |
+| `bucket_name`             | Set as `USER_STORAGE_BUCKET_NAME`.                                 |
+| `bucket_region`           | Set as `AWS_REGION`.                                               |
+| `access_policy_arns`      | Per environment, every kind. The broad grant.                      |
+| `kind_access_policy_arns` | Per `<environment>:<kind>`, e.g. `prod:resumes`. The narrow grant. |
 
 ## What it does not do
 

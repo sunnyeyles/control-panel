@@ -1,21 +1,19 @@
 # Deploying
 
-Two runbooks. **The briefing worker** — first deploy, verification, rollback —
-and, at the end, **giving the dashboard access to user storage** via Vercel
-OIDC. They are unrelated deployments that happen to share a bucket and a state
-file. The layout, the one-triple-per-stack rule and the architecture behind them
-live in `infra/aws/README.md` and are not restated here.
+Two runbooks. **The root itself** — first deploy, verification, rollback — and,
+after it, **giving the dashboard access to user storage** via Vercel OIDC. The
+layout, the one-triple-per-stack rule and the architecture behind them live in
+`infra/aws/README.md` and are not restated here.
 
-Worth knowing before the first deploy: **all three stacks share this root and
-therefore one state file**, which is what lets the worker's execution role and
-the bucket policy that references it resolve in a single graph instead of across
-a remote-state lookup. Each stack keeps to its own files.
+Worth knowing before the first deploy: **both stacks share this root and
+therefore one state file**, which is what lets the dashboard's role attach a
+policy the user-storage module publishes in a single graph instead of across a
+remote-state lookup. Each stack keeps to its own files.
 
-Two things the worker does not own. **The SNS topic and its email subscription**
-live in `alerting.tf`, because one topic serves every stack and a per-stack topic
-means a per-stack confirmation mail. **The permissions boundary** on both its
-roles comes from `boundary.tf`; the deploy role may only create roles that carry
-it.
+Two things no stack owns. **The SNS topic and its email subscription** live in
+`alerting.tf`, because one topic serves every stack and a per-stack topic means
+a per-stack confirmation mail. **The permissions boundary** on every role comes
+from `boundary.tf`; the deploy role may only create roles that carry it.
 
 ## First deploy
 
@@ -29,12 +27,9 @@ and the deploy role, and prints the repository variables to set.
 terraform -chdir=infra/aws init -backend-config="bucket=control-panel-tfstate-<account-id>"
 ```
 
-**3. Build before planning.** `filebase64sha256` reads `lambda.zip` at _plan_
-time, so a plan on an unbuilt tree fails with a file-not-found that reads like a
-Terraform bug.
+**3. Apply.**
 
 ```bash
-pnpm turbo zip --filter=@workspace/briefing-worker
 terraform -chdir=infra/aws apply
 ```
 
@@ -42,37 +37,10 @@ No `-var` flags. `alert_email` and the bucket name live in the committed
 `infra/aws/terraform.tfvars`, which Terraform auto-loads — check the bucket name
 in it is right for this account before the first apply.
 
-**4. Set all five secrets by hand.** Terraform creates each one empty and can
-never write it — that is deliberate, see `bootstrap/README.md`.
-
-```bash
-aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/openai-api-key --secret-string "sk-..."
-aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/database-url --secret-string "postgres://..."
-aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/apify-token --secret-string "apify_api_..."
-aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/langfuse-public-key --secret-string "pk-lf-..."
-aws secretsmanager put-secret-value \
-  --secret-id briefing-worker/langfuse-secret-key --secret-string "sk-lf-..."
-```
-
-**All five, not just the one you changed.** `loadSecrets` fetches them
-concurrently at handler init, so a single empty shell takes down _every_
-invocation — including ticks with nothing due — with
-`ResourceNotFoundException: … staging label: AWSCURRENT`, before `runTick` is
-reached and before any run report can be emitted. The failure names no secret,
-so the first useful question is always "which of the five is empty", not
-"what is wrong with the code".
-
-That is a live trap rather than a hypothetical: adding the Tavily secret in a
-later apply created the shell, the reference to it went out in the same apply,
-and the value was never put in behind it. Every tick failed until someone
-looked.
-
-**5. Confirm the SNS subscription.** AWS sends a confirmation mail. Until it is
-clicked the alarms deliver nothing, and silence will look like health.
+**4. Confirm the SNS subscription.** AWS sends a confirmation mail. Until it is
+clicked the topic delivers nothing, and silence will look like health. No stack
+raises an alarm today; confirming now is what makes the first one a future
+stack adds actually arrive.
 
 ```bash
 aws sns list-subscriptions-by-topic \
@@ -86,102 +54,15 @@ again.
 
 ## Verifying
 
-Forcing a run and reading the log lines it emits is
-`apps/briefing-worker/README.md` §Forcing a run in AWS — the worker defines
-those lines, so it documents them.
-
-What belongs here is the daily health check — count ticks, not runs, since most
-hours have nothing due and a run report is only emitted when a job is actually
-claimed:
-
-```
-filter @message like /"event":"tick"/
-| parse @message '"failed":*,' as failed
-| stats count() as ticks, sum(failed) as failed_runs by bin(1d)
-```
-
-Twenty-four ticks a day is healthy. Fewer means the schedule is not firing,
-which is the missed-run alarm's job to notice — but this is how to see it.
-
 Done means all of:
 
 - [ ] `terraform -chdir=infra/aws test` passes (no credentials needed)
 - [ ] `terraform apply` clean, and a following `plan` reports no changes
-- [ ] both roles carry the boundary:
-      `aws iam get-role --role-name briefing-worker-execution --query Role.PermissionsBoundary`
-- [ ] **all five** secrets hold a value — see "Counting secret versions" below
-- [ ] the function carries `USER_STORAGE_BUCKET_NAME` and
-      `USER_STORAGE_ENVIRONMENT`:
-      `aws lambda get-function-configuration --function-name briefing-worker --query Environment.Variables`
-- [ ] migrations applied: `DATABASE_URL_UNPOOLED=… pnpm --filter @workspace/db migrate`
-      reports nothing to do on a second run
-- [ ] a manual invoke produces one `tick` line; with nothing due that is
-      `"due":0` and is a success
-- [ ] with a job seeded due, a manual invoke produces one `briefing-run` line
-      with `"outcome":"success"`, `"searches"` above zero, and an `objectKey` —
-      a non-zero search count is what proves the postings were looked up rather
-      than recalled
-- [ ] that `objectKey` exists in the bucket, carries the `kind=briefs` tag, and
-      has a matching row: `select object_key from artifacts order by created_at desc limit 1`
-- [ ] `Init Duration` noted from the `REPORT` line, as the cold-start baseline.
-      Expect it to have grown: the bundle now carries `pg`, and a tick pays a
-      Neon wake on top
-- [ ] `Init Duration` and total duration on an idle tick are both acceptable —
-      an hourly tick wakes Neon 24× a day where a daily one woke it once, which
-      is a compute-hours line to watch rather than a caching strategy to build
-- [ ] the failure contract: set the OpenAI secret to an invalid value, invoke
-      with a job due, and confirm exactly one `"outcome":"failure"` line, a
-      `tick` line with `"failed":1`, one `Errors` datapoint and an alarm mail —
-      then restore with
-      `aws secretsmanager get-secret-value --version-stage AWSPREVIOUS`, not from
-      the clipboard
-- [ ] ticks land on the hour unprompted
-
-### Counting secret versions
-
-Count versions, never print one. `LastChangedDate` is not the check: creating an
-empty shell sets it too, so a secret with no value at all reads as freshly
-changed.
-
-```bash
-for s in openai-api-key database-url apify-token langfuse-public-key langfuse-secret-key; do
-  printf '%-16s ' "$s"
-  aws secretsmanager describe-secret --secret-id "briefing-worker/$s" \
-    --query 'length(keys(VersionIdsToStages || `{}`))' --output text
-done
-```
-
-Every line must report `1` or more. A `0` is the outage in step 4.
-
-## Taking the worker off duty
-
-Verifying a change without letting it run whatever is due:
-
-```bash
-terraform -chdir=infra/aws apply -var="schedule_enabled=false"
-```
-
-The function stays deployed and manually invocable; only the tick is disabled.
-Re-apply without the flag to put it back on duty.
-
-**This is the safe half of the tick cutover.** The worker and its schedule
-changed meaning at the same moment — the function became "run what is due" and
-the schedule became hourly — and deploying either alone leaves the system
-incoherent: an hourly schedule against a worker that ignores the database runs
-the proof task 24 times a day, and a daily schedule against the tick caps every
-job at one run a day. Deploy both with `schedule_enabled=false`, apply
-migrations, verify by manual invoke, then enable.
-
-`schedule_enabled` is the one stack input kept as a flat top-level variable
-rather than a field of the `briefing_worker` object, precisely so it can be set
-this way — an object field cannot be overridden from the command line without
-restating the whole object.
-
-The missed-run alarm is destroyed along with the schedule rather than left to
-fire. It treats no invocation as breaching, so leaving it in place would hold it
-permanently in ALARM while the worker is deliberately off duty — and it is the
-only alarm that catches silence, so teaching anyone to ignore its mail is the one
-habit worth avoiding.
+- [ ] the dashboard role carries the boundary:
+      `aws iam get-role --role-name control-panel-vercel-dashboard --query Role.PermissionsBoundary`
+- [ ] the SNS subscription is confirmed, per step 4
+- [ ] an upload at `/documents` lands with the key, tag and metadata described in
+      the dashboard runbook's §Verifying below
 
 ## Rollback
 
@@ -192,30 +73,21 @@ a re-apply:
 git revert <the bad commit> && git push
 ```
 
-That rebuilds the zip from the reverted source and applies the reverted
-Terraform in one run, which is the same path that put the bad version there.
+That applies the reverted Terraform in one run, which is the same path that put
+the bad version there.
 
-To get out from under a broken function faster than CI can run, disable the
-schedule as above — that stops the damage without needing a good build to exist
-yet.
-
-Two things a revert does **not** undo:
-
-- **The secret.** Terraform never writes its value. If a rotation is what broke
-  the run, restore the previous one directly:
-  `aws secretsmanager get-secret-value --secret-id briefing-worker/openai-api-key --version-stage AWSPREVIOUS`
-- **Anything already written to S3.** The bucket is versioned, so an overwritten
-  brief is recoverable by version ID and a deleted one sits behind a delete
-  marker — but reverting code does not remove what a bad run produced.
+One thing a revert does **not** undo: **anything already written to S3.** The
+bucket is versioned, so an overwritten document is recoverable by version ID and
+a deleted one sits behind a delete marker — but reverting code does not remove
+what a bad deploy wrote.
 
 ---
 
 # Giving the dashboard access to user storage
 
-The dashboard on Vercel reads and writes uploaded **Documents** in the same
-bucket the worker writes briefs to. It gets there by exchanging a Vercel OIDC
-token for the `control-panel-vercel-dashboard` role — no access key exists on
-this path either.
+The dashboard on Vercel reads and writes uploaded **Documents** in the
+user-storage bucket. It gets there by exchanging a Vercel OIDC token for the
+`control-panel-vercel-dashboard` role — no access key exists on this path.
 
 **This stack is configured and on.** `vercel_dashboard` in
 `infra/aws/terraform.tfvars` names a `team_slug`, so the role and its
@@ -285,22 +157,14 @@ terraform -chdir=infra/aws output -raw vercel_dashboard_role_arn
 
 ## 4. Set the Vercel project environment
 
-Production scope, five variables:
+Production scope, four variables:
 
-| Variable                        | Value                                            |
-| ------------------------------- | ------------------------------------------------ |
-| `USER_STORAGE_BUCKET_NAME`      | `terraform output -raw user_storage_bucket_name` |
-| `USER_STORAGE_ENVIRONMENT`      | `prod`                                           |
-| `AWS_REGION`                    | `ap-southeast-2` — **an override, not a gap**    |
-| `AWS_ROLE_ARN`                  | the output from step 3                           |
-| `BRIEFING_WORKER_FUNCTION_NAME` | `terraform output -raw worker_function_name`     |
-
-**`BRIEFING_WORKER_FUNCTION_NAME` is what the Run now button needs.** Without it
-the button fails at the moment of the click, saying the briefing could not be
-started; everything else in the app works. Note that the role also has to carry
-the invoke grant — `aws_iam_role_policy.vercel_dashboard_invoke_worker` in
-`vercel-dashboard.tf` — so a Vercel variable set before that apply lands still
-produces an `AccessDeniedException`.
+| Variable                   | Value                                            |
+| -------------------------- | ------------------------------------------------ |
+| `USER_STORAGE_BUCKET_NAME` | `terraform output -raw user_storage_bucket_name` |
+| `USER_STORAGE_ENVIRONMENT` | `prod`                                           |
+| `AWS_REGION`               | `ap-southeast-2` — **an override, not a gap**    |
+| `AWS_ROLE_ARN`             | the output from step 3                           |
 
 **`AWS_REGION` is the row to be careful with, and not because it is missing.**
 Vercel sets it for you, to the region the function happened to execute in. Its

@@ -75,10 +75,10 @@ export interface StoredResume extends ResumeRef {
 /**
  * Documents the user uploaded — CVs and the like.
  *
- * A facade over {@link UserObjectStore}, not a second implementation. Unlike
- * briefs these are opaque binary, arrive from outside, and are replaced rather
- * than regenerated — so the key carries no date and the extension is chosen
- * from an allowlist per upload.
+ * A facade over {@link UserObjectStore}, not a second implementation. These are
+ * opaque binary, arrive from outside, and are replaced rather than regenerated
+ * — so the key is a flat id and the extension is chosen from an allowlist per
+ * upload.
  */
 export interface ResumeStore {
   put(resume: NewResume): Promise<StoredResume>
@@ -205,8 +205,8 @@ function documentTypeMetadata(
  * Strip it to something a header can carry, and keep only the basename so a
  * path never survives into the record.
  *
- * The stripping itself is {@link toMetadataValue}, shared with the cover-letter
- * store rather than restated — the rule is about what a header can carry, which
+ * The stripping itself is {@link toMetadataValue}, shared with the document type
+ * rather than restated — the rule is about what a header can carry, which
  * has nothing to do with filenames. What stays here is the part that *is* about
  * filenames: taking the basename, and treating "nothing survived" as an error
  * rather than an absence. A document with no name is a row of raw uuid, and the

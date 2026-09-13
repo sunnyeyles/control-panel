@@ -1229,16 +1229,9 @@ export const PromptInputSubmit = ({
   )
 }
 
-/* Four families of composer parts used to continue from here, and they now sit
-   in siblings — `prompt-input-select.tsx`, `prompt-input-hover-card.tsx`,
-   `prompt-input-command.tsx` and `prompt-input-tabs.tsx`.
-
-   Not tidiness. Nothing in this app renders any of them, and while they lived
-   in this module their imports — cmdk, Radix HoverCard, Radix Select — were in
-   the chat page's first-load chunk, because `PromptInput` itself is. The
-   package's export map is one file per subpath, so each is importable at
-   `@workspace/ui/components/ai-elements/prompt-input-<family>` and nothing had
-   to be registered anywhere.
+/* The registry's select, hover-card, command and tabs composer parts are not
+   vendored: nothing in this app renders them, and their imports would sit in
+   the chat page's first-load chunk because `PromptInput` itself does.
 
    The action-menu family above stays put on purpose: `PromptInputActionAddAttachments`
    and `PromptInputActionAddScreenshot` are `DropdownMenuItem`s wired to this

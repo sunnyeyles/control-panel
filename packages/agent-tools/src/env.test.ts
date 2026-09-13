@@ -34,7 +34,7 @@ function sourceFiles(directory: string): string[] {
 const sources = sourceFiles(SRC)
 
 /**
- * `requireEnv("APIFY_TOKEN", …)` → `APIFY_TOKEN`.
+ * `requireEnv("TAVILY_API_KEY", …)` → `TAVILY_API_KEY`.
  *
  * The declaration in `internal/http.ts` is excluded by matching a call with a
  * string literal first argument — the definition's parameter is `name`, which

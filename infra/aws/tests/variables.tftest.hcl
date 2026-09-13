@@ -102,74 +102,13 @@ run "rejects_object_kind_name_with_uppercase" {
   variables {
     bucket_name  = "control-panel-user-storage-test"
     environments = ["prod"]
-    object_kinds = { Briefs = { expiration_days = 30 } }
+    object_kinds = { Resumes = { expiration_days = 30 } }
   }
 
   expect_failures = [var.object_kinds]
 }
 
-# 900 seconds is Lambda's hard maximum. Above it the apply fails at the API with
-# a less obvious message.
-run "rejects_timeout_above_lambda_maximum" {
-  command = plan
-
-  module {
-    source = "./modules/briefing-worker"
-  }
-
-  variables {
-    function_name            = "briefing-worker"
-    lambda_zip_path          = "./tests/fixtures/lambda.zip"
-    alerts_topic_arn         = "arn:aws:sns:ap-southeast-2:000000000000:test"
-    user_storage_bucket_name = "control-panel-user-storage-test"
-    timeout                  = 901
-  }
-
-  expect_failures = [var.timeout]
-}
-
-# The alarms have to publish somewhere real. A non-ARN here would apply cleanly
-# and deliver nothing.
-run "rejects_non_arn_alerts_topic" {
-  command = plan
-
-  module {
-    source = "./modules/briefing-worker"
-  }
-
-  variables {
-    function_name            = "briefing-worker"
-    lambda_zip_path          = "./tests/fixtures/lambda.zip"
-    alerts_topic_arn         = "briefing-worker-alerts"
-    user_storage_bucket_name = "control-panel-user-storage-test"
-  }
-
-  expect_failures = [var.alerts_topic_arn]
-}
-
-# The environment name is the leading segment of every object key the worker
-# writes, and `assertSegment()` in `packages/user-storage/src/keys.ts` enforces
-# the same rule on the other side. A name with a slash here would have the
-# worker addressing a prefix the IAM grant does not scope to.
-run "rejects_storage_environment_with_slash" {
-  command = plan
-
-  module {
-    source = "./modules/briefing-worker"
-  }
-
-  variables {
-    function_name            = "briefing-worker"
-    lambda_zip_path          = "./tests/fixtures/lambda.zip"
-    alerts_topic_arn         = "arn:aws:sns:ap-southeast-2:000000000000:test"
-    user_storage_bucket_name = "control-panel-user-storage-test"
-    user_storage_environment = "prod/eu"
-  }
-
-  expect_failures = [var.user_storage_environment]
-}
-
-# Alerting that silently switches itself off is the failure the alarms exist to
+# Alerting that silently switches itself off is the failure alarms exist to
 # catch, so a malformed address must break the apply rather than produce a
 # subscription that can never confirm. Root-level: the address is the root's,
 # because the topic is.
@@ -181,10 +120,6 @@ run "rejects_malformed_alert_email" {
 
     user_storage = {
       bucket_name = "control-panel-user-storage-test"
-    }
-
-    briefing_worker = {
-      lambda_zip_path = "./tests/fixtures/lambda.zip"
     }
   }
 

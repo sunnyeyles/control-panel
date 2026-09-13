@@ -23,10 +23,8 @@ export function createDocumentDelegate(store: DevStore) {
 /**
  * One user's Documents, newest first.
  *
- * The real query's order, restated rather than ignored: `loadCandidateBackground`
- * picks "the newest document labelled resume" by taking the first match out of
- * it, so insertion order would make that choice look arbitrary here and correct
- * in production.
+ * The real query's order, restated rather than ignored — tie-break on `id`
+ * included — so `/documents` under the flag lists in the order production does.
  */
 function findManyDocuments(store: DevStore, userId: string): Document[] {
   return store.documents
@@ -55,9 +53,8 @@ function createDocument(store: DevStore, data: Document): Document {
 }
 
 /**
- * Splices out of the backing array rather than rebuilding it, for the reason
- * deletePostings gives: the field is `readonly` and every other method reads
- * through it.
+ * Splices out of the backing array rather than rebuilding it: the field is
+ * `readonly` and every other method reads through it.
  */
 function deleteDocuments(
   store: DevStore,

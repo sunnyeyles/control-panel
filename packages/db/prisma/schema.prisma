@@ -1,9 +1,8 @@
 // Application tables only. Neon Auth lives in `neon_auth` and is never modeled
 // here — `users.auth_user_id` is a plain text column on purpose, not an FK.
 //
-// Partial indexes and CHECK constraints that Prisma cannot express live in the
-// initial migration SQL beside this schema. Do not "tidy" them into full
-// unique constraints: ad-hoc runs (`scheduled_for IS NULL`) must stay unlimited.
+// CHECK constraints that Prisma cannot express live in the migration SQL beside
+// this schema. Migrations here are hand-authored and forward-only.
 
 generator client {
   provider = "prisma-client"
@@ -17,38 +16,14 @@ datasource db {
 model User {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  // Better Auth nanoids — text, not uuid. Nullable so unlinked (worker-owned)
-  // users remain legal; UNIQUE still maps one auth identity to at most one row.
+  // Better Auth nanoids — text, not uuid. Nullable so unlinked users remain
+  // legal; UNIQUE still maps one auth identity to at most one row.
   authUserId String?  @unique @map("auth_user_id")
 
-  jobs                    Job[]
-  coverLetterInstructions CoverLetterInstructions?
-  postingFilters          PostingFilters?
-  postings                Posting[]
-  documents               Document[]
-  board                   Board?
+  documents Document[]
+  board     Board?
 
   @@map("users")
-}
-
-model PostingFilters {
-  userId String @id @map("user_id") @db.Uuid
-  // Words that rule a Posting out by its title, lowercased and normalised by
-  // `parseTitleExclusions` in `@workspace/job-search` before they get here.
-  // A real `text[]` rather than JSON — unlike `jobs.config`, this package does
-  // read these: `listPostingPage` filters on them, so they are data with a
-  // shape rather than a blob it merely stores. `cardinality` is bounded by a
-  // CHECK in the migration SQL.
-  titleExclusions String[] @map("title_exclusions")
-  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  // Cascades, like `CoverLetterInstructions` and `Board` and for the reason
-  // both give: a preference with no independent existence is not a record that
-  // something happened, so `Restrict` would make a user undeletable for the
-  // sake of a settings row.
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("posting_filters")
 }
 
 model Document {
@@ -65,14 +40,16 @@ model Document {
   // is an HTTP header and so carries printable ASCII and nothing else — an em
   // dash in a filename did not survive that round trip.
   filename   String
-  // text + CHECK in migration SQL rather than a Postgres enum, as `runs.status`
-  // and `postings.status` are. NOT NULL: "unlabelled" was a state for objects
-  // written before the label existed, and `other` is the honest value for an
-  // upload whose posted label we do not recognise.
+  // text + CHECK in migration SQL rather than a Postgres enum. NOT NULL:
+  // "unlabelled" was a state for objects written before the label existed, and
+  // `other` is the honest value for an upload whose posted label we do not
+  // recognise.
   docType    String   @default("other") @map("doc_type")
   byteSize   Int      @map("byte_size")
   uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
 
+  // Restrict: a row is a pointer at bytes in a bucket, so deleting the user out
+  // from under it would leave objects nothing names.
   user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId, uploadedAt(sort: Desc), id(sort: Desc)], map: "documents_user_uploaded_idx")
@@ -81,196 +58,17 @@ model Document {
 
 model Board {
   userId String @id @map("user_id") @db.Uuid
-  // A tldraw store snapshot, opaque here exactly as `runs.findings` and
-  // `jobs.config` are. Nothing in this package reads inside it — its shape is
-  // tldraw's, it changes when tldraw's schema does, and tldraw migrates it on
-  // load. A column per shape would be a second, worse copy of a format that
-  // already has an owner.
+  // A tldraw store snapshot, opaque here. Nothing in this package reads inside
+  // it — its shape is tldraw's, it changes when tldraw's schema does, and tldraw
+  // migrates it on load. A column per shape would be a second, worse copy of a
+  // format that already has an owner.
   snapshot  Json
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  // Cascades, like `CoverLetterInstructions` and unlike everything else. A
-  // board is something the user is working on, not a record that something
-  // happened, so there is no provenance to preserve and `Restrict` would make
-  // a user undeletable for the sake of a drawing.
+  // Cascades, unlike `Document`. A board is something the user is working on,
+  // not a pointer at anything outside the database, so `Restrict` would make a
+  // user undeletable for the sake of a drawing.
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("boards")
-}
-
-model CoverLetterInstructions {
-  userId        String   @id @map("user_id") @db.Uuid
-  instructions  String   @default("")
-  // A letter the candidate wants imitated. Held apart from `instructions`
-  // rather than concatenated into it, because the prompt has to fence the two
-  // differently: rules are followed, an example is a style reference and never
-  // a source of facts.
-  exampleLetter String   @default("") @map("example_letter")
-  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  // The one deliberate cascade. This row is a preference with no independent
-  // existence, not a record that something happened, so `Restrict` would make a
-  // user undeletable for the sake of a settings row. Everywhere else restricts.
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("cover_letter_instructions")
-}
-
-model Job {
-  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String    @map("user_id") @db.Uuid
-  name             String
-  config           Json      @default("{}")
-  scheduleCron     String    @map("schedule_cron")
-  scheduleTimezone String    @default("UTC") @map("schedule_timezone")
-  // NULL means not scheduled (paused or retired). There is no `enabled` column.
-  nextRunAt        DateTime? @map("next_run_at") @db.Timestamptz(6)
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  user User  @relation(fields: [userId], references: [id], onDelete: Restrict)
-  runs Run[]
-
-  @@unique([userId, name])
-  @@map("jobs")
-}
-
-model Run {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  jobId        String    @map("job_id") @db.Uuid
-  // NULL means ad-hoc. Uniqueness of scheduled slots is a *partial* unique
-  // index in the migration SQL — not a table unique — so unlimited NULLs stay
-  // legal and immune to a later NULLS NOT DISTINCT tidy.
-  scheduledFor DateTime? @map("scheduled_for") @db.Timestamptz(6)
-  // text + CHECK in migration SQL rather than a Postgres enum.
-  status       String
-  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
-  // When the worker picked this run up, as distinct from when it was requested.
-  // Only the ad-hoc path writes it: a scheduled run is made at-most-once by the
-  // partial unique index on (job_id, scheduled_for), which by definition does
-  // not cover an ad-hoc run. NULL means unclaimed, and is what the claim's
-  // compare-and-swap matches on.
-  claimedAt    DateTime? @map("claimed_at") @db.Timestamptz(6)
-  finishedAt   DateTime? @map("finished_at") @db.Timestamptz(6)
-  failure      Json?
-  // What the scout found, kept so it outlives the run that found it. NULL for
-  // a run that failed before the hand-off, and for every run that predates
-  // this column. Written after the brief exists and never fatally: a run that
-  // produced a briefing succeeded whatever happened to this record.
-  findings     Json?
-
-  job       Job        @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  artifacts Artifact[]
-  // Two relations to the same model, so each needs a name. Provenance only:
-  // neither is part of a Posting's identity.
-  firstSeen Posting[]  @relation("PostingFirstSeenRun")
-  lastSeen  Posting[]  @relation("PostingLastSeenRun")
-
-  @@index([jobId, startedAt(sort: Desc)], map: "runs_job_started_at_idx")
-  @@map("runs")
-}
-
-model Artifact {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  runId     String   @map("run_id") @db.Uuid
-  // S3 object key. CHECK in migration SQL rejects URL schemes and leading /.
-  objectKey String   @unique @map("object_key")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  run Run @relation(fields: [runId], references: [id], onDelete: Restrict)
-
-  @@index([runId], map: "artifacts_run_id_idx")
-  @@map("artifacts")
-}
-
-model Posting {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId          String    @map("user_id") @db.Uuid
-  // The *derived* Posting id — `postingId()` from `@workspace/agents` — and not
-  // this row's `id`. It is also an S3 key segment, so a CHECK in the migration
-  // SQL pins it to sixteen lowercase hex characters.
-  postingId       String    @map("posting_id")
-  title           String
-  // ⚠️ **`GENERATED ALWAYS AS … STORED` in `0010`, and Prisma cannot say so.**
-  // It is `title` lowercased, with every run of non-alphanumerics flattened to
-  // one space and a space at each end — `" senior staff engineer remote "` —
-  // which is what turns a whole-word title filter into an ordinary `LIKE
-  // '%…%'` the database can answer while paginating. `normalizeTitle()` in
-  // `@workspace/job-search` is the other half of the rule and the two must
-  // agree.
-  //
-  // **Never write it, and do not "tidy" it into a plain column**, the same
-  // instruction this file's header gives about the partial indexes and CHECKs.
-  // Optional here only so Prisma never demands it on a create; both posting
-  // inserts are raw SQL with explicit column lists, so nothing offers it a
-  // value. A `prisma migrate dev` would try to re-derive it — migrations here
-  // are hand-authored and forward-only, and that is why.
-  titleNormalized String?   @map("title_normalized")
-  company         String
-  location        String
-  url             String
-  // When the advertisement said the role was posted. NULL when it said nothing,
-  // and NULL when what it said is not a date — the scout copies the page's own
-  // words, so "3 days ago" is an ordinary answer and not a failure.
-  //
-  // Unlike the four columns above this one is *derived* rather than copied:
-  // `parsePostedAt()` in `@workspace/agents` is the only rule that produces it,
-  // and the backfill in `0006` restates that rule in SQL.
-  postedAt        DateTime? @map("posted_at") @db.Timestamptz(6)
-  // The validated Posting as its producer wrote it, opaque here exactly as
-  // `runs.findings` and `jobs.config` are. The five columns above are the
-  // projection this table sorts and displays on.
-  payload         Json
-  // `new`, `applied`, `not-interested` or `rejected` — text + CHECK in
-  // migration SQL rather than a Postgres enum, as `runs.status` is. The only
-  // column in this schema a person writes, which is why `recordPostings`
-  // leaves it out of its `DO UPDATE SET` list.
-  //
-  // The first three are the user's own; `rejected` is the employer's answer,
-  // so it can only follow `applied`. Nothing enforces that ordering and
-  // nothing should — see `PostingStatus` in `src/types.ts`.
-  status          String    @default("new")
-  // NULL means nobody has ever moved it off `new`.
-  statusChangedAt DateTime? @map("status_changed_at") @db.Timestamptz(6)
-  // How well this advertisement matches the candidate's own resume, 0–100, with
-  // the reason and the stated requirements it does not evidence. Distinct from
-  // `payload -> matchReason`, which is one sentence about the *criteria* a scout
-  // was handed; criteria are a lossy projection of a person, and this is the
-  // judgement against the document itself.
-  //
-  // All five are NULL together or set together — a CHECK in `0011` says so —
-  // because a score nobody can date or attribute to a document is not a score.
-  //
-  // ⚠️ Written only by the dashboard, never by a Run. They join `status` in the
-  // list `recordPostings` leaves out of its `DO UPDATE SET`, and for the same
-  // reason: a Run re-finding a scored advertisement must not blank the score.
-  matchScore      Int?      @map("match_score") @db.SmallInt
-  matchReason     String?   @map("match_reason")
-  matchGaps       Json?     @map("match_gaps")
-  // The `documents.id` the score was computed against, and deliberately not an
-  // FK — see `0011`. A value other than the user's current resume is the whole
-  // of "this needs scoring again".
-  matchResumeId   String?   @map("match_resume_id") @db.Uuid
-  matchedAt       DateTime? @map("matched_at") @db.Timestamptz(6)
-  firstSeenAt     DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(6)
-  lastSeenAt      DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
-  // NULL in either means no Run has seen this: the user added it by pasting the
-  // advertisement's link. There is no `source` column and there must not be one
-  // — see `0009` and `posting-source.ts`, which makes the same argument for the
-  // board a Posting came from.
-  //
-  // The two move independently. A Run that later finds a link-added
-  // advertisement sets `last_seen_run_id` and leaves `first_seen_run_id` NULL,
-  // because a second sighting cannot change who saw it first.
-  firstSeenRunId  String?   @map("first_seen_run_id") @db.Uuid
-  lastSeenRunId   String?   @map("last_seen_run_id") @db.Uuid
-
-  user         User @relation(fields: [userId], references: [id], onDelete: Restrict)
-  firstSeenRun Run? @relation("PostingFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: Restrict)
-  lastSeenRun  Run? @relation("PostingLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: Restrict)
-
-  @@unique([userId, postingId], map: "postings_user_id_posting_id_key")
-  @@index([userId, lastSeenAt(sort: Desc), postingId(sort: Desc)], map: "postings_user_last_seen_idx")
-  @@index([userId, matchScore(sort: Desc), postingId(sort: Desc)], map: "postings_user_match_idx")
-  @@map("postings")
 }

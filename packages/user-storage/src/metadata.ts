@@ -7,9 +7,9 @@
  * the stored object is wrong.
  *
  * Every caller uses this rather than restating the rule, which is how the
- * cleaning came to be filename-only inside `resume-store.ts`. The live path is
- * provenance: model-copied company names and titles are the values most likely
- * to carry an em dash, a non-breaking space, or a stray newline.
+ * cleaning came to be filename-only inside `resume-store.ts`. An uploaded
+ * filename and a form-supplied document type are the values most likely to
+ * carry an em dash, a non-breaking space, or a stray newline.
  *
  * Nothing here validates a *key* — metadata names are this package's own
  * compile-time constants, never caller input.
@@ -22,7 +22,7 @@
  * one value, so this is a per-value budget chosen so that a handful of them
  * cannot add up to it. Truncating rather than refusing is right here and wrong
  * for a document body: metadata is provenance for a human reading it later, and
- * a clipped company name is still the company.
+ * a clipped filename still names the file.
  */
 const MAX_METADATA_VALUE_CHARS = 255
 
@@ -55,38 +55,4 @@ export function toMetadataValue(
   const safe = value.replace(UNSAFE, "").slice(0, maxLength).trim()
 
   return safe.length > 0 ? safe : undefined
-}
-
-/**
- * A whole record of provenance, cleaned, with unrepresentable entries dropped.
- *
- * The shape callers actually want: they hold several optional values at once
- * and want a `metadata` object with the survivors in it.
- */
-export function toMetadataRecord(
-  values: Record<string, string | undefined | null>,
-  maxLength: number = MAX_METADATA_VALUE_CHARS
-): Record<string, string> {
-  const cleaned: Record<string, string> = {}
-
-  for (const [key, value] of Object.entries(values)) {
-    const safe = toMetadataValue(value, maxLength)
-    if (safe !== undefined) cleaned[key] = safe
-  }
-
-  return cleaned
-}
-
-/**
- * A metadata value as the instant it records, or `undefined` if it is absent
- * or unparseable.
- *
- * The parse-or-nothing half only; the fallback is the caller's decision,
- * because the right answer differs — the brief store degrades to its partition
- * day, the posting-document store to the object's own write time.
- */
-export function parseInstant(raw: string | undefined): Date | undefined {
-  const parsed = raw ? new Date(raw) : undefined
-
-  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : undefined
 }

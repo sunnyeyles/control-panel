@@ -1,8 +1,0 @@
-{
-  "titles": ["software engineer"],
-  "locations": ["Sydney", "Remote (Australia)"],
-  "keywords": ["TypeScript"],
-  "exclude": ["senior"],
-  "sources": ["seek.com.au"],
-  "maxPostings": 5
-}

@@ -2,27 +2,25 @@
 
 How the agent stack fits together: which packages depend on which, what the
 runtime graph does, which agent carries which tools, who invokes them, and how a
-run is traced.
+turn is traced.
 
-`OVERVIEW.md` maps the product pipeline and shows the agents as two boxes. This
-is the view underneath that — the packages, the graph, and the tool catalog.
+`OVERVIEW.md` maps the product and where each part lives. This is the view
+underneath that — the packages, the graph, and the tool catalog.
 
-Vocabulary follows `CONTEXT.md`. In particular a **Job** is a row in `jobs`, a
-thing that runs on a cadence, and never an employment opportunity — that is a
-**Posting**.
+Vocabulary follows `CONTEXT.md`.
 
 ---
 
 ## 1. Package layering
 
-Three layers, plus tracing off to one side. The direction of the arrows is the
-design, and so is one arrow that is deliberately missing.
+Three layers, plus tracing and the whiteboard wire contract off to one side. The
+direction of the arrows is the design, and so is one arrow that is deliberately
+missing.
 
 ```mermaid
 flowchart TD
-    subgraph entry ["Entry points"]
+    subgraph entry ["Entry point"]
         DASH["apps/dashboard"]
-        WORK["apps/briefing-worker"]
     end
 
     subgraph stack ["The agent stack"]
@@ -35,9 +33,7 @@ flowchart TD
     WB["@workspace/whiteboard-schema<br/>the canvas wire contract, zod only"]
 
     DASH --> AGENTS
-    WORK --> AGENTS
     DASH --> LF
-    WORK --> LF
 
     AGENTS --> CORE
     AGENTS --> TOOLS
@@ -48,17 +44,16 @@ flowchart TD
     TOOLS -. "NO dependency edge.<br/>AgentTool = StructuredToolInterface,<br/>so they line up structurally" .- CORE
 ```
 
-Three things this picture is making explicit:
+What this picture is making explicit:
 
 - **`agent-tools` does not depend on `agents-core`.** Tools are plain LangChain
   tools, and `AgentTool` in the runtime is a type alias for the same
   `StructuredToolInterface`. The two fit structurally, not by dependency, so the
   catalog works with any caller and the runtime ships no tools at all
   (`createAgent({ tools })` defaults to none).
-- **The worker declares only `@workspace/agents` and `@workspace/langfuse`.**
-  The dashboard additionally declares `@workspace/agent-tools`, for the two page
-  fetchers behind add-by-link, and `@workspace/whiteboard-schema`. `agents-core`
-  still arrives transitively for both.
+- **The dashboard imports `@workspace/agents`, `@workspace/langfuse` and
+  `@workspace/whiteboard-schema`, and nothing else from this picture.**
+  `agents-core` and `agent-tools` reach it through `@workspace/agents`.
 - **`@workspace/langfuse` has no edge to the stack in either direction.** It is a
   composition-root concern, which is why `@langfuse/*` and `@opentelemetry/*`
   stay out of the runtime entirely.
@@ -69,18 +64,17 @@ Three things this picture is making explicit:
   bundle. It was `canvas-schema.ts` inside `agent-tools` until that meant the
   dashboard's client bundle waiting on the tool catalog's build for a type.
 
-`agents` exposes wildcard `./*` subpaths. `agent-tools` exposes three directory
-patterns and two root modules — `boards/*`, `whiteboard/*`, `pages/*`, `./time`,
-`./web-search`, `./env` — and deliberately nothing else, so `internal/` stays
-private and has no consumers to break. `agents-core`, `langfuse` and
-`whiteboard-schema` expose `"."` alone, which is why every consumer imports
-those three from the root.
+`agents` exposes wildcard `./*` subpaths. `agent-tools` exposes one directory
+pattern and three root modules — `whiteboard/*`, `./time`, `./web-search`,
+`./env` — and deliberately nothing else, so `internal/` stays private and has no
+consumers to break. `agents-core`, `langfuse` and `whiteboard-schema` expose
+`"."` alone, which is why every consumer imports those three from the root.
 
 **There is no `@workspace/agent-tools` root export at all.** It held `allTools`,
 which claimed to be "every tool in the catalog" while holding two, for the
-structural reason that every tool added since is a `createX(catalog, log)`
-factory bound to one run. Removing the barrel rather than correcting it means
-the claim cannot come back.
+structural reason that the canvas tools are a factory bound to one whiteboard
+turn and a module-level array cannot hold them. Removing the barrel rather than
+correcting it means the claim cannot come back.
 
 ---
 
@@ -113,135 +107,61 @@ unanswered — and an unanswered tool call is rejected on the next turn. `halt`
 answers each one with a `status:"error"` ToolMessage saying the budget ran out,
 so the transcript stays well-formed.
 
-| Budget                     | Value | Why                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| -------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_MAX_LLM_CALLS`    | 5     | Sized for a question with one tool round trip                                                                                                                                                                                                                                                                                                                                                                                     |
-| `JOB_SCOUT_MAX_LLM_CALLS`  | 10    | The Scout's _floor_, not its budget. It makes one focused search per role title, location and **board**, so the worker sizes the real figure with `scoutLlmCallBudget()` — `titles × locations × boards + 6`, never below this and never above `MAX_SCOUT_LLM_CALLS`. The `+ 6` is the turns that are not searches: reading the brief, reading the shortlist back with `get_posting_details`, submitting, and the line it ends on |
-| `WHITEBOARD_MAX_LLM_CALLS` | 24    | A system architecture is six to ten shapes and as many arrows, and every tool round trip costs a call                                                                                                                                                                                                                                                                                                                             |
+| Budget                     | Value | Why                                                                                                   |
+| -------------------------- | ----- | ----------------------------------------------------------------------------------------------------- |
+| `DEFAULT_MAX_LLM_CALLS`    | 5     | Sized for a question with one tool round trip                                                         |
+| `WHITEBOARD_MAX_LLM_CALLS` | 24    | A system architecture is six to ten shapes and as many arrows, and every tool round trip costs a call |
 
 **A budget is only reachable because the graph sets its own `recursionLimit`.**
 `model` and `tools` are one LangGraph super-step each, so `n` model calls cost
 `2n` steps and the runtime's default of 25 caps every budget at 12 — the run
 throws `GraphRecursionError` part-way through rather than reaching `halt`.
 `createAgent` binds `recursionLimitFor(maxLlmCalls)` (`2n + 1`) to the compiled
-graph so no call site has to know. Both budgets above the default depend on it:
-the Whiteboard's 24, and any Scout run sized past 12 searches.
+graph so no call site has to know. The Whiteboard's 24 depends on it.
 
 The tool registry (`tools.ts`) is the other containment point. Duplicate tool
 names **throw at construction** rather than silently shadowing each other. After
 that nothing a tool does can break the run: an unknown tool name and a tool that
 throws both come back as `status:"error"` ToolMessages.
 
-The model is a `ChatOpenAI` on `gpt-5.4-mini` (`model.ts`). `temperature` is
+The model is a `ChatOpenAI` on `gpt-5.4-mini` (`model.ts`), except for the
+whiteboard agent, which asks for `gpt-5.4` (`WHITEBOARD_MODEL`) because it has to
+hold a spatial model of the board across a dozen tool calls. `temperature` is
 deliberately never set — reasoning-capable models reject any non-default value.
 
 ---
 
 ## 3. Agents and their tools
 
-Eight agents. What separates them is mostly which tools they carry, and **tool
-scope here is a containment boundary rather than a tuning knob.**
+Two agents. What separates them is which tools they carry, and **tool scope here
+is a containment boundary rather than a tuning knob.**
 
 ```mermaid
 flowchart LR
     subgraph named ["@workspace/agents"]
-        SCOUT["createJobScout<br/>the Scout"]
-        BW["createBriefWriter<br/>the Brief Writer"]
-        CLW["createCoverLetterWriter<br/>the Letter Writer"]
-        RT["createResumeTailor<br/>the Resume Tailor"]
-        PE["createProfileExtractor<br/>the Profile Extractor"]
-        RTS["createRoleTitleSuggester<br/>the Role Title Suggester"]
-        PX["createPostingExtractor<br/>the Posting Extractor"]
-        ASST["createAssistant"]
+        ASST["createAssistant<br/>the Assistant"]
         WB["createWhiteboardAgent<br/>the Whiteboard"]
     end
 
     subgraph catalog ["@workspace/agent-tools"]
-        SEEK["seek_search"]
-        IND["indeed_search"]
-        LI["linkedin_search"]
-        DET["get_posting_details"]
         WEB["web_search"]
         TIME["get_current_time"]
         CANVAS["createCanvasTools<br/>board mutations"]
     end
 
-    NONE["no tools at all"]
-
-    SCOUT --> SEEK
-    SCOUT --> IND
-    SCOUT --> LI
-    SCOUT --> DET
-    SCOUT --> SUB["submit_findings<br/>@workspace/agents"]
     ASST --> WEB
     ASST --> TIME
     WB --> CANVAS
-    BW --> NONE
-    CLW --> NONE
-    RT --> NONE
-    PE --> NONE
-    RTS --> NONE
-    PX --> NONE
 
-    SEEK --> RUN["apify-search.ts<br/>shared runner — APIFY_TOKEN"]
-    IND --> RUN
-    LI --> RUN
-    RUN --> CAT["posting-catalog.ts<br/>one per run: id → posting"]
-    RUN --> SLOG["search-log.ts<br/>one per run: did the board answer?"]
-    DET --> CAT
-    SUB --> CAT
-    RUN --> A1["unfenced-group~seek-com-au-scraper"]
-    RUN --> A2["misceres~indeed-scraper"]
-    RUN --> A3["curious_coder~linkedin-jobs-scraper"]
-    A1 --> L1["seek.com.au live inventory"]
-    A2 --> L2["indeed.com live inventory"]
-    A3 --> L3["linkedin.com live inventory"]
     WEB --> TAV["Tavily REST API<br/>TAVILY_API_KEY"]
-    FETCH["extractPage<br/>NOT a tool — no agent carries it"] --> TAVX["Tavily /extract<br/>TAVILY_API_KEY"]
-    TAVX -.->|"failed"| FETCH2["extractPageViaApify<br/>NOT a tool — no agent carries it"]
-    FETCH2 --> A4["apify~website-content-crawler"]
-    TAVX -.->|"the dashboard hands the page<br/>to a tool-less agent"| PX
-    FETCH2 -.->|"same hand-off when Tavily cannot read"| PX
-    BFETCH["fetchBoardPosting<br/>NOT a tool — no agent carries it"] --> A1
-    BFETCH --> A2
-    BFETCH -.->|"fields the board published —<br/>no model in the path at all"| PTBL[("postings")]
     TIME --> INTL["Intl.DateTimeFormat<br/>no network, no key"]
     CANVAS --> BOARD["BoardSession<br/>in-memory; no network"]
 ```
 
-**The three board tools are one implementation, not three.** `apify-search.ts`
-owns the token, the timeout, the result clamp, the failure split, the search log
-and the rendering; a board file supplies only an `ApifyBoardSpec` — a tool name,
-an actor id, a request body and a field mapping. They take the same five inputs
-deliberately, so the model does not have to learn a different search per board.
-Adding a board is a spec, a factory, and a line in
-`JOB_SCOUT_SEARCH_TOOL_NAMES`.
-
-**A search returns two lines per posting, not the advertisement.** Every result
-is recorded in the run's `PostingCatalog` and rendered as an id, a listing date
-and a teaser; the advertisement itself is read back by id through
-`get_posting_details`, for the shortlist alone. Descriptions were already
-arriving in the same actor call, so this costs no extra scrape — what it saves
-is context, and a transcript is re-sent to the model on every turn. It also
-stops sixty advertisements' worth of boilerplate sitting between the model and
-the handful of facts it ranks on.
-
-Two consequences beyond the cost. **No URL is ever shown to the model** — a
-posting is named by its id, and the worker resolves the id back to the URL the
-board issued, so the transcription failures recorded in `resolve-postings.ts`
-have nothing left to go wrong in. And the board tools are **factories** rather
-than module singletons, because each is bound to one run's catalog.
-
-| Agent                     | Tools                                                          | Why that set                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createJobScout`          | three board searches, `get_posting_details`, `submit_findings` | One search tool per board, one reader for what they returned, and one way to report. Read-only **outside the run** by construction: no tool reaches the network except to search, so "the Scout returns data and performs no side effects" is structural rather than a prompt rule someone can talk it out of. `submit_findings` does not weaken that — it writes to a variable `createJobScout` owns, and reaches nothing else |
-| `createBriefWriter`       | `[]`                                                           | Cannot search, so it cannot quietly supplement thin Findings with something half-remembered; cannot write, so uploading stays with the worker                                                                                                                                                                                                                                                                                   |
-| `createCoverLetterWriter` | `[]`                                                           | Prompt-injection containment — see below                                                                                                                                                                                                                                                                                                                                                                                        |
-| `createResumeTailor`      | `[]`                                                           | The Letter Writer's case, unchanged: the same CV, the same advertisement copied verbatim beside it                                                                                                                                                                                                                                                                                                                              |
-| `createProfileExtractor`  | `[]`                                                           | The same containment, at full strength: it holds the candidate's whole CV verbatim and the uploaded file is itself the untrusted input                                                                                                                                                                                                                                                                                          |
-| `createPostingExtractor`  | `[]`                                                           | Reads one page fetched from a host the user merely named — the least trusted input in the system — verbatim. It is the "separate agent" the two writers below defer to, and holds no CV, no instructions and no way to reach the page's own links                                                                                                                                                                               |
-| `createAssistant`         | `ASSISTANT_TOOLS` + `extraTools`                               | The one genuinely general-purpose agent. Its set is two module singletons — `get_current_time`, `web_search` — named in `assistant.ts` and pinned by `assistant.test.ts`, because widening it widens what a chat agent can do for anyone who can reach the chat                                                                                                                                                                 |
-| `createWhiteboardAgent`   | `createCanvasTools(board)` + `extraTools`                      | Nine verbs over one in-memory board session for the turn; no board search, no fetch, no S3. The session helpers come from `@workspace/agent-tools/whiteboard/`, and the schema both ends agree on from `@workspace/whiteboard-schema`                                                                                                                                                                                           |
+| Agent                   | Tools                                     | Why that set                                                                                                                                                                                                                                          |
+| ----------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAssistant`       | `ASSISTANT_TOOLS` + `extraTools`          | The one general-purpose agent. Its set is two module singletons — `get_current_time`, `web_search` — named in `assistant.ts` and pinned by `assistant.test.ts`, because widening it widens what a chat agent can do for anyone who can reach the chat |
+| `createWhiteboardAgent` | `createCanvasTools(board)` + `extraTools` | Nine verbs over one in-memory board session for the turn; no search, no fetch, no S3. The session helpers come from `@workspace/agent-tools/whiteboard/`, and the schema both ends agree on from `@workspace/whiteboard-schema`                       |
 
 ### Why the whiteboard agent does not compute coordinates
 
@@ -267,354 +187,111 @@ Two things follow, and both were previously impossible:
 The board reaches the model **inside its system prompt**, via
 `renderBoardContext`, which means every shape label the user has typed is
 rendered into the most privileged part of the request. The prompt therefore
-carries the same quoted-material fence as the tool-less agents below, in its own
-wording — a shape labelled like an instruction is a shape with a strange label.
-`packages/agents/evals/cases/injection.ts` is what keeps that clause honest.
-
-### The page fetchers, and why none is in the catalog
-
-They exist for **adding a Posting by pasting its link**, and each is a plain
-function rather than a `tool()`, carried by no agent — because the alternative
-is a general chat agent acquiring a fetcher the first time somebody tidies the
-catalog. It is enforced two ways. The Tavily pair lives under `pages/`, where
-`NAMING.md` R9 forbids a tool outright and `naming.test.ts` checks it by
-importing every module in the directory; `by-url.ts` sits among tools in
-`boards/`, so R9 cannot reach it and `by-url.test.ts` asserts it locally.
-
-**`fetchBoardPosting`** (`packages/agent-tools/src/boards/by-url.ts`) is tried
-first. Where the link belongs to a board whose actor takes a single
-advertisement's URL — SEEK and Indeed, through a `byUrl` entry on their existing
-`ApifyBoardSpec` — the board answers with `title`, `company`, `location` and the
-description as _fields it published_. **No model is in that path at all**: no
-extraction to be wrong about, no prompt to inject into, and nothing to pay for.
-The answer is still validated against `StoredPostingSchema`, because a community
-scraper's structured output is not validated output.
-
-Two properties are worth not undoing. Its run timeout is 30 seconds against the
-search path's 120 — a person is waiting inside a route whose `maxDuration` is 60.
-And **the item it accepts has to be the advertisement that was asked for**,
-matched on `postingId` rather than on string equality: both actors take a search
-or a company page as a start URL as readily as a job, and taking `[0]` on trust
-is how pasting a search page stores one arbitrary role as though somebody had
-chosen it.
-
-The routing lives one layer up, in `packages/agents/src/board-fetch.ts`, because
-`agent-tools` may not depend on `@workspace/agents` — `postingId` lives there,
-and `by-url.ts` takes `idFor` as an injection for the same reason
-`posting-catalog.ts` does. `boardForHost` and the board registry it reads are
-_not_ up there: they moved down beside the specs they name, so adding a board is
-one file in `boards/` and one row in `boards/registry.ts` rather than a matching
-edit in two packages. `@workspace/agents/job-boards` re-exports them.
-
-**`extractPage`** (`packages/agent-tools/src/pages/page-extract.ts`) is the first try
-for every link no board can answer — a Greenhouse link, a company careers page,
-and LinkedIn, whose actor accepts search-results URLs only. The dashboard's
-action calls it, bounds what comes back, and hands the text to
-`createPostingExtractor`, which has no tools. So the untrusted page and the
-ability to act on it are never held by the same thing.
-
-**`extractPageViaApify`** (`packages/agent-tools/src/pages/page-extract-apify.ts`) is
-the same general path's second try: Apify's `website-content-crawler`, once,
-when Tavily returns `failed`. Same result shape, same bound, still not a tool.
-Its timeout is 20 seconds — shorter than the board-by-URL path — because Tavily
-may already have spent 15s and the extractor still has to fit in 60.
-
-Retrieval is delegated on every path — to Tavily's `/extract` or to an Apify
-actor run — so this system never opens a socket to a host somebody typed into a
-form. And a board that fails is **not** followed by the general fetchers: the
-board path has already spent its clock, and a general crawler is the path least
-likely to get past the board that just refused.
-
-### Why the Letter Writer, the Resume Tailor, the Profile Extractor and the Role Title Suggester have no tools
-
-The strongest case in the stack, and it is one argument covering three agents.
-All three hold the candidate's CV in their context, and **an agent that can both
-read a CV and issue an outbound request can be induced to put one inside the
-other.** None of them needs to look anything up to do its job, so none is given
-the means to.
-
-**The Letter Writer and the Resume Tailor** have attacker-influenced text sitting
-beside the CV. The Posting is written by anyone who can pay to place an
-advertisement, and its highlights reach both prompts **verbatim** rather than
-laundered through a paraphrase, so an instruction hidden in a bullet point
-survives intact. Having no tools is exactly what makes copying the advertisement
-acceptable: injected text can shape the prose of a document the user then reads
-and edits, and can reach nothing else.
-
-They are one case rather than two, and the Resume Tailor is if anything the
-sharper half: it holds the CV whole and its output is a rewrite of that CV, so
-the amount of the candidate's own data in play is the same as the Profile
-Extractor's while the untrusted advertisement sits alongside it. What differs
-between the two is only what a bad output _costs_ — a letter is prose a reader
-weighs, and a resume is read as a list of facts — and that difference is handled
-in the prompt rather than in the tool set.
-
-**The Profile Extractor** has no second document at all — it has the CV, whole
-and verbatim, including whatever address, phone number and employment history it
-carries. That is the strongest version of the same case rather than a weaker one:
-the uploaded file _is_ the injection surface, it arrives from outside the system,
-nothing sanitises it, and a closed signup is no help, because a person can be
-handed a document as easily as they can write one. So the document with the most
-to leak is read by the agent with no way to leak it, and what comes back is a
-JSON object the user reviews in a form before anything is saved.
-
-**The Role Title Suggester** is the Profile Extractor's case with one more
-untrusted input. It reads the same CV, whole and verbatim, and alongside it the
-role titles the user typed into a form moments earlier. Those are fenced
-_separately_ from the document, and the separation is doing two jobs at once:
-it is the exclusion set the agent is told not to propose back, which a
-paragraph folded into the CV's fence would not be, and it keeps a second piece
-of outside text visibly outside. Being tool-less is what makes reading either
-verbatim acceptable — injected text can shape a row of buttons the user then
-reads, and can reach nothing else.
-
-Every prompt here also tells the model to treat the outside text as quoted
-material, and `toSearchCriteriaPrompt()` and `toRoleTitleSuggestionsPrompt()`
-fence the CV in the same idiom — but a fence is a label, not a boundary, and
-nothing stops a document from writing one of its own. The containment is the
-empty tool list, and each is asserted structurally, in
-`cover-letter-writer.test.ts`, `resume-tailor.test.ts`,
-`profile-extractor.test.ts` and `role-title-suggester.test.ts`, rather than left
-to a comment.
-
-That agent now exists, and is the **Posting Extractor** above: a page fetcher on
-a separate agent that never sees the profile, handing validated data on. The
-clause in `cover-letter-writer.ts` and `resume-tailor.ts` stays exactly as
-written — it is now a description of where the fetcher went, and a rule about
-where it must not move to.
-
-### The same idea one level down
-
-The board tools narrow their own reach the same way. The Apify actors behind them
-accept webhook, Telegram and Slack notification fields; no tool ever sends them.
-Each tool's Zod input schema is that board's entire reach — which is what keeps
-the no-side-effects property structural at the tool layer too, and putting the
-request body in one shared runner means it is one place to check rather than
-three.
+tells the model to treat that text as quoted material — a shape labelled like an
+instruction is a shape with a strange label. A fence is a label, not a boundary,
+which is why `packages/agents/evals/cases/injection.ts` exists to keep that
+clause honest, and why the real containment is that the agent's only tools are
+the nine canvas verbs.
 
 ### Two notes on the catalog
 
 - **There is no catalog-wide tool list, and there deliberately is not one.**
   `allTools` used to be it: `[getCurrentTime, webSearch]`, calling itself "every
-  tool in the catalog" while every tool added after it was a
-  `createX(catalog, log)` factory bound to one run, which a module-level array
-  cannot hold. The barrel is gone. Each agent names its own set —
-  `ASSISTANT_TOOLS` in `assistant.ts`, `JOB_BOARDS.map(b => b.createSearch(…))`
-  in `job-scout.ts` — so the assistant still cannot search a job board, and now
-  nothing claims otherwise.
+  tool in the catalog" while the canvas tools, a factory bound to one turn's
+  board session, could never be in a module-level array. The barrel is gone.
+  Each agent names its own set — `ASSISTANT_TOOLS` in `assistant.ts`,
+  `createCanvasTools(board, { turnId })` in `whiteboard.ts` — so the Assistant
+  cannot draw on the whiteboard, and nothing claims otherwise.
 - **Agents are `createX()` factories, never instances.** Building one constructs
   a model, which reads `OPENAI_API_KEY` and throws without it. A module-level
   instance would move that failure to import time and break any consumer that
   merely imports the module. Every tool reads its key inside the call for the
-  same reason, so importing the catalog is always free.
+  same reason, so importing the catalog is always free. The whiteboard agent is
+  per-request for a second reason too: the board it reasons about is baked into
+  its system prompt, so an instance would outlive its truth.
 
 ---
 
 ## 4. Who invokes what
 
-Six entry points. They differ in how they import, how they call, and what they
-persist.
+Two entry points, both in the dashboard, and both streamed.
 
 ```mermaid
 flowchart TD
     subgraph chat ["Chat — dashboard"]
         direction TB
-        C1["agent-chat.tsx (client)"] --> C2["POST /api/chat"]
+        C1["AgentChat (client)"] --> C2["POST /api/chat"]
         C2 --> C3["lib/chat-handler.ts<br/>auth gate, then validate"]
         C3 --> C4["createAssistant → .stream()"]
         C4 --> C5["streamed to the browser<br/>nothing persisted"]
     end
 
-    subgraph letter ["Cover letter — dashboard"]
-        direction TB
-        L1["Draft button"] --> L2["Server Action"]
-        L2 --> L3["cover-letter-actions.ts<br/>auth, ownership, assertDraftable"]
-        L3 --> L4["createCoverLetterWriter → .invoke()"]
-        L4 --> L5["CoverLetterStore.put<br/>S3 only, no database row"]
-    end
-
-    subgraph resume ["Tailored resume — dashboard"]
-        direction TB
-        R1["Generate button"] --> R2["Server Action"]
-        R2 --> R3["tailored-resume-actions.ts<br/>auth, ownership, assertDraftable"]
-        R3 --> R4["createResumeTailor → .invoke()"]
-        R4 --> R5["TailoredResumeStore.put<br/>S3 only, no database row"]
-    end
-
-    subgraph criteria ["Search criteria — dashboard"]
-        direction TB
-        S1["Suggest from my resume"] --> S2["Server Action"]
-        S2 --> S3["suggest-criteria-actions.ts<br/>auth, loadCandidateBackground, assertDraftable"]
-        S3 --> S4["createProfileExtractor → .invoke()"]
-        S4 --> S5["parseSearchCriteria<br/>back to the form, nothing persisted"]
-    end
-
     subgraph whiteboard ["Whiteboard — dashboard"]
         direction TB
         W1["/whiteboard"] --> W2["POST /api/whiteboard"]
-        W2 --> W3["whiteboard-handler.ts<br/>auth, board session"]
+        W2 --> W3["whiteboard-handler.ts<br/>auth, board context"]
         W3 --> W4["createWhiteboardAgent → .stream()"]
-        W4 --> W5["canvas ops applied to the board<br/>snapshot saved in boards"]
-    end
-
-    subgraph brief ["Briefing — worker"]
-        direction TB
-        B1["EventBridge Tick, hourly"] --> B2["run-tick.ts<br/>dueJobs → claimJob"]
-        B2 --> B3["createJobScout → find-postings<br/>a second, wider pass if the first is empty"]
-        B3 --> B4["session.searches()<br/>no search, or none that worked, fails the Run"]
-        B4 --> B5["session.findings()<br/>+ resolvePostings"]
-        B5 --> B6["createBriefWriter → write-brief"]
-        B6 --> B7["S3 object → artifacts row → runs.findings"]
+        W4 --> W5["canvas ops applied in the browser<br/>snapshot saved to boards via /api/whiteboard/board"]
     end
 ```
 
-**Chat and the whiteboard stream**, because both agents have tools and the
-interesting part is watching them work. **Every other entry point uses
-`.invoke()`, not `.stream()`** — with no tools the graph is just
-`START → model → END`, so there is nothing to watch. **The worker is the only
-place two agents run in sequence**, scout then writer, with a validation step
-between them.
+**Both stream**, because both agents have tools and the interesting part is
+watching them work. The whiteboard adds a `custom` stream mode beside `values`
+and `messages`, which is the channel canvas ops travel on — so shapes land while
+the sentence describing them is still arriving.
 
-**The cover letter and the tailored resume are the same path twice, and they
-share the parts where getting it wrong is expensive.** Both re-read the Posting
-through `lib/postings/load-stored-posting.ts` — one identifier out of the form,
-the advertisement out of `postings.payload`, ownership structural in the natural
-key — and both read the CV through `loadCandidateBackground()` **before** the
-agent is constructed, so a user with nothing to write from costs no model call.
-What they do not share is a store, a kind or an IAM grant: two documents for one
-Posting need two addresses, or one would overwrite the other.
+The dashboard imports each agent by wildcard subpath —
+`@workspace/agents/assistant` and `@workspace/agents/whiteboard` — and each
+handler takes the factory as a `*Deps` seam under its exported name (`NAMING.md`
+R2), so a test hands it a fake without a model or a key.
 
-**The criteria suggestion is the only entry point that persists nothing**, and
-that is the feature rather than an omission. It answers into the new-briefing
-form; the user edits what came back and `jobs.config` is written by the ordinary
-create action if they press Create. So there is nothing to invalidate and the
-action calls no `refresh()` — and a suggestion someone abandons leaves no trace
-anywhere. It reuses `loadCandidateBackground()` and `assertDraftable` from the
-cover-letter path rather than growing a document picker, so "which document is my
-resume" answers the same in both places.
-
-**Suggest related titles** sits beside it and holds every one of those
-properties, over `createRoleTitleSuggester`: nothing persisted, no `refresh()`,
-the same CV through the same loader. It differs in one place — it reads a form
-field, the titles chosen so far, because "what _else_ should this person search
-for" has no answer without them. That field is the user's own text and reaches
-the prompt as fenced quoted material; no part of it selects a document or names
-a user, which is the property both suggest actions keep. What comes back is
-snapped to the checked-in completion list in
-`apps/dashboard/lib/jobs/role-titles.ts`, so two agents proposing one role under
-two spellings do not become two buttons and two searches.
-
-Import style differs by app and both are correct: the dashboard uses wildcard
-subpaths (`@workspace/agents/cover-letter-writer`,
-`@workspace/agents/profile-extractor`, `@workspace/agents/role-title-suggester`),
-the worker uses the root barrel.
-
-Two invariants the worker enforces, both of which exist because a plausible
-fabrication is worse than an empty result:
-
-- **The Scout never handles a URL.** It reports the id a search gave it, and
-  `resolve-postings.ts` looks that id up in the run's catalog to get the URL the
-  board issued — so there is no transcription step left to get wrong, and an
-  invented id names nothing. That module records why: comparing URLs on
-  `postingId()` fixed seven runs lost to mistyped LinkedIn tracking parameters,
-  and not showing the model a URL at all makes them unrepeatable. The Run
-  survives a drop and carries a warning naming it; only a Run with nothing left
-  at all fails.
-- **A Run with no successful search fails**, and what counts as one is recorded
-  by the search rather than inferred from the transcript. `JobScoutSession`
-  carries a `SearchLog` alongside the catalog, and each board tool records one
-  `SearchAttempt` per call at whichever exit it takes: `ok` when the board
-  answered — including when it answered with nothing — and `failed` when it did
-  not. The transcript cannot answer the question, which was the bug: a failed
-  actor run returns a _sentence_, and only a thrown tool sets `status: "error"`,
-  so a Run whose every board was down showed three perfectly successful tool
-  results and passed the gate that exists to catch exactly that.
-  `JOB_SCOUT_SEARCH_TOOL_NAMES` is still exported, for the per-board breakdown in
-  the run report: a board that answered nothing has to be named to be reported as
-  a zero.
-- **A Run that reports nothing searches once more, wider.** The worker runs the
-  scout again with the same criteria read as preferences (`toSearchBrief(…,
-"wider")`) on a fresh session — `submit_findings` is last-write-wins and tells a
-  scout that has reported not to search again, so a reused session cannot make a
-  second pass at all. It is skipped when the title filter is what emptied the
-  Run, and it can only improve a Run: a board that goes down between the passes
-  is recorded on the warning rather than thrown.
+`packages/agents/evals/runner.ts` builds the same whiteboard agent outside the
+dashboard, against the fixed cases in `evals/cases/` — see
+`packages/agents/evals/README.md`.
 
 ---
 
 ## 5. Tracing
 
-Two independent mechanisms. Neither feeds the other, both are opt-in, and
-neither is ever load-bearing.
+One mechanism, opt-in, and never load-bearing.
 
 ```mermaid
 flowchart TD
-    subgraph lfuse ["Langfuse, over OpenTelemetry"]
-        direction TB
-        I1["dashboard instrumentation-node.ts<br/>batched"] --> P
-        I2["worker index.ts<br/>immediate"] --> P
-        P["tracer provider<br/>silent no-op unless both keys are set"]
-        P --> R["runWithLangfuseTrace<br/>one call site: run-briefing.ts"]
-        P --> CB["createLangfuseCallback<br/>one per run"]
-        R --> R1["generate-briefing, the root"]
-        R1 --> R2["find-postings"]
-        R1 --> R3["write-brief"]
-        CB --> CB1["chat-response"]
-        CB --> CB2["cover-letter"]
-    CB --> CB6["posting-extract"]
-        CB --> CB3["search-criteria"]
-        CB --> CB4["tailored-resume"]
-        CB --> CB5["whiteboard-turn"]
-    end
-
-    subgraph sink ["The worker's own trace sink"]
-        direction TB
-        T1["run-briefing emits typed TraceEvents"] --> T2["createTracer — src/trace.ts"]
-        T2 -->|"dev CLI passes a sink"| T3["dev/render.ts — terminal"]
-        T2 -->|"production passes none"| T4["nothing emitted, costs nothing"]
-    end
+    I1["dashboard instrumentation-node.ts<br/>batched"] --> P
+    I2["evals/run.ts<br/>refuses to start without keys"] --> P
+    P["tracer provider<br/>silent no-op unless both keys are set"]
+    P --> CB["createLangfuseCallback<br/>one per turn"]
+    CB --> CB1["chat-response"]
+    CB --> CB2["whiteboard-turn"]
 ```
 
 Langfuse is gated on `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. Without
-both, all four functions are **silent no-ops rather than errors** —
+both, the adapter's functions are **silent no-ops rather than errors** —
 `createLangfuseCallback` returns `undefined`, which is why call sites spread
 `...(callback ? { callbacks: [callback] } : {})`.
 
-The worker exports `immediate` and the dashboard `batched` because a Lambda can
-be frozen the moment the handler returns; the dashboard is a long-lived process
-that can afford to batch. The worker calls `shutdownLangfuse()` in a `finally`
-beside `prisma.$disconnect()` to flush what is queued.
+The dashboard initialises the exporter `batched`, because a long-lived process
+can afford to; `immediate` exists for a runtime that can be frozen the moment
+its handler returns. Each trace is one agent answering one request, so neither
+needs a root span wrapped around it.
 
-The briefing Run is wrapped so the Scout and the Brief Writer nest under a single
-`generate-briefing` root rather than arriving as two unrelated traces. The
-dashboard traces need no such root: each is one agent answering one request.
-
-`posting-extract` is the one dashboard trace carrying no candidate data at all —
-its whole prompt is a page somebody else wrote — which makes it the safest of
-them to read when something goes wrong. It is also the one that does not appear
-for every attempt: a SEEK or Indeed link is answered by that board's actor with
-no model in the path, so there is no span to look for. An **Add posting** that
-left no trace usually means the board answered, not that something was lost.
-
-**Three of those traces carry the candidate's CV**, `cover-letter`,
-`search-criteria` and `tailored-resume`, and Langfuse retains full prompts by
-design. Whether that text leaves the machine is decided entirely by whether the
-two keys are set — which is the one place the no-op default is a privacy
+**A `whiteboard-turn` trace carries every label on the user's board**, because
+the board is rendered into the system prompt, and Langfuse retains full prompts
+by design. Whether that text leaves the machine is decided entirely by whether
+the two keys are set — which is the one place the no-op default is a privacy
 property and not merely a convenience.
 
-The trace sink is held to the same standard from the other direction: it is
-synchronous and returns nothing, because a sink that could be awaited is a sink
-that can stall a Run, and `createTracer` wraps it so that a sink which throws is
-ignored for the rest of the Run rather than taking a paid, at-most-once execution
-down with it.
+An eval is the exception to the no-op rule: it **refuses to start** without
+keys, because its scores would have nowhere to go.
 
 ---
 
-## Where things live |
+## Where things live
 
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/agents` | `assistant`, `job-scout`, `brief-writer`, `cover-letter-writer`, `resume-tailor`, `profile-extractor`, `posting-extractor`, `whiteboard`, plus the schema contracts — `findings` (Scout → Brief Writer), `criteria` (Profile Extractor → whoever stores them) and `stored-posting` (what a `postings.payload` may hold) — and `cover-letter`, `tailored-resume`, `posting-id`, `posted-at`, `job-boards` and `board-fetch` (host → board → actor, the one place the registry meets the tool catalog). Also `evals/`, the scored whiteboard harness, which is outside `src/` and outside `pnpm test` |
-| `packages/agents-core` | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts` |
-| `packages/agent-tools` | Grouped by domain, no barrel. `boards/`: `seek-search.ts`, `indeed-search.ts` and `linkedin-search.ts` over the shared `apify-search.ts`, plus `posting-catalog.ts`, `posting-details.ts`, `search-log.ts`, `by-url.ts` (a fetcher, not a tool) and `registry.ts`. `whiteboard/`: `canvas.ts` / `session.ts` / `layout.ts` / `render.ts` / `graph-layout.ts`. `pages/`: `page-extract.ts` and `page-extract-apify.ts`, where R9 forbids a tool. `internal/http.ts` is unexported; `time.ts`, `web-search.ts` and `env.ts` sit at the root |
-| `packages/whiteboard-schema` | `index.ts` alone — the canvas wire contract, zod and nothing else, imported by the tools above and by the dashboard's client components |
-| `packages/langfuse` | `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse` |
+| Package                      | Holds                                                                                                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/agents`            | `assistant` and `whiteboard`, plus `agent-options` (the option shape both take). Also `evals/`, the scored whiteboard harness, which is outside `src/` and outside `pnpm test`                                     |
+| `packages/agents-core`       | `agent.ts` (graph), `state.ts`, `model.ts`, `tools.ts` (registry), `env.ts`                                                                                                                                        |
+| `packages/agent-tools`       | Grouped by domain, no barrel. `whiteboard/`: `canvas.ts` / `session.ts` / `layout.ts` / `render.ts` / `graph-layout.ts`. `internal/http.ts` is unexported; `time.ts`, `web-search.ts` and `env.ts` sit at the root |
+| `packages/whiteboard-schema` | `index.ts` alone — the canvas wire contract, zod and nothing else, imported by the tools above and by the dashboard's client components                                                                            |
+| `packages/langfuse`          | `initializeLangfuse`, `createLangfuseCallback` and `shutdownLangfuse`, used by the dashboard and the eval CLI                                                                                                      |

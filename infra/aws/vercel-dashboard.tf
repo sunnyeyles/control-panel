@@ -109,28 +109,17 @@ resource "aws_iam_role" "vercel_dashboard" {
   }
 }
 
-# Take the **narrow** grants — the same reasoning as `briefing-worker.tf`, in
-# the other direction. The dashboard handles documents a user uploaded and the
-# cover letters it drafts for them, so it wants `prod:resumes` and
-# `prod:cover-letters` and not the per-environment policy that would also let it
-# rewrite the briefs the worker generates.
+# Take the **narrow** grant. The dashboard handles documents a user uploaded,
+# so it wants `prod:resumes` and not the per-environment policy, which would
+# also cover whatever kind is added to the bucket next.
 #
-# **Enumerated rather than pattern-matched.** The filter used to be
-# `endswith(key, ":resumes")`; a suffix list keeps that shape while sitting one
-# careless `or` away from covering briefs.
-#
-# The two roles' attachments are disjoint by construction — the worker cannot
-# delete someone's CV, the dashboard cannot forge a briefing — and that is
-# asserted in `tests/vercel_dashboard.tftest.hcl`, because it is not obvious
-# from either file alone. Nothing new is authored here; the user-storage module
-# publishes each policy as soon as the kind is in `object_kinds`.
+# **Enumerated rather than pattern-matched**, so a new kind reaches the
+# dashboard only by being written into this list — and the exact set is
+# asserted in `tests/vercel_dashboard.tftest.hcl`, so that edit has to be argued
+# for there too. Nothing new is authored here; the user-storage module publishes
+# each policy as soon as the kind is in `object_kinds`.
 locals {
-  # ⚠️ `briefs` is deliberately absent: the app holds no grant over what the
-  # worker wrote, which is why /jobs renders the Findings on the run row rather
-  # than the Brief itself. `tailored-resumes` is here for the `cover-letters`
-  # reason — the app generates it from a button on a page, never on a schedule,
-  # so the worker has no business with it and the sets stay disjoint.
-  vercel_dashboard_kinds = ["resumes", "cover-letters", "tailored-resumes"]
+  vercel_dashboard_kinds = ["resumes"]
 }
 
 resource "aws_iam_role_policy_attachment" "vercel_dashboard_user_storage" {
@@ -141,40 +130,4 @@ resource "aws_iam_role_policy_attachment" "vercel_dashboard_user_storage" {
 
   role       = aws_iam_role.vercel_dashboard[0].name
   policy_arn = each.value
-}
-
-# Asking the worker to run a briefing now.
-#
-# The "Run now" button does not run a briefing; it asks the worker to, with an
-# async invocation naming a `runs` row it already inserted.
-#
-# **This does not widen the storage boundary above**, which is the whole reason
-# the button works this way: the app that *renders* a briefing still holds no
-# `prod:briefs` grant, so it can start work but never produce or alter its
-# output. `tests/vercel_dashboard.tftest.hcl` asserts both halves — storage set
-# unchanged, and this grant naming one function rather than `*`.
-#
-# **Inline** rather than a managed policy: nothing else can want a grant naming
-# one function in one account, and a managed one would land in the `for_each`
-# map the storage assertion checks by exact key set.
-#
-# No boundary change needed — `bootstrap/boundary.tf` already permits
-# `lambda:InvokeFunction` on `*` for the scheduler role, and a boundary is a
-# ceiling that may be wider than any one role's policy.
-data "aws_iam_policy_document" "vercel_dashboard_invoke_worker" {
-  count = local.vercel_dashboard_enabled ? 1 : 0
-
-  statement {
-    sid       = "InvokeBriefingWorker"
-    actions   = ["lambda:InvokeFunction"]
-    resources = [module.briefing_worker.function_arn]
-  }
-}
-
-resource "aws_iam_role_policy" "vercel_dashboard_invoke_worker" {
-  count = local.vercel_dashboard_enabled ? 1 : 0
-
-  name   = "invoke-briefing-worker"
-  role   = aws_iam_role.vercel_dashboard[0].id
-  policy = data.aws_iam_policy_document.vercel_dashboard_invoke_worker[0].json
 }

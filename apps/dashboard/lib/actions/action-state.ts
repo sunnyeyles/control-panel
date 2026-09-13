@@ -4,14 +4,14 @@
  * **This module has no imports, and that is the point.** A client component
  * needs the initial state, while the action modules import `@workspace/db` and
  * `@workspace/user-storage` — importing it from beside an action would pull
- * `pg`, `cron-parser` or the AWS SDK into the browser bundle for one literal.
+ * `pg` or the AWS SDK into the browser bundle for one literal.
  *
  * ⚠️ Serializable by construction: the value crosses the RSC boundary, so an
  * `Error`, a `Date` or a class instance fails at runtime rather than at compile
- * time. In particular a `Job` must never be returned — `nextRunAt` is a `Date`.
+ * time. In particular a database row must never be returned — a `Document`'s
+ * `uploadedAt` is a `Date`.
  *
- * One union for every feature: the documents and briefings copies were
- * byte-identical apart from their names.
+ * One union for every feature.
  */
 export type ActionState =
   | { status: "idle" }

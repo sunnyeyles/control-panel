@@ -6,9 +6,9 @@ import { Skeleton } from "@workspace/ui/components/skeleton"
  * Shaped against the real markup — a `rounded-lg border` box around a `<Table>`
  * — so the border and row rhythm are here rather than one grey block.
  *
- * **Only the page's `<Suspense>` draws this, unlike the two skeletons under
- * `/jobs`.** `/documents` has no `loading.tsx` and should not grow one; it
- * inherits the deliberately shape-agnostic `app/(app)/loading.tsx`.
+ * **Only the page's `<Suspense>` draws this.** `/documents` has no
+ * `loading.tsx` and should not grow one; it inherits the deliberately
+ * shape-agnostic `app/(app)/loading.tsx`.
  *
  * `rows` is a parameter rather than a constant because no number is right for
  * both a stocked shelf and a one-line empty state.

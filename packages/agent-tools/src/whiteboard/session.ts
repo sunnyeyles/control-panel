@@ -14,8 +14,7 @@
  *
  * One session per request, created by whoever builds the tools. A module-level
  * instance would leak one user's board into the next request, which on a warm
- * serverless container is not hypothetical — the same reasoning as
- * `posting-catalog.ts`.
+ * serverless container is not hypothetical.
  *
  * **Every mutator returns the string the model will read**, including its
  * failures: `"no shape with id s9"` is a correction the model can act on within
@@ -143,9 +142,8 @@ export interface BoardSession {
  *
  * The model is shown short ids, but it also sees tldraw-shaped ones whenever a
  * client error quotes one back, and copying the longer form is a transcription
- * habit rather than a claim about a different shape. Forgiven for the same
- * reason `posting-catalog.ts` forgives `[7f3a91c2]`; everything substantive —
- * an id naming no shape — still fails to resolve.
+ * habit rather than a claim about a different shape. So it is forgiven, and
+ * everything substantive — an id naming no shape — still fails to resolve.
  */
 function normaliseId(id: string): string {
   const trimmed = id.trim()

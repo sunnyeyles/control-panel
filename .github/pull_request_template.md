@@ -11,7 +11,7 @@ A feature: what a user can now do that they could not do before.
 A bug fix: what was broken, what the user saw, and what they see now.
 
 Describe behaviour, not the diff. "Adds a function to X" is not an answer;
-"a user can revise the generated cover letter in place" is.
+"a user can change a document's type without uploading it again" is.
 -->
 
 ## Why

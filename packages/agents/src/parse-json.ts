@@ -1,15 +1,6 @@
 import * as z from "zod"
 
 /**
- * Render a Zod schema as JSON Schema for embedding in a prompt. Derived rather
- * than hand-written so the shape an agent is asked for stays identical to the
- * shape {@link parseJsonAgainstSchema} enforces.
- */
-export function schemaDescription(schema: z.ZodType): string {
-  return JSON.stringify(z.toJSONSchema(schema), null, 2)
-}
-
-/**
  * Models like to wrap JSON in a fenced block despite being asked not to. That
  * is a formatting habit rather than a failure to follow the instruction, so it
  * is stripped rather than rejected — unlike a missing field or a bad URL, which
