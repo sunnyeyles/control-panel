@@ -24,7 +24,7 @@ import { gradeStructurally } from "./graders/structural.ts"
 import type { EvalCase, Score, TurnResult } from "./types.ts"
 
 /** The mean of every grader on the run. What a regression gate would read. */
-export const OVERALL = "overall"
+const OVERALL = "overall"
 
 function toEvaluation(score: Score) {
   return {

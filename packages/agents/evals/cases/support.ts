@@ -13,7 +13,7 @@ import type {
 } from "@workspace/whiteboard-schema"
 
 /** What the browser reports when nothing has been drawn. */
-export const VIEWPORT = { x: 0, y: 0, w: 1400, h: 900 }
+const VIEWPORT = { x: 0, y: 0, w: 1400, h: 900 }
 
 export function shape(
   id: string,

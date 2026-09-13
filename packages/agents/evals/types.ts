@@ -112,5 +112,3 @@ export interface Score {
   /** Why, in a sentence. This is what a human reads when a case regresses. */
   detail: string
 }
-
-export type { BoardContext }
