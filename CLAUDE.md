@@ -10,8 +10,7 @@ and all 120 preview branches with it. `migrate.yml` and `preview-auth-domain.yml
 were removed in the same pass, so **nothing in CI touches a database any more** —
 the three remaining workflows are `test.yml`, `deploy-infra.yml` and `evals.yml`.
 
-The deployed dashboard cannot authenticate, and the briefing worker has no
-database to read. Neither runs.
+The deployed dashboard cannot authenticate, so it does not run.
 
 Everything below about Neon, Neon Auth, migrations in CI, preview branches and
 the `storage_` variables is **kept as a record, not as instructions**. Re-pointing
@@ -33,11 +32,6 @@ Scope to one workspace with a Turborepo filter — **use the package name, not t
 pnpm turbo dev --filter=@workspace/dashboard   # apps/dashboard
 pnpm turbo typecheck --filter=@workspace/ui
 ```
-
-The scheduled worker has its own build and run story — an esbuild bundle and
-Terraform for deployment. See `apps/briefing-worker/README.md` and
-`infra/aws/DEPLOYING.md`; neither the Next.js commands above nor `pnpm dev`
-cover it.
 
 Database migrations are outside Turborepo. **CI used to apply them** —
 `.github/workflows/migrate.yml`, on every push to `main`, which also applied a
@@ -117,11 +111,9 @@ copy-on-write, so a child shares its parent's pages and is billed only for the
 delta it writes; a hundred idle ones are not a hundred databases' worth of
 bytes. Each is another compute endpoint something can wake, and a wake bills a
 five-minute minimum however short the query — so the compute line tracks how
-often things wake, not how many branches exist. The hourly tick in
-`infra/aws/modules/briefing-worker/schedule.tf` is the biggest single waker:
-24 a day against `main`, a floor of roughly 2 CU-hours a day with nobody using
-the app. Lowering it is not the fix — see that module's README on why hourly is
-the resolution of the whole scheduling system.
+often things wake, not how many branches exist. Anything scheduled against
+`main` sets the floor: an hourly caller alone is roughly 2 CU-hours a day with
+nobody using the app.
 
 **`NEON_AUTH_COOKIE_SECRET` is ours, not Neon's**, so `env pull` does not
 supply it. Generate with `openssl rand -base64 32`; the SDK requires 32+
@@ -133,10 +125,11 @@ in `apps/dashboard/lib/auth/current-user.ts` is the only thing standing between
 that account and the app. An unset list refuses everyone, deliberately.
 
 Infrastructure is Terraform under `infra/aws/`, and **Turborepo does not cover
-it**. One root holds three stacks — the worker, user storage, and the Vercel
-dashboard's access to that storage — sharing a single state file, plus
-`bootstrap/` for the state bucket and the CI deploy role. Terraform runs
-directly:
+it**. One root holds two stacks — user storage, and the Vercel dashboard's access
+to that storage — plus the alerts topic, sharing a single state file, and
+`bootstrap/` for the state bucket and the CI deploy role. The state key is still
+`briefing-worker/terraform.tfstate`, a historical name: changing a backend key
+points Terraform at an empty state, so it stays. Terraform runs directly:
 
 ```bash
 terraform -chdir=infra/aws fmt -recursive -check
@@ -149,8 +142,8 @@ terraform -chdir=infra/aws test
 `init` first — it installs the modules the run blocks target.
 
 `plan` is where credentials start being needed: it calls STS while configuring
-the provider and fails before reaching a resource. It also reads `lambda.zip` at
-plan time, so build before planning.
+the provider and fails before reaching a resource. `.github/workflows/deploy-infra.yml`
+plans and applies from `main` when anything under `infra/**` changes.
 
 Stack configuration lives in the committed `infra/aws/terraform.tfvars`, so
 `apply` takes no `-var` flags. Adding a stack means adding a
@@ -163,17 +156,16 @@ Tests are their own task, and a thin one:
 pnpm test        # turbo test
 ```
 
-**Only eight workspaces have tests** — `@workspace/dashboard`,
+**Only seven workspaces have tests** — `@workspace/dashboard`,
 `@workspace/user-storage`, `@workspace/db`, `@workspace/agent-tools`,
-`@workspace/agents-core`, `@workspace/agents`, `@workspace/briefing-worker` and
-`@workspace/ui`. Vitest is a devDependency of those alone; `turbo test` is a
-no-op in the other five — `eslint-config`, `typescript-config`, `langfuse`,
-`job-search` and `whiteboard-schema`. (This used to say "the other three",
-which was already wrong before `whiteboard-schema` existed: `job-search` has
-never had tests.) Do not assume a package is covered because the command exits 0. Adding tests to another workspace means adding `vitest` to it and a `test`
-script — the `test` task in `turbo.json` is already there.
+`@workspace/agents-core`, `@workspace/agents` and `@workspace/ui`. Vitest is a
+devDependency of those alone; `turbo test` is a no-op in the other four —
+`eslint-config`, `typescript-config`, `langfuse` and `whiteboard-schema`. Do not
+assume a package is covered because the command exits 0. Adding tests to another
+workspace means adding `vitest` to it and a `test` script — the `test` task in
+`turbo.json` is already there.
 
-In the six that emit `dist/` the same arrangement repeats and is deliberate:
+In the five that emit `dist/` the same arrangement repeats and is deliberate:
 `src/**/*.test.ts` is excluded from `tsconfig.json` so tests never reach
 `dist/`, and a `tsconfig.test.json` covers them with `noEmit` because Vitest
 transpiles without typechecking. `typecheck` runs both. The dashboard and
@@ -218,13 +210,13 @@ make every number downstream a lie. They know nothing about Langfuse —
 
 **`@workspace/ui` is tested only under `src/lib/`, and that boundary is the
 point.** Everything under `src/components/` is React over a DOM, which would
-mean a browser environment and — for the editor — ProseMirror. What is covered
-is string-to-string logic deliberately moved out of a component so it could be
-reached without any of that: `src/lib/markdown.ts` pins the markdown dialect the
-rich-text editor round-trips through, because on Turndown's defaults an
-_untouched_ save rewrote every bullet, emphasis and rule in the document. That
-is a data-fidelity property, not a rendering one, so it belongs in a test rather
-than in a comment.
+mean a browser environment. What is covered is string-to-string logic
+deliberately moved out of a component so it could be reached without one:
+`src/lib/markdown-plugins.ts` decides which of Streamdown's code, math and
+mermaid plugins a chat message needs, and so which chunks the chat page fetches —
+a wrong answer is either a diagram that never renders or a syntax highlighter
+downloaded to display a sentence. That is a property worth a test rather than a
+comment.
 
 **`@workspace/db` generates its Prisma Client through a `generate` Turborepo
 task**, which `build`, `typecheck`, `test` and `dev` all depend on. They used to
@@ -233,11 +225,10 @@ what made `turbo test --force` fail intermittently. Consequence: run its tests
 through Turborepo, not `pnpm --filter @workspace/db test` — see
 `packages/db/README.md`.
 
-`@workspace/db` splits its suite by whether the thing under test needs Postgres
-to _be_ Postgres. `schedule.test.ts` needs nothing. `stores.test.ts` needs a real
-database and **skips itself when `DATABASE_URL_UNPOOLED` is unset**, so a clean
-`pnpm test` locally does not mean the claim race, the CHECK constraints, or the
-partial unique index were exercised — only CI, with a database, exercises those.
+`@workspace/db` has one suite, `stores.test.ts`, and it needs Postgres to _be_
+Postgres. It **skips itself when `DATABASE_URL_UNPOOLED` is unset**, so a clean
+`pnpm test` locally does not mean the CHECK constraints or the foreign keys were
+exercised — only CI, with a database, exercises those.
 
 ## Architecture
 
@@ -258,14 +249,14 @@ partial unique index were exercised — only CI, with a database, exercises thos
 
 - **`agents-core` ships no tools and no agents.** It is the runtime only, and `createAgent({ tools })` defaults to none. Keeping concrete tools out of it means a project can take the runtime and supply its own.
 - **`agent-tools` does not depend on `agents-core`.** Tools are plain LangChain tools (`StructuredToolInterface`), so they work with any caller. `AgentTool` in the runtime is a type alias for that same interface — the two line up structurally, not by dependency.
-- **`agent-tools` is grouped by domain, and its exports map is a boundary rather than a convention.** `boards/`, `whiteboard/`, `pages/` and two root modules are exported; `internal/` and `test-support/` are not, so the shared HTTP transport can be refactored without breaking a consumer. It was a bare `./*` until that published every file in the package. Adding `src/boards/monster-search.ts` makes `@workspace/agent-tools/boards/monster-search` importable with no config change — a subpath pattern's `*` spans slashes — but a **new top-level directory needs a new entry**. See `packages/agent-tools/README.md`.
+- **`agent-tools` is grouped by domain, and its exports map is a boundary rather than a convention.** `whiteboard/` and three root modules (`time`, `web-search`, `env`) are exported; `internal/` is not, so the shared HTTP transport can be refactored without breaking a consumer. It was a bare `./*` until that published every file in the package. A new file under `src/whiteboard/` is importable as `@workspace/agent-tools/whiteboard/<name>` with no config change — a subpath pattern's `*` spans slashes — but a **new top-level directory needs a new entry**. See `packages/agent-tools/README.md`.
 - **Agents are exported as `createX()` factories, never as instances.** Building one constructs a model, which reads `OPENAI_API_KEY` and throws without it; a module-level instance would move that failure to import time and break any consumer that merely imports the module.
-- **An agent names its own tools, and there is no `allTools`.** There was, and it was a lie: it held two tools while calling itself the whole catalog, because every tool added after it is a `createX(catalog, log)` factory bound to one run and a module-level array cannot hold one. A model picks worse as the tool list grows, so the set is chosen per agent in `@workspace/agents` — `ASSISTANT_TOOLS` is the general assistant's, and it is pinned by a test because widening it widens what a chat agent can do for anyone who can reach the chat.
+- **An agent names its own tools, and there is no `allTools`.** There was, and it was a lie: it held two tools while calling itself the whole catalog, because the canvas tools are a factory bound to one whiteboard turn and a module-level array cannot hold them. A model picks worse as the tool list grows, so the set is chosen per agent in `@workspace/agents` — `ASSISTANT_TOOLS` is the general assistant's, and it is pinned by a test because widening it widens what a chat agent can do for anyone who can reach the chat.
 - **The whiteboard wire contract is a fifth package**, `@workspace/whiteboard-schema`, and not part of this stack. Both ends of the wire import it — the canvas tools and the dashboard's client components — so it depends on zod and nothing else. Anything added to it is added to a browser bundle.
 
-`docs/agent-architecture.md` draws all of this — the layering above, the compiled graph inside `createAgent`, which agent carries which tools and why that is containment rather than tuning, the three entry points, and how a run is traced.
+`docs/agent-architecture.md` draws all of this — the layering above, the compiled graph inside `createAgent`, which agent carries which tools and why that is containment rather than tuning, the two entry points, and how a turn is traced.
 
-**Tracing is a fourth package, deliberately outside that stack.** `@workspace/langfuse` owns the Langfuse OpenTelemetry adapter — `initializeLangfuse`, `createLangfuseCallback`, `runWithLangfuseTrace`, `shutdownLangfuse` — and the entry points are what import it: `apps/dashboard/instrumentation-node.ts` and `apps/briefing-worker/src/index.ts`. Nothing the agent stack _ships_ depends on it — `@workspace/agents` devDepends on it for its eval CLI, which is an entry point too — and it depends on nothing in the agent stack, so `@langfuse/*` and `@opentelemetry/*` stay out of the runtime and a consumer that wants untraced agents simply never calls it. Its only tie to LangChain is the `CallbackHandler` type from `@langfuse/langchain`, which every caller passes through `config.callbacks`. Missing keys make all four functions no-ops rather than errors — see `packages/langfuse/README.md`.
+**Tracing is a fourth package, deliberately outside that stack.** `@workspace/langfuse` owns the Langfuse OpenTelemetry adapter — `initializeLangfuse`, `createLangfuseCallback` and `shutdownLangfuse`, plus `runWithLangfuseTrace`, which nothing calls today — and the entry points are what import it: `apps/dashboard/instrumentation-node.ts` and the eval CLI, `packages/agents/evals/run.ts`. Nothing the agent stack _ships_ depends on it — `@workspace/agents` carries it only for that CLI — and it depends on nothing in the agent stack, so `@langfuse/*` and `@opentelemetry/*` stay out of the runtime and a consumer that wants untraced agents simply never calls it. Its only tie to LangChain is the `CallbackHandler` type from `@langfuse/langchain`, which every caller passes through `config.callbacks`. Missing keys make every function a no-op rather than an error — see `packages/langfuse/README.md`.
 
 **Two packages carry their own `CLAUDE.md`, and it loads only when you work under them** — `apps/dashboard/CLAUDE.md` (the auth gate, Server Action shape, app shell) and `packages/user-storage/CLAUDE.md` (the AWS SDK boundary, key shape, retention tags). Read the relevant one before changing either.
 
@@ -283,7 +274,7 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 ## Conventions
 
-**`NAMING.md` says how an identifier is formed, and five of its rules are tested.** `CONTEXT.md` owns what the words mean; `NAMING.md` owns where they go — the glossary's hold on identifiers (`job` is a row in `jobs`, never a Posting), the agent-seam rule (a `*Deps` field takes the exact factory name `@workspace/agents` exports), the fixed surface of an agent module, the type-suffix vocabulary (a `Row` is what `@workspace/db` returns and must not reach a client component), and the rule that `components/` mirrors the route tree. `apps/dashboard/lib/naming.test.ts` and `packages/agents/src/naming.test.ts` fail on a violation, because ESLint cannot: see the `only-warn` note below. Read it before adding a feature — the rules exist so a new one does not have to re-derive a name and get a different answer.
+**`NAMING.md` says how an identifier is formed, and five of its rules are tested.** `CONTEXT.md` owns what the words mean; `NAMING.md` owns where they go — the glossary's hold on identifiers (an upload is a document, whatever the `resumes` kind is called), the agent-seam rule (a `*Deps` field takes the exact factory name `@workspace/agents` exports), the fixed surface of an agent module, the type-suffix vocabulary (a `Row` is what `@workspace/db` returns and must not reach a client component), the rule that `components/` mirrors the route tree, and how a tool is named. `apps/dashboard/lib/naming.test.ts`, `packages/agents/src/naming.test.ts` and `packages/agent-tools/src/naming.test.ts` fail on a violation, because ESLint cannot: see the `only-warn` note below. Read it before adding a feature — the rules exist so a new one does not have to re-derive a name and get a different answer.
 
 **Comments are short, clear and concise — a line or two, never an essay.** Write the comment the reader needs and stop: what is not obvious from the code, and why the code is the way it is. A comment that restates the line below it, narrates a diff ("now uses X instead of Y"), or reasons through alternatives that were not taken is noise, and noise is what gets skipped. Prefer a clearer name or a smaller function over a paragraph explaining a confusing one. Long-form background belongs in the prose docs — `CLAUDE.md`, a package `README.md`, `CONTEXT.md` — where it can be found and maintained, not spread across the files it describes. When editing, leave the comments around you at that standard too.
 
@@ -297,14 +288,14 @@ App-local aliases (`@/components`, `@/hooks`, `@/lib`) exist for app-specific co
 
 **TypeScript is strict, including `noUncheckedIndexedAccess`** (`packages/typescript-config/base.json`). Indexed reads are `T | undefined` — narrow them. The base config is `NodeNext`; the Next.js preset overrides to `ESNext`/`Bundler` with `noEmit`.
 
-**In the packages that emit `dist/`, relative imports carry a `.ts` extension and the compiler rewrites it.** Write `import { computeNextRunAt } from "./schedule.ts"` — the extension of the file that actually exists. `rewriteRelativeImportExtensions` in the base config turns that into `./schedule.js` on emit, so `dist/` stays valid Node ESM under NodeNext; the emitted JS is unchanged from when sources spelled `.js` by hand. It also implies `allowImportingTsExtensions`, which is why that flag can coexist with emit at all — on its own it requires `noEmit`.
+**In the packages that emit `dist/`, relative imports carry a `.ts` extension and the compiler rewrites it.** Write `import { extensionsFor } from "./kinds.ts"` — the extension of the file that actually exists. `rewriteRelativeImportExtensions` in the base config turns that into `./kinds.js` on emit, so `dist/` stays valid Node ESM under NodeNext; the emitted JS is unchanged from when sources spelled `.js` by hand. It also implies `allowImportingTsExtensions`, which is why that flag can coexist with emit at all — on its own it requires `noEmit`.
 
-This rule is scoped to the NodeNext workspaces: `db`, `user-storage`, `agents`, `agents-core`, `agent-tools`, `langfuse`, `briefing-worker`. `@workspace/ui` and `apps/dashboard` override to `Bundler` resolution, where nothing is rewritten and relative imports stay extensionless — `packages/ui/src/components/ai-elements/tool.tsx` importing `"./code-block"` is correct, not a straggler.
+This rule is scoped to the NodeNext workspaces: `db`, `user-storage`, `agents`, `agents-core`, `agent-tools`, `langfuse`. `@workspace/ui` and `apps/dashboard` override to `Bundler` resolution, where nothing is rewritten and relative imports stay extensionless — `packages/ui/src/components/ai-elements/tool.tsx` importing `"./code-block"` is correct, not a straggler.
 
 Two things here look wrong and are not:
 
 - **Declaration output keeps the `.ts` specifier.** `dist/*.d.ts` reads `from "./keys.ts"`. Only TypeScript reads a `.d.ts`, and it resolves that to the sibling `.d.ts` — downstream packages typecheck against it without needing `allowImportingTsExtensions` themselves. Do not "fix" it.
-- **The extension is `.ts`, not nothing.** Extensionless imports would mean abandoning NodeNext for `Bundler` resolution. NodeNext is what the emitted `dist/` and its `.d.ts` declare, and every relative specifier in NodeNext ESM must carry an explicit extension — that is the output contract consumers resolve against, whether Node runs a file directly or esbuild bundles it first.
+- **The extension is `.ts`, not nothing.** Extensionless imports would mean abandoning NodeNext for `Bundler` resolution. NodeNext is what the emitted `dist/` and its `.d.ts` declare, and every relative specifier in NodeNext ESM must carry an explicit extension — that is the output contract consumers resolve against, whether Node runs a file directly or a bundler resolves it first.
 
 ## Pull requests
 
@@ -323,9 +314,9 @@ The four sections are required on every PR, however small:
 
 `## Verification`, `## Noted, not fixed` and `## ⚠️ Before merging` are optional and sit commented out at the foot of the template. They are house style rather than ceremony: verification carries the commands actually run _and_ what they did not cover, and the ⚠️ heading exists because changes here regularly need a step the merger must take out of band — a migration, a Terraform apply, a secret value, a Neon setting.
 
-**The title is a sentence about the behaviour that changed** — imperative, sentence case, no `feat:`/`fix:` prefix, no trailing period. "Propose search criteria from the candidate's resume", "Fix the Illegal invocation that blanked the dashboard home", "Send OAuth back to the branch alias, not the deployment host". A title derived from the branch name — "Worktree dev auth bypass" — is the failure mode this rule exists to stop, and is never acceptable.
+**The title is a sentence about the behaviour that changed** — imperative, sentence case, no `feat:`/`fix:` prefix, no trailing period. "Fix the Illegal invocation that blanked the dashboard home", "Send OAuth back to the branch alias, not the deployment host". A title derived from the branch name — "Worktree dev auth bypass" — is the failure mode this rule exists to stop, and is never acceptable.
 
-**`CONTEXT.md` binds the prose.** A PR body is prose about this system, so the glossary applies to it: "job" is a row in `jobs`, never an employment opportunity — that is a "posting".
+**`CONTEXT.md` binds the prose.** A PR body is prose about this system, so the glossary applies to it — its words as it defines them, and none of the ones an entry says to avoid.
 
 Two constraints are not about writing and are set out in `RELEASING.md`: **squash-merge**, because GitGuardian scans every commit on a pull request and a credential-shaped string removed in a later commit still flags; and a pull request runs `check` only, since the deploy role's trust policy names `ref:refs/heads/main` alone.
 
@@ -341,6 +332,6 @@ That evidence is graded, and the grading is the part worth knowing. A pull reque
 
 Worktrees outside `.claude/worktrees/` are never touched, including the ones other agent CLIs leave behind — remove those yourself with `git worktree remove`.
 
-`CONTEXT.md` is the domain glossary — what "briefing", "brief", "scout", "findings" and "run report" mean, and which words to avoid. Read it before writing prose about this system: **"job" means a row in `jobs`, a thing that runs on a cadence, and never an employment opportunity** — that is a "posting". The schema owns the word and prose must not borrow it back. `OVERVIEW.md` states the shape of the pipeline and, in its "Not built yet" section, what the product still lacks: closing the criteria loop with nobody watching, scout fan-out, _sending_ a cover letter, and a viewer for the brief itself. **Read that section rather than assuming from the heading** — most of its entries are partly closed, so proposing criteria from a resume, and drafting, listing and editing a cover letter, are all built.
+`CONTEXT.md` is the domain glossary — what "document", "document type", "allowlist", "gate", "trace", "whiteboard" and "eval" mean, and which words to avoid. Read it before writing prose about this system: **an upload is a "document" whatever its type, and `resumes` is only the storage kind every upload goes on.** `OVERVIEW.md` is the short map of what is built, where each part lives, and the rules it keeps.
 
 **`.scratch/` is agent scratch space and is git-ignored.** Plans, ticket sets (`<feature>/issues/`, `plan.md`, `README.md`) and audits are written there while the work is in progress and are never committed — they go stale the moment the work ships, and a pull request that carries them is reviewing notes instead of code. Tickets still live there rather than in GitHub Issues, despite the remote having labels for them. Anything worth keeping past the work belongs in the durable docs (`CLAUDE.md`, `OVERVIEW.md`, `CONTEXT.md`, `NAMING.md`, a package README) or in the pull request body — not in a file under `.scratch/`.
