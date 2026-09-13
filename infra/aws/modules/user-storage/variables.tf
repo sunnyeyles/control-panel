@@ -49,35 +49,6 @@ variable "object_kinds" {
   }))
 
   default = {
-    # Regenerated daily. A year of history is plenty, and unbounded growth of
-    # machine-generated text is pure cost.
-    briefs = {
-      expiration_days                    = 365
-      noncurrent_version_expiration_days = 30
-    }
-
-    # Drafted once, for one advertisement, in the user's own voice — and they
-    # may already have relied on it. Never expired automatically, the same
-    # posture as `resumes` and deliberately **not** the `briefs` one: a brief is
-    # regenerated daily and expiring a year of them is housekeeping, while
-    # deleting a letter is data loss. Superseded drafts are kept a year, which
-    # is what makes re-drafting a Posting non-destructive.
-    cover-letters = {
-      expiration_days                    = null
-      noncurrent_version_expiration_days = 365
-    }
-
-    # Generated once, for one advertisement, out of the user's own CV — and
-    # they may already have applied with it. Same posture as `cover-letters`
-    # for the same reason: a brief is regenerated daily and expiring a year of
-    # them is housekeeping, while deleting this is data loss. Superseded
-    # versions are kept a year, which is what makes re-generating for a Posting
-    # non-destructive.
-    tailored-resumes = {
-      expiration_days                    = null
-      noncurrent_version_expiration_days = 365
-    }
-
     # The user's own upload. Never expired automatically; superseded versions
     # are kept a year so a mistaken re-upload is recoverable.
     resumes = {
@@ -111,7 +82,7 @@ variable "attach_to_role_names" {
     one resource. Leave empty and consume the policy ARNs from the outputs
     instead.
 
-    Example: { prod = ["briefing-worker-prod"] }
+    Example: { prod = ["control-panel-example-prod"] }
   EOT
   type        = map(list(string))
   default     = {}

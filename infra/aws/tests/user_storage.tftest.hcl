@@ -53,7 +53,7 @@ run "defaults" {
       length(rule.filter[0].tag) == 1
       if startswith(rule.id, "retain-")
     ])
-    error_message = "Per-kind retention must filter on the kind tag. A prefix filter cannot express 'every user's briefs'."
+    error_message = "Per-kind retention must filter on the kind tag. A prefix filter cannot express 'every user's resumes'."
   }
 
   # `expiration_days = null` means never expire, and the absence of the block is
@@ -67,33 +67,20 @@ run "defaults" {
     error_message = "resumes must have no expiration block at all, not a long one."
   }
 
-  # Same guarantee for a drafted cover letter, and for a different reason than
-  # the one above. A letter is written once, in the user's own voice, for one
-  # advertisement they may already have relied on — expiring it is data loss,
-  # not housekeeping, so this kind must not pick up the `briefs` posture by
-  # being copied from the wrong neighbour.
-  assert {
-    condition = length([
-      for rule in aws_s3_bucket_lifecycle_configuration.user_storage.rule :
-      rule if rule.id == "retain-cover-letters" && length(rule.expiration) > 0
-    ]) == 0
-    error_message = "cover-letters must have no expiration block at all; a drafted letter is the user's own text, not regenerated output."
-  }
-
-  # One narrow policy per (environment, kind). This is what lets the worker be
-  # granted briefs without also being granted a user's CV.
+  # One narrow policy per (environment, kind). This is what lets a workload be
+  # granted one category of user data without also being granted every other.
   assert {
     condition     = length(keys(aws_iam_policy.kind_access)) == length(var.environments) * length(keys(var.object_kinds))
     error_message = "There must be exactly one kind_access policy per environment and kind."
   }
 
   assert {
-    condition     = contains(keys(aws_iam_policy.kind_access), "prod:briefs")
-    error_message = "prod:briefs is the key briefing-worker.tf filters on; renaming it silently unattaches the worker's grant."
+    condition     = contains(keys(aws_iam_policy.kind_access), "prod:resumes")
+    error_message = "prod:resumes is the key vercel-dashboard.tf filters on; renaming it silently unattaches the dashboard's grant."
   }
 
-  # A public object here is a personal-data breach, not a leaked summary. All
-  # four flags, pinned at the bucket rather than trusted to account settings.
+  # A public object here is a personal-data breach. All four flags, pinned at
+  # the bucket rather than trusted to account settings.
   assert {
     condition = alltrue([
       aws_s3_bucket_public_access_block.user_storage.block_public_acls,
@@ -140,8 +127,8 @@ run "customer_managed_key" {
   }
 
   # Only meaningful under KMS, where it collapses per-object key requests into
-  # one per bucket-key period — a large cost difference at object-per-user-per-
-  # day volumes.
+  # one per bucket-key period — a large cost difference once the object count
+  # grows.
   assert {
     condition = alltrue([
       for rule in aws_s3_bucket_server_side_encryption_configuration.user_storage.rule :

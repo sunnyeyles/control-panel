@@ -3,7 +3,6 @@
   "ui": "tui",
   "globalEnv": [
     "OPENAI_API_KEY",
-    "OPENAI_SECRET_ID",
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
     "LANGFUSE_BASE_URL",
@@ -12,16 +11,12 @@
     "NEXT_RUNTIME",
     "DATABASE_URL",
     "DATABASE_URL_UNPOOLED",
-    "DATABASE_SECRET_ID",
     "TAVILY_API_KEY",
-    "APIFY_TOKEN",
-    "APIFY_SECRET_ID",
     "USER_STORAGE_BUCKET_NAME",
     "USER_STORAGE_ENVIRONMENT",
     "AWS_REGION",
     "AWS_DEFAULT_REGION",
     "AWS_ROLE_ARN",
-    "BRIEFING_WORKER_FUNCTION_NAME",
     "NEON_AUTH_BASE_URL",
     "NEON_AUTH_COOKIE_SECRET",
     "AUTH_ALLOWED_EMAILS",
@@ -67,10 +62,6 @@
         "EVAL_CASES",
         "EVAL_CONCURRENCY"
       ]
-    },
-    "zip": {
-      "dependsOn": ["build"],
-      "outputs": ["lambda.zip"]
     },
     "dev": {
       "dependsOn": ["^build", "generate"],

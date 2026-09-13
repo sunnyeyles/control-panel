@@ -1,5 +1,5 @@
-# Private storage for per-user data — generated Markdown briefs and documents
-# the user uploaded themselves.
+# Private storage for per-user data — today, the documents a user uploaded
+# themselves.
 #
 # The bucket is private, encrypted and versioned, and nothing in this module
 # grants public read — there is no website configuration, no ACL, no presigned
@@ -48,11 +48,11 @@ resource "aws_s3_bucket" "user_storage" {
   }
 }
 
-# Belt and braces against the single worst outcome for this bucket. It now
-# holds documents the user uploaded, so a public object here is a personal-data
-# breach rather than a leaked summary. The account may or may not have the
-# equivalent block set; this pins it at the bucket so the guarantee does not
-# depend on account-level configuration staying put.
+# Belt and braces against the single worst outcome for this bucket. It holds
+# documents the user uploaded, so a public object here is a personal-data
+# breach. The account may or may not have the equivalent block set; this pins
+# it at the bucket so the guarantee does not depend on account-level
+# configuration staying put.
 resource "aws_s3_bucket_public_access_block" "user_storage" {
   bucket = aws_s3_bucket.user_storage.id
 
@@ -73,9 +73,9 @@ resource "aws_s3_bucket_ownership_controls" "user_storage" {
   }
 }
 
-# Versioning is the undo button, and it matters more for uploads than for
-# generated text: a user who replaces their CV with the wrong file has not lost
-# the old one. It is also why the store's `delete` is safe to expose.
+# Versioning is the undo button: a user who replaces their CV with the wrong
+# file has not lost the old one. It is also why the store's `delete` is safe to
+# expose.
 resource "aws_s3_bucket_versioning" "user_storage" {
   bucket = aws_s3_bucket.user_storage.id
 
@@ -95,7 +95,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "user_storage" {
 
     # Only meaningful under KMS, where it collapses per-object key requests
     # into one per bucket-key period. Harmless otherwise, and a large cost
-    # difference at object-per-user-per-day volumes.
+    # difference once the object count grows.
     bucket_key_enabled = var.kms_key_arn != null
   }
 }
@@ -141,7 +141,7 @@ resource "aws_s3_bucket_policy" "user_storage" {
 
 # ⚠️ Retention is driven by an object *tag*, not a key prefix. S3 lifecycle
 # filters match a literal prefix with no wildcards, and the layout is
-# `environment/userId/kind/…`, so no prefix means "every user's briefs". Putting
+# `environment/userId/kind/…`, so no prefix means "every user's resumes". Putting
 # kind above userId would fix lifecycle but make erasing a user N deletes.
 #
 # So the store tags every object `kind=<kind>` at write time and these rules
@@ -287,10 +287,10 @@ resource "aws_iam_policy" "access" {
 
 # Narrower still: one policy per (environment, kind).
 #
-# Now that the bucket holds two quite differently sensitive things, "the
-# scheduled worker can write briefs" and "the scheduled worker can delete a
-# user's CV" should not be the same grant. IAM resource ARNs do take wildcards,
-# so unlike lifecycle this can be expressed as a prefix with userId wildcarded.
+# Kinds differ in sensitivity, so "may write one category of user data" and "may
+# delete a user's CV" should not have to be the same grant. IAM resource ARNs do
+# take wildcards, so unlike lifecycle this can be expressed as a prefix with
+# userId wildcarded.
 data "aws_iam_policy_document" "kind_access" {
   for_each = local.environment_kinds
 

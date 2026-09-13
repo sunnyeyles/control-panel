@@ -1,7 +1,7 @@
-# The third stack. See the note in user-storage.variables.tf for the two rules
+# The second stack. See the note in user-storage.variables.tf for the two rules
 # governing what appears in one of these objects and where its defaults live.
 #
-# Unlike the other two this variable defaults to null, and the stack creates
+# Unlike `user_storage` this variable defaults to null, and the stack creates
 # nothing when it is. That is not a style break — it is the only safe default
 # given how this root is applied. `.github/workflows/deploy-infra.yml` applies
 # on every push to `main` touching `infra/**`, so a required field with a
