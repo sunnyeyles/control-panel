@@ -1,13 +1,12 @@
 # `@workspace/langfuse`
 
 The Langfuse OpenTelemetry adapter for agent runs: init, per-run callbacks,
-root traces, shutdown.
+shutdown.
 
 ```ts
 import {
   initializeLangfuse,
   createLangfuseCallback,
-  runWithLangfuseTrace,
   shutdownLangfuse,
 } from "@workspace/langfuse"
 ```
@@ -29,7 +28,7 @@ packages/agents         evals/run.ts → initialize + shutdown around one eval r
 The link to LangChain is one type: `CallbackHandler` from `@langfuse/langchain`,
 which any LangChain or LangGraph caller accepts in `config.callbacks`.
 
-## The four functions
+## The three functions
 
 `initializeLangfuse({ exportMode })` builds one `NodeTracerProvider` for the
 runtime and registers it. Registering is what supplies Node's async context
@@ -42,22 +41,14 @@ be frozen mid-flush.
 run. Handlers retain run state, so sharing one across concurrent requests would
 mix their traces.
 
-`runWithLangfuseTrace(options, run)` wraps a multi-stage workflow in a single
-root trace and hands `run` a callback created inside that trace context, which
-nests every generation and tool call below the root. An error inside `run`
-marks the trace `ERROR` and rethrows. Pass identity and tags once via
-`userId` / `sessionId` / `tags` / `traceMetadata` — the package fans
-`traceMetadata` into both attribute propagation and the root observation.
-
 `shutdownLangfuse()` delivers queued spans before a short-lived runtime exits.
 
 ## No keys, no tracing
 
 Every function is a no-op unless both `LANGFUSE_PUBLIC_KEY` and
 `LANGFUSE_SECRET_KEY` are set and non-empty: `initializeLangfuse` returns
-`false`, `createLangfuseCallback` returns `undefined`, and
-`runWithLangfuseTrace` just calls `run(undefined)`. Nothing throws and nothing
-has to be conditionally wired at the call site.
+`false` and `createLangfuseCallback` returns `undefined`. Nothing throws and
+nothing has to be conditionally wired at the call site.
 
 The remaining configuration is read by the Langfuse SDK itself, not by this
 package — `LANGFUSE_BASE_URL` and `LANGFUSE_TRACING_ENVIRONMENT`. See the root

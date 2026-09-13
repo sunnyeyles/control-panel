@@ -30,6 +30,4 @@ export {
   type NewDocument,
 } from "./documents.ts"
 
-export type { Board, Document, DocumentType, User } from "./types.ts"
-
-export { isUniqueViolation } from "./errors.ts"
+export type { Board, Document, DocumentType } from "./types.ts"

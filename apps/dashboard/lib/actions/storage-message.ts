@@ -3,7 +3,7 @@ import { isUserStorageError } from "@workspace/user-storage"
 /** Conflated not_found / ownership — never say which. */
 export const DOCUMENT_GONE = "That document no longer exists."
 
-export const STORAGE_UNAVAILABLE =
+const STORAGE_UNAVAILABLE =
   "Document storage is unavailable. Try again in a moment."
 
 /**

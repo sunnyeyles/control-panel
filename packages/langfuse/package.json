@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Langfuse OpenTelemetry adapter for agent runs: init, per-run callbacks, root traces, shutdown.",
+  "description": "Langfuse OpenTelemetry adapter for agent runs: init, per-run callbacks, shutdown.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

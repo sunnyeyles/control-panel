@@ -19,13 +19,7 @@ export {
   type CreateS3UserObjectStoreOptions,
 } from "./s3-user-object-store.ts"
 
-export type {
-  FetchedObject,
-  NewObject,
-  ObjectRef,
-  StoredObject,
-  UserObjectStore,
-} from "./user-object-store.ts"
+export type { UserObjectStore } from "./user-object-store.ts"
 
 export { toMetadataValue } from "./metadata.ts"
 
@@ -51,7 +45,6 @@ export {
 } from "./errors.ts"
 
 export {
-  buildObjectKey,
   isObjectKeySegment,
   kindPrefix,
   parseObjectKey,
@@ -59,9 +52,4 @@ export {
   type ObjectKeyParts,
 } from "./keys.ts"
 
-export {
-  contentTypeFor,
-  extensionsFor,
-  isObjectKind,
-  type ObjectKind,
-} from "./kinds.ts"
+export { extensionsFor, isObjectKind } from "./kinds.ts"

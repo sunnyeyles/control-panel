@@ -1,10 +1,6 @@
 import { CallbackHandler } from "@langfuse/langchain"
 import { LangfuseSpanProcessor } from "@langfuse/otel"
-import {
-  propagateAttributes,
-  setLangfuseTracerProvider,
-  startActiveObservation,
-} from "@langfuse/tracing"
+import { setLangfuseTracerProvider } from "@langfuse/tracing"
 import { context, propagation, trace } from "@opentelemetry/api"
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node"
 
@@ -13,11 +9,6 @@ export interface LangfuseCallbackOptions {
   sessionId?: string
   tags?: string[]
   traceMetadata?: Record<string, string>
-}
-
-export interface LangfuseTraceOptions extends LangfuseCallbackOptions {
-  name: string
-  input: unknown
 }
 
 let provider: NodeTracerProvider | undefined
@@ -66,60 +57,6 @@ export function createLangfuseCallback(
 ): CallbackHandler | undefined {
   if (!provider) return undefined
   return new CallbackHandler(options)
-}
-
-/**
- * Wrap a multi-stage workflow in one Langfuse trace.
- *
- * The callback supplied to `run` is created inside the active trace context,
- * which nests every LangChain generation and tool call below this root.
- */
-export async function runWithLangfuseTrace<T>(
-  options: LangfuseTraceOptions,
-  run: (callback: CallbackHandler | undefined) => Promise<T>
-): Promise<T> {
-  if (!provider) return run(undefined)
-
-  return startActiveObservation(
-    options.name,
-    async (trace) =>
-      propagateAttributes(
-        {
-          userId: options.userId,
-          sessionId: options.sessionId,
-          tags: options.tags,
-          metadata: options.traceMetadata,
-          traceName: options.name,
-        },
-        async () => {
-          trace.update({
-            input: options.input,
-            metadata: options.traceMetadata,
-          })
-
-          try {
-            const result = await run(
-              createLangfuseCallback({
-                userId: options.userId,
-                sessionId: options.sessionId,
-                tags: options.tags,
-                traceMetadata: options.traceMetadata,
-              })
-            )
-            trace.update({ output: result })
-            return result
-          } catch (error) {
-            trace.update({
-              level: "ERROR",
-              statusMessage:
-                error instanceof Error ? error.message : String(error),
-            })
-            throw error
-          }
-        }
-      ),
-    { asType: "chain" }
-  )
 }
 
 /**
